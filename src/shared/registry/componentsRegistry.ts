@@ -41,4 +41,11 @@ export const COMPONENTS_REGISTRY: ComponentRegistryEntry[] = [
     description: "Contenitore per affiancare due schede con divisorio ridimensionabile col mouse.",
     propsSummary: ["primaryContent", "secondaryContent", "direction", "isSplit"],
   },
+  {
+    name: "ExcelGrid",
+    category: "grid",
+    path: "src/shared/components/data-grid/ExcelGrid.tsx",
+    description: "Griglia tabellare ad alte performance basata su Glide Data Grid (Canvas 60 FPS, Excel-like, fill handle, copia/incolla, thema integrato).",
+    propsSummary: ["columns", "rows", "getCellContent", "onCellEdited", "onRowAppended", "onPaste"],
+  },
 ];

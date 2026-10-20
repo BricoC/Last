@@ -1,5 +1,5 @@
 import React from "react";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useTabStore } from "@/shared/stores/useTabStore";
 
 interface SplitPaneContainerProps {
@@ -18,8 +18,8 @@ export const SplitPaneContainer: React.FC<SplitPaneContainerProps> = ({ renderCo
   }
 
   return (
-    <Group
-      orientation={splitDirection}
+    <PanelGroup
+      direction={splitDirection}
       className="flex-1 w-full h-full bg-[var(--background)]"
     >
       {/* Pannello Primario (Sinistra o Alto) */}
@@ -28,12 +28,12 @@ export const SplitPaneContainer: React.FC<SplitPaneContainerProps> = ({ renderCo
       </Panel>
 
       {/* Divisore trascinabile col mouse */}
-      <Separator className="w-1.5 hover:w-2 bg-[var(--border)] hover:bg-[var(--primary)] transition-all cursor-col-resize select-none" />
+      <PanelResizeHandle className="w-1.5 hover:w-2 bg-[var(--border)] hover:bg-[var(--primary)] transition-all cursor-col-resize select-none" />
 
       {/* Pannello Secondario Affiancato (Destra o Basso) */}
       <Panel defaultSize={50} minSize={25} className="overflow-auto bg-slate-900/40">
         {renderContent(splitTabId)}
       </Panel>
-    </Group>
+    </PanelGroup>
   );
 };

@@ -26,4 +26,11 @@ export const HOOKS_REGISTRY: HookRegistryEntry[] = [
     description: "Gestione del Theme Engine dinamico e applicazione immediata delle CSS Variables su :root.",
     returns: "{ theme, setTheme, resetTheme, applyToDom }",
   },
+  {
+    name: "useProductList",
+    category: "data",
+    path: "src/features/price-lists/hooks/useProductList.ts",
+    description: "Hook di caricamento, ricerca e mutazione articoli con persistenza SQLite e Soft Delete.",
+    returns: "{ products, loading, error, searchQuery, setSearchQuery, addProduct, updateProduct, deleteProduct, reload }",
+  },
 ];

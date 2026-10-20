@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { TabBar } from "@/shared/components/tabs/TabBar";
 import { SplitPaneContainer } from "@/shared/components/tabs/SplitPaneContainer";
 import { DashboardPage } from "@/features/dashboard/DashboardPage";
+import { ProductListPage } from "@/features/price-lists/ProductListPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { Card } from "@/shared/components/ui/card";
 
@@ -19,15 +20,7 @@ export function App() {
       case "dashboard":
         return <DashboardPage />;
       case "price-lists":
-        return (
-          <div className="p-6">
-            <Card title="Modulo Listino Generale">
-              <p className="text-sm text-slate-300">
-                Modulo predisposto per Glide Data Grid (griglia interattiva Excel-like).
-              </p>
-            </Card>
-          </div>
-        );
+        return <ProductListPage />;
       case "ddt-studio":
         return (
           <div className="p-6">
