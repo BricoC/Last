@@ -29,7 +29,7 @@ export class ProductRepository {
   }
 
   /**
-   * Recupera un singolo articolo per ID.
+   * Recupera un singolo articolo per ID (anche se eliminato logicamente).
    */
   async getProductById(id: string): Promise<Product | null> {
     const db = await getDatabase();
@@ -41,6 +41,31 @@ export class ProductRepository {
   }
 
   /**
+   * Verifica se esiste già un articolo attivo con un determinato codice.
+   * Esclude l'articolo con id specificato (utile durante l'update).
+   */
+  async isCodeTaken(code: string, excludeId?: string): Promise<boolean> {
+    const db = await getDatabase();
+    const cleanCode = code.trim().toUpperCase();
+
+    if (excludeId) {
+      const rows = await db.select<{ count: number }[]>(
+        `SELECT COUNT(*) as count FROM products 
+         WHERE code = $1 AND id != $2 AND deleted_at IS NULL`,
+        [cleanCode, excludeId]
+      );
+      return (rows[0]?.count || 0) > 0;
+    }
+
+    const rows = await db.select<{ count: number }[]>(
+      `SELECT COUNT(*) as count FROM products 
+       WHERE code = $1 AND deleted_at IS NULL`,
+      [cleanCode]
+    );
+    return (rows[0]?.count || 0) > 0;
+  }
+
+  /**
    * Crea un nuovo articolo nel database SQLite locale.
    */
   async createProduct(input: CreateProductInput, operator = "Cassa 1"): Promise<Product> {
@@ -49,13 +74,18 @@ export class ProductRepository {
       throw new Error(`Validazione fallita: ${validation.errors.map((e) => e.message).join(", ")}`);
     }
 
+    const cleanCode = input.code.trim().toUpperCase();
+    if (await this.isCodeTaken(cleanCode)) {
+      throw new Error(`Codice '${cleanCode}' già presente tra gli articoli attivi.`);
+    }
+
     const db = await getDatabase();
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
 
     const product: Product = {
       id,
-      code: input.code.trim().toUpperCase(),
+      code: cleanCode,
       description: input.description.trim(),
       unit: (input.unit || "NR").trim().toUpperCase(),
       purchase_price_cents: Math.max(0, input.purchase_price_cents || 0),
@@ -71,30 +101,38 @@ export class ProductRepository {
       sync_status: "pending",
     };
 
-    await db.execute(
-      `INSERT INTO products (
-        id, code, description, unit, purchase_price_cents, sale_price_cents,
-        vat_rate, category, supplier, notes, created_at, updated_at, updated_by,
-        deleted_at, sync_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-      [
-        product.id,
-        product.code,
-        product.description,
-        product.unit,
-        product.purchase_price_cents,
-        product.sale_price_cents,
-        product.vat_rate,
-        product.category ?? null,
-        product.supplier ?? null,
-        product.notes ?? null,
-        product.created_at,
-        product.updated_at,
-        product.updated_by,
-        product.deleted_at,
-        product.sync_status,
-      ]
-    );
+    try {
+      await db.execute(
+        `INSERT INTO products (
+          id, code, description, unit, purchase_price_cents, sale_price_cents,
+          vat_rate, category, supplier, notes, created_at, updated_at, updated_by,
+          deleted_at, sync_status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        [
+          product.id,
+          product.code,
+          product.description,
+          product.unit,
+          product.purchase_price_cents,
+          product.sale_price_cents,
+          product.vat_rate,
+          product.category ?? null,
+          product.supplier ?? null,
+          product.notes ?? null,
+          product.created_at,
+          product.updated_at,
+          product.updated_by,
+          product.deleted_at,
+          product.sync_status,
+        ]
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("UNIQUE constraint failed")) {
+        throw new Error(`Codice '${cleanCode}' già presente tra gli articoli attivi.`);
+      }
+      throw err;
+    }
 
     return product;
   }
@@ -114,12 +152,17 @@ export class ProductRepository {
       throw new Error(`Validazione fallita: ${validation.errors.map((e) => e.message).join(", ")}`);
     }
 
+    const cleanCode = merged.code.trim().toUpperCase();
+    if (await this.isCodeTaken(cleanCode, id)) {
+      throw new Error(`Codice '${cleanCode}' già utilizzato da un altro articolo attivo.`);
+    }
+
     const db = await getDatabase();
     const now = new Date().toISOString();
 
     const updated: Product = {
       ...merged,
-      code: merged.code.trim().toUpperCase(),
+      code: cleanCode,
       description: merged.description.trim(),
       unit: (merged.unit || "NR").trim().toUpperCase(),
       updated_at: now,
@@ -181,49 +224,60 @@ export class ProductRepository {
   }
 
   /**
-   * Inserisce o aggiorna una lista di articoli in blocco (per import o incolla massivo).
+   * Inserisce o aggiorna una lista di articoli in blocco in modo atomico (Transazione).
+   * Se una singola riga fallisce, viene eseguito il rollback totale.
    */
   async batchUpsert(products: Product[]): Promise<void> {
+    if (products.length === 0) return;
+
     const db = await getDatabase();
 
-    for (const p of products) {
-      await db.execute(
-        `INSERT INTO products (
-          id, code, description, unit, purchase_price_cents, sale_price_cents,
-          vat_rate, category, supplier, notes, created_at, updated_at, updated_by,
-          deleted_at, sync_status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        ON CONFLICT(id) DO UPDATE SET
-          code = excluded.code,
-          description = excluded.description,
-          unit = excluded.unit,
-          purchase_price_cents = excluded.purchase_price_cents,
-          sale_price_cents = excluded.sale_price_cents,
-          vat_rate = excluded.vat_rate,
-          category = excluded.category,
-          supplier = excluded.supplier,
-          notes = excluded.notes,
-          updated_at = excluded.updated_at,
-          updated_by = excluded.updated_by,
-          sync_status = excluded.sync_status`,
-        [
-          p.id,
-          p.code,
-          p.description,
-          p.unit,
-          p.purchase_price_cents,
-          p.sale_price_cents,
-          p.vat_rate,
-          p.category ?? null,
-          p.supplier ?? null,
-          p.notes ?? null,
-          p.created_at,
-          p.updated_at,
-          p.updated_by,
-          p.deleted_at,
-          p.sync_status,
-        ]
-      );
+    await db.execute("BEGIN TRANSACTION;");
+    try {
+      for (const p of products) {
+        await db.execute(
+          `INSERT INTO products (
+            id, code, description, unit, purchase_price_cents, sale_price_cents,
+            vat_rate, category, supplier, notes, created_at, updated_at, updated_by,
+            deleted_at, sync_status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          ON CONFLICT(id) DO UPDATE SET
+            code = excluded.code,
+            description = excluded.description,
+            unit = excluded.unit,
+            purchase_price_cents = excluded.purchase_price_cents,
+            sale_price_cents = excluded.sale_price_cents,
+            vat_rate = excluded.vat_rate,
+            category = excluded.category,
+            supplier = excluded.supplier,
+            notes = excluded.notes,
+            updated_at = excluded.updated_at,
+            updated_by = excluded.updated_by,
+            sync_status = excluded.sync_status`,
+          [
+            p.id,
+            p.code,
+            p.description,
+            p.unit,
+            p.purchase_price_cents,
+            p.sale_price_cents,
+            p.vat_rate,
+            p.category ?? null,
+            p.supplier ?? null,
+            p.notes ?? null,
+            p.created_at,
+            p.updated_at,
+            p.updated_by,
+            p.deleted_at,
+            p.sync_status,
+          ]
+        );
+      }
+      await db.execute("COMMIT;");
+    } catch (err) {
+      await db.execute("ROLLBACK;");
+      console.error("[ProductRepository] Errore in batchUpsert, transazione annullata:", err);
+      throw err;
     }
   }
 }

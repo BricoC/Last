@@ -16,7 +16,7 @@ export interface ExcelGridProps {
   getCellContent: (cell: Item) => GridCell;
   onCellEdited?: (cell: Item, newValue: EditableGridCell) => void;
   onRowAppended?: () => void;
-  onPaste?: (target: Item, values: readonly (readonly string[])[]) => boolean;
+  onPaste?: (target: Item, values: readonly (readonly string[])[]) => boolean | Promise<boolean>;
   className?: string;
 }
 
@@ -31,6 +31,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
   getCellContent,
   onCellEdited,
   onRowAppended,
+  onPaste,
   className,
 }) => {
   const { theme } = useThemeStore();
@@ -60,6 +61,14 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
     };
   }, [theme]);
 
+  // Adapter per onPaste asincrono se Glide richiede ritorno sincrono
+  const handleGlidePaste = (target: Item, values: readonly (readonly string[])[]): boolean => {
+    if (!onPaste) return false;
+    const res = onPaste(target, values);
+    if (typeof res === "boolean") return res;
+    return true; // Gestito in background
+  };
+
   return (
     <div className={`w-full h-full flex flex-col overflow-hidden ${className || ""}`}>
       <DataEditor
@@ -68,6 +77,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
         getCellContent={getCellContent}
         onCellEdited={onCellEdited}
         onRowAppended={onRowAppended}
+        onPaste={handleGlidePaste}
         rowMarkers="number"
         fillHandle={true}
         smoothScrollX={true}

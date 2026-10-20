@@ -5,6 +5,8 @@ import { useProductList } from "./hooks/useProductList";
 import { Button } from "@/shared/components/ui/button";
 import { Card } from "@/shared/components/ui/card";
 import { centsToEuro, parseEuroStringToCents, formatCentsToEuro } from "./utils/currencyUtils";
+import { productRepository } from "./services/productRepository";
+import { Product } from "./models/product";
 import { Plus, Search, RefreshCw, AlertCircle, Trash2 } from "lucide-react";
 
 export const ProductListPage: React.FC = () => {
@@ -45,28 +47,28 @@ export const ProductListPage: React.FC = () => {
       }
 
       switch (col) {
-        case 0: // Codice
+        case 0:
           return {
             kind: GridCellKind.Text,
             allowOverlay: true,
             data: product.code,
             displayData: product.code,
           };
-        case 1: // Descrizione
+        case 1:
           return {
             kind: GridCellKind.Text,
             allowOverlay: true,
             data: product.description,
             displayData: product.description,
           };
-        case 2: // U.M.
+        case 2:
           return {
             kind: GridCellKind.Text,
             allowOverlay: true,
             data: product.unit,
             displayData: product.unit,
           };
-        case 3: { // Prezzo Acquisto
+        case 3: {
           const euroVal = centsToEuro(product.purchase_price_cents);
           return {
             kind: GridCellKind.Number,
@@ -75,7 +77,7 @@ export const ProductListPage: React.FC = () => {
             displayData: formatCentsToEuro(product.purchase_price_cents, false),
           };
         }
-        case 4: { // Prezzo Vendita
+        case 4: {
           const euroVal = centsToEuro(product.sale_price_cents);
           return {
             kind: GridCellKind.Number,
@@ -84,14 +86,14 @@ export const ProductListPage: React.FC = () => {
             displayData: formatCentsToEuro(product.sale_price_cents, false),
           };
         }
-        case 5: // IVA %
+        case 5:
           return {
             kind: GridCellKind.Number,
             allowOverlay: true,
             data: product.vat_rate,
             displayData: `${product.vat_rate}%`,
           };
-        case 6: // Note
+        case 6:
           return {
             kind: GridCellKind.Text,
             allowOverlay: true,
@@ -120,39 +122,39 @@ export const ProductListPage: React.FC = () => {
 
       try {
         switch (col) {
-          case 0: // Codice
+          case 0:
             if (newValue.kind === GridCellKind.Text) {
               await updateProduct(product.id, { code: newValue.data });
             }
             break;
-          case 1: // Descrizione
+          case 1:
             if (newValue.kind === GridCellKind.Text) {
               await updateProduct(product.id, { description: newValue.data });
             }
             break;
-          case 2: // U.M.
+          case 2:
             if (newValue.kind === GridCellKind.Text) {
               await updateProduct(product.id, { unit: newValue.data });
             }
             break;
-          case 3: // Prezzo Acquisto
+          case 3:
             if (newValue.kind === GridCellKind.Number && newValue.data !== undefined) {
               const cents = parseEuroStringToCents(newValue.data);
               await updateProduct(product.id, { purchase_price_cents: cents });
             }
             break;
-          case 4: // Prezzo Vendita
+          case 4:
             if (newValue.kind === GridCellKind.Number && newValue.data !== undefined) {
               const cents = parseEuroStringToCents(newValue.data);
               await updateProduct(product.id, { sale_price_cents: cents });
             }
             break;
-          case 5: // IVA
+          case 5:
             if (newValue.kind === GridCellKind.Number && newValue.data !== undefined) {
               await updateProduct(product.id, { vat_rate: Math.round(newValue.data) });
             }
             break;
-          case 6: // Note
+          case 6:
             if (newValue.kind === GridCellKind.Text) {
               await updateProduct(product.id, { notes: newValue.data });
             }
@@ -163,6 +165,57 @@ export const ProductListPage: React.FC = () => {
       }
     },
     [products, updateProduct]
+  );
+
+  // Gestione incolla multi-cella (Ctrl+V) con salvataggio in transazione atomica
+  const handlePaste = useCallback(
+    async (target: Item, values: readonly (readonly string[])[]): Promise<boolean> => {
+      const [startCol, startRow] = target;
+      const modifiedProducts: Product[] = [];
+      const updatedList = [...products];
+
+      for (let r = 0; r < values.length; r++) {
+        const rowIndex = startRow + r;
+        if (rowIndex >= updatedList.length) break;
+
+        const rowValues = values[r];
+        const p: Product = { ...updatedList[rowIndex] };
+
+        for (let c = 0; c < rowValues.length; c++) {
+          const colIndex = startCol + c;
+          const rawVal = rowValues[c]?.trim();
+          if (rawVal === undefined) continue;
+
+          switch (colIndex) {
+            case 0: p.code = rawVal.toUpperCase(); break;
+            case 1: p.description = rawVal; break;
+            case 2: p.unit = rawVal.toUpperCase(); break;
+            case 3: p.purchase_price_cents = parseEuroStringToCents(rawVal); break;
+            case 4: p.sale_price_cents = parseEuroStringToCents(rawVal); break;
+            case 5: p.vat_rate = parseInt(rawVal, 10) || 22; break;
+            case 6: p.notes = rawVal; break;
+          }
+        }
+
+        p.updated_at = new Date().toISOString();
+        p.sync_status = "pending";
+        updatedList[rowIndex] = p;
+        modifiedProducts.push(p);
+      }
+
+      if (modifiedProducts.length > 0) {
+        try {
+          await productRepository.batchUpsert(modifiedProducts);
+          reload();
+          return true;
+        } catch (err) {
+          console.error("[ProductListPage] Errore incolla multi-cella:", err);
+          return false;
+        }
+      }
+      return true;
+    },
+    [products, reload]
   );
 
   // Creazione rapida articolo
@@ -309,6 +362,7 @@ export const ProductListPage: React.FC = () => {
             rows={products.length}
             getCellContent={getCellContent}
             onCellEdited={onCellEdited}
+            onPaste={handlePaste}
           />
         )}
       </div>
