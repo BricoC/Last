@@ -13,7 +13,7 @@
 
 2. **TIMESTAMP UTC & SOFT DELETE OBBLIGATORIO:**
    - Qualsiasi record traccia `created_at`, `updated_at` (ISO 8601 UTC) e `updated_by`.
-   - Divieto di `DELETE` fisico: le eliminazioni avvengono solo tramite Soft Delete (`deleted_at = NOW_UTC()`), per evitare la ricomparsa di record eliminati tra diverse postazioni.
+   - Divieto assoluto di `DELETE` fisico: le eliminazioni avvengono solo tramite Soft Delete (`deleted_at = NOW_UTC()`), impedendo la ricomparsa di record eliminati tra diverse postazioni.
 
 3. **REGISTRO DI COMPONENTI E HOOK (No Doppioni):**
    - Prima di creare un nuovo componente UI o custom hook, è **obbligatorio consultare il Registro Centrale** (`src/shared/registry/`).
@@ -38,63 +38,84 @@
 ## 2. 🏗️ STACK TECNOLOGICO TARGET
 
 - **Nome Applicazione:** **Last**
-- **Desktop Shell:** **Tauri v2** (Rust + plugin: `tauri-plugin-sql`, `fs`, `shell`, `dialog`, `notification`, `process`)
+- **Desktop Shell:** **Tauri v2** (Rust + plugin ufficiali: `tauri-plugin-sql`, `fs`, `shell`, `dialog`, `notification`, `process`)
 - **Frontend Core:** **React 18+**, **TypeScript** (Strict mode attivo)
 - **Bundler:** **Vite**
-- **State Management:** **Redux Toolkit** (Riservato esclusivamente allo stato UI: tab aperte, split view, tema, utente attivo, notifiche. I dati di business risiedono in SQLite e sono interrogati on-demand, mai duplicati in RAM).
-- **Styling:** **CSS Custom Properties (Design Tokens)** sincronizzate con le Settings + **TailwindCSS**
-- **Data Grids:** **Glide Data Grid**
-- **Database Locale:** **SQLite embedded** (`LastData.db` gestito da Tauri in `%APPDATA%\Last\`, auto-creato, invisibile e a zero configurazione).
+- **State Management (UI):** **Zustand** (Store atomici ultra-leggeri per tab, layout split-screen, tema, utente, notifiche. Zero boilerplate; i dati di business risiedono in SQLite e sono interrogati on-demand, mai duplicati in RAM).
+- **Componenti UI:** **shadcn/ui (Radix Primitives) + TailwindCSS** (Componenti nel codice sorgente, accessibili, ultra-leggeri, governati al 100% dalle variabili CSS del Theme Engine).
+- **Split-Screen & Layout:** **`react-resizable-panels`** (Pannelli affiancati fluidi e ridimensionabili col mouse con memoria delle dimensioni).
+- **Data Grids:** **Glide Data Grid** (Canvas virtualizzato a 60 FPS, esperienza Excel reale).
+- **Stampa e Generazione Documenti:** **Template A4 Vettoriale Millimetrico** (Layout A4 a misure fisse in millimetri, CSS `@media print` a 300 DPI nativo; testo, bordi e codici a barre nitidissimi per DDT e Preventivi identici al documento commerciale aziendale).
+- **Database Locale:** **SQLite embedded** (`LastData.db` via `tauri-plugin-sql` in `%APPDATA%\Last\`, auto-creato, invisibile e a zero configurazione).
 - **Database Cloud:** **Supabase** (PostgreSQL)
 
 ---
 
-## 3. 🖥️ SISTEMA DI NAVIGAZIONE A SCHEDE CON SPLIT-VIEW (Chrome-like + Affiancamento)
+## 3. 🖥️ SISTEMA A SCHEDE CON SPLIT-VIEW (Multi-Tab + Affiancamento)
 
-Per garantire massima produttività nel lavoro quotidiano di cassa e ufficio:
 1. **Navigazione Multi-Tab:** L'utente può aprire più schede contemporaneamente (es. DDT Studio, Listino Generale, Scheda Cliente, Ordini).
-2. **Split View (Affiancamento Schermi):**
-   - Possibilità di **affiancare due schede qualsiasi** (layout split orizzontale o verticale).
-   - *Esempio d'uso:* DDT Studio aperto a sinistra e Listino Prezzi / Storico Cliente affiancato a destra per consultare e copiare dati al volo senza saltare continuamente da una schermata all'altra.
-3. **Stato Persistente:** Lo stato dei tab e dell'eventuale split view è gestito in Redux e memorizzato localmente per ripristinare la sessione di lavoro all'avvio.
+2. **Split View (Affiancamento Schede):**
+   - Possibilità di **affiancare due schede qualsiasi** (layout orizzontale o verticale gestito con `react-resizable-panels`).
+   - *Esempio d'uso:* DDT Studio aperto a sinistra e Listino Prezzi / Storico Cliente affiancato a destra per consultare e copiare dati al volo senza cambiare continuamente schermata.
+3. **Stato Persistente:** Lo stato dei tab e del layout affiancato è orchestrato da uno store Zustand leggero e ripristinato automaticamente all'avvio.
 
 ---
 
-## 4. 📧 INTEGRAZIONE OUTLOOK (Composizione e Invio Diretto)
+## 4. 📄 DOCUMENTI FISCALI A4 (DDT e Preventivi BricoClass)
 
-L'integrazione con Microsoft Outlook è snella e mirata:
-1. **Scopo Esclusivo (Composizione/Invio):** L'applicazione **non** funge da client di posta (nessuna lettura di inbox o gestione cartelle).
+1. **Precisione Tipografica:**
+   - Layout identico al modulo ufficiale: logo e testata con riquadro *Numero/Data*, sezioni affiancate *Spettabile ditta* e *Luogo di destinazione*, causale, operatore, pagamento (*In conto / A Saldo*).
+   - Tabella articoli con griglia a linee fisse che scendono fino ai totali.
+   - Fascia totali con imponibile, aliquote IVA, imposta e totale documento.
+   - Riquadri firme (vettore, conducente, cessionario), porto e piè di pagina aziendale con P.IVA e recapiti.
+2. **Motore di Render:**
+   - Template React dimensionato rigorosamente in millimetri (`210mm × 297mm`).
+   - Stampa e salvataggio PDF tramite motore vettoriale nativo di WebView2 (risoluzione 300 DPI, zero sgranature, codici a barre leggibili dai lettori ottici).
+
+---
+
+## 5. 📧 INTEGRAZIONE OUTLOOK (Composizione e Invio Diretto)
+
+1. **Scopo Esclusivo (Composizione/Invio):** L'applicazione non legge inbox né gestisce cartelle.
 2. **Flusso di Lavoro:**
    - L'utente clicca "Invia DDT via Email" o "Invia Ordine Fornitore".
-   - Last genera l'allegato (PDF del DDT o Excel dell'ordine).
-   - Tramite un comando leggero Tauri (COM Automation / PowerShell nativo), Last apre una nuova finestra di composizione in Microsoft Outlook con:
-     - Destinatario precompilato (email cliente o fornitore).
-     - Oggetto formattato.
-     - Corpo del testo standard o personalizzato.
+   - Last genera il file (PDF vettoriale del DDT o foglio Excel dell'ordine).
+   - Tramite un comando leggero Tauri (COM Automation / PowerShell nativo), Last apre la finestra di composizione di Microsoft Outlook precompilando:
+     - Destinatario (email cliente o fornitore).
+     - Oggetto e corpo del messaggio.
      - Documento già allegato.
-   - È Outlook (già configurato con l'account `@hotmail` o aziendale) che si occupa dell'invio effettivo.
+   - Sarà Outlook (collegato all'account Hotmail o aziendale) a gestire l'invio.
 
 ---
 
-## 5. 📐 STRUTTURA DEL PROGETTO (Feature-Driven)
+## 6. 📐 STRUTTURA DEL PROGETTO (Feature-Driven)
 
 ```
 src/
 ├── features/
 │   ├── ddt-studio/             # Documenti di Trasporto
+│   │   ├── components/         # Sotto-componenti (<300 righe)
+│   │   ├── document/           # Template A4 vettoriale millimetrico per stampa/PDF
+│   │   ├── hooks/              # Hook specifici
+│   │   ├── models/             # Tipi e interfacce TypeScript
+│   │   ├── services/           # Repository e operazioni SQLite
+│   │   ├── utils/              # Calcoli fiscali puri
+│   │   └── DdtStudioPage.tsx
 │   ├── orders/                 # Gestione ordini fornitori
 │   ├── price-lists/            # Listini prezzi
 │   ├── clients/                # Anagrafica clienti
-│   ├── quotes/                 # Preventivi
+│   ├── quotes/                 # Preventivi (con template A4 vettoriale)
 │   ├── electronic-invoices/    # Consultazione fatture XML
 │   ├── notes/                  # Memo e note aziendali
-│   └── settings/               # Impostazioni, Tema, Credenziali
+│   └── settings/               # Impostazioni, Theme Engine, Credenziali
 ├── shared/
 │   ├── components/             # Componenti UI generici (Button, Modal, Input, Card)
-│   │   ├── data-grid/          # Wrapper unificato per Glide Data Grid (Excel-like)
-│   │   └── tabs/               # Sistema TabBar e Split View container
-│   ├── hooks/                  # Hook riutilizzabili (useDebounce, useHotkeys, ecc.)
+│   │   ├── ui/                 # Componenti base shadcn/ui (Radix Primitives)
+│   │   ├── data-grid/          # Wrapper unificato Glide Data Grid (Excel-like)
+│   │   └── tabs/               # TabBar e contenitore Split-View (react-resizable-panels)
+│   ├── hooks/                  # Hook riutilizzabili (useDebounce, useHotkeys)
 │   ├── registry/               # REGISTRO centrale componenti e hook
+│   ├── stores/                 # Store Zustand atomici (useTabStore, useThemeStore)
 │   ├── data-layer/             # Repository SQLite locale & Sync Outbox
 │   ├── theme/                  # Theme Provider e iniezione CSS tokens
 │   ├── types/                  # Interfacce globali e BaseEntity
@@ -103,11 +124,11 @@ src/
 
 ### Regola dei 100–300 righi per file
 - Nessun file deve eccedere le 300 righe di codice.
-- I componenti visualizzano; i calcoli sono funzioni pure in `utils/`; la persistenza risiede nei Repository.
+- I componenti visualizzano; i calcoli risiedono in funzioni pure (`utils/`); la persistenza risiede nei Repository.
 
 ---
 
-## 6. 📚 REGISTRO CENTRALE COMPONENTI & HOOK (`src/shared/registry/`)
+## 7. 📚 REGISTRO CENTRALE COMPONENTI & HOOK (`src/shared/registry/`)
 
 Per eliminare codice duplicato:
 1. **`componentsRegistry.ts`**: Censimento di tutti i componenti riutilizzabili (`AppButton`, `AppModal`, `ExcelGrid`, `SplitPane`, `MetricCard`).
@@ -116,19 +137,17 @@ Per eliminare codice duplicato:
 
 ---
 
-## 7. 🎨 THEME ENGINE E DESIGN SYSTEM (Guidato dalle Settings)
+## 8. 🎨 THEME ENGINE E DESIGN SYSTEM (Guidato dalle Settings)
 
 1. **Token nei Settings:** Palette colori (sfondo, card, testo, accento, stati), raggi di curvatura bordi (`borderRadius`), ombre e tema per Glide Data Grid.
-2. **Propagazione Dinamica:** I valori sono salvati nei Settings e applicati a runtime su `:root` come CSS Custom Properties (`--color-primary`, `--bg-surface`, ecc.).
+2. **Propagazione Dinamica:** I valori sono salvati nei Settings e applicati a runtime su `:root` come CSS Custom Properties (`--color-primary`, `--bg-surface`, ecc.), consumate sia da Tailwind che dai componenti shadcn/ui.
 3. **Estendibilità:** Se occorre un nuovo elemento visivo, va prima formalizzato nei Settings/ThemeConfig e poi consumato dai componenti.
 
 ---
 
-## 8. 🔄 ARCHITETTURA DI SINCRONIZZAZIONE (SQLite ↔ Supabase Outbox)
+## 9. 🔄 ARCHITETTURA DI SINCRONIZZAZIONE (SQLite ↔ Supabase Outbox)
 
-Un'architettura semplice e solida per operare su più PC senza conflitti o perdite:
-
-### 8.1 Struttura Base (`BaseEntity`)
+### 9.1 Struttura Base (`BaseEntity`)
 Tutti i record includono obbligatoriamente:
 ```typescript
 export interface BaseEntity {
@@ -141,15 +160,15 @@ export interface BaseEntity {
 }
 ```
 
-### 8.2 Push Locale ➔ Cloud (Pattern Outbox)
+### 9.2 Push Locale ➔ Cloud (Pattern Outbox)
 1. **Salvataggio Locale Istantaneo (< 3ms):** Scrittura immediata su SQLite (`LastData.db`) con `updated_at = NOW_UTC()` e `sync_status = 'pending'`.
 2. **Worker in Background:**
    - Cerca i record con `sync_status = 'pending'`.
    - Esegue l'`upsert` su Supabase.
    - A conferma ricevuta, aggiorna lo stato locale a `'synced'`.
-   - Se manca la connessione, i record restano `'pending'` senza alcuna perdita e partiranno al ripristino della rete.
+   - Se manca la connessione, i record restano protetti in SQLite come `'pending'` e partiranno al ripristino della rete.
 
-### 8.3 Pull Cloud ➔ Locale (Incrementale per Data)
+### 9.3 Pull Cloud ➔ Locale (Incrementale per Data)
 1. L'app conserva il timestamp dell'ultimo controllo (`last_pulled_at`).
 2. Scarica solo le novità con una query diretta:
    ```sql
@@ -157,26 +176,25 @@ export interface BaseEntity {
    ```
 3. Applica l'upsert in SQLite locale e aggiorna `last_pulled_at`.
 
-### 8.4 Cancellazioni Senza Fantasmi
+### 9.4 Cancellazioni Senza Fantasmi
 - Mai `DELETE` fisico. Si imposta `deleted_at = NOW_UTC()` con `sync_status = 'pending'`.
 - La cancellazione viene sincronizzata come un qualsiasi aggiornamento recente, impedendo ai record eliminati di ricomparire.
 
 ---
 
-## 9. 🔤 NAMING CONVENTIONS
+## 10. 🔤 NAMING CONVENTIONS
 
 - **Codice in Inglese:** Nomi di file, variabili, funzioni, interfacce TypeScript e commenti tecnici in inglese.
 - **Termini Fiscali/Commerciali:** I termini specifici italiani rimangono chiaramente riconoscibili (es. `DdtDocument`, `RibaPayment`, `CausaleTrasporto`).
-- **File:** Componenti in `PascalCase.tsx`, Hook in `useCamelCase.ts`, Utility/Services in `camelCase.ts`.
+- **File:** Componenti in `PascalCase.tsx`, Hook in `useCamelCase.ts`, Store Zustand in `use[Feature]Store.ts`, Utility/Services in `camelCase.ts`.
 
 ---
 
-## 10. 🧪 TESTING E CHECKLIST QUALITÀ
+## 11. 🧪 TESTING E CHECKLIST QUALITÀ
 
 - **Testing Mirato (Vitest):** Obbligatorio **solo** per la matematica e la logica critica:
   - Calcoli fiscali (totali DDT, scorporo IVA, ricarichi/sconti).
   - Meccanismo di accodamento Outbox e sincronizzazione SQLite.
-  *(Nessuna burocrazia di test obbligatori per semplici schermate UI o form).*
 - **Checklist prima di rilasciare una feature:**
   - [ ] Il file rispetta il limite indicativo di ~300 righe?
   - [ ] È stato consultato il registro per evitare componenti/hook duplicati?
