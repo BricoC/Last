@@ -1,7 +1,7 @@
-# 🛡️ GUIDA E REGOLE DI SVILUPPO — AGENT.MD (NoMan V2)
+# 🛡️ GUIDA E REGOLE DI SVILUPPO — AGENT.MD (Last)
 
 > **SCOPO DEL DOCUMENTO:**  
-> Questo file definisce i principi architetturali, i vincoli operativi e le regole d'oro inderogabili per lo sviluppo e la ricostruzione del gestionale **NoMan V2**.  
+> Questo file definisce i principi architetturali, i vincoli operativi e le regole d'oro inderogabili per lo sviluppo e la realizzazione del gestionale desktop **Last**.  
 > **Ogni agente AI o sviluppatore che lavora su questo progetto DEVE rispettare questo documento alla lettera.**
 
 ---
@@ -11,7 +11,7 @@
 1. **ARCHITETTURA DATI PURAMENTE NATIVA (Zero dipendenze esterne in lettura):**
    - Questa versione **NON legge file sorgente esterni (Excel, CSV o PDF da parsare)**.
    - L'intero ecosistema dati vive unicamente nel binomio **Locale (Offline-first) ↔ Cloud (Supabase)**.
-   - *(Nota: L'esportazione/generazione di PDF di cortesia e file Excel per l'utente finale resta supportata come output).*
+   - *(Nota: L'esportazione/generazione di PDF di cortesia e file Excel per l'utente finale resta pienamente supportata come output).*
 
 2. **OGNI MODIFICA DEVE AVERE UN TIMESTAMP OBBLIGATORIO:**
    - Per garantire integrità e sincronizzazione bidirezionale affidabile: **qualsiasi record o entità DEVE tracciare `created_at`, `updated_at` (ISO 8601 UTC) e `updated_by`**.
@@ -27,22 +27,28 @@
    - **Nuovi componenti/pagine:** devono attingere ai token del tema (CSS variables / theme tokens) senza stili hardcoded isolati.
    - **Estensioni del tema:** se una nuova interfaccia necessita di un nuovo pattern visivo, stile o variante (es. una nuova sfumatura o variante di card/pulsante), questo **DEVE essere aggiunto alla configurazione nei Settings**, così da diventare uno standard di base riutilizzabile per tutto il progetto.
 
-5. **NESSUN HARDCODING:**
+5. **TABELLE DATI EXCEL-LIKE (Glide Data Grid Standard):**
+   - Tutte le tabelle dati del gestionale adottano **Glide Data Grid** come standard primario.
+   - Devono garantire la completa esperienza Excel-like: selezione a intervalli di celle (range selection), navigazione fluida con frecce tastiera/Tab/Invio, editing immediato, maniglia di trascinamento (fill handle) e copia/incolla bidirezionale (Ctrl+C / Ctrl+V) compatibile con Excel.
+   - Il tema visivo di Glide Data Grid deve essere vincolato dinamicamente ai token definiti nelle Settings.
+
+6. **NESSUN HARDCODING:**
    - Nessun percorso su disco, credenziale, parametro email o impostazione deve essere inserito a codice. Tutto deve risiedere nei Settings o nel `.env`.
 
-6. **SUPABASE SECURITY & RLS:**
+7. **SUPABASE SECURITY & RLS:**
    - Ogni singola tabella creata su Supabase **DEVE** avere abilitato il Row Level Security (`ENABLE ROW LEVEL SECURITY`) e relative policy (`GRANT` / `POLICY`) esplicite.
 
 ---
 
 ## 2. 🏗️ STACK TECNOLOGICO TARGET
 
+- **Nome Applicazione:** **Last**
 - **Desktop Shell:** **Tauri v2** (Rust + Plugin ufficiali v2: fs, shell, dialog, notification, process)
 - **Frontend Core:** **React 18+**, **TypeScript** (Strict mode attivo)
 - **Bundler:** **Vite**
 - **State Management:** **Redux Toolkit** (slices tipizzate) + Custom Repository Hooks
 - **Styling & Theme Engine:** **CSS Custom Properties (Design Tokens)** sincronizzate con le Settings + **TailwindCSS** (configurato per consumare i token del tema)
-- **Data Grids:** **AG Grid Community / Enterprise** (con tema CSS integrato nei Settings)
+- **Data Grids:** **Glide Data Grid** (Canvas virtualizzato ad alte prestazioni, 60 FPS, esperienza Excel-like nativa, licenza MIT open source)
 - **Database Locale:** JSON partizionato per entità/anno/mese o SQLite locale (Tauri v2 plugin)
 - **Database Cloud:** **Supabase** (PostgreSQL + PostgREST)
 
@@ -70,6 +76,7 @@ src/
 │   └── settings/               # Gestione impostazioni e Theme Engine
 ├── shared/
 │   ├── components/             # Componenti UI generici catalogati nel registro
+│   │   └── data-grid/          # Componente wrapper unificato per Glide Data Grid (Excel-like)
 │   ├── hooks/                  # Hook generici riutilizzabili
 │   ├── registry/               # REGISTRO dei componenti, hook e temi
 │   ├── data-layer/             # Repository Pattern & Sync Engine
@@ -89,7 +96,7 @@ src/
 Per garantire massima coerenza e azzerare i doppioni, il progetto adotta un catalogo tracciato:
 
 1. **`componentsRegistry.ts`**:
-   - Elenco e documentazione di tutti i componenti UI generici (es. `AppButton`, `AppModal`, `DataTable`, `SearchBar`, `MetricCard`, `DateRangePicker`).
+   - Elenco e documentazione di tutti i componenti UI generici (es. `AppButton`, `AppModal`, `ExcelDataGrid`, `SearchBar`, `MetricCard`, `DateRangePicker`).
    - Prima di creare un componente di interfaccia, verificare se ne esiste già uno adatto o se una prop opzionale può risolvere la necessità.
 
 2. **`hooksRegistry.ts`**:
@@ -107,15 +114,15 @@ Il tema non è un foglio di stile statico, ma un'entità dinamica controllata da
 1. **Struttura dei Token nei Settings (`ThemeSettings`):**
    - **Color Palette:** Sfondo base, pannelli/card, testo primario/secondario, colore di accento (Primary), warning, danger, success.
    - **Superfici & Forme:** Raggio di curvatura angoli (`borderRadius`: 'none' | 'sm' | 'md' | 'lg' | 'full'), ombreggiature (`shadows`).
-   - **Tabelle (AG Grid):** Colore riga alternata, colore hover, colore riga selezionata, opacità di evidenziazione.
+   - **Glide Data Grid Theme:** Sfondo celle, testo cella, griglia di demarcazione, cella attiva/selezionata, header background/testo, accent color per fill handle e range selection.
 
 2. **Propagazione Automatica:**
    - Le impostazioni del tema sono salvate nel JSON di configurazione / Supabase e iniettate a livello di `:root` sotto forma di **CSS Custom Properties** (es. `--color-primary`, `--bg-card`, `--radius-ui`).
-   - Tailwind e Vanilla CSS fanno riferimento esclusivamente a queste variabili CSS.
+   - Il wrapper di Glide Data Grid consuma direttamente l'oggetto tema generato da queste proprietà.
 
 3. **Workflow di Creazione Nuovi Componenti / Varianti:**
    - Un nuovo componente DEVE consumare le classi o variabili del tema.
-   - **Se occorre un nuovo stile non presente** (es. un nuovo tipo di alert o uno stato visivo inedito):
+   - **Se occorre un nuovo stile non presente**:
      1. Si dichiara il nuovo token in `ThemeSettings` / `themeConfig.ts`.
      2. Viene esposto nella pagina **Settings -> Aspetto/Tema**.
      3. Il componente lo utilizza come standard.
@@ -168,4 +175,5 @@ Il tema non è un foglio di stile statico, ma un'entità dinamica controllata da
   - [ ] Il componente usa i token del Theme Engine e non stili/colori hardcoded?
   - [ ] Le entità manipolate aggiornano `updated_at` e gestiscono il soft-delete?
   - [ ] Nessuna dipendenza o lettura da file esterni Excel/CSV/PDF?
+  - [ ] La griglia dati usa Glide Data Grid con le interazioni Excel-like previste?
   - [ ] Tutti i tipi TypeScript sono rigorosi e senza `any`?
