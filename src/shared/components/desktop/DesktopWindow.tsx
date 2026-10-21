@@ -113,10 +113,12 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
         const dx = e.clientX - dragStartRef.current.mouseX;
         const dy = e.clientY - dragStartRef.current.mouseY;
 
-        // Se trascini in alto (verso la barra), attiva la modalità scelta posizionamento Windows 11 (punto 3)
-        if (e.clientY <= 38) {
+        // Se trascini verso l'alto (in prossimità della barra), attiva la modalità scelta affiancamento
+        if (e.clientY <= 35) {
           setSnapFlyoutVisible(true);
-        } else if (e.clientY > 85) {
+          setDraggingWindowId(win.id);
+        } else if (e.clientY > 350) {
+          // Si chiude solo se il cursore scende molto in basso verso il centro/fondo dello schermo
           setSnapFlyoutVisible(false);
         }
 
