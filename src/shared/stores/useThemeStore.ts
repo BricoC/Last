@@ -1,30 +1,11 @@
 import { create } from "zustand";
 
-export type ThemePresetId = "grigio" | "blu-notte" | "nero-oled" | "smeraldo" | "viola";
-
-export interface AccentColorOption {
-  id: string;
-  name: string;
-  color: string;
-}
-
-export const ACCENT_COLORS: AccentColorOption[] = [
-  { id: "blu-cobalto", name: "Blu Cobalto", color: "#3b82f6" },
-  { id: "ciano-cielo", name: "Ciano Cielo", color: "#06b6d4" },
-  { id: "verde-petrolio", name: "Verde Petrolio", color: "#0d9488" },
-  { id: "smeraldo", name: "Smeraldo", color: "#10b981" },
-  { id: "ambra-oro", name: "Ambra Oro", color: "#f59e0b" },
-  { id: "arancio-vivo", name: "Arancio Vivo", color: "#f97316" },
-  { id: "rosa-carminio", name: "Rosa Carminio", color: "#f43f5e" },
-  { id: "viola-ametista", name: "Viola Ametista", color: "#a855f7" },
-  { id: "indaco-notte", name: "Indaco Notte", color: "#6366f1" },
-  { id: "ardesia-neutro", name: "Ardesia Neutro", color: "#94a3b8" },
-];
+export type ThemePresetId = "grigio" | "nero-oled" | "avorio";
 
 export interface ThemeTokens {
   preset: ThemePresetId;
   presetName: string;
-  brightnessLevel: number; // 1 to 5
+  brightnessLevel: number; // 1 to 5 (solo per Grigio)
   primaryColor: string;
   backgroundColor: string;
   cardColor: string;
@@ -35,7 +16,7 @@ export interface ThemeTokens {
   borderRadius: string;
 }
 
-// Grigio L4 (Titanio Chiaro) — Tonalità neutra, pulita, priva di bluastro freddo, esattamente come da richiesta
+// Grigio L4 (Titanio Chiaro) — Tonalità neutra pulita predefinita
 const THEME_GRIGIO_L4: ThemeTokens = {
   preset: "grigio",
   presetName: "Grigio",
@@ -55,7 +36,6 @@ interface ThemeState {
   setTheme: (updates: Partial<ThemeTokens>) => void;
   setPreset: (preset: ThemePresetId) => void;
   setBrightness: (level: number) => void;
-  setAccentColor: (color: string) => void;
   resetTheme: () => void;
   applyToDom: () => void;
 }
@@ -97,46 +77,36 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
         backgroundColor: tones.bg,
         cardColor: tones.card,
         borderColor: tones.border,
+        textColor: "#f3f4f6",
+        mutedTextColor: "#9ca3af",
+        primaryColor: "#3b82f6",
       };
     } else if (preset === "nero-oled") {
       newTheme = {
         ...get().theme,
         preset: "nero-oled",
         presetName: "Nero Assoluto (OLED)",
-        backgroundColor: "#0a0a0a",
-        cardColor: "#141414",
+        backgroundColor: "#000000",
+        cardColor: "#111111",
+        cardHoverColor: "#1c1c1c",
         borderColor: "#262626",
-      };
-    } else if (preset === "smeraldo") {
-      newTheme = {
-        ...get().theme,
-        preset: "smeraldo",
-        presetName: "Verde Smeraldo Notte",
-        backgroundColor: "#0d1b17",
-        cardColor: "#142621",
-        borderColor: "#1d3830",
-        primaryColor: "#10b981",
-      };
-    } else if (preset === "viola") {
-      newTheme = {
-        ...get().theme,
-        preset: "viola",
-        presetName: "Viola Ametista Notturno",
-        backgroundColor: "#171224",
-        cardColor: "#221b35",
-        borderColor: "#342952",
-        primaryColor: "#a855f7",
+        textColor: "#ffffff",
+        mutedTextColor: "#888888",
+        primaryColor: "#3b82f6",
       };
     } else {
-      // Blu Notte
+      // Bianco / Avorio (Light theme pulito e riposante)
       newTheme = {
         ...get().theme,
-        preset: "blu-notte",
-        presetName: "Blu Notte",
-        backgroundColor: "#0f172a",
-        cardColor: "#1e293b",
-        borderColor: "#334155",
-        primaryColor: "#3b82f6",
+        preset: "avorio",
+        presetName: "Bianco Avorio",
+        backgroundColor: "#f7f6f2",
+        cardColor: "#ffffff",
+        cardHoverColor: "#f0eee9",
+        borderColor: "#ded9cf",
+        textColor: "#1e232b",
+        mutedTextColor: "#64748b",
+        primaryColor: "#2563eb",
       };
     }
     set({ theme: newTheme });
@@ -159,11 +129,6 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     } else {
       set({ theme: { ...get().theme, brightnessLevel: level } });
     }
-  },
-
-  setAccentColor: (color) => {
-    set({ theme: { ...get().theme, primaryColor: color } });
-    get().applyToDom();
   },
 
   resetTheme: () => {

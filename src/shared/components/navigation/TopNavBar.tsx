@@ -115,12 +115,6 @@ export const TopNavBar: React.FC = () => {
           </button>
         </div>
 
-        {/* Pill Stato Cloud (esattamente come in foto) */}
-        <div className="flex items-center space-x-1.5 px-2.5 py-1 bg-[#1a2e26] border border-[#23533e] rounded-full text-emerald-300 text-xs font-medium">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>Cloud: 09:29</span>
-        </div>
-
         {/* Pulsante Impostazioni */}
         <button
           type="button"
