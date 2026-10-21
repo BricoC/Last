@@ -137,16 +137,16 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
           const hoveredSlotElem = elemUnderCursor?.closest("[data-snap-slot]")?.getAttribute("data-snap-slot") as SnapSlotType | null;
 
           // PRIORITÀ 1: Bordo Sinistro (Aero Snap 50% Sinistra con ombra trasparente)
-          if (isNearLeft && !hoveredSlotElem && e.clientX < window.innerWidth / 3) {
+          if (isNearLeft && !hoveredSlotElem) {
+            setSnapFlyoutVisible(false);
             setHoveredSnapSlot("left-half");
             pendingSnapRef.current = "left-half";
-            setSnapFlyoutVisible(false);
           }
           // PRIORITÀ 2: Bordo Destro (Aero Snap 50% Destra con ombra trasparente)
-          else if (isNearRight && !hoveredSlotElem && e.clientX > (window.innerWidth * 2) / 3) {
+          else if (isNearRight && !hoveredSlotElem) {
+            setSnapFlyoutVisible(false);
             setHoveredSnapSlot("right-half");
             pendingSnapRef.current = "right-half";
-            setSnapFlyoutVisible(false);
           }
           // PRIORITÀ 3: Bordo Superiore (Flyout Layouts e Anteprima Massimizza a tutto schermo)
           else if (isNearTop) {

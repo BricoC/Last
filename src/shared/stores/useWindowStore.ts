@@ -246,11 +246,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   },
 
   setSnapFlyoutVisible: (visible) => {
-    set({
-      isSnapFlyoutVisible: visible,
-      hoveredSnapSlot: visible ? get().hoveredSnapSlot : null,
-      snapPreviewBounds: visible ? get().snapPreviewBounds : null,
-    });
+    set({ isSnapFlyoutVisible: visible });
   },
 
   setHoveredSnapSlot: (slot) => {
