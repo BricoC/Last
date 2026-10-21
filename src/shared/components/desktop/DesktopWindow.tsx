@@ -127,29 +127,29 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
           const newY = Math.max(0, Math.min(window.innerHeight - 80, dragStartRef.current.startY + dy));
           updateWindowBounds(win.id, { x: newX, y: newY });
 
-          // Calcola bordi dello schermo (Soglia ridotta a 30px per richiedere vicinanza reale al bordo)
-          const isNearLeft = e.clientX <= 30 || newX <= 0;
-          const isNearRight = e.clientX >= window.innerWidth - 30 || (newX + currentW) >= window.innerWidth;
-          const isNearTop = e.clientY <= 25;
+          // Comportamento Nativo Windows: si attiva SOLO quando il cursore del mouse tocca il bordo dello schermo
+          const isTouchingLeftBorder = e.clientX <= 12;
+          const isTouchingRightBorder = e.clientX >= window.innerWidth - 12;
+          const isTouchingTopBorder = e.clientY <= 15;
 
           // Rileva se il cursore è sopra uno dei riquadri del flyout di snap
           const elemUnderCursor = document.elementFromPoint(e.clientX, e.clientY);
           const hoveredSlotElem = elemUnderCursor?.closest("[data-snap-slot]")?.getAttribute("data-snap-slot") as SnapSlotType | null;
 
-          // PRIORITÀ 1: Bordo Sinistro (Aero Snap 50% Sinistra con ombra trasparente)
-          if (isNearLeft && !hoveredSlotElem) {
+          // PRIORITÀ 1: Bordo Sinistro (Tocca il bordo sinistro: ombra blu 50% sinistra)
+          if (isTouchingLeftBorder && !hoveredSlotElem) {
             setSnapFlyoutVisible(false);
             setHoveredSnapSlot("left-half");
             pendingSnapRef.current = "left-half";
           }
-          // PRIORITÀ 2: Bordo Destro (Aero Snap 50% Destra con ombra trasparente)
-          else if (isNearRight && !hoveredSlotElem) {
+          // PRIORITÀ 2: Bordo Destro (Tocca il bordo destro: ombra blu 50% destra)
+          else if (isTouchingRightBorder && !hoveredSlotElem) {
             setSnapFlyoutVisible(false);
             setHoveredSnapSlot("right-half");
             pendingSnapRef.current = "right-half";
           }
-          // PRIORITÀ 3: Bordo Superiore (Flyout Layouts e Anteprima Massimizza a tutto schermo)
-          else if (isNearTop) {
+          // PRIORITÀ 3: Bordo Superiore (Tocca il bordo superiore: flyout e anteprima massimizza)
+          else if (isTouchingTopBorder) {
             setSnapFlyoutVisible(true);
             setDraggingWindowId(win.id);
 
@@ -161,7 +161,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
               pendingSnapRef.current = "maximize";
             }
           }
-          // PRIORITÀ 4: Cursore nel flyout aperto
+          // PRIORITÀ 4: Cursore sopra un riquadro del flyout aperto
           else if (hoveredSlotElem) {
             setHoveredSnapSlot(hoveredSlotElem);
             pendingSnapRef.current = hoveredSlotElem;
