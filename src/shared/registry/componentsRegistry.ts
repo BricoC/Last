@@ -52,8 +52,8 @@ export const COMPONENTS_REGISTRY: ComponentRegistryEntry[] = [
     name: "TopNavBar",
     category: "layout",
     path: "src/shared/components/navigation/TopNavBar.tsx",
-    description: "Barra superiore di primo livello con pulsanti moduli, indicatore Cloud e comandi di affiancamento/disposizione desktop.",
-    propsSummary: ["openWindow", "activeWindowId", "tileSideBySide", "tileGrid", "cascadeWindows", "minimizeAll"],
+    description: "Barra superiore di primo livello con pulsanti moduli, e comandi di affiancamento/disposizione desktop e toggle Mostra Desktop.",
+    propsSummary: ["openWindow", "activeWindowId", "tileSideBySide", "tileGrid", "cascadeWindows", "toggleShowDesktop"],
   },
   {
     name: "WindowTabBar",
@@ -73,7 +73,14 @@ export const COMPONENTS_REGISTRY: ComponentRegistryEntry[] = [
     name: "DesktopWindow",
     category: "layout",
     path: "src/shared/components/desktop/DesktopWindow.tsx",
-    description: "Finestra flottante singola stile Windows con drag & drop su intestazione, ridimensionamento ad angoli, minimizzazione, massimizzazione e chiusura.",
+    description: "Finestra flottante singola stile Windows con drag & drop su intestazione, ridimensionamento ad angoli e bordi, minimizzazione, massimizzazione e chiusura.",
     propsSummary: ["window", "renderContent"],
+  },
+  {
+    name: "WindowsSnapFlyout",
+    category: "layout",
+    path: "src/shared/components/desktop/WindowsSnapFlyout.tsx",
+    description: "Menu a comparsa superiore in stile Windows 11 Snap Layouts per scegliere graficamente il posizionamento e l'affiancamento delle finestre.",
+    propsSummary: ["targetWindowId"],
   },
 ];

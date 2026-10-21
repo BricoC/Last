@@ -63,7 +63,7 @@ export const WindowTabBar: React.FC = () => {
               key={win.id}
               onClick={() => focusWindow(win.id)}
               className={cn(
-                "group relative h-6 px-2.5 flex items-center space-x-1.5 text-xs font-medium rounded transition-all cursor-pointer border",
+                "group relative h-6 px-2.5 flex items-center space-x-1.5 text-xs font-medium rounded transition-all cursor-default border",
                 isActive
                   ? "bg-[#282d38] text-white border-[var(--primary)] shadow-sm shadow-blue-950/40"
                   : win.isMinimized

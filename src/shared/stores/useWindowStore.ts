@@ -15,10 +15,26 @@ export interface WindowItem {
   closable: boolean;
 }
 
+export type SnapSlotType =
+  | "left-half"
+  | "right-half"
+  | "left-two-thirds"
+  | "right-one-third"
+  | "three-col-left"
+  | "three-col-mid"
+  | "three-col-right"
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right";
+
 interface WindowState {
   windows: WindowItem[];
   activeWindowId: string | null;
   nextZIndex: number;
+  lastVisibleWindowIds: string[];
+  draggingWindowId: string | null;
+  isSnapFlyoutVisible: boolean;
 
   // Actions
   openWindow: (item: {
@@ -39,13 +55,21 @@ interface WindowState {
     bounds: Partial<Pick<WindowItem, "x" | "y" | "width" | "height">>
   ) => void;
 
-  // Snap & Tiling Presets
+  setDraggingWindowId: (id: string | null) => void;
+  setSnapFlyoutVisible: (visible: boolean) => void;
+  snapWindowToSlot: (id: string, slot: SnapSlotType) => void;
+
+  // Toggle Mostra Desktop (Minimizza/Ripristina tutto stile pulsante Windows)
+  toggleShowDesktop: () => void;
+  areAllWindowsMinimized: () => boolean;
+
+  // Layout Presets
   tileSideBySide: () => void;
   tileGrid: () => void;
   cascadeWindows: () => void;
-  minimizeAll: () => void;
 }
 
+// All'avvio la dashboard è sempre a dimensione massima (punto 5)
 const DEFAULT_DASHBOARD_WINDOW: WindowItem = {
   id: "dashboard",
   title: "Dashboard",
@@ -57,7 +81,7 @@ const DEFAULT_DASHBOARD_WINDOW: WindowItem = {
   height: 640,
   zIndex: 10,
   isMinimized: false,
-  isMaximized: false,
+  isMaximized: true,
   closable: false,
 };
 
@@ -65,6 +89,9 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   windows: [DEFAULT_DASHBOARD_WINDOW],
   activeWindowId: "dashboard",
   nextZIndex: 11,
+  lastVisibleWindowIds: ["dashboard"],
+  draggingWindowId: null,
+  isSnapFlyoutVisible: false,
 
   openWindow: (item) => {
     const { windows, nextZIndex } = get();
@@ -84,11 +111,11 @@ export const useWindowStore = create<WindowState>((set, get) => ({
       return;
     }
 
-    // Calcolo posizionamento a cascata per la nuova finestra
     const offset = (windows.length % 6) * 30 + 30;
     const defaultW = item.defaultWidth ?? 960;
     const defaultH = item.defaultHeight ?? 620;
 
+    // Quando apro le finestre sono SEMPRE in dimensione massima (punto 5)
     const newWindow: WindowItem = {
       id: item.id,
       title: item.title,
@@ -100,7 +127,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
       height: defaultH,
       zIndex: nextZIndex + 1,
       isMinimized: false,
-      isMaximized: false,
+      isMaximized: true,
       closable: item.closable ?? true,
     };
 
@@ -175,35 +202,124 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     }));
   },
 
+  setDraggingWindowId: (id) => {
+    set({ draggingWindowId: id });
+  },
+
+  setSnapFlyoutVisible: (visible) => {
+    set({ isSnapFlyoutVisible: visible });
+  },
+
+  snapWindowToSlot: (id, slot) => {
+    const { windows, nextZIndex } = get();
+    const target = windows.find((w) => w.id === id);
+    if (!target) return;
+
+    const desktopW = window.innerWidth;
+    const desktopH = window.innerHeight - 72; // altezza totale al netto delle barre superiori
+
+    let bounds = { x: 0, y: 0, width: desktopW, height: desktopH };
+
+    switch (slot) {
+      case "left-half":
+        bounds = { x: 0, y: 0, width: Math.floor(desktopW / 2), height: desktopH };
+        break;
+      case "right-half":
+        bounds = { x: Math.floor(desktopW / 2), y: 0, width: Math.ceil(desktopW / 2), height: desktopH };
+        break;
+      case "left-two-thirds":
+        bounds = { x: 0, y: 0, width: Math.floor((desktopW * 2) / 3), height: desktopH };
+        break;
+      case "right-one-third":
+        bounds = { x: Math.floor((desktopW * 2) / 3), y: 0, width: Math.ceil(desktopW / 3), height: desktopH };
+        break;
+      case "three-col-left":
+        bounds = { x: 0, y: 0, width: Math.floor(desktopW / 3), height: desktopH };
+        break;
+      case "three-col-mid":
+        bounds = { x: Math.floor(desktopW / 3), y: 0, width: Math.floor(desktopW / 3), height: desktopH };
+        break;
+      case "three-col-right":
+        bounds = { x: Math.floor((desktopW * 2) / 3), y: 0, width: Math.ceil(desktopW / 3), height: desktopH };
+        break;
+      case "top-left":
+        bounds = { x: 0, y: 0, width: Math.floor(desktopW / 2), height: Math.floor(desktopH / 2) };
+        break;
+      case "top-right":
+        bounds = { x: Math.floor(desktopW / 2), y: 0, width: Math.ceil(desktopW / 2), height: Math.floor(desktopH / 2) };
+        break;
+      case "bottom-left":
+        bounds = { x: 0, y: Math.floor(desktopH / 2), width: Math.floor(desktopW / 2), height: Math.ceil(desktopH / 2) };
+        break;
+      case "bottom-right":
+        bounds = { x: Math.floor(desktopW / 2), y: Math.floor(desktopH / 2), width: Math.ceil(desktopW / 2), height: Math.ceil(desktopH / 2) };
+        break;
+    }
+
+    set({
+      nextZIndex: nextZIndex + 1,
+      isSnapFlyoutVisible: false,
+      draggingWindowId: null,
+      windows: windows.map((w) =>
+        w.id === id
+          ? {
+              ...w,
+              ...bounds,
+              isMaximized: false,
+              isMinimized: false,
+              zIndex: nextZIndex + 1,
+            }
+          : w
+      ),
+      activeWindowId: id,
+    });
+  },
+
+  areAllWindowsMinimized: () => {
+    const { windows } = get();
+    return windows.length > 0 && windows.every((w) => w.isMinimized);
+  },
+
+  toggleShowDesktop: () => {
+    const { windows, lastVisibleWindowIds, areAllWindowsMinimized } = get();
+
+    if (areAllWindowsMinimized()) {
+      // Tutte le finestre sono minimizzate: ripristina quelle che erano visibili (punto 4)
+      set({
+        windows: windows.map((w) => ({
+          ...w,
+          isMinimized: !lastVisibleWindowIds.includes(w.id),
+        })),
+        activeWindowId: lastVisibleWindowIds[lastVisibleWindowIds.length - 1] || null,
+      });
+    } else {
+      // Salva le finestre attualmente visibili e minimizza tutto sul desktop
+      const visibleIds = windows.filter((w) => !w.isMinimized).map((w) => w.id);
+      set({
+        lastVisibleWindowIds: visibleIds.length > 0 ? visibleIds : ["dashboard"],
+        windows: windows.map((w) => ({ ...w, isMinimized: true })),
+        activeWindowId: null,
+      });
+    }
+  },
+
   tileSideBySide: () => {
     const { windows, nextZIndex } = get();
     const activeList = windows.filter((w) => !w.isMinimized);
     if (activeList.length === 0) return;
 
     const desktopW = window.innerWidth;
-    const desktopH = window.innerHeight - 80; // altezza disponibile al netto della barra superiore
+    const desktopH = window.innerHeight - 72;
 
-    if (activeList.length === 1) {
-      set({
-        windows: windows.map((w) =>
-          w.id === activeList[0].id
-            ? { ...w, x: 20, y: 15, width: desktopW - 40, height: desktopH - 30, isMaximized: false }
-            : w
-        ),
-      });
-      return;
-    }
-
-    // Affianca le prime due finestre aperte 50% / 50%
-    const halfW = Math.floor((desktopW - 30) / 2);
+    const halfW = Math.floor(desktopW / 2);
     set({
       nextZIndex: nextZIndex + 1,
       windows: windows.map((w) => {
         if (w.id === activeList[0].id) {
-          return { ...w, x: 10, y: 10, width: halfW, height: desktopH - 20, isMaximized: false, isMinimized: false, zIndex: nextZIndex + 1 };
+          return { ...w, x: 0, y: 0, width: halfW, height: desktopH, isMaximized: false, isMinimized: false, zIndex: nextZIndex + 1 };
         }
-        if (w.id === activeList[1].id) {
-          return { ...w, x: halfW + 20, y: 10, width: halfW, height: desktopH - 20, isMaximized: false, isMinimized: false, zIndex: nextZIndex + 1 };
+        if (activeList[1] && w.id === activeList[1].id) {
+          return { ...w, x: halfW, y: 0, width: halfW, height: desktopH, isMaximized: false, isMinimized: false, zIndex: nextZIndex + 1 };
         }
         return w;
       }),
@@ -216,15 +332,15 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     if (activeList.length === 0) return;
 
     const desktopW = window.innerWidth;
-    const desktopH = window.innerHeight - 80;
-    const halfW = Math.floor((desktopW - 30) / 2);
-    const halfH = Math.floor((desktopH - 30) / 2);
+    const desktopH = window.innerHeight - 72;
+    const halfW = Math.floor(desktopW / 2);
+    const halfH = Math.floor(desktopH / 2);
 
     const positions = [
-      { x: 10, y: 10, w: halfW, h: halfH },
-      { x: halfW + 20, y: 10, w: halfW, h: halfH },
-      { x: 10, y: halfH + 20, w: halfW, h: halfH },
-      { x: halfW + 20, y: halfH + 20, w: halfW, h: halfH },
+      { x: 0, y: 0, w: halfW, h: halfH },
+      { x: halfW, y: 0, w: halfW, h: halfH },
+      { x: 0, y: halfH, w: halfW, h: halfH },
+      { x: halfW, y: halfH, w: halfW, h: halfH },
     ];
 
     set({
@@ -255,12 +371,5 @@ export const useWindowStore = create<WindowState>((set, get) => ({
         zIndex: nextZIndex + index,
       })),
     });
-  },
-
-  minimizeAll: () => {
-    set((state) => ({
-      windows: state.windows.map((w) => ({ ...w, isMinimized: true })),
-      activeWindowId: null,
-    }));
   },
 }));

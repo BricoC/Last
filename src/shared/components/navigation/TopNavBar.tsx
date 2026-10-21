@@ -28,7 +28,15 @@ export interface NavModule {
 }
 
 export const TopNavBar: React.FC = () => {
-  const { openWindow, activeWindowId, tileSideBySide, tileGrid, cascadeWindows, minimizeAll } = useWindowStore();
+  const {
+    openWindow,
+    activeWindowId,
+    tileSideBySide,
+    tileGrid,
+    cascadeWindows,
+    toggleShowDesktop,
+    areAllWindowsMinimized,
+  } = useWindowStore();
 
   const modules: NavModule[] = [
     { id: "dashboard", title: "Dashboard", componentId: "dashboard", icon: <LayoutGrid className="w-3.5 h-3.5" /> },
@@ -62,7 +70,7 @@ export const TopNavBar: React.FC = () => {
                 })
               }
               className={cn(
-                "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap cursor-pointer",
+                "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap cursor-default",
                 isActive
                   ? "bg-[#2c3038] text-white border border-[var(--primary)] shadow-sm shadow-blue-900/30 font-semibold"
                   : "bg-transparent text-slate-300 hover:bg-[#282b33] hover:text-white"
@@ -84,7 +92,7 @@ export const TopNavBar: React.FC = () => {
           <button
             type="button"
             onClick={tileSideBySide}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors"
+            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
             title="Affianca finestre (50 / 50)"
           >
             <Columns2 className="w-3.5 h-3.5" />
@@ -92,7 +100,7 @@ export const TopNavBar: React.FC = () => {
           <button
             type="button"
             onClick={tileGrid}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors"
+            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
             title="Griglia 4 finestre"
           >
             <Grid2X2 className="w-3.5 h-3.5" />
@@ -100,16 +108,27 @@ export const TopNavBar: React.FC = () => {
           <button
             type="button"
             onClick={cascadeWindows}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors"
+            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
             title="Disponi a cascata"
           >
             <Layers className="w-3.5 h-3.5" />
           </button>
+
+          {/* Tasto Mostra Desktop / Ripristina finestre (in stile pulsante angolo di Windows - punto 4) */}
           <button
             type="button"
-            onClick={minimizeAll}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors"
-            title="Minimizza tutte sul desktop"
+            onClick={toggleShowDesktop}
+            className={cn(
+              "p-1 rounded transition-colors cursor-default",
+              areAllWindowsMinimized()
+                ? "bg-blue-600/30 text-blue-400 border border-blue-500/40"
+                : "text-slate-400 hover:text-white hover:bg-[#2c3038]"
+            )}
+            title={
+              areAllWindowsMinimized()
+                ? "Ripristina finestre aperte"
+                : "Mostra Desktop (Minimizza tutte le finestre)"
+            }
           >
             <Minimize2 className="w-3.5 h-3.5" />
           </button>
@@ -126,7 +145,7 @@ export const TopNavBar: React.FC = () => {
             })
           }
           className={cn(
-            "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-colors cursor-pointer",
+            "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-colors cursor-default",
             activeWindowId === "settings"
               ? "bg-[#2c3038] text-white border border-[var(--primary)]"
               : "text-slate-300 hover:bg-[#282b33] hover:text-white"

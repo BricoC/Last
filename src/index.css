@@ -65,5 +65,11 @@ body {
   padding: 0;
   user-select: none;
   overflow: hidden;
+  cursor: default;
+}
+
+/* Disattiva cursore a manina: classico puntatore freccia standard Windows ovunque */
+button, a, [role="button"], .cursor-pointer {
+  cursor: default !important;
 }
 
