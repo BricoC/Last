@@ -2,12 +2,14 @@ import React from "react";
 import { useWindowStore, SnapSlotType } from "@/shared/stores/useWindowStore";
 import { X } from "lucide-react";
 
+import { cn } from "@/shared/utils/cn";
+
 interface WindowsSnapFlyoutProps {
   targetWindowId: string | null;
 }
 
 export const WindowsSnapFlyout: React.FC<WindowsSnapFlyoutProps> = ({ targetWindowId }) => {
-  const { snapWindowToSlot, isSnapFlyoutVisible, setSnapFlyoutVisible, setHoveredSnapSlot } = useWindowStore();
+  const { snapWindowToSlot, isSnapFlyoutVisible, setSnapFlyoutVisible, setHoveredSnapSlot, hoveredSnapSlot } = useWindowStore();
 
   if (!isSnapFlyoutVisible || !targetWindowId) return null;
 
@@ -15,16 +17,25 @@ export const WindowsSnapFlyout: React.FC<WindowsSnapFlyoutProps> = ({ targetWind
     snapWindowToSlot(targetWindowId, slot);
   };
 
-  const slotProps = (slot: SnapSlotType, title: string) => ({
-    onMouseEnter: () => setHoveredSnapSlot(slot),
-    onMouseLeave: () => setHoveredSnapSlot(null),
-    onClick: (e: React.MouseEvent) => {
-      e.stopPropagation();
-      handleSelectSlot(slot);
-    },
-    title,
-    className: "rounded bg-[#383b45] border border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-all cursor-default",
-  });
+  const slotProps = (slot: SnapSlotType, title: string) => {
+    const isSlotHovered = hoveredSnapSlot === slot;
+    return {
+      "data-snap-slot": slot,
+      onMouseEnter: () => setHoveredSnapSlot(slot),
+      onMouseLeave: () => setHoveredSnapSlot("maximize"),
+      onClick: (e: React.MouseEvent) => {
+        e.stopPropagation();
+        handleSelectSlot(slot);
+      },
+      title,
+      className: cn(
+        "rounded border transition-all cursor-default",
+        isSlotHovered
+          ? "bg-[#0078d4] border-sky-300 shadow-[0_0_12px_rgba(0,120,212,0.6)]"
+          : "bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300"
+      ),
+    };
+  };
 
   return (
     <>

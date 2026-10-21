@@ -15,7 +15,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({ renderConten
       {/* Sfondo del Desktop con watermark discreto */}
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(#3e4350_1px,transparent_1px)] [background-size:24px_24px] opacity-20" />
 
-      {/* Anteprima Istantanea Trasparente (Snap Ghost Preview stile Windows 11 - Punto 3) */}
+      {/* Anteprima Istantanea Trasparente (Aero Snap Ghost Preview stile Windows 11) */}
       {snapPreviewBounds && (
         <div
           style={{
@@ -24,7 +24,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({ renderConten
             width: `${snapPreviewBounds.width}px`,
             height: `${snapPreviewBounds.height}px`,
           }}
-          className="absolute z-[9985] rounded-xl bg-blue-500/25 border-2 border-blue-400 backdrop-blur-sm shadow-[0_0_28px_rgba(59,130,246,0.4)] transition-all duration-150 pointer-events-none"
+          className="absolute z-[9985] rounded-xl bg-blue-500/20 border-2 border-blue-400 backdrop-blur-md shadow-[0_0_36px_rgba(59,130,246,0.45),inset_0_0_24px_rgba(59,130,246,0.18)] transition-all duration-150 pointer-events-none animate-in fade-in zoom-in-95"
         />
       )}
 

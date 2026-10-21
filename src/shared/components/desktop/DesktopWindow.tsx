@@ -131,12 +131,22 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
           const isAtLeft = e.clientX <= 50 || newX <= 15;
           const isAtRight = e.clientX >= window.innerWidth - 50 || (newX + currentW) >= window.innerWidth - 15;
 
-          // 1. In Alto: Flyout Layouts e Massimizza al rilascio (Punto 1)
+          // Rileva se il cursore è sopra uno dei riquadri del flyout di snap
+          const elemUnderCursor = document.elementFromPoint(e.clientX, e.clientY);
+          const hoveredSlotElem = elemUnderCursor?.closest("[data-snap-slot]")?.getAttribute("data-snap-slot") as SnapSlotType | null;
+
+          // 1. In Alto: Flyout Layouts e Anteprima Trasparente Aero Snap
           if (isAtTop) {
             setSnapFlyoutVisible(true);
             setDraggingWindowId(win.id);
-            pendingSnapRef.current = "maximize";
-            setHoveredSnapSlot(null);
+
+            if (hoveredSlotElem) {
+              setHoveredSnapSlot(hoveredSlotElem);
+              pendingSnapRef.current = hoveredSlotElem;
+            } else {
+              setHoveredSnapSlot("maximize");
+              pendingSnapRef.current = "maximize";
+            }
           }
           // 2. A Sinistra: Anteprima 50% verticale a sinistra (Punto 3)
           else if (isAtLeft && e.clientY > 50) {
@@ -150,16 +160,23 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
             pendingSnapRef.current = "right-half";
             setSnapFlyoutVisible(false);
           }
-          // 4. Al centro: rimuove anteprime laterali e chiude flyout se distante
+          // 4. Zona centrale/libera
           else {
-            if (pendingSnapRef.current === "left-half" || pendingSnapRef.current === "right-half") {
-              setHoveredSnapSlot(null);
-              pendingSnapRef.current = null;
-            }
-            if (e.clientY > 160 || e.clientX < window.innerWidth / 2 - 320 || e.clientX > window.innerWidth / 2 + 320) {
-              setSnapFlyoutVisible(false);
-              if (pendingSnapRef.current === "maximize") {
+            // Se il cursore è sceso dentro il flyout
+            if (hoveredSlotElem) {
+              setHoveredSnapSlot(hoveredSlotElem);
+              pendingSnapRef.current = hoveredSlotElem;
+            } else {
+              if (pendingSnapRef.current === "left-half" || pendingSnapRef.current === "right-half") {
+                setHoveredSnapSlot(null);
                 pendingSnapRef.current = null;
+              }
+              if (e.clientY > 160 || e.clientX < window.innerWidth / 2 - 320 || e.clientX > window.innerWidth / 2 + 320) {
+                setSnapFlyoutVisible(false);
+                setHoveredSnapSlot(null);
+                if (pendingSnapRef.current === "maximize") {
+                  pendingSnapRef.current = null;
+                }
               }
             }
           }

@@ -16,6 +16,7 @@ export interface WindowItem {
 }
 
 export type SnapSlotType =
+  | "maximize"
   | "left-half"
   | "right-half"
   | "top-half"
@@ -35,6 +36,8 @@ export function getSnapSlotBounds(slot: SnapSlotType): { x: number; y: number; w
   const desktopH = window.innerHeight - 72;
 
   switch (slot) {
+    case "maximize":
+      return { x: 0, y: 0, width: desktopW, height: desktopH };
     case "left-half":
       return { x: 0, y: 0, width: Math.floor(desktopW / 2), height: desktopH };
     case "right-half":
@@ -263,6 +266,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     const target = windows.find((w) => w.id === id);
     if (!target) return;
 
+    const isMax = slot === "maximize";
     const bounds = getSnapSlotBounds(slot);
 
     set({
@@ -276,7 +280,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
           ? {
               ...w,
               ...bounds,
-              isMaximized: false,
+              isMaximized: isMax,
               isMinimized: false,
               zIndex: nextZIndex + 1,
             }
