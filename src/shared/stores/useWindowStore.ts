@@ -71,6 +71,7 @@ interface WindowState {
   lastVisibleWindowIds: string[];
   draggingWindowId: string | null;
   isSnapFlyoutVisible: boolean;
+  hoveredSnapSlot: SnapSlotType | null;
   snapPreviewBounds: { x: number; y: number; width: number; height: number } | null;
 
   // Actions
@@ -130,6 +131,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   lastVisibleWindowIds: ["dashboard"],
   draggingWindowId: null,
   isSnapFlyoutVisible: false,
+  hoveredSnapSlot: null,
   snapPreviewBounds: null,
 
   openWindow: (item) => {
@@ -243,15 +245,16 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   setSnapFlyoutVisible: (visible) => {
     set({
       isSnapFlyoutVisible: visible,
+      hoveredSnapSlot: visible ? get().hoveredSnapSlot : null,
       snapPreviewBounds: visible ? get().snapPreviewBounds : null,
     });
   },
 
   setHoveredSnapSlot: (slot) => {
     if (!slot) {
-      set({ snapPreviewBounds: null });
+      set({ hoveredSnapSlot: null, snapPreviewBounds: null });
     } else {
-      set({ snapPreviewBounds: getSnapSlotBounds(slot) });
+      set({ hoveredSnapSlot: slot, snapPreviewBounds: getSnapSlotBounds(slot) });
     }
   },
 
@@ -265,6 +268,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     set({
       nextZIndex: nextZIndex + 1,
       isSnapFlyoutVisible: false,
+      hoveredSnapSlot: null,
       draggingWindowId: null,
       snapPreviewBounds: null,
       windows: windows.map((w) =>

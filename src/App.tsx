@@ -29,7 +29,7 @@ export function App() {
         return (
           <div className="p-6 max-w-4xl mx-auto">
             <Card title="Modulo DDT Studio (Pro)" subtitle="Editor A4 Millimetrico">
-              <p className="text-sm text-slate-300">
+              <p className="text-sm text-[var(--foreground)] mt-2">
                 Modulo predisposto per l'editor DDT vettoriale millimetrico (210mm × 297mm) con stampa a 300 DPI e invio diretto tramite Microsoft Outlook.
               </p>
             </Card>
@@ -39,7 +39,7 @@ export function App() {
         return (
           <div className="p-6 max-w-4xl mx-auto">
             <Card title={`Modulo: ${componentId}`} subtitle="Integrazione Desktop Finestra MDI">
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-[var(--muted-foreground)] mt-2">
                 Questa finestra è gestita liberamente sul desktop: puoi trascinarla, ridimensionarla, affiancarla o ingrandirla a tutto schermo.
               </p>
             </Card>

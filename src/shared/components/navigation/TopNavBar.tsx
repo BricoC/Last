@@ -55,7 +55,7 @@ export const TopNavBar: React.FC = () => {
   ];
 
   return (
-    <header className="h-10 bg-[#1c1e24] border-b border-[#363a46] px-2 flex items-center justify-between select-none">
+    <header className="h-10 bg-[var(--card)] border-b border-[var(--border)] px-2 flex items-center justify-between select-none text-[var(--foreground)] transition-colors">
       {/* Lista Moduli Navigazione Primaria (con scroll orizzontale senza barra brutta) */}
       <div className="flex items-center space-x-1 overflow-x-auto no-scrollbar py-1">
         {modules.map((mod) => {
@@ -74,11 +74,11 @@ export const TopNavBar: React.FC = () => {
               className={cn(
                 "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap cursor-default",
                 isActive
-                  ? "bg-[#2c3038] text-white border border-[var(--primary)] shadow-sm shadow-blue-900/30 font-semibold"
-                  : "bg-transparent text-slate-300 hover:bg-[#282b33] hover:text-white"
+                  ? "bg-[var(--background)] text-[var(--foreground)] border border-[var(--primary)] shadow-sm font-semibold"
+                  : "bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)]"
               )}
             >
-              <span className={cn(isActive ? "text-[var(--primary)]" : "text-slate-400")}>
+              <span className={cn(isActive ? "text-[var(--primary)]" : "text-[var(--muted-foreground)]")}>
                 {mod.icon}
               </span>
               <span>{mod.title}</span>
@@ -87,14 +87,14 @@ export const TopNavBar: React.FC = () => {
         })}
       </div>
 
-      {/* Sezione Destra: Strumenti Desktop Finestre + Stato Cloud + Impostazioni */}
+      {/* Sezione Destra: Strumenti Desktop Finestre + Impostazioni */}
       <div className="flex items-center space-x-2 pl-2">
         {/* Strumenti Rapidi Disposizione Finestre Desktop */}
-        <div className="hidden lg:flex items-center space-x-1 border-r border-[#363a46] pr-2">
+        <div className="hidden lg:flex items-center space-x-1 border-r border-[var(--border)] pr-2">
           <button
             type="button"
             onClick={tileSideBySide}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
+            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors cursor-default"
             title="Affianca finestre verticalmente (50 / 50)"
           >
             <Columns2 className="w-3.5 h-3.5" />
@@ -102,7 +102,7 @@ export const TopNavBar: React.FC = () => {
           <button
             type="button"
             onClick={tileHorizontal}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
+            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors cursor-default"
             title="Affianca finestre orizzontalmente (50 / 50)"
           >
             <Rows2 className="w-3.5 h-3.5" />
@@ -110,7 +110,7 @@ export const TopNavBar: React.FC = () => {
           <button
             type="button"
             onClick={tileGrid}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
+            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors cursor-default"
             title="Griglia 4 finestre"
           >
             <Grid2X2 className="w-3.5 h-3.5" />
@@ -118,7 +118,7 @@ export const TopNavBar: React.FC = () => {
           <button
             type="button"
             onClick={cascadeWindows}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
+            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors cursor-default"
             title="Disponi a cascata"
           >
             <Layers className="w-3.5 h-3.5" />
@@ -131,8 +131,8 @@ export const TopNavBar: React.FC = () => {
             className={cn(
               "p-1 rounded transition-colors cursor-default",
               areAllWindowsMinimized()
-                ? "bg-blue-600/30 text-blue-400 border border-blue-500/40"
-                : "text-slate-400 hover:text-white hover:bg-[#2c3038]"
+                ? "bg-blue-600/30 text-[var(--primary)] border border-blue-500/40"
+                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)]"
             )}
             title={
               areAllWindowsMinimized()
@@ -157,11 +157,11 @@ export const TopNavBar: React.FC = () => {
           className={cn(
             "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-colors cursor-default",
             activeWindowId === "settings"
-              ? "bg-[#2c3038] text-white border border-[var(--primary)]"
-              : "text-slate-300 hover:bg-[#282b33] hover:text-white"
+              ? "bg-[var(--background)] text-[var(--foreground)] border border-[var(--primary)] shadow-sm font-semibold"
+              : "text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)]"
           )}
         >
-          <SettingsIcon className="w-3.5 h-3.5 text-slate-400" />
+          <SettingsIcon className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
           <span>Settings</span>
         </button>
       </div>

@@ -39,18 +39,18 @@ export const WindowTabBar: React.FC = () => {
   };
 
   return (
-    <div className="h-8 bg-[#181a1f] border-b border-[#363a46] px-1 flex items-center select-none justify-between">
-      {/* Freccia Scorrimento Sinistra (esattamente come in foto) */}
+    <div className="h-8 bg-[var(--background)] border-b border-[var(--border)] px-1 flex items-center select-none justify-between text-[var(--foreground)] transition-colors">
+      {/* Freccia Scorrimento Sinistra */}
       <button
         type="button"
         onClick={() => scroll("left")}
-        className="h-6 w-6 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-[#252830] transition-colors"
+        className="h-6 w-6 flex items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] transition-colors cursor-default"
         title="Scorri schede a sinistra"
       >
         <ChevronLeft className="w-3.5 h-3.5" />
       </button>
 
-      {/* Contenitore Schede Aperte (Senza alcuna scrollbar visibile) */}
+      {/* Contenitore Schede Aperte */}
       <div
         ref={scrollContainerRef}
         className="flex-1 flex items-center space-x-1.5 overflow-x-auto no-scrollbar px-1 h-full"
@@ -65,13 +65,13 @@ export const WindowTabBar: React.FC = () => {
               className={cn(
                 "group relative h-6 px-2.5 flex items-center space-x-1.5 text-xs font-medium rounded transition-all cursor-default border",
                 isActive
-                  ? "bg-[#282d38] text-white border-[var(--primary)] shadow-sm shadow-blue-950/40"
+                  ? "bg-[var(--card)] text-[var(--foreground)] border-[var(--primary)] shadow-sm font-semibold"
                   : win.isMinimized
-                  ? "bg-[#1f2127] text-slate-500 border-[#323640] hover:text-slate-300"
-                  : "bg-[#20232a] text-slate-400 border-[#363a46] hover:bg-[#262a33] hover:text-slate-200"
+                  ? "bg-[var(--card)]/30 text-[var(--muted-foreground)] opacity-60 border-[var(--border)]"
+                  : "bg-[var(--card)]/60 text-[var(--muted-foreground)] border-[var(--border)] hover:bg-[var(--card)] hover:text-[var(--foreground)]"
               )}
             >
-              <span className={cn(isActive ? "text-[var(--primary)]" : "text-slate-400")}>
+              <span className={cn(isActive ? "text-[var(--primary)]" : "text-[var(--muted-foreground)]")}>
                 {renderIcon(win.componentId)}
               </span>
 
@@ -83,29 +83,27 @@ export const WindowTabBar: React.FC = () => {
               )}
 
               {/* Pulsantino chiusura scheda */}
-              {win.closable && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeWindow(win.id);
-                  }}
-                  className="p-0.5 rounded-full hover:bg-slate-600 text-slate-400 hover:text-white transition-colors ml-1"
-                  title="Chiudi scheda"
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeWindow(win.id);
+                }}
+                className="p-0.5 rounded-full hover:bg-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors ml-1 cursor-default"
+                title="Chiudi scheda"
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
             </div>
           );
         })}
       </div>
 
-      {/* Freccia Scorrimento Destra (esattamente come in foto) */}
+      {/* Freccia Scorrimento Destra */}
       <button
         type="button"
         onClick={() => scroll("right")}
-        className="h-6 w-6 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-[#252830] transition-colors"
+        className="h-6 w-6 flex items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] transition-colors cursor-default"
         title="Scorri schede a destra"
       >
         <ChevronRight className="w-3.5 h-3.5" />

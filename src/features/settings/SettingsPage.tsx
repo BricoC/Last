@@ -29,16 +29,39 @@ export const SettingsPage: React.FC = () => {
     },
   ];
 
-  const brightnessLevels = [
-    { level: 1, label: "L1 (Scuro Profondo)" },
-    { level: 2, label: "L2 (Grafite Medio)" },
-    { level: 3, label: "L3 (Standard)" },
-    { level: 4, label: "L4 (Titanio Chiaro — Consigliato)" },
-    { level: 5, label: "L5 (Massima Luminosità)" },
-  ];
+  // Etichette dinamiche per i 5 livelli in base al tema attivo
+  const getBrightnessLevels = () => {
+    if (theme.preset === "avorio") {
+      return [
+        { level: 1, label: "L1 (Bianco Puro)" },
+        { level: 2, label: "L2 (Avorio Luminoso)" },
+        { level: 3, label: "L3 (Avorio Caldo — Consigliato)" },
+        { level: 4, label: "L4 (Avorio Sabbia)" },
+        { level: 5, label: "L5 (Avorio Titanio)" },
+      ];
+    }
+    if (theme.preset === "nero-oled") {
+      return [
+        { level: 1, label: "L1 (Nero Assoluto 100%)" },
+        { level: 2, label: "L2 (Carbone Scuro)" },
+        { level: 3, label: "L3 (Grafite Notte)" },
+        { level: 4, label: "L4 (Ossidiana)" },
+        { level: 5, label: "L5 (Ardesia Scuro)" },
+      ];
+    }
+    return [
+      { level: 1, label: "L1 (Scuro Profondo)" },
+      { level: 2, label: "L2 (Grafite Medio)" },
+      { level: 3, label: "L3 (Standard)" },
+      { level: 4, label: "L4 (Titanio Chiaro — Consigliato)" },
+      { level: 5, label: "L5 (Massima Luminosità)" },
+    ];
+  };
+
+  const brightnessLevels = getBrightnessLevels();
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6 select-none">
+    <div className="p-6 max-w-6xl mx-auto space-y-6 select-none text-[var(--foreground)]">
       {/* Header Impostazioni */}
       <div className="flex items-center justify-between pb-4 border-b border-[var(--border)]">
         <div>
@@ -52,7 +75,7 @@ export const SettingsPage: React.FC = () => {
             type="button"
             onClick={() => setEditEnabled(!editEnabled)}
             className={cn(
-              "flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer",
+              "flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-default",
               editEnabled ? "bg-red-600 text-white" : "bg-slate-700 text-slate-300"
             )}
           >
@@ -61,7 +84,7 @@ export const SettingsPage: React.FC = () => {
           </button>
           <button
             type="button"
-            className="flex items-center space-x-1.5 px-4 py-1.5 rounded-md bg-white text-slate-900 font-semibold text-xs hover:bg-slate-200 transition-colors cursor-pointer"
+            className="flex items-center space-x-1.5 px-4 py-1.5 rounded-md bg-[var(--primary)] text-white font-semibold text-xs hover:opacity-90 transition-opacity cursor-default"
           >
             <Save className="w-3.5 h-3.5" />
             <span>Salva</span>
@@ -84,7 +107,7 @@ export const SettingsPage: React.FC = () => {
               type="button"
               onClick={() => setActiveNav(item.id)}
               className={cn(
-                "w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer",
+                "w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-default",
                 activeNav === item.id
                   ? "bg-[var(--card)] text-[var(--foreground)] border border-[var(--primary)] font-semibold shadow-sm"
                   : "text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)]"
@@ -110,7 +133,7 @@ export const SettingsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={resetTheme}
-                className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] text-xs text-[var(--foreground)] hover:border-slate-400 cursor-pointer"
+                className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] text-xs text-[var(--foreground)] hover:border-[var(--primary)] cursor-default"
               >
                 <RotateCcw className="w-3 h-3" />
                 <span>Ripristina Default</span>
@@ -125,17 +148,17 @@ export const SettingsPage: React.FC = () => {
                     key={p.id}
                     onClick={() => setPreset(p.id)}
                     className={cn(
-                      "p-3.5 rounded-lg border cursor-pointer transition-all flex flex-col justify-between",
+                      "p-3.5 rounded-lg border cursor-default transition-all flex flex-col justify-between",
                       isActive
                         ? "bg-[var(--background)] border-[var(--primary)] ring-2 ring-[var(--primary)]/30 shadow-md"
-                        : "bg-[var(--background)]/60 border-[var(--border)] hover:border-slate-400"
+                        : "bg-[var(--background)]/60 border-[var(--border)] hover:border-[var(--primary)]"
                     )}
                   >
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="text-xs font-semibold text-[var(--foreground)]">{p.name}</span>
                         {isActive && (
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-400 border border-blue-500/40">
+                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-600/30 text-[var(--primary)] border border-blue-500/40">
                             ATTIVO
                           </span>
                         )}
@@ -157,38 +180,38 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Regolazione Luminosità Grigio (visibile solo quando il preset è Grigio) */}
-          {theme.preset === "grigio" && (
-            <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-[var(--foreground)]">Livello Luminosità — Grigio</h3>
-                  <p className="text-xs text-[var(--muted-foreground)]">Regola la chiarezza delle superfici di lavoro</p>
-                </div>
-                <span className="text-xs text-[var(--primary)] font-medium">
-                  {brightnessLevels.find((b) => b.level === theme.brightnessLevel)?.label}
-                </span>
+          {/* Regolazione 5 Livelli di Luminosità (attivo per TUTTI i temi - Punto 5) */}
+          <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--foreground)]">
+                  Livello Luminosità — {theme.presetName}
+                </h3>
+                <p className="text-xs text-[var(--muted-foreground)]">Regola la chiarezza delle superfici di lavoro</p>
               </div>
-              <div className="grid grid-cols-5 gap-2">
-                {brightnessLevels.map((b) => (
-                  <button
-                    key={b.level}
-                    type="button"
-                    onClick={() => setBrightness(b.level)}
-                    className={cn(
-                      "py-2 px-1 rounded-lg border text-center text-xs font-medium transition-all flex flex-col items-center justify-center space-y-1 cursor-pointer",
-                      theme.brightnessLevel === b.level
-                        ? "bg-[var(--background)] border-[var(--primary)] text-[var(--foreground)] shadow-sm font-semibold"
-                        : "bg-[var(--background)]/60 border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-                    )}
-                  >
-                    <span>L{b.level}</span>
-                    {theme.brightnessLevel === b.level && <Check className="w-3 h-3 text-[var(--primary)]" />}
-                  </button>
-                ))}
-              </div>
+              <span className="text-xs text-[var(--primary)] font-medium">
+                {brightnessLevels.find((b) => b.level === theme.brightnessLevel)?.label || `Livello ${theme.brightnessLevel}`}
+              </span>
             </div>
-          )}
+            <div className="grid grid-cols-5 gap-2">
+              {brightnessLevels.map((b) => (
+                <button
+                  key={b.level}
+                  type="button"
+                  onClick={() => setBrightness(b.level)}
+                  className={cn(
+                    "py-2 px-1 rounded-lg border text-center text-xs font-medium transition-all flex flex-col items-center justify-center space-y-1 cursor-default",
+                    theme.brightnessLevel === b.level
+                      ? "bg-[var(--background)] border-[var(--primary)] text-[var(--foreground)] shadow-sm font-semibold ring-1 ring-[var(--primary)]"
+                      : "bg-[var(--background)]/60 border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                  )}
+                >
+                  <span>L{b.level}</span>
+                  {theme.brightnessLevel === b.level && <Check className="w-3 h-3 text-[var(--primary)]" />}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
