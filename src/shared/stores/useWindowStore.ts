@@ -18,6 +18,8 @@ export interface WindowItem {
 export type SnapSlotType =
   | "left-half"
   | "right-half"
+  | "top-half"
+  | "bottom-half"
   | "left-two-thirds"
   | "right-one-third"
   | "three-col-left"
@@ -28,6 +30,40 @@ export type SnapSlotType =
   | "bottom-left"
   | "bottom-right";
 
+export function getSnapSlotBounds(slot: SnapSlotType): { x: number; y: number; width: number; height: number } {
+  const desktopW = window.innerWidth;
+  const desktopH = window.innerHeight - 72;
+
+  switch (slot) {
+    case "left-half":
+      return { x: 0, y: 0, width: Math.floor(desktopW / 2), height: desktopH };
+    case "right-half":
+      return { x: Math.floor(desktopW / 2), y: 0, width: Math.ceil(desktopW / 2), height: desktopH };
+    case "top-half":
+      return { x: 0, y: 0, width: desktopW, height: Math.floor(desktopH / 2) };
+    case "bottom-half":
+      return { x: 0, y: Math.floor(desktopH / 2), width: desktopW, height: Math.ceil(desktopH / 2) };
+    case "left-two-thirds":
+      return { x: 0, y: 0, width: Math.floor((desktopW * 2) / 3), height: desktopH };
+    case "right-one-third":
+      return { x: Math.floor((desktopW * 2) / 3), y: 0, width: Math.ceil(desktopW / 3), height: desktopH };
+    case "three-col-left":
+      return { x: 0, y: 0, width: Math.floor(desktopW / 3), height: desktopH };
+    case "three-col-mid":
+      return { x: Math.floor(desktopW / 3), y: 0, width: Math.floor(desktopW / 3), height: desktopH };
+    case "three-col-right":
+      return { x: Math.floor((desktopW * 2) / 3), y: 0, width: Math.ceil(desktopW / 3), height: desktopH };
+    case "top-left":
+      return { x: 0, y: 0, width: Math.floor(desktopW / 2), height: Math.floor(desktopH / 2) };
+    case "top-right":
+      return { x: Math.floor(desktopW / 2), y: 0, width: Math.ceil(desktopW / 2), height: Math.floor(desktopH / 2) };
+    case "bottom-left":
+      return { x: 0, y: Math.floor(desktopH / 2), width: Math.floor(desktopW / 2), height: Math.ceil(desktopH / 2) };
+    case "bottom-right":
+      return { x: Math.floor(desktopW / 2), y: Math.floor(desktopH / 2), width: Math.ceil(desktopW / 2), height: Math.ceil(desktopH / 2) };
+  }
+}
+
 interface WindowState {
   windows: WindowItem[];
   activeWindowId: string | null;
@@ -35,6 +71,7 @@ interface WindowState {
   lastVisibleWindowIds: string[];
   draggingWindowId: string | null;
   isSnapFlyoutVisible: boolean;
+  snapPreviewBounds: { x: number; y: number; width: number; height: number } | null;
 
   // Actions
   openWindow: (item: {
@@ -57,19 +94,20 @@ interface WindowState {
 
   setDraggingWindowId: (id: string | null) => void;
   setSnapFlyoutVisible: (visible: boolean) => void;
+  setHoveredSnapSlot: (slot: SnapSlotType | null) => void;
   snapWindowToSlot: (id: string, slot: SnapSlotType) => void;
 
-  // Toggle Mostra Desktop (Minimizza/Ripristina tutto stile pulsante Windows)
   toggleShowDesktop: () => void;
   areAllWindowsMinimized: () => boolean;
 
   // Layout Presets
   tileSideBySide: () => void;
+  tileHorizontal: () => void;
   tileGrid: () => void;
   cascadeWindows: () => void;
 }
 
-// All'avvio la dashboard è sempre a dimensione massima (punto 5)
+// Tutte le finestre sono chiudibili (Punto 1) e aprono sempre massimizzate (Punto 5)
 const DEFAULT_DASHBOARD_WINDOW: WindowItem = {
   id: "dashboard",
   title: "Dashboard",
@@ -82,7 +120,7 @@ const DEFAULT_DASHBOARD_WINDOW: WindowItem = {
   zIndex: 10,
   isMinimized: false,
   isMaximized: true,
-  closable: false,
+  closable: true,
 };
 
 export const useWindowStore = create<WindowState>((set, get) => ({
@@ -92,13 +130,13 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   lastVisibleWindowIds: ["dashboard"],
   draggingWindowId: null,
   isSnapFlyoutVisible: false,
+  snapPreviewBounds: null,
 
   openWindow: (item) => {
     const { windows, nextZIndex } = get();
     const existing = windows.find((w) => w.id === item.id);
 
     if (existing) {
-      // Finestra già aperta: portala in primo piano e ripristina se minimizzata
       set({
         activeWindowId: existing.id,
         nextZIndex: nextZIndex + 1,
@@ -115,7 +153,6 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     const defaultW = item.defaultWidth ?? 960;
     const defaultH = item.defaultHeight ?? 620;
 
-    // Quando apro le finestre sono SEMPRE in dimensione massima (punto 5)
     const newWindow: WindowItem = {
       id: item.id,
       title: item.title,
@@ -128,7 +165,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
       zIndex: nextZIndex + 1,
       isMinimized: false,
       isMaximized: true,
-      closable: item.closable ?? true,
+      closable: true,
     };
 
     set({
@@ -140,9 +177,6 @@ export const useWindowStore = create<WindowState>((set, get) => ({
 
   closeWindow: (id) => {
     const { windows, activeWindowId } = get();
-    const target = windows.find((w) => w.id === id);
-    if (!target || !target.closable) return;
-
     const remaining = windows.filter((w) => w.id !== id);
     let nextActiveId = activeWindowId;
 
@@ -207,7 +241,18 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   },
 
   setSnapFlyoutVisible: (visible) => {
-    set({ isSnapFlyoutVisible: visible });
+    set({
+      isSnapFlyoutVisible: visible,
+      snapPreviewBounds: visible ? get().snapPreviewBounds : null,
+    });
+  },
+
+  setHoveredSnapSlot: (slot) => {
+    if (!slot) {
+      set({ snapPreviewBounds: null });
+    } else {
+      set({ snapPreviewBounds: getSnapSlotBounds(slot) });
+    }
   },
 
   snapWindowToSlot: (id, slot) => {
@@ -215,51 +260,13 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     const target = windows.find((w) => w.id === id);
     if (!target) return;
 
-    const desktopW = window.innerWidth;
-    const desktopH = window.innerHeight - 72; // altezza totale al netto delle barre superiori
-
-    let bounds = { x: 0, y: 0, width: desktopW, height: desktopH };
-
-    switch (slot) {
-      case "left-half":
-        bounds = { x: 0, y: 0, width: Math.floor(desktopW / 2), height: desktopH };
-        break;
-      case "right-half":
-        bounds = { x: Math.floor(desktopW / 2), y: 0, width: Math.ceil(desktopW / 2), height: desktopH };
-        break;
-      case "left-two-thirds":
-        bounds = { x: 0, y: 0, width: Math.floor((desktopW * 2) / 3), height: desktopH };
-        break;
-      case "right-one-third":
-        bounds = { x: Math.floor((desktopW * 2) / 3), y: 0, width: Math.ceil(desktopW / 3), height: desktopH };
-        break;
-      case "three-col-left":
-        bounds = { x: 0, y: 0, width: Math.floor(desktopW / 3), height: desktopH };
-        break;
-      case "three-col-mid":
-        bounds = { x: Math.floor(desktopW / 3), y: 0, width: Math.floor(desktopW / 3), height: desktopH };
-        break;
-      case "three-col-right":
-        bounds = { x: Math.floor((desktopW * 2) / 3), y: 0, width: Math.ceil(desktopW / 3), height: desktopH };
-        break;
-      case "top-left":
-        bounds = { x: 0, y: 0, width: Math.floor(desktopW / 2), height: Math.floor(desktopH / 2) };
-        break;
-      case "top-right":
-        bounds = { x: Math.floor(desktopW / 2), y: 0, width: Math.ceil(desktopW / 2), height: Math.floor(desktopH / 2) };
-        break;
-      case "bottom-left":
-        bounds = { x: 0, y: Math.floor(desktopH / 2), width: Math.floor(desktopW / 2), height: Math.ceil(desktopH / 2) };
-        break;
-      case "bottom-right":
-        bounds = { x: Math.floor(desktopW / 2), y: Math.floor(desktopH / 2), width: Math.ceil(desktopW / 2), height: Math.ceil(desktopH / 2) };
-        break;
-    }
+    const bounds = getSnapSlotBounds(slot);
 
     set({
       nextZIndex: nextZIndex + 1,
       isSnapFlyoutVisible: false,
       draggingWindowId: null,
+      snapPreviewBounds: null,
       windows: windows.map((w) =>
         w.id === id
           ? {
@@ -284,7 +291,6 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     const { windows, lastVisibleWindowIds, areAllWindowsMinimized } = get();
 
     if (areAllWindowsMinimized()) {
-      // Tutte le finestre sono minimizzate: ripristina quelle che erano visibili (punto 4)
       set({
         windows: windows.map((w) => ({
           ...w,
@@ -293,7 +299,6 @@ export const useWindowStore = create<WindowState>((set, get) => ({
         activeWindowId: lastVisibleWindowIds[lastVisibleWindowIds.length - 1] || null,
       });
     } else {
-      // Salva le finestre attualmente visibili e minimizza tutto sul desktop
       const visibleIds = windows.filter((w) => !w.isMinimized).map((w) => w.id);
       set({
         lastVisibleWindowIds: visibleIds.length > 0 ? visibleIds : ["dashboard"],
@@ -310,8 +315,8 @@ export const useWindowStore = create<WindowState>((set, get) => ({
 
     const desktopW = window.innerWidth;
     const desktopH = window.innerHeight - 72;
-
     const halfW = Math.floor(desktopW / 2);
+
     set({
       nextZIndex: nextZIndex + 1,
       windows: windows.map((w) => {
@@ -320,6 +325,29 @@ export const useWindowStore = create<WindowState>((set, get) => ({
         }
         if (activeList[1] && w.id === activeList[1].id) {
           return { ...w, x: halfW, y: 0, width: halfW, height: desktopH, isMaximized: false, isMinimized: false, zIndex: nextZIndex + 1 };
+        }
+        return w;
+      }),
+    });
+  },
+
+  tileHorizontal: () => {
+    const { windows, nextZIndex } = get();
+    const activeList = windows.filter((w) => !w.isMinimized);
+    if (activeList.length === 0) return;
+
+    const desktopW = window.innerWidth;
+    const desktopH = window.innerHeight - 72;
+    const halfH = Math.floor(desktopH / 2);
+
+    set({
+      nextZIndex: nextZIndex + 1,
+      windows: windows.map((w) => {
+        if (w.id === activeList[0].id) {
+          return { ...w, x: 0, y: 0, width: desktopW, height: halfH, isMaximized: false, isMinimized: false, zIndex: nextZIndex + 1 };
+        }
+        if (activeList[1] && w.id === activeList[1].id) {
+          return { ...w, x: 0, y: halfH, width: desktopW, height: halfH, isMaximized: false, isMinimized: false, zIndex: nextZIndex + 1 };
         }
         return w;
       }),

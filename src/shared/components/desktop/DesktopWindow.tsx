@@ -239,20 +239,18 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
             {win.isMaximized ? <Copy className="w-3.5 h-3.5" /> : <Square className="w-3 h-3" />}
           </button>
 
-          {/* Chiudi Finestra */}
-          {win.closable && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeWindow(win.id);
-              }}
-              className="w-7 h-6 flex items-center justify-center rounded hover:bg-red-600 text-slate-400 hover:text-white transition-colors cursor-default"
-              title="Chiudi"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+          {/* Chiudi Finestra (sempre presente su tutte le finestre) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              closeWindow(win.id);
+            }}
+            className="w-7 h-6 flex items-center justify-center rounded hover:bg-red-600 text-slate-400 hover:text-white transition-colors cursor-default"
+            title="Chiudi"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 

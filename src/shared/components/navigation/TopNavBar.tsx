@@ -14,6 +14,7 @@ import {
   Users,
   Settings as SettingsIcon,
   Columns2,
+  Rows2,
   Grid2X2,
   Layers,
   Minimize2,
@@ -32,6 +33,7 @@ export const TopNavBar: React.FC = () => {
     openWindow,
     activeWindowId,
     tileSideBySide,
+    tileHorizontal,
     tileGrid,
     cascadeWindows,
     toggleShowDesktop,
@@ -93,9 +95,17 @@ export const TopNavBar: React.FC = () => {
             type="button"
             onClick={tileSideBySide}
             className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
-            title="Affianca finestre (50 / 50)"
+            title="Affianca finestre verticalmente (50 / 50)"
           >
             <Columns2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={tileHorizontal}
+            className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#2c3038] transition-colors cursor-default"
+            title="Affianca finestre orizzontalmente (50 / 50)"
+          >
+            <Rows2 className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
