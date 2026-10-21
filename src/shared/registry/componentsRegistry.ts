@@ -48,4 +48,32 @@ export const COMPONENTS_REGISTRY: ComponentRegistryEntry[] = [
     description: "Griglia tabellare ad alte performance basata su Glide Data Grid (Canvas 60 FPS, Excel-like, fill handle, copia/incolla, thema integrato).",
     propsSummary: ["columns", "rows", "getCellContent", "onCellEdited", "onRowAppended", "onPaste"],
   },
+  {
+    name: "TopNavBar",
+    category: "layout",
+    path: "src/shared/components/navigation/TopNavBar.tsx",
+    description: "Barra superiore di primo livello con pulsanti moduli, indicatore Cloud e comandi di affiancamento/disposizione desktop.",
+    propsSummary: ["openWindow", "activeWindowId", "tileSideBySide", "tileGrid", "cascadeWindows", "minimizeAll"],
+  },
+  {
+    name: "WindowTabBar",
+    category: "layout",
+    path: "src/shared/components/navigation/WindowTabBar.tsx",
+    description: "Barra inferiore delle schede aperte con scorrimento a frecce laterali (zero scrollbar), indicatore di focus e chiusura tab.",
+    propsSummary: ["windows", "activeWindowId", "focusWindow", "closeWindow"],
+  },
+  {
+    name: "DesktopWorkspace",
+    category: "layout",
+    path: "src/shared/components/desktop/DesktopWorkspace.tsx",
+    description: "Contenitore canvas desktop MDI stile Windows che ospita finestre flessibili, ridimensionabili e massimizzabili.",
+    propsSummary: ["renderContent"],
+  },
+  {
+    name: "DesktopWindow",
+    category: "layout",
+    path: "src/shared/components/desktop/DesktopWindow.tsx",
+    description: "Finestra flottante singola stile Windows con drag & drop su intestazione, ridimensionamento ad angoli, minimizzazione, massimizzazione e chiusura.",
+    propsSummary: ["window", "renderContent"],
+  },
 ];

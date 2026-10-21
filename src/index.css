@@ -2,24 +2,24 @@
 
 @layer base {
   :root {
-    --background: #0f172a;
-    --foreground: #f8fafc;
-    --card: #1e293b;
-    --card-foreground: #f8fafc;
-    --popover: #1e293b;
-    --popover-foreground: #f8fafc;
+    --background: #22242a;
+    --foreground: #f3f4f6;
+    --card: #2c3038;
+    --card-foreground: #f3f4f6;
+    --popover: #262930;
+    --popover-foreground: #f3f4f6;
     --primary: #3b82f6;
     --primary-foreground: #ffffff;
-    --secondary: #334155;
-    --secondary-foreground: #f8fafc;
-    --muted: #334155;
-    --muted-foreground: #94a3b8;
-    --accent: #2563eb;
+    --secondary: #323640;
+    --secondary-foreground: #f3f4f6;
+    --muted: #323640;
+    --muted-foreground: #9ca3af;
+    --accent: #3b82f6;
     --accent-foreground: #ffffff;
     --destructive: #ef4444;
     --destructive-foreground: #ffffff;
-    --border: #334155;
-    --input: #334155;
+    --border: #3e4350;
+    --input: #262930;
     --ring: #3b82f6;
     --radius: 0.5rem;
   }
@@ -27,6 +27,34 @@
 
 * {
   border-color: var(--border);
+}
+
+/* Scrollbar personalizzata ultra-sottile e discreta (nessuna scrollbar nativa invasiva) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3e4350;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #52596b;
+}
+
+/* Utility per nascondere del tutto la scrollbar orizzontale nelle barre tab */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 body {
@@ -38,3 +66,4 @@ body {
   user-select: none;
   overflow: hidden;
 }
+

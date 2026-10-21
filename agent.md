@@ -51,13 +51,15 @@
 
 ---
 
-## 3. 🖥️ SISTEMA A SCHEDE CON SPLIT-VIEW (Multi-Tab + Affiancamento)
+## 3. 🖥️ SISTEMA DESKTOP MDI A FINESTRE MULTIPLE (Multi-Window Desktop)
 
-1. **Navigazione Multi-Tab:** L'utente può aprire più schede contemporaneamente (es. DDT Studio, Listino Generale, Scheda Cliente, Ordini).
-2. **Split View (Affiancamento Schede):**
-   - Possibilità di **affiancare due schede qualsiasi** (layout orizzontale o verticale gestito con `react-resizable-panels`).
-   - *Esempio d'uso:* DDT Studio aperto a sinistra e Listino Prezzi / Storico Cliente affiancato a destra per consultare e copiare dati al volo senza cambiare continuamente schermata.
-3. **Stato Persistente:** Lo stato dei tab e del layout affiancato è orchestrato da uno store Zustand leggero e ripristinato automaticamente all'avvio.
+1. **Doppia Barra Superiore Integrata (Zero Scrollbar):**
+   - **Livello 1 (Navigazione Moduli):** Accesso istantaneo a tutti i moduli aziendali (*Dashboard, Order Manager, Listino Generale, OR Numbers, DDT List, DDT Articoli, Listini Clienti, Fatture Elettroniche, DDT Studio, Preventivi, Clienti*) + indicatore stato Cloud + Settings.
+   - **Livello 2 (Schede Aperte con Frecce):** Visualizzazione tab a pill con scorrimento orizzontale a frecce `<` e `>`, privo di scrollbar native invasive.
+2. **Desktop Window Manager (Stile Desktop Windows):**
+   - Ogni scheda aperta vive come finestra indipendente sul desktop: trascinabile per l'intestazione, ridimensionabile dagli angoli, minimizzabile a icona (`_`), massimizzabile a tutto schermo (`□`) e richiudibile (`×`).
+   - Comandi rapidi di layout: Affianca 50/50 a sinistra e destra, Griglia 4 quadranti, e Disposizione a Cascata.
+3. **Stato Persistente (`useWindowStore`):** Coordinate, dimensioni, livelli z-index e stato minimizzato/massimizzato persistiti e orchestrati da Zustand.
 
 ---
 

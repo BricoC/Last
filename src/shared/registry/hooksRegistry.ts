@@ -33,4 +33,11 @@ export const HOOKS_REGISTRY: HookRegistryEntry[] = [
     description: "Hook di caricamento, ricerca e mutazione articoli con persistenza SQLite e Soft Delete.",
     returns: "{ products, loading, error, searchQuery, setSearchQuery, addProduct, updateProduct, deleteProduct, reload }",
   },
+  {
+    name: "useWindowStore",
+    category: "state",
+    path: "src/shared/stores/useWindowStore.ts",
+    description: "Gestione del Desktop Window Manager MDI (posizionamento, ridimensionamento, minimizzazione, massimizzazione, focus e layout automatici).",
+    returns: "{ windows, activeWindowId, openWindow, closeWindow, focusWindow, minimizeWindow, toggleMaximizeWindow, tileSideBySide, tileGrid, cascadeWindows, minimizeAll }",
+  },
 ];
