@@ -127,9 +127,9 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
           const newY = Math.max(0, Math.min(window.innerHeight - 80, dragStartRef.current.startY + dy));
           updateWindowBounds(win.id, { x: newX, y: newY });
 
-          // Calcola bordi dello schermo (Soglie generose per rilevamento immediato e affidabile)
-          const isNearLeft = e.clientX <= 70 || newX <= 20;
-          const isNearRight = e.clientX >= window.innerWidth - 70 || (newX + currentW) >= window.innerWidth - 20;
+          // Calcola bordi dello schermo (Soglia ridotta a 30px per richiedere vicinanza reale al bordo)
+          const isNearLeft = e.clientX <= 30 || newX <= 0;
+          const isNearRight = e.clientX >= window.innerWidth - 30 || (newX + currentW) >= window.innerWidth;
           const isNearTop = e.clientY <= 25;
 
           // Rileva se il cursore è sopra uno dei riquadri del flyout di snap
