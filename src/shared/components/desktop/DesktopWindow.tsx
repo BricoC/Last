@@ -5,6 +5,16 @@ import { cn } from "@/shared/utils/cn";
 
 type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
+const MODULE_ICONS: Record<string, React.ReactNode> = {
+  dashboard: <LayoutGrid className="w-4 h-4 text-blue-400" />,
+  "price-lists": <Tag className="w-4 h-4 text-emerald-400" />,
+  "ddt-studio": <FileText className="w-4 h-4 text-amber-400" />,
+  orders: <ShoppingCart className="w-4 h-4 text-cyan-400" />,
+  quotes: <Calculator className="w-4 h-4 text-purple-400" />,
+  clients: <Users className="w-4 h-4 text-teal-400" />,
+  settings: <SettingsIcon className="w-4 h-4 text-slate-300" />,
+};
+
 interface DesktopWindowProps {
   window: WindowItem;
   renderContent: (componentId: string) => React.ReactNode;
@@ -23,60 +33,20 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
   } = useWindowStore();
 
   const isFocused = activeWindowId === win.id;
-
   const [isDragging, setIsDragging] = useState(false);
   const [activeResizeDir, setActiveResizeDir] = useState<ResizeDirection | null>(null);
 
-  const dragStartRef = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number }>({
-    mouseX: 0,
-    mouseY: 0,
-    startX: 0,
-    startY: 0,
+  const dragStartRef = useRef({
+    mouseX: 0, mouseY: 0, startX: 0, startY: 0, wasMaximized: false, hasMoved: false,
   });
 
-  const resizeStartRef = useRef<{
-    mouseX: number;
-    mouseY: number;
-    startX: number;
-    startY: number;
-    startW: number;
-    startH: number;
-  }>({
-    mouseX: 0,
-    mouseY: 0,
-    startX: 0,
-    startY: 0,
-    startW: 0,
-    startH: 0,
+  const resizeStartRef = useRef({
+    mouseX: 0, mouseY: 0, startX: 0, startY: 0, startW: 0, startH: 0,
   });
 
-  const snapHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const renderIcon = () => {
-    switch (win.componentId) {
-      case "dashboard":
-        return <LayoutGrid className="w-4 h-4 text-blue-400" />;
-      case "price-lists":
-        return <Tag className="w-4 h-4 text-emerald-400" />;
-      case "ddt-studio":
-        return <FileText className="w-4 h-4 text-amber-400" />;
-      case "orders":
-        return <ShoppingCart className="w-4 h-4 text-cyan-400" />;
-      case "quotes":
-        return <Calculator className="w-4 h-4 text-purple-400" />;
-      case "clients":
-        return <Users className="w-4 h-4 text-teal-400" />;
-      case "settings":
-        return <SettingsIcon className="w-4 h-4 text-slate-300" />;
-      default:
-        return <Package className="w-4 h-4 text-blue-400" />;
-    }
-  };
-
+  // Mousedown sulla barra del titolo (funziona sia per finestre ridotte che massimizzate)
   const handleTitleMouseDown = (e: React.MouseEvent) => {
-    if (win.isMaximized) return;
     if ((e.target as HTMLElement).closest("button")) return;
-
     focusWindow(win.id);
     setIsDragging(true);
     setDraggingWindowId(win.id);
@@ -86,9 +56,18 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
       mouseY: e.clientY,
       startX: win.x,
       startY: win.y,
+      wasMaximized: win.isMaximized,
+      hasMoved: false,
     };
   };
 
+  // Doppio click sulla barra del titolo: ingrandisce o ripristina esattamente come Windows (Punto 2)
+  const handleTitleDoubleClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    toggleMaximizeWindow(win.id);
+  };
+
+  // Avvio ridimensionamento da bordi / angoli
   const handleResizeStart = (e: React.MouseEvent, dir: ResizeDirection) => {
     if (win.isMaximized) return;
     e.stopPropagation();
@@ -96,7 +75,6 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
 
     focusWindow(win.id);
     setActiveResizeDir(dir);
-
     resizeStartRef.current = {
       mouseX: e.clientX,
       mouseY: e.clientY,
@@ -112,19 +90,40 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
       if (isDragging) {
         const dx = e.clientX - dragStartRef.current.mouseX;
         const dy = e.clientY - dragStartRef.current.mouseY;
+        const dist = Math.hypot(dx, dy);
 
-        // Se trascini verso l'alto (in prossimità della barra), attiva la modalità scelta affiancamento
-        if (e.clientY <= 35) {
-          setSnapFlyoutVisible(true);
-          setDraggingWindowId(win.id);
-        } else if (e.clientY > 350) {
-          // Si chiude solo se il cursore scende molto in basso verso il centro/fondo dello schermo
-          setSnapFlyoutVisible(false);
+        if (dist > 3) dragStartRef.current.hasMoved = true;
+
+        // Se la finestra era a tutto schermo e l'utente trascina verso il basso (Punto 3):
+        // la ripristina al volo centrando la barra sotto il cursore esattamente come Windows!
+        if (dragStartRef.current.wasMaximized && dist > 4) {
+          const ratio = Math.max(0.1, Math.min(0.9, e.clientX / window.innerWidth));
+          const restoredW = win.width || 960;
+          const restoredX = Math.max(0, Math.min(window.innerWidth - restoredW, e.clientX - restoredW * ratio));
+          const restoredY = Math.max(0, e.clientY - 16);
+
+          updateWindowBounds(win.id, { x: restoredX, y: restoredY, isMaximized: false });
+          dragStartRef.current.wasMaximized = false;
+          dragStartRef.current.startX = restoredX;
+          dragStartRef.current.startY = restoredY;
+          dragStartRef.current.mouseX = e.clientX;
+          dragStartRef.current.mouseY = e.clientY;
+          return;
         }
 
-        const newX = Math.max(-win.width + 100, Math.min(window.innerWidth - 80, dragStartRef.current.startX + dx));
-        const newY = Math.max(0, Math.min(window.innerHeight - 80, dragStartRef.current.startY + dy));
-        updateWindowBounds(win.id, { x: newX, y: newY });
+        if (!dragStartRef.current.wasMaximized && dragStartRef.current.hasMoved) {
+          // Se trascini in prossimità della barra superiore, compare il flyout di snap
+          if (e.clientY <= 30) {
+            setSnapFlyoutVisible(true);
+            setDraggingWindowId(win.id);
+          } else if (e.clientY > 350) {
+            setSnapFlyoutVisible(false);
+          }
+
+          const newX = Math.max(-win.width + 100, Math.min(window.innerWidth - 80, dragStartRef.current.startX + dx));
+          const newY = Math.max(0, Math.min(window.innerHeight - 80, dragStartRef.current.startY + dy));
+          updateWindowBounds(win.id, { x: newX, y: newY });
+        }
       } else if (activeResizeDir) {
         const dx = e.clientX - resizeStartRef.current.mouseX;
         const dy = e.clientY - resizeStartRef.current.mouseY;
@@ -135,16 +134,12 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
         let newW = s.startW;
         let newH = s.startH;
 
-        if (activeResizeDir.includes("e")) {
-          newW = Math.max(380, s.startW + dx);
-        }
+        if (activeResizeDir.includes("e")) newW = Math.max(380, s.startW + dx);
         if (activeResizeDir.includes("w")) {
           newW = Math.max(380, s.startW - dx);
           newX = s.startX + (s.startW - newW);
         }
-        if (activeResizeDir.includes("s")) {
-          newH = Math.max(240, s.startH + dy);
-        }
+        if (activeResizeDir.includes("s")) newH = Math.max(240, s.startH + dy);
         if (activeResizeDir.includes("n")) {
           newH = Math.max(240, s.startH - dy);
           newY = s.startY + (s.startH - newH);
@@ -153,7 +148,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
         updateWindowBounds(win.id, { x: newX, y: newY, width: newW, height: newH });
       }
     },
-    [isDragging, activeResizeDir, win.id, win.width, updateWindowBounds, setSnapFlyoutVisible]
+    [isDragging, activeResizeDir, win.id, win.width, updateWindowBounds, setSnapFlyoutVisible, setDraggingWindowId]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -175,24 +170,8 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
   if (win.isMinimized) return null;
 
   const style: React.CSSProperties = win.isMaximized
-    ? {
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        width: "100%",
-        height: "100%",
-        zIndex: win.zIndex,
-      }
-    : {
-        position: "absolute",
-        top: `${win.y}px`,
-        left: `${win.x}px`,
-        width: `${win.width}px`,
-        height: `${win.height}px`,
-        zIndex: win.zIndex,
-      };
+    ? { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%", zIndex: win.zIndex }
+    : { position: "absolute", top: `${win.y}px`, left: `${win.x}px`, width: `${win.width}px`, height: `${win.height}px`, zIndex: win.zIndex };
 
   return (
     <div
@@ -200,22 +179,17 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
       style={style}
       className={cn(
         "flex flex-col bg-[var(--card)] rounded-lg shadow-2xl overflow-hidden transition-shadow select-none cursor-default",
-        isFocused
-          ? "border-2 border-[var(--primary)] ring-1 ring-[var(--primary)]/30 shadow-black/60"
-          : "border border-[var(--border)] opacity-95",
+        isFocused ? "border-2 border-[var(--primary)] ring-1 ring-[var(--primary)]/30 shadow-black/60" : "border border-[var(--border)] opacity-95",
         win.isMaximized && "rounded-none border-none ring-0"
       )}
     >
-      {/* 8 Bordi e Angoli di Ridimensionamento in Stile Windows (Punto 1) */}
+      {/* 8 Bordi e Angoli di Ridimensionamento in Stile Windows */}
       {!win.isMaximized && (
         <>
-          {/* Bordi */}
           <div onMouseDown={(e) => handleResizeStart(e, "n")} className="absolute top-0 left-2 right-2 h-1.5 cursor-n-resize z-50" />
           <div onMouseDown={(e) => handleResizeStart(e, "s")} className="absolute bottom-0 left-2 right-2 h-1.5 cursor-s-resize z-50" />
           <div onMouseDown={(e) => handleResizeStart(e, "w")} className="absolute left-0 top-2 bottom-2 w-1.5 cursor-w-resize z-50" />
           <div onMouseDown={(e) => handleResizeStart(e, "e")} className="absolute right-0 top-2 bottom-2 w-1.5 cursor-e-resize z-50" />
-
-          {/* Angoli */}
           <div onMouseDown={(e) => handleResizeStart(e, "nw")} className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize z-50" />
           <div onMouseDown={(e) => handleResizeStart(e, "ne")} className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize z-50" />
           <div onMouseDown={(e) => handleResizeStart(e, "sw")} className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize z-50" />
@@ -226,16 +200,14 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
       {/* Title Bar in stile Finestra Windows */}
       <div
         onMouseDown={handleTitleMouseDown}
-        onDoubleClick={() => toggleMaximizeWindow(win.id)}
+        onDoubleClick={handleTitleDoubleClick}
         className={cn(
           "h-9 px-3 flex items-center justify-between border-b select-none cursor-default",
-          isFocused
-            ? "bg-[#282d38] border-[var(--border)] text-white"
-            : "bg-[#21242c] border-[#363a46] text-slate-400"
+          isFocused ? "bg-[#282d38] border-[var(--border)] text-white" : "bg-[#21242c] border-[#363a46] text-slate-400"
         )}
       >
         <div className="flex items-center space-x-2 truncate pointer-events-none">
-          {renderIcon()}
+          {MODULE_ICONS[win.componentId] || <Package className="w-4 h-4 text-blue-400" />}
           <span className="text-xs font-semibold tracking-wide truncate">{win.title}</span>
         </div>
 
@@ -254,21 +226,12 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
             <Minus className="w-3.5 h-3.5" />
           </button>
 
-          {/* Ingrandisci / Ripristina (con supporto Windows 11 Snap su hover) */}
+          {/* Ingrandisci / Ripristina: click pulito e immediato stile Windows (Punto 1) */}
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               toggleMaximizeWindow(win.id);
-            }}
-            onMouseEnter={() => {
-              snapHoverTimer.current = setTimeout(() => {
-                setDraggingWindowId(win.id);
-                setSnapFlyoutVisible(true);
-              }, 260);
-            }}
-            onMouseLeave={() => {
-              if (snapHoverTimer.current) clearTimeout(snapHoverTimer.current);
             }}
             className="w-7 h-6 flex items-center justify-center rounded hover:bg-slate-700/60 text-slate-400 hover:text-white transition-colors cursor-default"
             title={win.isMaximized ? "Ripristina giù" : "Ingrandisci a schermo intero"}

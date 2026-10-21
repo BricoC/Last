@@ -52,7 +52,7 @@ interface WindowState {
   toggleMaximizeWindow: (id: string) => void;
   updateWindowBounds: (
     id: string,
-    bounds: Partial<Pick<WindowItem, "x" | "y" | "width" | "height">>
+    bounds: Partial<Pick<WindowItem, "x" | "y" | "width" | "height" | "isMaximized">>
   ) => void;
 
   setDraggingWindowId: (id: string | null) => void;
