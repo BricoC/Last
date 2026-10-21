@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { WindowItem, useWindowStore, SnapSlotType } from "@/shared/stores/useWindowStore";
-import { Minus, Square, Copy, X, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users } from "lucide-react";
+import { Minus, Square, Copy, X, Plus, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
 type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -26,6 +26,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
     focusWindow,
     minimizeWindow,
     toggleMaximizeWindow,
+    duplicateWindow,
     closeWindow,
     updateWindowBounds,
     setDraggingWindowId,
@@ -294,6 +295,19 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
 
         {/* Pulsanti Finestra Windows */}
         <div className="flex items-center space-x-1">
+          {/* Sdoppia / Duplica Finestra (nuova istanza dello stesso modulo) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              duplicateWindow(win.id);
+            }}
+            className="w-7 h-6 flex items-center justify-center rounded hover:bg-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors cursor-default"
+            title="Sdoppia finestra (apri un'altra istanza di questo modulo)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+
           {/* Riduci a icona */}
           <button
             type="button"

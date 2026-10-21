@@ -91,6 +91,7 @@ interface WindowState {
   focusWindow: (id: string) => void;
   minimizeWindow: (id: string) => void;
   toggleMaximizeWindow: (id: string) => void;
+  duplicateWindow: (id: string) => void;
   updateWindowBounds: (
     id: string,
     bounds: Partial<Pick<WindowItem, "x" | "y" | "width" | "height" | "isMaximized">>
@@ -232,6 +233,41 @@ export const useWindowStore = create<WindowState>((set, get) => ({
           ? { ...w, isMaximized: !w.isMaximized, isMinimized: false, zIndex: nextZIndex + 1 }
           : w
       ),
+    });
+  },
+
+  duplicateWindow: (id) => {
+    const { windows, nextZIndex } = get();
+    const target = windows.find((w) => w.id === id);
+    if (!target) return;
+
+    // Calcola il numero progressivo di istanze per questo modulo
+    const count = windows.filter((w) => w.componentId === target.componentId).length + 1;
+    const cleanBaseTitle = target.title.replace(/\s*\(\d+\)$/, "");
+    const newTitle = `${cleanBaseTitle} (${count})`;
+    const newId = `${target.componentId}-${Date.now().toString(36)}`;
+
+    // Posizionamento sfalsato a cascata
+    const offset = ((windows.length) % 8) * 32 + 32;
+    const newWindow: WindowItem = {
+      id: newId,
+      title: newTitle,
+      componentId: target.componentId,
+      iconName: target.iconName,
+      x: offset,
+      y: offset,
+      width: target.width || 960,
+      height: target.height || 620,
+      zIndex: nextZIndex + 1,
+      isMinimized: false,
+      isMaximized: false, // Inizia fluttuante per visualizzare comodamente entrambe le finestre
+      closable: true,
+    };
+
+    set({
+      windows: [...windows, newWindow],
+      activeWindowId: newWindow.id,
+      nextZIndex: nextZIndex + 2,
     });
   },
 
