@@ -127,16 +127,29 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
           const newY = Math.max(0, Math.min(window.innerHeight - 80, dragStartRef.current.startY + dy));
           updateWindowBounds(win.id, { x: newX, y: newY });
 
-          const isAtTop = e.clientY <= 35 || newY <= 5;
-          const isAtLeft = e.clientX <= 50 || newX <= 15;
-          const isAtRight = e.clientX >= window.innerWidth - 50 || (newX + currentW) >= window.innerWidth - 15;
+          // Calcola bordi dello schermo (Soglie generose per rilevamento immediato e affidabile)
+          const isNearLeft = e.clientX <= 70 || newX <= 20;
+          const isNearRight = e.clientX >= window.innerWidth - 70 || (newX + currentW) >= window.innerWidth - 20;
+          const isNearTop = e.clientY <= 25;
 
           // Rileva se il cursore è sopra uno dei riquadri del flyout di snap
           const elemUnderCursor = document.elementFromPoint(e.clientX, e.clientY);
           const hoveredSlotElem = elemUnderCursor?.closest("[data-snap-slot]")?.getAttribute("data-snap-slot") as SnapSlotType | null;
 
-          // 1. In Alto: Flyout Layouts e Anteprima Trasparente Aero Snap
-          if (isAtTop) {
+          // PRIORITÀ 1: Bordo Sinistro (Aero Snap 50% Sinistra con ombra trasparente)
+          if (isNearLeft && !hoveredSlotElem && e.clientX < window.innerWidth / 3) {
+            setHoveredSnapSlot("left-half");
+            pendingSnapRef.current = "left-half";
+            setSnapFlyoutVisible(false);
+          }
+          // PRIORITÀ 2: Bordo Destro (Aero Snap 50% Destra con ombra trasparente)
+          else if (isNearRight && !hoveredSlotElem && e.clientX > (window.innerWidth * 2) / 3) {
+            setHoveredSnapSlot("right-half");
+            pendingSnapRef.current = "right-half";
+            setSnapFlyoutVisible(false);
+          }
+          // PRIORITÀ 3: Bordo Superiore (Flyout Layouts e Anteprima Massimizza a tutto schermo)
+          else if (isNearTop) {
             setSnapFlyoutVisible(true);
             setDraggingWindowId(win.id);
 
@@ -148,35 +161,22 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
               pendingSnapRef.current = "maximize";
             }
           }
-          // 2. A Sinistra: Anteprima 50% verticale a sinistra (Punto 3)
-          else if (isAtLeft && e.clientY > 50) {
-            setHoveredSnapSlot("left-half");
-            pendingSnapRef.current = "left-half";
-            setSnapFlyoutVisible(false);
+          // PRIORITÀ 4: Cursore nel flyout aperto
+          else if (hoveredSlotElem) {
+            setHoveredSnapSlot(hoveredSlotElem);
+            pendingSnapRef.current = hoveredSlotElem;
           }
-          // 3. A Destra: Anteprima 50% verticale a destra (Punto 3)
-          else if (isAtRight && e.clientY > 50) {
-            setHoveredSnapSlot("right-half");
-            pendingSnapRef.current = "right-half";
-            setSnapFlyoutVisible(false);
-          }
-          // 4. Zona centrale/libera
+          // PRIORITÀ 5: Spazio libero centrale del desktop
           else {
-            // Se il cursore è sceso dentro il flyout
-            if (hoveredSlotElem) {
-              setHoveredSnapSlot(hoveredSlotElem);
-              pendingSnapRef.current = hoveredSlotElem;
-            } else {
-              if (pendingSnapRef.current === "left-half" || pendingSnapRef.current === "right-half") {
+            if (pendingSnapRef.current === "left-half" || pendingSnapRef.current === "right-half") {
+              setHoveredSnapSlot(null);
+              pendingSnapRef.current = null;
+            }
+            if (e.clientY > 160 || e.clientX < window.innerWidth / 2 - 320 || e.clientX > window.innerWidth / 2 + 320) {
+              setSnapFlyoutVisible(false);
+              if (pendingSnapRef.current === "maximize") {
                 setHoveredSnapSlot(null);
                 pendingSnapRef.current = null;
-              }
-              if (e.clientY > 160 || e.clientX < window.innerWidth / 2 - 320 || e.clientX > window.innerWidth / 2 + 320) {
-                setSnapFlyoutVisible(false);
-                setHoveredSnapSlot(null);
-                if (pendingSnapRef.current === "maximize") {
-                  pendingSnapRef.current = null;
-                }
               }
             }
           }

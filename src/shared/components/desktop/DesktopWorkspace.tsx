@@ -19,12 +19,12 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({ renderConten
       {snapPreviewBounds && (
         <div
           style={{
-            left: `${snapPreviewBounds.x}px`,
-            top: `${snapPreviewBounds.y}px`,
-            width: `${snapPreviewBounds.width}px`,
-            height: `${snapPreviewBounds.height}px`,
+            left: `${snapPreviewBounds.x + 4}px`,
+            top: `${snapPreviewBounds.y + 4}px`,
+            width: `${Math.max(100, snapPreviewBounds.width - 8)}px`,
+            height: `${Math.max(100, snapPreviewBounds.height - 8)}px`,
           }}
-          className="absolute z-[9985] rounded-xl bg-blue-500/20 border-2 border-blue-400 backdrop-blur-md shadow-[0_0_36px_rgba(59,130,246,0.45),inset_0_0_24px_rgba(59,130,246,0.18)] transition-all duration-150 pointer-events-none animate-in fade-in zoom-in-95"
+          className="absolute z-[9985] rounded-xl bg-blue-500/25 border-2 border-blue-400 backdrop-blur-md shadow-[0_0_36px_rgba(59,130,246,0.5),inset_0_0_24px_rgba(59,130,246,0.2)] transition-all duration-150 pointer-events-none animate-in fade-in zoom-in-95"
         />
       )}
 
