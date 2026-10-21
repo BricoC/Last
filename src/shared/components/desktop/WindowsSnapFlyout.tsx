@@ -18,27 +18,20 @@ export const WindowsSnapFlyout: React.FC<WindowsSnapFlyoutProps> = ({ targetWind
   const slotProps = (slot: SnapSlotType, title: string) => ({
     onMouseEnter: () => setHoveredSnapSlot(slot),
     onMouseLeave: () => setHoveredSnapSlot(null),
-    onMouseUp: () => handleSelectSlot(slot),
-    onClick: () => handleSelectSlot(slot),
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      handleSelectSlot(slot);
+    },
     title,
     className: "rounded bg-[#383b45] border border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-all cursor-default",
   });
 
   return (
     <>
-      {/* Backdrop invisibile per chiudere il menu se si rilascia o clicca fuori */}
-      <div
-        onClick={() => {
-          setSnapFlyoutVisible(false);
-          setHoveredSnapSlot(null);
-        }}
-        className="fixed inset-0 z-[9990] bg-black/10"
-      />
-
       {/* Flyout di Snap Layouts (Stile Windows 11 nativo) */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className="absolute top-0 left-1/2 -translate-x-1/2 z-[9999] bg-[#202227]/98 backdrop-blur-xl border-x border-b border-[#444957] rounded-b-xl shadow-[0_12px_36px_rgba(0,0,0,0.85)] px-4 pt-2.5 pb-3 flex flex-col items-center select-none cursor-default animate-in fade-in slide-in-from-top-2 duration-150"
+        className="absolute top-0 left-1/2 -translate-x-1/2 z-[9999] bg-[#202227]/98 backdrop-blur-xl border-x border-b border-[#444957] rounded-b-xl shadow-[0_12px_36px_rgba(0,0,0,0.85)] px-4 pt-2.5 pb-3 flex flex-col items-center select-none cursor-default animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
       >
         {/* Intestazione flyout con pulsante chiudi rapido */}
         <div className="w-full flex items-center justify-between pb-2 mb-1.5 border-b border-[#343844] text-[11px] text-slate-400 font-medium">

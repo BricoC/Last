@@ -122,41 +122,47 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
         }
 
         if (!dragStartRef.current.wasMaximized && dragStartRef.current.hasMoved) {
-          // Aero Snap a Sinistra al 50% (Punto 3: trascinamento al bordo sinistro)
-          if (e.clientX <= 35) {
+          const currentW = win.width || 960;
+          const newX = Math.max(-currentW + 100, Math.min(window.innerWidth - 80, dragStartRef.current.startX + dx));
+          const newY = Math.max(0, Math.min(window.innerHeight - 80, dragStartRef.current.startY + dy));
+          updateWindowBounds(win.id, { x: newX, y: newY });
+
+          const isAtTop = e.clientY <= 35 || newY <= 5;
+          const isAtLeft = e.clientX <= 50 || newX <= 15;
+          const isAtRight = e.clientX >= window.innerWidth - 50 || (newX + currentW) >= window.innerWidth - 15;
+
+          // 1. In Alto: Flyout Layouts e Massimizza al rilascio (Punto 1)
+          if (isAtTop) {
+            setSnapFlyoutVisible(true);
+            setDraggingWindowId(win.id);
+            pendingSnapRef.current = "maximize";
+            setHoveredSnapSlot(null);
+          }
+          // 2. A Sinistra: Anteprima 50% verticale a sinistra (Punto 3)
+          else if (isAtLeft && e.clientY > 50) {
             setHoveredSnapSlot("left-half");
             pendingSnapRef.current = "left-half";
             setSnapFlyoutVisible(false);
           }
-          // Aero Snap a Destra al 50% (Punto 3: trascinamento al bordo destro)
-          else if (e.clientX >= window.innerWidth - 35) {
+          // 3. A Destra: Anteprima 50% verticale a destra (Punto 3)
+          else if (isAtRight && e.clientY > 50) {
             setHoveredSnapSlot("right-half");
             pendingSnapRef.current = "right-half";
             setSnapFlyoutVisible(false);
           }
-          // Trascina in alto in prossimità della barra: mostra Flyout di scelta e prepara Massimizza al rilascio (Punto 1)
-          else if (e.clientY <= 30) {
-            setSnapFlyoutVisible(true);
-            setDraggingWindowId(win.id);
-            pendingSnapRef.current = "maximize";
-          }
-          // Al centro: rimuove anteprime laterali se presenti
+          // 4. Al centro: rimuove anteprime laterali e chiude flyout se distante
           else {
             if (pendingSnapRef.current === "left-half" || pendingSnapRef.current === "right-half") {
               setHoveredSnapSlot(null);
               pendingSnapRef.current = null;
             }
-            if (e.clientY > 160) {
+            if (e.clientY > 160 || e.clientX < window.innerWidth / 2 - 320 || e.clientX > window.innerWidth / 2 + 320) {
               setSnapFlyoutVisible(false);
               if (pendingSnapRef.current === "maximize") {
                 pendingSnapRef.current = null;
               }
             }
           }
-
-          const newX = Math.max(-win.width + 100, Math.min(window.innerWidth - 80, dragStartRef.current.startX + dx));
-          const newY = Math.max(0, Math.min(window.innerHeight - 80, dragStartRef.current.startY + dy));
-          updateWindowBounds(win.id, { x: newX, y: newY });
         }
       } else if (activeResizeDir) {
         const dx = e.clientX - resizeStartRef.current.mouseX;
