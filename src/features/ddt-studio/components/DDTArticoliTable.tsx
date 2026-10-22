@@ -1,27 +1,44 @@
-import React, { useEffect, useMemo, useRef, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { AgGridReact } from "ag-grid-react";
 import { Trash2 } from "lucide-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import { DdtItem } from "../models/ddt";
-import { calculateRowAmounts } from "../utils/ddtCalculations";
+import { calculateRowAmounts, formatCascadeDiscountDisplay } from "../utils/ddtCalculations";
 import { money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import DDTTextEditor from "./DDTTextEditor";
+
+export interface DDTArticoliTableHandle {
+  clearFocusedCell: () => void;
+}
 
 export interface DDTArticoliTableProps {
   items: DdtItem[];
   setItems: React.Dispatch<React.SetStateAction<DdtItem[]>>;
   showMargini: boolean;
+  globalDiscount?: string;
+  globalMarkup?: string;
   onOpenSearchModal: () => void;
 }
 
-export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
+export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTableProps>(({
   items,
   setItems,
   showMargini,
+  globalDiscount = "",
+  globalMarkup = "",
   onOpenSearchModal,
-}) => {
+}, ref) => {
   const gridRef = useRef<AgGridReact<DdtItem>>(null);
+
+  useImperativeHandle(ref, () => ({
+    clearFocusedCell: () => {
+      if (gridRef.current?.api) {
+        gridRef.current.api.stopEditing(true);
+        gridRef.current.api.clearFocusedCell();
+      }
+    },
+  }));
 
   // Shortcut globale F1 per posizionarsi con focus sulla prima cella della prima riga (U.M.)
   useEffect(() => {
@@ -55,7 +72,16 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
       }
 
       if (colId === "unit_price") {
-        updatedData.unit_price = safeMoney(params.newValue);
+        const parsedPrice = safeMoney(params.newValue);
+        const cleanMarkup = (globalMarkup || "").trim().replace("%", "").replace(",", ".");
+        const markupNum = parseFloat(cleanMarkup);
+        if (!isNaN(markupNum) && markupNum !== 0) {
+          updatedData.base_price = parsedPrice;
+          updatedData.unit_price = parsedPrice.times(1 + markupNum / 100);
+        } else {
+          updatedData.unit_price = parsedPrice;
+          updatedData.base_price = parsedPrice;
+        }
       } else {
         updatedData.unit_price = safeMoney(updatedData.unit_price);
       }
@@ -75,11 +101,19 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
         }
       }
 
+      if (colId === "discount_pct") {
+        const parsedDisc = params.newValue ? String(params.newValue).trim() : "";
+        updatedData.discount_pct = parsedDisc;
+        updatedData.base_discount_pct = parsedDisc;
+      } else if (!updatedData.discount_pct && globalDiscount?.trim()) {
+        updatedData.discount_pct = globalDiscount.trim();
+      }
+
       // Ricalcola importo netto e IVA riga
       const { netAmount, vatAmount } = calculateRowAmounts(
         updatedData.quantity || (isPositivePrice(updatedData.unit_price) ? "1" : ""),
         updatedData.unit_price,
-        updatedData.discount_pct || "0",
+        updatedData.discount_pct || (globalDiscount?.trim() || "0"),
         updatedData.vat_rate
       );
       updatedData.net_amount = netAmount;
@@ -112,7 +146,8 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
           unit: "",
           quantity: "",
           unit_price: money(0),
-          discount_pct: "",
+          base_price: money(0),
+          discount_pct: globalDiscount?.trim() || "",
           net_amount: money(0),
           vat_rate: "",
           vat_amount: money(0),
@@ -121,7 +156,7 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
         return copy.map((r, i) => ({ ...r, row_index: i + 1 }));
       });
     },
-    [setItems]
+    [setItems, globalDiscount]
   );
 
   // Spostamento e riordinamento righe tramite trascinamento (drag & drop)
@@ -156,8 +191,14 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
           const rowIndex = e.node.rowIndex;
           const updatedRow = { ...e.node.data };
 
-          if (colId === "unit_price" || colId === "purchase_price") {
+          if (colId === "unit_price") {
+            updatedRow.unit_price = money(0);
+            updatedRow.base_price = money(0);
+          } else if (colId === "purchase_price") {
             updatedRow[colId] = money(0);
+          } else if (colId === "discount_pct") {
+            updatedRow.discount_pct = "";
+            updatedRow.base_discount_pct = "";
           } else if (colId === "vat_rate") {
             updatedRow[colId] = "";
           } else {
@@ -328,8 +369,8 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
       {
         headerName: "DESCRIZIONE ARTICOLO / PRESTAZIONE *",
         field: "description",
-        flex: 3,
-        minWidth: 260,
+        flex: 2,
+        minWidth: 200,
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase() : ""),
@@ -343,8 +384,8 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
       {
         headerName: "PREZZO €",
         field: "unit_price",
-        width: 105,
-        minWidth: 95,
+        width: 115,
+        minWidth: 105,
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => safeMoney(p.newValue),
@@ -362,8 +403,8 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
       {
         headerName: "SC.%",
         field: "discount_pct",
-        width: 70,
-        minWidth: 65,
+        width: 110,
+        minWidth: 95,
         editable: true,
         cellEditor: DDTTextEditor,
         cellStyle: {
@@ -372,16 +413,22 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
           fontSize: "11px",
         },
         valueFormatter: (p: any) => {
-          if (!p.value) return "";
-          const n = parseFloat(String(p.value).replace(",", "."));
-          return n > 0 ? `${n}%` : "";
+          const hasRowContent = Boolean(
+            (p.data?.description && String(p.data?.description).trim().length > 0) ||
+            isPositivePrice(p.data?.unit_price) ||
+            (p.data?.quantity && String(p.data?.quantity).trim().length > 0)
+          );
+          if (!hasRowContent && !p.data?.unit_price?.toNumber()) {
+            return "";
+          }
+          return formatCascadeDiscountDisplay(p.value);
         },
       },
       {
         headerName: "IMPORTO €",
         field: "net_amount",
-        width: 115,
-        minWidth: 100,
+        width: 145,
+        minWidth: 135,
         editable: false,
         sortable: false,
         cellStyle: {
@@ -501,6 +548,19 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
         .ag-theme-alpine .ag-row-odd {
           background-color: #f8f9fa;
         }
+        /* Intestazione tabella non selezionabile con mouse o drag */
+        .ag-theme-alpine .ag-header,
+        .ag-theme-alpine .ag-header-cell,
+        .ag-theme-alpine .ag-header-cell-label,
+        .ag-theme-alpine .ag-header-cell-text,
+        .ag-theme-alpine .ag-header-group-cell,
+        .ag-theme-alpine .ag-header-row {
+          user-select: none !important;
+          -webkit-user-select: none !important;
+          -moz-user-select: none !important;
+          -ms-user-select: none !important;
+          cursor: default !important;
+        }
         .ag-theme-alpine .ag-header-cell-label {
           justify-content: center;
           font-weight: 700;
@@ -544,8 +604,9 @@ export const DDTArticoliTable: React.FC<DDTArticoliTableProps> = ({
           resizable: true,
           sortable: false,
           filter: false,
+          headerClass: "select-none !cursor-default",
         }}
       />
     </div>
   );
-};
+});

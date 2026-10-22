@@ -6,6 +6,8 @@ import {
   paginateDdtRows,
   getOperatorSymbol,
   normalizeOperator,
+  parseCascadeDiscounts,
+  formatCascadeDiscountDisplay,
 } from "../ddtCalculations";
 import { DdtItem } from "../../models/ddt";
 import { formatDdtImageFilename, formatDdtPdfFilename } from "../ddtExportManager";
@@ -47,6 +49,24 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
     // 2 pezzi a 10,50000 con 10% sconto = 18,90000
     const res = calculateRowAmounts("2", "10,50000", "10", "22");
     expect(res.netAmount.formatIT(false)).toBe("18,90000");
+  });
+
+  it("supporta e calcola correttamente sconti a cascata (es. 10 + 3%)", () => {
+    expect(parseCascadeDiscounts("10 + 3")).toEqual([10, 3]);
+    expect(parseCascadeDiscounts("(10+3)")).toEqual([10, 3]);
+    expect(parseCascadeDiscounts("10+5+2")).toEqual([10, 5, 2]);
+
+    expect(formatCascadeDiscountDisplay("10 + 3")).toBe("10% + 3%");
+    expect(formatCascadeDiscountDisplay("10+3")).toBe("10% + 3%");
+    expect(formatCascadeDiscountDisplay("15")).toBe("15%");
+
+    // Lordo 100 €, sconto 10 + 3%:
+    // 100 * 0.90 = 90 €
+    // 90 * 0.97 = 87.30 €
+    const res = calculateRowAmounts(1, 100, "10 + 3", 22);
+    expect(res.netAmount.formatIT(false)).toBe("87,30000");
+    // IVA 22% su 87.30000: 87.3 * 0.22 = 19.20600
+    expect(res.vatAmount.formatIT(false)).toBe("19,20600");
   });
 
   it("mappa correttamente gli operatori e i simboli BricoClass", () => {

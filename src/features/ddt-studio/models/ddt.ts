@@ -19,6 +19,8 @@ export interface DdtItem {
   vat_rate?: number | string | null;
   vat_amount: MonetaryValue;  // 5 decimali
   purchase_price?: MonetaryValue; // 5 decimali
+  base_price?: MonetaryValue; // Prezzo base originale prima della maggiorazione %
+  base_discount_pct?: string; // Sconto base originale della riga prima della sovrascrittura da Sconto Righe
 }
 
 export interface DdtDocument extends BaseEntity {

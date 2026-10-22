@@ -10,7 +10,7 @@ import { calculateRowAmounts, calculateDdtTotals } from "./utils/ddtCalculations
 import { DDTStudioHeader } from "./components/DDTStudioHeader";
 import { DDTStudioSidebar } from "./components/DDTStudioSidebar";
 import { DDTClienteCard } from "./components/DDTClienteCard";
-import { DDTArticoliTable } from "./components/DDTArticoliTable";
+import { DDTArticoliTable, DDTArticoliTableHandle } from "./components/DDTArticoliTable";
 import { DDTFinancialBar } from "./components/DDTFinancialBar";
 import { DDTLogisticaCard } from "./components/DDTLogisticaCard";
 import { DDTA4Document } from "./document/DDTA4Document";
@@ -111,7 +111,9 @@ export function makeTest48Items(): DdtItem[] {
       unit: s.um,
       quantity: qty,
       unit_price: pr,
+      base_price: pr,
       discount_pct: disc,
+      base_discount_pct: disc,
       net_amount: netAmount,
       vat_rate: s.v,
       vat_amount: vatAmount,
@@ -166,6 +168,17 @@ export const DDTStudioPage: React.FC = () => {
   const [ddt, setDdt] = useState<Partial<DdtDocument>>(makeEmptyDdt());
   const [items, setItems] = useState<DdtItem[]>(makeEmptyItems());
 
+  // Input Finanziari Immediati (Sconto Righe e Maggiorazione %)
+  const [globalDiscount, setGlobalDiscount] = useState("");
+  const [globalMarkup, setGlobalMarkup] = useState("");
+
+  // Riferimento per controllo imperativo tabella (es. pulizia focus cella)
+  const tableRef = React.useRef<DDTArticoliTableHandle>(null);
+
+  const handleClearTableFocus = useCallback(() => {
+    tableRef.current?.clearFocusedCell();
+  }, []);
+
   // Modale ricerca articoli F3
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
@@ -203,8 +216,12 @@ export const DDTStudioPage: React.FC = () => {
       setDdt(fullDoc);
 
       // Riempi sempre fino a 500 righe esatte
-      const existing = fullDoc.items || [];
-      const padded = [...existing];
+      const existing: DdtItem[] = (fullDoc.items || []).map((it) => ({
+        ...it,
+        base_price: it.base_price && isPositivePrice(it.base_price) ? it.base_price : it.unit_price,
+        base_discount_pct: it.base_discount_pct !== undefined ? it.base_discount_pct : it.discount_pct,
+      }));
+      const padded: DdtItem[] = [...existing];
       while (padded.length < TOTAL_PRESET_ROWS) {
         padded.push({
           id: crypto.randomUUID(),
@@ -215,6 +232,7 @@ export const DDTStudioPage: React.FC = () => {
           unit: "",
           quantity: "",
           unit_price: money(0),
+          base_price: money(0),
           discount_pct: "",
           net_amount: money(0),
           vat_rate: "",
@@ -222,6 +240,8 @@ export const DDTStudioPage: React.FC = () => {
           purchase_price: money(0),
         });
       }
+      setGlobalDiscount("");
+      setGlobalMarkup("");
       setItems(padded);
       showToast(`DDT #${fullDoc.doc_number || "Bozza"} caricato`);
     } catch (e) {
@@ -233,6 +253,8 @@ export const DDTStudioPage: React.FC = () => {
   const handleNewDdt = () => {
     setDdt(makeEmptyDdt());
     setItems(makeEmptyItems());
+    setGlobalDiscount("");
+    setGlobalMarkup("");
     showToast("Nuova Bozza DDT creata");
   };
 
@@ -345,7 +367,15 @@ export const DDTStudioPage: React.FC = () => {
       const price = money(prod.sale_price_cents / 100);
       const purchasePrice = money(prod.purchase_price_cents / 100);
       const q = quantityStr || "1";
-      const { netAmount, vatAmount } = calculateRowAmounts(q, price, 0, prod.vat_rate);
+
+      let effectivePrice = price;
+      const markupClean = globalMarkup.trim().replace("%", "").replace(",", ".");
+      const markupNum = parseFloat(markupClean);
+      if (!isNaN(markupNum) && markupNum !== 0) {
+        effectivePrice = price.times(1 + markupNum / 100);
+      }
+      const disc = globalDiscount.trim();
+      const { netAmount, vatAmount } = calculateRowAmounts(q, effectivePrice, disc, prod.vat_rate);
 
       copy[targetIdx] = {
         ...copy[targetIdx],
@@ -354,8 +384,10 @@ export const DDTStudioPage: React.FC = () => {
         description: prod.description.toUpperCase(),
         unit: prod.unit || "NR",
         quantity: q,
-        unit_price: price,
-        discount_pct: "",
+        unit_price: effectivePrice,
+        base_price: price,
+        discount_pct: disc,
+        base_discount_pct: "",
         net_amount: netAmount,
         vat_rate: prod.vat_rate,
         vat_amount: vatAmount,
@@ -423,6 +455,133 @@ export const DDTStudioPage: React.FC = () => {
     }, 500);
   };
 
+  // Modifica istantanea sconto globale (singolo o a cascata es. 10+3) retroattiva su tutte le righe (vecchie e nuove)
+  // Preserva lo sconto base originario di ogni riga e lo ripristina quando la casella viene svuotata ("torna come prima")
+  const handleChangeGlobalDiscount = (val: string) => {
+    setGlobalDiscount(val);
+    const cleanDisc = val.trim();
+
+    React.startTransition(() => {
+      // Se l'utente svuota o cancella il valore, ripristina lo sconto che c'era prima per ogni singola riga
+      if (cleanDisc === "") {
+        setItems((prev) =>
+          prev.map((item) => {
+            const restoredDisc =
+              item.base_discount_pct !== undefined ? item.base_discount_pct : (item.discount_pct || "");
+            const hasPrice = isPositivePrice(item.unit_price);
+            const { netAmount, vatAmount } = calculateRowAmounts(
+              item.quantity || (hasPrice ? "1" : ""),
+              item.unit_price,
+              restoredDisc,
+              item.vat_rate
+            );
+            return {
+              ...item,
+              discount_pct: restoredDisc,
+              base_discount_pct: undefined,
+              net_amount: netAmount,
+              vat_amount: vatAmount,
+            };
+          })
+        );
+        return;
+      }
+
+      // Applica il nuovo sconto preservando lo sconto originale prima dell'inizio della sovrascrittura
+      setItems((prev) =>
+        prev.map((item) => {
+          const originalBase =
+            item.base_discount_pct !== undefined ? item.base_discount_pct : (item.discount_pct || "");
+          const hasPrice = isPositivePrice(item.unit_price);
+          const { netAmount, vatAmount } = calculateRowAmounts(
+            item.quantity || (hasPrice ? "1" : ""),
+            item.unit_price,
+            cleanDisc,
+            item.vat_rate
+          );
+          return {
+            ...item,
+            base_discount_pct: originalBase,
+            discount_pct: cleanDisc,
+            net_amount: netAmount,
+            vat_amount: vatAmount,
+          };
+        })
+      );
+    });
+  };
+
+  // Modifica istantanea maggiorazione % su tutti i prezzi della DDT (con ripristino istantaneo se cancellato)
+  const handleChangeGlobalMarkup = (val: string) => {
+    setGlobalMarkup(val);
+    const trimmed = val.trim();
+
+    React.startTransition(() => {
+      // Se l'utente svuota o cancella l'input: ripristina all'istante i prezzi base ("torna come prima")
+      if (trimmed === "") {
+        setItems((prev) =>
+          prev.map((item) => {
+            if (item.base_price && isPositivePrice(item.base_price)) {
+              const restoredPrice = item.base_price;
+              const { netAmount, vatAmount } = calculateRowAmounts(
+                item.quantity || "1",
+                restoredPrice,
+                item.discount_pct,
+                item.vat_rate
+              );
+              return {
+                ...item,
+                unit_price: restoredPrice,
+                net_amount: netAmount,
+                vat_amount: vatAmount,
+              };
+            }
+            return item;
+          })
+        );
+        return;
+      }
+
+      const clean = trimmed.replace("%", "").replace(",", ".");
+      const num = parseFloat(clean);
+      if (isNaN(num)) {
+        // Sta digitando un carattere parziale (es. "+", "-"): attendiamo senza alterare i prezzi
+        return;
+      }
+
+      // Applica moltiplicatore istantaneo rispetto al prezzo base originale
+      const multiplier = 1 + num / 100;
+      setItems((prev) =>
+        prev.map((item) => {
+          const base =
+            item.base_price && isPositivePrice(item.base_price)
+              ? item.base_price
+              : isPositivePrice(item.unit_price)
+              ? item.unit_price
+              : null;
+
+          if (base) {
+            const newPrice = base.times(multiplier);
+            const { netAmount, vatAmount } = calculateRowAmounts(
+              item.quantity || "1",
+              newPrice,
+              item.discount_pct,
+              item.vat_rate
+            );
+            return {
+              ...item,
+              base_price: base,
+              unit_price: newPrice,
+              net_amount: netAmount,
+              vat_amount: vatAmount,
+            };
+          }
+          return item;
+        })
+      );
+    });
+  };
+
   const totals = calculateDdtTotals(items);
 
   return (
@@ -488,14 +647,17 @@ export const DDTStudioPage: React.FC = () => {
               {/* Tabella Articoli (Excel-Like con 500 righe e bianco/grigio alternato) */}
               <div className="flex-1 min-h-0 w-full overflow-hidden flex flex-col">
                 <DDTArticoliTable
+                  ref={tableRef}
                   items={items}
                   setItems={setItems}
                   showMargini={showMargini}
+                  globalDiscount={globalDiscount}
+                  globalMarkup={globalMarkup}
                   onOpenSearchModal={() => setIsSearchModalOpen(true)}
                 />
               </div>
 
-              {/* Barra Finanziaria Colorata (Tot. Acquisto, Totale Netto, Ricavo, Ricarico % + Alex + Margini Toggle) */}
+              {/* Barra Finanziaria Colorata (Tot. Acquisto, Totale Netto, Ricavo, Ricarico % + Alex + Sconto & Maggiorazione) */}
               <DDTFinancialBar
                 ddt={ddt}
                 setDdt={setDdt}
@@ -504,6 +666,11 @@ export const DDTStudioPage: React.FC = () => {
                 setShowMargini={setShowMargini}
                 onOpenSearchModal={() => setIsSearchModalOpen(true)}
                 onOpenAlexModal={() => setIsSearchModalOpen(true)}
+                globalDiscount={globalDiscount}
+                onChangeGlobalDiscount={handleChangeGlobalDiscount}
+                globalMarkup={globalMarkup}
+                onChangeGlobalMarkup={handleChangeGlobalMarkup}
+                onClearTableFocus={handleClearTableFocus}
               />
 
               {/* Card Logistica e Riepilogo Economico */}

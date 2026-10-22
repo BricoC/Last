@@ -7,6 +7,7 @@ import {
   toDateIT,
   getOperatorSymbol,
   formatAddressOrCity,
+  formatCascadeDiscountDisplay,
 } from "../utils/ddtCalculations";
 import bricoLogo from "@/assets/logo_brico_class.jpg";
 
@@ -642,7 +643,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                 <tbody>
                   {p.rows.map((r, i) => {
                     const hasPrice = isPositivePrice(r.unit_price);
-                    const hasDiscount = Boolean(r.discount_pct && parseFloat(String(r.discount_pct).replace(",", ".")) > 0);
+                    const hasDiscount = Boolean(r.discount_pct && formatCascadeDiscountDisplay(r.discount_pct));
                     const hasNet = isPositivePrice(r.net_amount);
                     const hasVat = r.vat_rate !== undefined && r.vat_rate !== null && String(r.vat_rate).trim() !== "";
                     const hasContent = Boolean(
@@ -733,7 +734,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             boxSizing: "border-box",
                           }}
                         >
-                          {hasDiscount ? `${r.discount_pct}%` : ""}
+                          {hasContent && hasDiscount ? formatCascadeDiscountDisplay(r.discount_pct) : ""}
                         </td>
                         <td
                           style={{

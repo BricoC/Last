@@ -1,5 +1,5 @@
-import React from "react";
-import { Eye, EyeOff, Search, Plus, UserCheck } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Eye, EyeOff, Search, Plus, UserCheck, Percent, TrendingUp } from "lucide-react";
 import { DdtTotals, DdtDocument } from "../models/ddt";
 import { OPERATORI, normalizeOperator } from "../utils/ddtCalculations";
 
@@ -11,6 +11,11 @@ export interface DDTFinancialBarProps {
   setShowMargini: (show: boolean | ((prev: boolean) => boolean)) => void;
   onOpenSearchModal: () => void;
   onOpenAlexModal?: () => void;
+  globalDiscount: string;
+  onChangeGlobalDiscount: (discountStr: string) => void;
+  globalMarkup: string;
+  onChangeGlobalMarkup: (markupStr: string) => void;
+  onClearTableFocus?: () => void;
 }
 
 export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
@@ -21,7 +26,23 @@ export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
   setShowMargini,
   onOpenSearchModal,
   onOpenAlexModal,
+  globalDiscount,
+  onChangeGlobalDiscount,
+  globalMarkup,
+  onChangeGlobalMarkup,
+  onClearTableFocus,
 }) => {
+  const [localDiscount, setLocalDiscount] = useState(globalDiscount);
+  const [localMarkup, setLocalMarkup] = useState(globalMarkup);
+
+  useEffect(() => {
+    setLocalDiscount(globalDiscount);
+  }, [globalDiscount]);
+
+  useEffect(() => {
+    setLocalMarkup(globalMarkup);
+  }, [globalMarkup]);
+
   const isBozza = ddt.status === "bozza" || ddt.doc_number === null;
   const ricavoPositive = (totals.totale_ricavo?.toNumber() ?? 0) >= 0;
 
@@ -96,6 +117,60 @@ export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
           <Plus className="w-3.5 h-3.5 stroke-[3]" />
           <span className="tracking-wide">Alex</span>
         </button>
+      </div>
+
+      {/* CENTRO: Sezione Sconto Globale & Maggiorazione Prezzi % (Immediate, senza tasto Applica) */}
+      <div className="flex flex-wrap items-center gap-2.5 bg-[#16181d] border border-[#2d3139] px-2.5 py-1 rounded-lg">
+        {/* 1. Sconto Righe (%) */}
+        <div className="flex flex-col items-start">
+          <label className="text-[9px] font-bold uppercase tracking-wider text-purple-400 mb-0.5 flex items-center space-x-1">
+            <Percent className="w-2.5 h-2.5" />
+            <span>Sconto Righe</span>
+          </label>
+          <div className="flex items-center space-x-1 bg-[#272a33] border border-[#3b404d] focus-within:border-purple-500 rounded px-1.5 py-0.5 transition-colors">
+            <input
+              type="text"
+              value={localDiscount}
+              onMouseDown={() => onClearTableFocus?.()}
+              onFocus={() => onClearTableFocus?.()}
+              onChange={(e) => {
+                const val = e.target.value;
+                setLocalDiscount(val);
+                onChangeGlobalDiscount(val);
+              }}
+              placeholder="Es. 10+3"
+              className="w-20 bg-transparent text-xs text-zinc-100 placeholder-zinc-500 font-mono outline-none text-center font-bold"
+              title="Scrivi lo sconto (es. 10 o 10+3): applicazione immediata a tutte le voci, vecchie e nuove"
+            />
+          </div>
+        </div>
+
+        {/* Separatore verticale */}
+        <div className="h-6 w-px bg-[#2d3139]" />
+
+        {/* 2. Maggiorazione Prezzi (%) */}
+        <div className="flex flex-col items-start">
+          <label className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 mb-0.5 flex items-center space-x-1">
+            <TrendingUp className="w-2.5 h-2.5" />
+            <span>Maggiorazione %</span>
+          </label>
+          <div className="flex items-center space-x-1 bg-[#272a33] border border-[#3b404d] focus-within:border-emerald-500 rounded px-1.5 py-0.5 transition-colors">
+            <input
+              type="text"
+              value={localMarkup}
+              onMouseDown={() => onClearTableFocus?.()}
+              onFocus={() => onClearTableFocus?.()}
+              onChange={(e) => {
+                const val = e.target.value;
+                setLocalMarkup(val);
+                onChangeGlobalMarkup(val);
+              }}
+              placeholder="Es. 10"
+              className="w-16 bg-transparent text-xs text-zinc-100 placeholder-zinc-500 font-mono outline-none text-center font-bold"
+              title="Aumenta tutti i prezzi del tot % (immediato). Rimuovi il valore per ripristinare i prezzi originali."
+            />
+          </div>
+        </div>
       </div>
 
       {/* DESTRA: Cerca Articoli (F3), Visualizza Margini, Operatore & Stato */}

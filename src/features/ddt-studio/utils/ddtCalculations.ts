@@ -43,7 +43,42 @@ export function formatAddressOrCity(str?: string): string {
 }
 
 /**
+ * Parsea una stringa di sconto singola o a cascata (es. "10", "10+3", "(10 + 3)", "10+5+2")
+ * Restituisce l'array di percentuali di sconto da applicare sequenzialmente.
+ */
+export function parseCascadeDiscounts(raw?: string | number | null): number[] {
+  if (raw === null || raw === undefined || raw === "") return [];
+  const clean = String(raw).trim().replace(/[()%]/g, "");
+  if (!clean) return [];
+
+  return clean
+    .split("+")
+    .map((part) => parseFloat(part.trim().replace(",", ".")))
+    .filter((n) => !isNaN(n) && n > 0);
+}
+
+/**
+ * Formatta la stringa di sconto per la visualizzazione nella griglia e nel documento cartaceo/PDF.
+ * Mantiene la dicitura inserita dall'utente aggiungendo il simbolo '%' finale (es. "10 + 3%").
+ */
+export function formatCascadeDiscountDisplay(raw?: string | number | null): string {
+  if (raw === null || raw === undefined || raw === "") return "";
+  const clean = String(raw).trim().replace(/[()%]/g, "");
+  if (!clean) return "";
+
+  if (clean.includes("+")) {
+    const parts = clean.split("+").map((p) => p.trim()).filter(Boolean);
+    return parts.length > 0 ? parts.map((p) => `${p}%`).join(" + ") : "";
+  }
+
+  const n = parseFloat(clean.replace(",", "."));
+  if (isNaN(n) || n <= 0) return "";
+  return `${n}%`;
+}
+
+/**
  * Calcolo esatto a 5 decimali per la singola riga del DDT.
+ * Supporta sconti a cascata (es. 10+3%, dove prima si calcola il 10% e sul netto risultante il 3%).
  * L'IVA non viene applicata automaticamente: se non specificata dall'utente, l'importo IVA è 0.
  */
 export function calculateRowAmounts(
@@ -64,10 +99,12 @@ export function calculateRowAmounts(
   // Lordo = qta * prezzo unitario (5 decimali esatti)
   const gross = price.times(q);
 
-  // Sconto %
-  const discStr = String(discountRaw ?? "").trim().replace(",", ".");
-  const disc = discStr ? parseFloat(discStr) : 0;
-  const net = disc > 0 ? gross.applyDiscount(disc) : gross;
+  // Sconto % sequenziale / a cascata (es. 10 + 3)
+  const discounts = parseCascadeDiscounts(discountRaw);
+  let net = gross;
+  for (const disc of discounts) {
+    net = net.applyDiscount(disc);
+  }
 
   // IVA %: l'IVA non si applica automaticamente a meno che non sia esplicitamente inserita dall'utente
   let vat = money(0);
