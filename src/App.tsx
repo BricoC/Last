@@ -5,6 +5,7 @@ import { DesktopWorkspace } from "@/shared/components/desktop/DesktopWorkspace";
 import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { ProductListPage } from "@/features/price-lists/ProductListPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { DDTStudioPage } from "@/features/ddt-studio/DDTStudioPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { Card } from "@/shared/components/ui/card";
 
@@ -26,15 +27,7 @@ export function App() {
       case "settings":
         return <SettingsPage />;
       case "ddt-studio":
-        return (
-          <div className="p-6 max-w-4xl mx-auto">
-            <Card title="Modulo DDT Studio (Pro)" subtitle="Editor A4 Millimetrico">
-              <p className="text-sm text-[var(--foreground)] mt-2">
-                Modulo predisposto per l'editor DDT vettoriale millimetrico (210mm × 297mm) con stampa a 300 DPI e invio diretto tramite Microsoft Outlook.
-              </p>
-            </Card>
-          </div>
-        );
+        return <DDTStudioPage />;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">

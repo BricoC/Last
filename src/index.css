@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* Fix critico per html2canvas con Tailwind CSS:
+   Tailwind preflight imposta img { display: block }.
+   html2canvas usa un <img> inline per calcolare la baseline dei font:
+   se l'img è block, va a capo e sfasa il calcolo della baseline,
+   facendo spostare/attaccare tutti i testi verso il bordo superiore nei PDF e nelle stampe! */
+img {
+  display: inline-block !important;
+}
+
 @layer base {
   :root {
     --background: #22242a;
@@ -72,4 +81,66 @@ body {
 button, a, [role="button"], .cursor-pointer {
   cursor: default !important;
 }
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  /* Nascondi completamente l'intera app UI e MDI desktop durante la stampa */
+  #root {
+    display: none !important;
+  }
+  /* Mostra SOLO il portale di stampa A4 dedicato */
+  #ddt-print-portal {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    visibility: visible !important;
+    z-index: 999999 !important;
+  }
+  #ddt-print-portal * {
+    visibility: visible !important;
+  }
+  #ddt-pro-print-wrapper {
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+  .ddt-a4-page {
+    width: 210mm !important;
+    min-height: 297mm !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
+    margin: 0 auto !important;
+    padding: 7mm 10mm 8mm 10mm !important;
+    box-sizing: border-box !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  .ddt-a4-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+}
+
 
