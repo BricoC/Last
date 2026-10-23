@@ -34,7 +34,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
   useImperativeHandle(ref, () => ({
     clearFocusedCell: () => {
       if (gridRef.current?.api) {
-        gridRef.current.api.stopEditing(true);
+        gridRef.current.api.stopEditing(false);
         gridRef.current.api.clearFocusedCell();
       }
     },
@@ -535,7 +535,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
   }, [showMargini, handleDeleteRow]);
 
   return (
-    <div className="ag-theme-alpine w-full h-full flex-1 min-h-0 overflow-hidden relative border border-zinc-300">
+    <div className="ddt-items-grid ag-theme-alpine w-full h-full flex-1 min-h-0 overflow-hidden relative border border-zinc-300">
       <style>{`
         /* Focus chiaro e visibile sull'intera riga */
         .ag-theme-alpine .ag-row.ag-row-focus {

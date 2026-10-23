@@ -5,6 +5,7 @@ pub struct QuoteSavePayload {
     pub(crate) id: String,
     pub(crate) year: i64,
     pub(crate) quote_date: String,
+    pub(crate) status: String,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
     pub(crate) updated_by: String,

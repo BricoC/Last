@@ -7,6 +7,7 @@ import { ProductListPage } from "@/features/price-lists/ProductListPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { DDTStudioPage } from "@/features/ddt-studio/DDTStudioPage";
 import { ClientListPage } from "@/features/clients/ClientListPage";
+import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { Card } from "@/shared/components/ui/card";
 
@@ -19,7 +20,7 @@ export function App() {
   }, [applyToDom]);
 
   // Renderer del contenuto delle finestre desktop in base al componentId
-  const renderWindowContent = (componentId: string) => {
+  const renderWindowContent = (componentId: string, windowId: string) => {
     switch (componentId) {
       case "dashboard":
         return <DashboardPage />;
@@ -28,9 +29,11 @@ export function App() {
       case "settings":
         return <SettingsPage />;
       case "ddt-studio":
-        return <DDTStudioPage />;
+        return <DDTStudioPage windowId={windowId} />;
       case "clients":
         return <ClientListPage />;
+      case "quotes":
+        return <QuoteStudioPage windowId={windowId} />;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">

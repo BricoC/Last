@@ -31,6 +31,25 @@ img {
     --input: #262930;
     --ring: #3b82f6;
     --radius: 0.5rem;
+    --document-background: #ffffff;
+    --document-foreground: #111827;
+    --document-border: #475569;
+    --document-table-border: #d6deea;
+    --document-table-header: #f1f5fa;
+    --document-table-stripe: #fafbfd;
+    --document-accent: #486a9a;
+    --document-total-border: #b8c8df;
+    --document-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.2);
+    --grid-sheet-background: #fbfbfc;
+    --grid-sheet-header: #f0f2f5;
+    --grid-sheet-header-active: #e6e9ee;
+    --grid-sheet-border: #d8dce3;
+    --grid-sheet-text: #16181d;
+    --grid-sheet-stripe: #ffffff;
+    --grid-sheet-hover: #f7f9fc;
+    --grid-sheet-selected: #eff5fc;
+    --grid-sheet-cost-text: #6e4f08;
+    --grid-sheet-acquisition: #dff6e8;
   }
 }
 

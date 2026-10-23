@@ -1,3 +1,5 @@
+use crate::ddt_commands::persist_ddt;
+use crate::ddt_types::DdtSavePayload;
 use crate::quote_persistence::persist_quote;
 use crate::quote_types::QuoteSavePayload;
 use tauri::State;
@@ -68,6 +70,69 @@ pub async fn soft_delete_quote_transaction(
     match result {
         Ok(()) => commit(&mut connection, "archiviazione preventivo").await,
         Err(error) => rollback(&mut connection, error, "archiviazione preventivo").await,
+    }
+}
+
+#[tauri::command]
+pub async fn convert_quote_to_ddt_transaction(
+    db_instances: State<'_, DbInstances>,
+    quote_payload: QuoteSavePayload,
+    ddt_payload: DdtSavePayload,
+) -> Result<String, String> {
+    if ddt_payload.is_emission || ddt_payload.doc_number.is_some() {
+        return Err("La conversione crea solo una bozza DDT senza progressivo".to_string());
+    }
+    let ddt_id = ddt_payload.id.clone();
+    let quote_id = quote_payload.id.clone();
+    let updated_at = ddt_payload.updated_at.clone();
+    let updated_by = ddt_payload.updated_by.clone();
+    let pool = get_pool(&db_instances).await?;
+    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| format!("Impossibile avviare la conversione preventivo-DDT: {error}"))?;
+
+    let result = async {
+        let already_converted = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM quotes WHERE id = ? AND deleted_at IS NULL AND converted_ddt_id IS NOT NULL",
+        )
+        .bind(&quote_id)
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(|error| error.to_string())?;
+        if already_converted > 0 {
+            return Err("Questo preventivo è già stato convertito in DDT".to_string());
+        }
+
+        persist_quote(&mut connection, quote_payload).await?;
+        persist_ddt(&mut connection, ddt_payload).await?;
+        let updated = sqlx::query(
+            "UPDATE quotes SET status = 'confermato', converted_ddt_id = ?, updated_at = ?, updated_by = ?, sync_status = 'pending'
+             WHERE id = ? AND deleted_at IS NULL AND converted_ddt_id IS NULL",
+        )
+        .bind(&ddt_id)
+        .bind(&updated_at)
+        .bind(&updated_by)
+        .bind(&quote_id)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| error.to_string())?;
+        if updated.rows_affected() == 0 {
+            return Err("Preventivo non attivo o già convertito".to_string());
+        }
+        Ok::<(), String>(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => {
+            commit(&mut connection, "conversione preventivo-DDT").await?;
+            Ok(ddt_id)
+        }
+        Err(error) => rollback(&mut connection, error, "conversione preventivo-DDT")
+            .await
+            .map(|()| ddt_id),
     }
 }
 

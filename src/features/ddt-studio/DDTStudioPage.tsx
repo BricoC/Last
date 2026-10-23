@@ -5,6 +5,7 @@ import { ddtRepository } from "./services/ddtRepository";
 import { clientRepository } from "@/features/clients/services/clientRepository";
 import { Product } from "@/features/price-lists/models/product";
 import { money, isPositivePrice } from "@/shared/domain/monetaryValue";
+import { registerWindowCloseGuard } from "@/shared/stores/useWindowStore";
 import { calculateRowAmounts, calculateDdtTotals } from "./utils/ddtCalculations";
 
 import { DDTStudioHeader } from "./components/DDTStudioHeader";
@@ -163,7 +164,9 @@ export function makeTestDdt(): Partial<DdtDocument> {
   };
 }
 
-export const DDTStudioPage: React.FC = () => {
+type DdtCloseChoice = "emit" | "draft" | "discard" | "cancel";
+
+export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState<"editor" | "a4">("editor");
   const [showMargini, setShowMargini] = useState(false);
@@ -175,6 +178,8 @@ export const DDTStudioPage: React.FC = () => {
   const [isPrintCopiesModalOpen, setIsPrintCopiesModalOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [closePrompt, setClosePrompt] = useState<((choice: DdtCloseChoice) => void) | null>(null);
+  const savedSignature = React.useRef<string | null>(null);
 
   // Stato DDT Corrente
   const [ddt, setDdt] = useState<Partial<DdtDocument>>(makeEmptyDdt());
@@ -183,6 +188,15 @@ export const DDTStudioPage: React.FC = () => {
   // Input Finanziari Immediati (Sconto Righe e Maggiorazione %)
   const [globalDiscount, setGlobalDiscount] = useState("");
   const [globalMarkup, setGlobalMarkup] = useState("");
+
+  const signature = (doc: Partial<DdtDocument>, rows: DdtItem[], discount: string, markup: string) =>
+    JSON.stringify({ doc, rows, discount, markup });
+  const isDirty = savedSignature.current !== null
+    && signature(ddt, items, globalDiscount, globalMarkup) !== savedSignature.current;
+
+  useEffect(() => {
+    savedSignature.current = signature(ddt, items, globalDiscount, globalMarkup);
+  }, []);
 
   // Riferimento per controllo imperativo tabella (es. pulizia focus cella)
   const tableRef = React.useRef<DDTArticoliTableHandle>(null);
@@ -218,6 +232,26 @@ export const DDTStudioPage: React.FC = () => {
   useEffect(() => {
     loadRecentDdts();
   }, [loadRecentDdts]);
+
+  useEffect(() => {
+    const handleQuoteConversion = (event: Event) => {
+      const detail = (event as CustomEvent<{ ddt: Partial<DdtDocument>; items: DdtItem[] }>).detail;
+      if (!detail?.ddt?.id) return;
+      const blanks = makeEmptyItems();
+      const padded = [...detail.items, ...blanks.slice(detail.items.length)].map((item) => ({
+        ...item, ddt_id: detail.ddt.id!,
+      }));
+      setDdt(detail.ddt);
+      setItems(padded);
+      setGlobalDiscount("");
+      setGlobalMarkup("");
+      setShowMargini(false);
+      setActiveView("editor");
+      showToast("Preventivo convertito in bozza DDT");
+    };
+    window.addEventListener("quote-converted-to-ddt", handleQuoteConversion);
+    return () => window.removeEventListener("quote-converted-to-ddt", handleQuoteConversion);
+  }, []);
 
   // Carica un DDT esistente selezionato dalla sidebar
   const handleSelectDdt = async (id: string) => {
@@ -260,6 +294,7 @@ export const DDTStudioPage: React.FC = () => {
       setGlobalDiscount("");
       setGlobalMarkup("");
       setItems(padded);
+      savedSignature.current = signature(fullDoc, padded, "", "");
       const identifier = fullDoc.doc_number === null
         ? "Bozza"
         : `${fullDoc.series ? `${fullDoc.series}/` : ""}${fullDoc.doc_number}`;
@@ -271,50 +306,69 @@ export const DDTStudioPage: React.FC = () => {
 
   // Nuovo DDT vuoto
   const handleNewDdt = () => {
-    setDdt(makeEmptyDdt());
-    setItems(makeEmptyItems());
+    const nextDdt = makeEmptyDdt();
+    const nextItems = makeEmptyItems();
+    setDdt(nextDdt);
+    setItems(nextItems);
     setGlobalDiscount("");
     setGlobalMarkup("");
+    savedSignature.current = signature(nextDdt, nextItems, "", "");
     showToast("Nuova Bozza DDT creata");
   };
 
   // Salva Bozza
-  const handleSaveDraft = async () => {
+  const handleSaveDraft = async (): Promise<boolean> => {
     setIsSaving(true);
     try {
       const saved = await ddtRepository.saveDraft(ddt, items);
       setDdt(saved);
+      savedSignature.current = signature(saved, items, globalDiscount, globalMarkup);
       await loadRecentDdts();
       showToast("Bozza salvata con successo");
+      return true;
     } catch (e) {
       console.error("Errore salvataggio bozza:", e);
-      showToast("Errore durante il salvataggio della bozza");
+      showToast(`Errore salvataggio bozza: ${getErrorMessage(e)}`);
+      return false;
     } finally {
       setIsSaving(false);
     }
   };
 
   // Salva e Conferma DDT (Emissione con numero progressivo)
-  const handleEmitDdt = async () => {
+  const handleEmitDdt = async (): Promise<boolean> => {
     if (!ddt.client_name?.trim()) {
       showToast("Attenzione: Inserisci il nome del cliente prima di salvare il DDT!");
-      return;
+      return false;
     }
 
     setIsSaving(true);
     try {
       const saved = await ddtRepository.emitDdt(ddt, items);
       setDdt(saved);
+      savedSignature.current = signature(saved, items, globalDiscount, globalMarkup);
       await loadRecentDdts();
       const identifier = `${saved.series ? `${saved.series}/` : ""}${saved.doc_number}`;
       showToast(`DDT emesso con successo! Numero assegnato: #${identifier}`);
+      return true;
     } catch (e) {
       console.error("Errore emissione DDT:", e);
-      showToast("Errore durante l'emissione del DDT");
+      showToast(`Errore emissione DDT: ${getErrorMessage(e)}`);
+      return false;
     } finally {
       setIsSaving(false);
     }
   };
+
+  useEffect(() => registerWindowCloseGuard(windowId, async () => {
+    if (!isDirty) return true;
+    const choice = await new Promise<DdtCloseChoice>((resolve) => setClosePrompt(() => resolve));
+    setClosePrompt(null);
+    if (choice === "discard") return true;
+    if (choice === "draft") return handleSaveDraft();
+    if (choice === "emit") return handleEmitDdt();
+    return false;
+  }), [windowId, isDirty, handleSaveDraft, handleEmitDdt]);
 
   // Duplica DDT
   const handleDuplicateDdt = async () => {
@@ -606,7 +660,16 @@ export const DDTStudioPage: React.FC = () => {
   const totals = calculateDdtTotals(items);
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#181a20] overflow-hidden">
+    <div
+      className="flex flex-col h-full w-full bg-[#181a20] overflow-hidden"
+      onMouseDownCapture={(event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (!target.closest("input, textarea, select, [contenteditable='true']")) return;
+        if (target.closest(".ddt-items-grid")) return;
+        tableRef.current?.clearFocusedCell();
+      }}
+    >
       {/* Toast Notifica */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-slate-900 border border-[var(--primary)] text-white px-4 py-2 rounded-lg shadow-2xl text-xs font-semibold z-50 flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2">
@@ -614,6 +677,19 @@ export const DDTStudioPage: React.FC = () => {
           <span>{toastMessage}</span>
         </div>
       )}
+
+      {closePrompt && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" role="presentation">
+        <section role="dialog" aria-modal="true" aria-labelledby="ddt-close-title" className="w-full max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 text-[var(--foreground)] shadow-2xl">
+          <h2 id="ddt-close-title" className="text-base font-semibold">DDT con modifiche non salvate</h2>
+          <p className="mt-2 text-sm text-[var(--muted-foreground)]">Scegli come conservare il lavoro prima di chiudere.</p>
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={() => closePrompt("cancel")} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm">Annulla</button>
+            <button type="button" onClick={() => closePrompt("discard")} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm">Chiudi senza salvare</button>
+            <button type="button" disabled={isSaving} onClick={() => closePrompt("draft")} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50">Salva in bozze</button>
+            <button type="button" disabled={isSaving} onClick={() => closePrompt("emit")} className="rounded-md bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50">Emetti DDT</button>
+          </div>
+        </section>
+      </div>}
 
       {/* Header Operativo DDT Studio */}
       <DDTStudioHeader
@@ -750,3 +826,9 @@ export const DDTStudioPage: React.FC = () => {
     </div>
   );
 };
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return JSON.stringify(error) ?? String(error);
+}

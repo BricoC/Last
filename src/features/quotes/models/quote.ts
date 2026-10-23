@@ -95,6 +95,7 @@ export interface QuoteItemInput {
 
 export interface QuoteDraftInput {
   id?: string;
+  status?: QuoteStatus;
   year?: number;
   quote_date?: string;
   client_id?: string | null;

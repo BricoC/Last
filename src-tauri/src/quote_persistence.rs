@@ -6,6 +6,24 @@ pub(crate) async fn persist_quote(
     connection: &mut SqliteConnection,
     payload: QuoteSavePayload,
 ) -> Result<(), String> {
+    if !["bozza", "inviato", "confermato", "rifiutato"].contains(&payload.status.as_str()) {
+        return Err("Stato preventivo non valido".to_string());
+    }
+    if payload.status == "confermato" {
+        let is_existing_confirmed = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM quotes WHERE id = ? AND status = 'confermato' AND deleted_at IS NULL",
+        )
+        .bind(&payload.id)
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(|error| error.to_string())?
+            > 0;
+        if !is_existing_confirmed {
+            return Err(
+                "Un preventivo può essere confermato solo durante la conversione in DDT".to_string(),
+            );
+        }
+    }
     persist_header(connection, &payload).await?;
 
     let active_ids = sqlx::query_scalar::<_, String>(
@@ -71,7 +89,7 @@ async fn persist_header(
             .push_bind(Option::<i64>::None)
             .push_bind(quote.year)
             .push_bind(&quote.quote_date)
-            .push_bind("bozza")
+            .push_bind(&quote.status)
             .push_bind(&quote.client_id)
             .push_bind(&quote.client_name)
             .push_bind(&quote.client_address)
@@ -108,7 +126,7 @@ async fn persist_header(
     });
     query.push(
         " ON CONFLICT(id) DO UPDATE SET
-          year = excluded.year, quote_date = excluded.quote_date, status = 'bozza',
+          year = excluded.year, quote_date = excluded.quote_date, status = excluded.status,
           client_id = excluded.client_id, client_name = excluded.client_name,
           client_address = excluded.client_address, client_city = excluded.client_city,
           client_postal_code = excluded.client_postal_code, client_province = excluded.client_province,

@@ -31,6 +31,22 @@ export type SnapSlotType =
   | "bottom-left"
   | "bottom-right";
 
+type WindowCloseGuard = () => Promise<boolean>;
+const windowCloseGuards = new Map<string, WindowCloseGuard>();
+
+export function registerWindowCloseGuard(id: string, guard: WindowCloseGuard): () => void {
+  windowCloseGuards.set(id, guard);
+  return () => {
+    if (windowCloseGuards.get(id) === guard) windowCloseGuards.delete(id);
+  };
+}
+
+export async function requestWindowClose(id: string): Promise<void> {
+  const guard = windowCloseGuards.get(id);
+  if (guard && !(await guard())) return;
+  useWindowStore.getState().closeWindow(id);
+}
+
 export function getSnapSlotBounds(slot: SnapSlotType): { x: number; y: number; width: number; height: number } {
   const desktopW = window.innerWidth;
   const desktopH = window.innerHeight - 72;

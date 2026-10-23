@@ -4,7 +4,7 @@ import { DesktopWindow } from "./DesktopWindow";
 import { WindowsSnapFlyout } from "./WindowsSnapFlyout";
 
 interface DesktopWorkspaceProps {
-  renderContent: (componentId: string) => React.ReactNode;
+  renderContent: (componentId: string, windowId: string) => React.ReactNode;
 }
 
 export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({ renderContent }) => {

@@ -50,7 +50,7 @@ pub async fn save_ddt_transaction(
     }
 }
 
-async fn persist_ddt(
+pub(crate) async fn persist_ddt(
     connection: &mut sqlx::SqliteConnection,
     mut payload: DdtSavePayload,
 ) -> Result<(), String> {

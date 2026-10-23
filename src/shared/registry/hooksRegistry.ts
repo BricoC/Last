@@ -37,7 +37,14 @@ export const HOOKS_REGISTRY: HookRegistryEntry[] = [
     name: "useWindowStore",
     category: "state",
     path: "src/shared/stores/useWindowStore.ts",
-    description: "Gestione del Desktop Window Manager MDI (posizionamento, ridimensionamento, minimizzazione, massimizzazione, focus e layout automatici).",
-    returns: "{ windows, activeWindowId, openWindow, closeWindow, focusWindow, minimizeWindow, toggleMaximizeWindow, tileSideBySide, tileGrid, cascadeWindows, minimizeAll }",
+    description: "Gestione del Desktop Window Manager MDI e delle richieste di chiusura protette da controlli di modifiche non salvate.",
+    returns: "{ windows, activeWindowId, openWindow, closeWindow, focusWindow, minimizeWindow, toggleMaximizeWindow, tileSideBySide, tileGrid, cascadeWindows, minimizeAll, registerWindowCloseGuard, requestWindowClose }",
+  },
+  {
+    name: "useFragmentSearch",
+    category: "ui",
+    path: "src/shared/hooks/useFragmentSearch.ts",
+    description: "Filtra liste con frammenti di parole in qualsiasi ordine, ignorando maiuscole e accenti.",
+    returns: "items filtrati tramite query e getSearchText",
   },
 ];

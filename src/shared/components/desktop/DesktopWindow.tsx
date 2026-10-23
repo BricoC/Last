@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { WindowItem, useWindowStore, SnapSlotType } from "@/shared/stores/useWindowStore";
+import { WindowItem, useWindowStore, SnapSlotType, requestWindowClose } from "@/shared/stores/useWindowStore";
 import { Minus, Square, Copy, X, Plus, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
@@ -17,7 +17,7 @@ const MODULE_ICONS: Record<string, React.ReactNode> = {
 
 interface DesktopWindowProps {
   window: WindowItem;
-  renderContent: (componentId: string) => React.ReactNode;
+  renderContent: (componentId: string, windowId: string) => React.ReactNode;
 }
 
 export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, renderContent }) => {
@@ -27,7 +27,6 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
     minimizeWindow,
     toggleMaximizeWindow,
     duplicateWindow,
-    closeWindow,
     updateWindowBounds,
     setDraggingWindowId,
     setSnapFlyoutVisible,
@@ -339,7 +338,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              closeWindow(win.id);
+              void requestWindowClose(win.id);
             }}
             className="w-7 h-6 flex items-center justify-center rounded hover:bg-red-600 hover:text-white text-[var(--muted-foreground)] transition-colors cursor-default"
             title="Chiudi"
@@ -351,7 +350,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
 
       {/* Contenuto Finestra con supporto colori tema */}
       <div className="flex-1 relative overflow-auto bg-[var(--background)] text-[var(--foreground)] cursor-default">
-        {renderContent(win.componentId)}
+        {renderContent(win.componentId, win.id)}
       </div>
     </div>
   );

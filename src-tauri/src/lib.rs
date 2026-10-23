@@ -154,7 +154,8 @@ pub fn run() {
             ddt_commands::save_ddt_transaction,
             ddt_delete_command::soft_delete_ddt_transaction,
             quote_commands::save_quote_transaction,
-            quote_commands::soft_delete_quote_transaction
+            quote_commands::soft_delete_quote_transaction,
+            quote_commands::convert_quote_to_ddt_transaction
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,10 +1,10 @@
 import React, { useRef } from "react";
-import { useWindowStore } from "@/shared/stores/useWindowStore";
+import { requestWindowClose, useWindowStore } from "@/shared/stores/useWindowStore";
 import { ChevronLeft, ChevronRight, X, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
 export const WindowTabBar: React.FC = () => {
-  const { windows, activeWindowId, focusWindow, closeWindow } = useWindowStore();
+  const { windows, activeWindowId, focusWindow } = useWindowStore();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: "left" | "right") => {
@@ -87,7 +87,7 @@ export const WindowTabBar: React.FC = () => {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  closeWindow(win.id);
+                  void requestWindowClose(win.id);
                 }}
                 className="p-0.5 rounded-full hover:bg-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors ml-1 cursor-default"
                 title="Chiudi scheda"

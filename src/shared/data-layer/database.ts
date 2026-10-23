@@ -1,6 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import { migrateDdtSchemaV5 } from "./migrations/ddtSchema";
 import { migrateQuoteSchemaV6 } from "./migrations/quoteSchema";
+import { migrateCompanySettingsSchemaV7 } from "./migrations/companySettingsSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -226,6 +227,11 @@ const MIGRATIONS: Migration[] = [
     version: 6,
     name: "create_quotes_and_quote_items",
     up: migrateQuoteSchemaV6,
+  },
+  {
+    version: 7,
+    name: "create_company_settings",
+    up: migrateCompanySettingsSchemaV7,
   },
 ];
 

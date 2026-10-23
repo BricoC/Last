@@ -17,11 +17,11 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const isDelete = props.eventKey === "Backspace" || props.eventKey === "Delete";
 
   const colId = props.column?.getColId();
-  const isUppercaseCol = colId === "unit" || colId === "um" || colId === "description" || colId === "descrizione" || colId === "code";
+  const isUppercaseCol = colId === "unit" || colId === "um" || colId === "description" || colId === "descrizione" || colId === "code" || colId === "quantity" || colId === "quantita";
 
   let startValue = "";
   if (props.value !== null && props.value !== undefined) {
-    if (colId === "unit_price" || colId === "purchase_price") {
+    if (colId === "unit_price" || colId === "purchase_price" || colId === "base_unit_price") {
       if (isPositivePrice(props.value)) {
         startValue = safeMoney(props.value).formatIT(false);
       } else {
@@ -51,7 +51,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const lastTypedLengthRef = useRef(startValue.length);
 
   const isNumericCol = [
-    "quantity", "quantita", "discount_pct", "sconto_pct", "unit_price", "prezzo", "purchase_price", "prezzo_acquisto", "vat_rate", "iva_pct"
+      "discount_pct", "sconto_pct", "unit_price", "prezzo", "purchase_price", "prezzo_acquisto", "base_unit_price", "markup_pct", "vat_rate", "iva_pct"
   ].includes(colId || "");
 
   const candidates = useMemo(() => {
@@ -250,8 +250,8 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
 
       const displayed = props.api?.getAllDisplayedColumns ? props.api.getAllDisplayedColumns() : [];
       const editableCols = displayed
-        .map((c) => c.getColId())
-        .filter((id) => ["unit", "quantity", "description", "unit_price", "discount_pct", "vat_rate", "purchase_price"].includes(id));
+        .filter((column) => column.isCellEditable(props.node))
+        .map((column) => column.getColId());
 
       const currentColId = props.column.getColId();
       const colIdx = editableCols.indexOf(currentColId);
@@ -384,8 +384,8 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     if (e.key === "ArrowLeft" && (isAtStart || isAllSelected) && !showSuggestions) {
       const displayed = props.api?.getAllDisplayedColumns ? props.api.getAllDisplayedColumns() : [];
       const editableCols = displayed
-        .map((c) => c.getColId())
-        .filter((id) => ["unit", "quantity", "description", "unit_price", "discount_pct", "vat_rate", "purchase_price"].includes(id));
+        .filter((column) => column.isCellEditable(props.node))
+        .map((column) => column.getColId());
 
       const currentColId = props.column.getColId();
       const colIdx = editableCols.indexOf(currentColId);
@@ -407,8 +407,8 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     if (e.key === "ArrowRight" && (isAtEnd || isAllSelected) && !showSuggestions) {
       const displayed = props.api?.getAllDisplayedColumns ? props.api.getAllDisplayedColumns() : [];
       const editableCols = displayed
-        .map((c) => c.getColId())
-        .filter((id) => ["unit", "quantity", "description", "unit_price", "discount_pct", "vat_rate", "purchase_price"].includes(id));
+        .filter((column) => column.isCellEditable(props.node))
+        .map((column) => column.getColId());
 
       const currentColId = props.column.getColId();
       const colIdx = editableCols.indexOf(currentColId);
