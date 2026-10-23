@@ -50,6 +50,13 @@ img {
     --grid-sheet-selected: #eff5fc;
     --grid-sheet-cost-text: #6e4f08;
     --grid-sheet-acquisition: #dff6e8;
+    --grid-sheet-acquisition-text: #18794e;
+    --grid-sheet-acquisition-header: #c8efd8;
+    --archive-margin-background: #174d39;
+    --archive-margin-hover: #1c6045;
+    --archive-margin-border: #27865c;
+    --archive-margin-text: #7ee0ac;
+    --archive-margin-muted: #a8ebc4;
   }
 }
 

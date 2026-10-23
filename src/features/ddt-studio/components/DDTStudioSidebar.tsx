@@ -1,16 +1,20 @@
-import React from "react";
-import { Search, Calendar, Plus, PanelLeftClose, ChevronRight } from "lucide-react";
-import { DdtDocument } from "../models/ddt";
+import React, { useState } from "react";
+import { Search, Calendar, Plus, PanelLeftClose, ChevronRight, Trash2, LoaderCircle } from "lucide-react";
+import { DdtArchiveEntry } from "../models/ddt";
 import { toDateIT } from "../utils/ddtCalculations";
 import { cn } from "@/shared/utils/cn";
+
+type ArchiveTab = "ddt" | "drafts";
 
 export interface DDTStudioSidebarProps {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
-  ddtList: DdtDocument[];
+  ddtList: DdtArchiveEntry[];
   currentDdtId?: string;
+  loadingDdtId?: string | null;
   onSelectDdt: (id: string) => void;
   onNewDdt: () => void;
+  onDeleteDdt: (id: string) => Promise<boolean>;
   selectedYear: number;
   setSelectedYear: (y: number) => void;
   search: string;
@@ -23,16 +27,47 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = ({
   setSidebarOpen,
   ddtList,
   currentDdtId,
+  loadingDdtId = null,
   onSelectDdt,
   onNewDdt,
+  onDeleteDdt,
   selectedYear,
   setSelectedYear,
   search,
   setSearch,
   isLoading = false,
 }) => {
+  const [marginFilter, setMarginFilter] = useState<"all" | "with_margins" | "without_margins">("all");
+  const [archiveTab, setArchiveTab] = useState<ArchiveTab>("ddt");
+  const [pendingDelete, setPendingDelete] = useState<DdtArchiveEntry | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
   const currentYearNum = new Date().getFullYear();
   const availableYears = [currentYearNum, currentYearNum - 1, currentYearNum - 2];
+  const drafts = ddtList.filter((doc) => doc.status === "bozza" || doc.doc_number === null);
+  const issuedDdts = ddtList.filter((doc) => doc.status !== "bozza" && doc.doc_number !== null);
+  const tabDocuments = archiveTab === "drafts" ? drafts : issuedDdts;
+  const filteredDdtList = tabDocuments.filter((doc) =>
+    marginFilter === "all" || (marginFilter === "with_margins" ? doc.has_complete_margins : !doc.has_complete_margins)
+  );
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setIsDeleting(true);
+    try {
+      const deleted = await onDeleteDdt(pendingDelete.id);
+      if (deleted) {
+        setPendingDelete(null);
+        setDeleteError(false);
+      } else {
+        setDeleteError(true);
+      }
+    } catch {
+      setDeleteError(true);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // SE LA SIDEBAR È RIDOTTA (COLLAPSED): Mostra la colonnina verticale con i pill dei numeri DDT
   if (!sidebarOpen) {
@@ -52,9 +87,9 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = ({
 
         {/* Lista verticale compatta dei numeri DDT */}
         <div className="flex-1 overflow-y-auto no-scrollbar py-1.5 space-y-1 w-full px-1 flex flex-col items-center">
-          {ddtList.map((doc) => {
-            const isSelected = currentDdtId === doc.id;
-            const isConfirmed = doc.status === "confermato" && doc.doc_number !== null;
+          {filteredDdtList.map((doc) => {
+            const isSelected = currentDdtId === doc.id || loadingDdtId === doc.id;
+            const isConfirmed = doc.has_complete_margins;
             const numberLabel = doc.doc_number === null
               ? "Bozza"
               : `${doc.series ? `${doc.series}/` : ""}${doc.doc_number}`;
@@ -69,8 +104,8 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = ({
                   "w-10 h-6 rounded flex items-center justify-center text-[10.5px] font-mono font-bold transition-all cursor-default",
                   isConfirmed
                     ? isSelected
-                      ? "bg-emerald-500 text-slate-950 shadow-md ring-2 ring-emerald-300"
-                      : "bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-600 hover:text-white"
+                      ? "bg-[var(--archive-margin-text)] text-slate-950 shadow-md ring-2 ring-[var(--archive-margin-border)]"
+                      : "bg-[var(--archive-margin-background)] border border-[var(--archive-margin-border)] text-[var(--archive-margin-text)] hover:bg-[var(--archive-margin-hover)] hover:text-white"
                     : isSelected
                     ? "bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-300"
                     : "bg-amber-950/70 border border-amber-500/50 text-amber-300 hover:bg-amber-600 hover:text-white"
@@ -151,62 +186,95 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = ({
         </div>
       </div>
 
+      <div className="grid grid-cols-3 gap-0.5 border-b border-[var(--border)] bg-[var(--card)] p-1">
+        {([
+          ["all", "Tutti"],
+          ["with_margins", "Con margini"],
+          ["without_margins", "Senza margini"],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setMarginFilter(value)}
+            className={cn(
+              "rounded py-1 text-[9px] font-bold transition-colors",
+              marginFilter === value && value === "with_margins" ? "bg-[var(--archive-margin-border)] text-white" :
+              marginFilter === value && value === "without_margins" ? "bg-amber-600 text-white" :
+              marginFilter === value ? "bg-[var(--primary)] text-[var(--primary-foreground)]" : "text-[var(--muted-foreground)] hover:bg-[var(--background)]"
+            )}
+          >{label}</button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-1 border-b border-[var(--border)] p-1">
+        <button
+          type="button"
+          onClick={() => setArchiveTab("ddt")}
+          className={cn("rounded px-2 py-1 text-[10px] font-bold", archiveTab === "ddt" ? "bg-[var(--primary)] text-[var(--primary-foreground)]" : "text-[var(--muted-foreground)] hover:bg-[var(--background)]")}
+        >DDT <span className="opacity-75">{issuedDdts.length}</span></button>
+        <button
+          type="button"
+          onClick={() => setArchiveTab("drafts")}
+          className={cn("rounded px-2 py-1 text-[10px] font-bold", archiveTab === "drafts" ? "bg-amber-600 text-white" : "text-[var(--muted-foreground)] hover:bg-[var(--background)]")}
+        >Bozze <span className="opacity-75">{drafts.length}</span></button>
+      </div>
+
       {/* Lista Documenti DDT */}
       <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]/50">
         {isLoading ? (
           <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
             Caricamento archivio...
           </div>
-        ) : ddtList.length === 0 ? (
+        ) : filteredDdtList.length === 0 ? (
           <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
-            Nessun documento trovato nel {selectedYear}.
+            {archiveTab === "drafts" ? "Nessuna bozza trovata." : `Nessun DDT trovato nel ${selectedYear}.`}
           </div>
         ) : (
-          ddtList.map((doc) => {
-            const isSelected = currentDdtId === doc.id;
+          filteredDdtList.map((doc) => {
+            const isSelected = currentDdtId === doc.id || loadingDdtId === doc.id;
             const isDraft = doc.status === "bozza" || doc.doc_number === null;
+            const numberLabel = doc.doc_number === null
+              ? "Bozza"
+              : `${doc.series ? `${doc.series}/` : ""}${doc.doc_number}`;
 
+            const marginColor = doc.has_complete_margins
+              ? "border-[var(--archive-margin-border)] bg-[var(--archive-margin-background)] hover:bg-[var(--archive-margin-hover)]"
+              : "border-[var(--border)] bg-[var(--background)]/50 hover:bg-[var(--background)]";
             return (
               <div
                 key={doc.id}
-                onClick={() => onSelectDdt(doc.id)}
                 className={cn(
-                  "p-2.5 cursor-default transition-colors flex flex-col space-y-1",
-                  isSelected
-                    ? "bg-[var(--background)] border-l-2 border-[var(--primary)] shadow-inner"
-                    : "hover:bg-[var(--background)]/60"
+                  "mx-1 my-1 flex h-11 items-center gap-1 rounded-md border px-2 transition-colors",
+                  marginColor,
+                  isSelected && "ring-1 ring-[var(--primary)]"
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-1.5">
-                    <span
-                      className={cn(
-                        "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded",
-                        isDraft
-                          ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
-                          : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
-                      )}
-                    >
-                      {isDraft ? "BOZZA" : `#${doc.doc_number}`}
-                    </span>
-                  </div>
-                  <span className="text-[10.5px] text-[var(--muted-foreground)]">
+                <button
+                  type="button"
+                  onClick={() => onSelectDdt(doc.id)}
+                  title={`DDT ${numberLabel} · ${doc.client_name} · ${toDateIT(doc.doc_date)}`}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                >
+                  <span className={cn("shrink-0 font-mono text-[11px] font-black", doc.has_complete_margins ? "text-[var(--archive-margin-text)]" : isDraft ? "text-amber-400" : "text-[var(--primary)]")}>
+                    {isDraft ? "BOZ" : numberLabel}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase text-[var(--foreground)]">
+                    {doc.client_name || "Cliente non specificato"}
+                  </span>
+                  <span className={cn("shrink-0 font-mono text-[10px]", doc.has_complete_margins ? "text-[var(--archive-margin-muted)]" : "text-[var(--muted-foreground)]")}>
                     {toDateIT(doc.doc_date)}
                   </span>
-                </div>
-
-                <div className="text-xs truncate text-[var(--foreground)] font-semibold uppercase">
-                  {doc.client_name || "Cliente non specificato"}
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] text-[var(--muted-foreground)] pt-0.5">
-                  <span className="truncate max-w-[120px]">
-                    {doc.destination_city || doc.client_city || "—"}
-                  </span>
-                  <span className="font-mono text-[var(--foreground)] font-bold">
-                    {doc.total_document ? `€ ${doc.total_document.formatIT(false)}` : "€ 0,00000"}
-                  </span>
-                </div>
+                  {loadingDdtId === doc.id && <LoaderCircle className="h-3 w-3 shrink-0 animate-spin text-[var(--primary)]" aria-label="Caricamento DDT" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDeleteError(false); setPendingDelete(doc); }}
+                  title="Elimina DDT"
+                  aria-label={`Elimina DDT ${numberLabel}`}
+                  className={cn("rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]", doc.has_complete_margins && "text-[var(--archive-margin-text)]")}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
             );
           })
@@ -224,6 +292,20 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = ({
           <span>Crea Nuova Bozza</span>
         </button>
       </div>
+
+      {pendingDelete && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4" role="presentation">
+          <section role="alertdialog" aria-modal="true" aria-labelledby="ddt-archive-delete-title" className="w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--foreground)] shadow-2xl">
+            <h2 id="ddt-archive-delete-title" className="text-sm font-semibold">Eliminare il DDT?</h2>
+            <p className="mt-2 text-xs text-[var(--muted-foreground)]">{pendingDelete.doc_number === null ? "La bozza" : `Il DDT n. ${pendingDelete.doc_number}`} di {pendingDelete.client_name || "cliente non specificato"} verrà rimosso dall’archivio.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              {deleteError && <span className="mr-auto self-center text-[10px] text-red-400">Eliminazione non riuscita.</span>}
+              <button type="button" disabled={isDeleting} onClick={() => { setPendingDelete(null); setDeleteError(false); }} className="rounded border border-[var(--border)] px-3 py-1.5 text-xs">Annulla</button>
+              <button type="button" disabled={isDeleting} onClick={confirmDelete} className="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">{isDeleting ? "Eliminazione…" : "Elimina"}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </aside>
   );
 };

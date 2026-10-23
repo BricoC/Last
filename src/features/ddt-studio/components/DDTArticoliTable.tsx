@@ -483,14 +483,16 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         minWidth: 85,
         editable: true,
         cellEditor: DDTTextEditor,
+        headerClass: "ddt-col-acq-header",
+        cellClass: "ddt-col-acq-cell",
         valueParser: (p: any) => safeMoney(p.newValue),
         cellStyle: {
           textAlign: "right",
           fontFamily: "monospace",
           fontSize: "12px",
           fontWeight: 700,
-          color: "#b45309",
-          backgroundColor: "#fef3c7",
+          color: "var(--grid-sheet-acquisition-text)",
+          backgroundColor: "var(--grid-sheet-acquisition)",
         },
         valueFormatter: (p: any) => {
           if (!p.value) return "";
@@ -571,6 +573,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           font-weight: 700;
           font-size: 11px;
           color: #334155;
+        }
+        .ag-theme-alpine .ddt-col-acq-header {
+          background-color: var(--grid-sheet-acquisition-header) !important;
         }
         .ag-theme-alpine .ag-cell-focus {
           outline: 2px solid #2563eb !important;

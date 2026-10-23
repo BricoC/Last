@@ -76,3 +76,8 @@ export interface DdtTotals {
   totale_ricavo?: MonetaryValue;
   ricarico_percentuale?: number;
 }
+
+/** DDT summary used by the archive, including its derived margin completeness state. */
+export interface DdtArchiveEntry extends DdtDocument {
+  has_complete_margins: boolean;
+}

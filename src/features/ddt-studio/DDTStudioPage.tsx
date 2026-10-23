@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { DdtDocument, DdtItem } from "./models/ddt";
+import { DdtArchiveEntry, DdtDocument, DdtItem } from "./models/ddt";
 import { ddtRepository } from "./services/ddtRepository";
 import { clientRepository } from "@/features/clients/services/clientRepository";
 import { Product } from "@/features/price-lists/models/product";
@@ -172,14 +172,16 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [showMargini, setShowMargini] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [searchSidebar, setSearchSidebar] = useState("");
-  const [recentDdts, setRecentDdts] = useState<DdtDocument[]>([]);
+  const [recentDdts, setRecentDdts] = useState<DdtArchiveEntry[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
+  const [loadingDdtId, setLoadingDdtId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isPrintCopiesModalOpen, setIsPrintCopiesModalOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [closePrompt, setClosePrompt] = useState<((choice: DdtCloseChoice) => void) | null>(null);
   const savedSignature = React.useRef<string | null>(null);
+  const ddtLoadRequest = React.useRef(0);
 
   // Stato DDT Corrente
   const [ddt, setDdt] = useState<Partial<DdtDocument>>(makeEmptyDdt());
@@ -255,8 +257,11 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   // Carica un DDT esistente selezionato dalla sidebar
   const handleSelectDdt = async (id: string) => {
+    const requestId = ++ddtLoadRequest.current;
+    setLoadingDdtId(id);
     try {
       const fullDoc = await ddtRepository.getDdtById(id);
+      if (requestId !== ddtLoadRequest.current) return;
       if (!fullDoc) return;
 
       setDdt(fullDoc);
@@ -300,12 +305,18 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         : `${fullDoc.series ? `${fullDoc.series}/` : ""}${fullDoc.doc_number}`;
       showToast(`DDT #${identifier} caricato`);
     } catch (e) {
+      if (requestId !== ddtLoadRequest.current) return;
       console.error("Errore apertura DDT:", e);
+      showToast("Non è stato possibile caricare il DDT selezionato");
+    } finally {
+      if (requestId === ddtLoadRequest.current) setLoadingDdtId(null);
     }
   };
 
   // Nuovo DDT vuoto
   const handleNewDdt = () => {
+    ddtLoadRequest.current += 1;
+    setLoadingDdtId(null);
     const nextDdt = makeEmptyDdt();
     const nextItems = makeEmptyItems();
     setDdt(nextDdt);
@@ -400,6 +411,20 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       showToast("DDT eliminato");
     } catch (e) {
       console.error("Errore eliminazione:", e);
+    }
+  };
+
+  const handleDeleteArchivedDdt = async (id: string): Promise<boolean> => {
+    try {
+      await ddtRepository.deleteDdt(id);
+      if (ddt.id === id) handleNewDdt();
+      await loadRecentDdts();
+      showToast("DDT eliminato dall’archivio");
+      return true;
+    } catch (e) {
+      console.error("Errore eliminazione DDT dall’archivio:", e);
+      showToast(`Errore eliminazione DDT: ${getErrorMessage(e)}`);
+      return false;
     }
   };
 
@@ -719,8 +744,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           setSidebarOpen={setSidebarOpen}
           ddtList={recentDdts}
           currentDdtId={ddt.id}
+          loadingDdtId={loadingDdtId}
           onSelectDdt={handleSelectDdt}
           onNewDdt={handleNewDdt}
+          onDeleteDdt={handleDeleteArchivedDdt}
           selectedYear={selectedYear}
           setSelectedYear={setSelectedYear}
           search={searchSidebar}

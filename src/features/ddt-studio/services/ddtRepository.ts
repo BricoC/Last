@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
-import { DdtItem, DdtDocument } from "../models/ddt";
+import { DdtItem, DdtDocument, DdtArchiveEntry } from "../models/ddt";
 import { calculateDdtTotals } from "../utils/ddtCalculations";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 
@@ -9,7 +9,7 @@ export class DdtRepository {
   /**
    * Recupera la lista dei DDT recenti filtrata per anno e ricerca facoltativa
    */
-  public async getRecentDdts(year?: number, search = ""): Promise<DdtDocument[]> {
+  public async getRecentDdts(year?: number, search = ""): Promise<DdtArchiveEntry[]> {
     const db = await getDatabase();
     let query = `
       SELECT * FROM ddt_documents 
@@ -32,7 +32,33 @@ export class DdtRepository {
     query += " ORDER BY year DESC, series ASC, CASE WHEN doc_number IS NULL THEN 0 ELSE 1 END DESC, doc_number DESC, doc_date DESC LIMIT 150";
 
     const rows = await db.select<any[]>(query, params);
-    return rows.map((r) => this.mapRowToDocument(r, []));
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((row) => String(row.id));
+    const placeholders = ids.map((_, index) => `$${index + 1}`).join(", ");
+    const itemRows = await db.select<any[]>(
+      `SELECT ddt_id, unit_price_subunits, purchase_price_subunits
+       FROM ddt_items
+       WHERE deleted_at IS NULL AND ddt_id IN (${placeholders})`,
+      ids
+    );
+    const marginState = new Map<string, { billedRows: number; allHaveCost: boolean }>();
+    for (const item of itemRows) {
+      const state = marginState.get(item.ddt_id) ?? { billedRows: 0, allHaveCost: true };
+      if (Number(item.unit_price_subunits) > 0) {
+        state.billedRows += 1;
+        if (Number(item.purchase_price_subunits) <= 0) state.allHaveCost = false;
+      }
+      marginState.set(item.ddt_id, state);
+    }
+
+    return rows.map((row) => {
+      const state = marginState.get(String(row.id));
+      return {
+        ...this.mapRowToDocument(row, []),
+        has_complete_margins: Boolean(state && state.billedRows > 0 && state.allHaveCost),
+      };
+    });
   }
 
   /**
