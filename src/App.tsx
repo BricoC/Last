@@ -6,6 +6,7 @@ import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { ProductListPage } from "@/features/price-lists/ProductListPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { DDTStudioPage } from "@/features/ddt-studio/DDTStudioPage";
+import { ClientListPage } from "@/features/clients/ClientListPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { Card } from "@/shared/components/ui/card";
 
@@ -28,6 +29,8 @@ export function App() {
         return <SettingsPage />;
       case "ddt-studio":
         return <DDTStudioPage />;
+      case "clients":
+        return <ClientListPage />;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">

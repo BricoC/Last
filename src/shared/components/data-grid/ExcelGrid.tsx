@@ -15,6 +15,7 @@ export interface ExcelGridProps {
   rows: number;
   getCellContent: (cell: Item) => GridCell;
   onCellEdited?: (cell: Item, newValue: EditableGridCell) => void;
+  onCellClicked?: (cell: Item) => void;
   onRowAppended?: () => void;
   onPaste?: (target: Item, values: readonly (readonly string[])[]) => boolean | Promise<boolean>;
   className?: string;
@@ -30,6 +31,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
   rows,
   getCellContent,
   onCellEdited,
+  onCellClicked,
   onRowAppended,
   onPaste,
   className,
@@ -76,6 +78,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
         rows={rows}
         getCellContent={getCellContent}
         onCellEdited={onCellEdited}
+        onCellClicked={onCellClicked}
         onRowAppended={onRowAppended}
         onPaste={handleGlidePaste}
         rowMarkers="number"

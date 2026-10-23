@@ -1,5 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
-import { Client, CreateClientInput } from "../models/client";
+import { Client, ClientPhone, CreateClientInput } from "../models/client";
 
 export class ClientRepository {
   public async getClients(search = ""): Promise<Client[]> {
@@ -22,13 +22,13 @@ export class ClientRepository {
 
     query += " ORDER BY business_name ASC LIMIT 200";
 
-    const rows = await db.select<any[]>(query, params);
+    const rows = await db.select<ClientRow[]>(query, params);
     return rows.map(this.mapRowToClient);
   }
 
   public async getClientById(id: string): Promise<Client | null> {
     const db = await getDatabase();
-    const rows = await db.select<any[]>(
+    const rows = await db.select<ClientRow[]>(
       "SELECT * FROM clients WHERE id = $1 AND deleted_at IS NULL",
       [id]
     );
@@ -61,10 +61,11 @@ export class ClientRepository {
           destination_city = $14,
           phones_json = $15,
           notes = $16,
-          updated_at = $17,
-          updated_by = 'system',
+          is_active = $17,
+          updated_at = $18,
+          updated_by = $19,
           sync_status = 'pending'
-        WHERE id = $18`,
+        WHERE id = $20 AND deleted_at IS NULL`,
         [
           input.code || null,
           input.business_name.trim(),
@@ -82,7 +83,9 @@ export class ClientRepository {
           input.destination_city || null,
           phonesJson,
           input.notes || null,
+          input.is_active === false ? 0 : 1,
           now,
+          "system",
           id,
         ]
       );
@@ -94,7 +97,7 @@ export class ClientRepository {
           destination_name, destination_address, destination_city,
           phones_json, notes, is_active, created_at, updated_at, updated_by, sync_status
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 1, $18, $18, 'system', 'pending'
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $19, $20, 'pending'
         )`,
         [
           id,
@@ -114,7 +117,9 @@ export class ClientRepository {
           input.destination_city || null,
           phonesJson,
           input.notes || null,
+          input.is_active === false ? 0 : 1,
           now,
+          "system",
         ]
       );
     }
@@ -124,11 +129,24 @@ export class ClientRepository {
     return saved;
   }
 
-  private mapRowToClient(row: any): Client {
-    let phones: any[] = [];
+  public async softDeleteClient(id: string): Promise<void> {
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+    await db.execute(
+      `UPDATE clients SET deleted_at = $1, updated_at = $1, updated_by = $2, sync_status = 'pending'
+       WHERE id = $3 AND deleted_at IS NULL`,
+      [now, "system", id]
+    );
+  }
+
+  private mapRowToClient(row: ClientRow): Client {
+    let phones: ClientPhone[] = [];
     try {
       if (row.phones_json) {
-        phones = JSON.parse(row.phones_json);
+        const parsed: unknown = JSON.parse(row.phones_json);
+        if (Array.isArray(parsed)) {
+          phones = parsed.filter(isClientPhone);
+        }
       }
     } catch {
       phones = [];
@@ -156,10 +174,44 @@ export class ClientRepository {
       created_at: row.created_at,
       updated_at: row.updated_at,
       updated_by: row.updated_by,
-      deleted_at: row.deleted_at || undefined,
+      deleted_at: row.deleted_at,
       sync_status: row.sync_status,
     };
   }
+}
+
+interface ClientRow {
+  id: string;
+  code: string | null;
+  business_name: string;
+  address: string | null;
+  city: string | null;
+  postal_code: string | null;
+  province: string | null;
+  vat_number: string | null;
+  fiscal_code: string | null;
+  sdi_code: string | null;
+  pec: string | null;
+  payment_method: string | null;
+  destination_name: string | null;
+  destination_address: string | null;
+  destination_city: string | null;
+  phones_json: string | null;
+  notes: string | null;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  updated_by: string;
+  deleted_at: string | null;
+  sync_status: "synced" | "pending";
+}
+
+function isClientPhone(value: unknown): value is ClientPhone {
+  if (typeof value !== "object" || value === null) return false;
+  const phone = value as Record<string, unknown>;
+  return (typeof phone.id === "string" || typeof phone.id === "number")
+    && typeof phone.nome === "string"
+    && typeof phone.numero === "string";
 }
 
 export const clientRepository = new ClientRepository();

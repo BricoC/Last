@@ -43,4 +43,5 @@ export interface CreateClientInput {
   destination_city?: string;
   phones?: ClientPhone[];
   notes?: string;
+  is_active?: boolean;
 }
