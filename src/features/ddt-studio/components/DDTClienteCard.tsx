@@ -106,7 +106,9 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
             <input
               type="text"
               readOnly
-              value={ddt.doc_number ? String(ddt.doc_number) : "Provvisorio (Assegnato al Salva)"}
+              value={ddt.doc_number !== null
+                ? `${ddt.series ? `${ddt.series}/` : ""}${ddt.doc_number}`
+                : "Provvisorio (Assegnato al Salva)"}
               className="w-full mt-0.5 px-2.5 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded font-semibold text-[var(--foreground)] outline-none"
             />
           </div>

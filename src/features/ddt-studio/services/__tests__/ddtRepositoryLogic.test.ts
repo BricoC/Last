@@ -8,6 +8,11 @@ describe("DdtRepository Logic & Life-cycle", () => {
     const items: DdtItem[] = [
       {
         id: "1",
+        created_at: "2026-07-31T10:00:00Z",
+        updated_at: "2026-07-31T10:00:00Z",
+        updated_by: "system",
+        deleted_at: null,
+        sync_status: "synced",
         ddt_id: "doc-1",
         row_index: 1,
         description: "TASSELLO SX 6",
@@ -31,6 +36,7 @@ describe("DdtRepository Logic & Life-cycle", () => {
     const original: DdtDocument = {
       id: "doc-orig",
       doc_number: 2023,
+      series: "",
       year: 2026,
       doc_date: "2026-07-31",
       status: "confermato",
@@ -52,6 +58,11 @@ describe("DdtRepository Logic & Life-cycle", () => {
       items: [
         {
           id: "r1",
+          created_at: "2026-07-31T10:00:00Z",
+          updated_at: "2026-07-31T10:00:00Z",
+          updated_by: "system",
+          deleted_at: null,
+          sync_status: "synced",
           ddt_id: "doc-orig",
           row_index: 1,
           description: "TASSELLO SX 6",

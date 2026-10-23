@@ -205,7 +205,9 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                               lineHeight: "1",
                             }}
                           >
-                            {ddt.doc_number ? ddt.doc_number : "BOZZA"}
+                            {ddt.doc_number !== null
+                              ? `${ddt.series ? `${ddt.series}/` : ""}${ddt.doc_number}`
+                              : "BOZZA"}
                           </td>
                           <td
                             style={{
@@ -542,7 +544,9 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                     <span style={{ textTransform: "uppercase" }}>{ddt.client_name}</span>
                   </div>
                   <div>
-                    DDT {ddt.doc_number ? `#${ddt.doc_number}` : "(Bozza)"} del {toDateIT(ddt.doc_date)}
+                    DDT {ddt.doc_number !== null
+                      ? `#${ddt.series ? `${ddt.series}/` : ""}${ddt.doc_number}`
+                      : "(Bozza)"} del {toDateIT(ddt.doc_date)}
                   </div>
                 </div>
               )}

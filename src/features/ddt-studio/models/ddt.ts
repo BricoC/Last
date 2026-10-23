@@ -4,8 +4,7 @@ import { MonetaryValue } from "@/shared/domain/monetaryValue";
 export type DdtStatus = "bozza" | "confermato" | "annullato";
 export type DdtAccountOrBalance = "" | "in_conto" | "a_saldo";
 
-export interface DdtItem {
-  id: string;
+export interface DdtItem extends BaseEntity {
   ddt_id: string;
   row_index: number;
   product_id?: string;
@@ -25,6 +24,7 @@ export interface DdtItem {
 
 export interface DdtDocument extends BaseEntity {
   doc_number: number | null; // null per le bozze
+  series: string;
   year: number;
   doc_date: string; // YYYY-MM-DD
   status: DdtStatus;

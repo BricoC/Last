@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { DdtItem, DdtDocument } from "../models/ddt";
@@ -26,12 +27,13 @@ export class DdtRepository {
       query += ` AND (
         client_name LIKE $${pIdx} 
         OR CAST(doc_number AS TEXT) LIKE $${pIdx}
+        OR series LIKE $${pIdx}
         OR destination_name LIKE $${pIdx}
         OR internal_notes LIKE $${pIdx}
       )`;
     }
 
-    query += " ORDER BY year DESC, CASE WHEN doc_number IS NULL THEN 0 ELSE 1 END DESC, doc_number DESC, doc_date DESC LIMIT 150";
+    query += " ORDER BY year DESC, series ASC, CASE WHEN doc_number IS NULL THEN 0 ELSE 1 END DESC, doc_number DESC, doc_date DESC LIMIT 150";
 
     const rows = await db.select<any[]>(query, params);
     return rows.map((r) => this.mapRowToDocument(r, []));
@@ -50,25 +52,12 @@ export class DdtRepository {
     if (docRows.length === 0) return null;
 
     const itemRows = await db.select<any[]>(
-      "SELECT * FROM ddt_items WHERE ddt_id = $1 ORDER BY row_index ASC",
+      "SELECT * FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NULL ORDER BY row_index ASC",
       [id]
     );
 
     const items = itemRows.map(this.mapRowToItem);
     return this.mapRowToDocument(docRows[0], items);
-  }
-
-  /**
-   * Calcola il prossimo numero progressivo disponibile per l'anno specificato
-   */
-  public async getNextDocNumber(year: number): Promise<number> {
-    const db = await getDatabase();
-    const rows = await db.select<{ max_num: number | null }[]>(
-      "SELECT MAX(doc_number) as max_num FROM ddt_documents WHERE year = $1 AND deleted_at IS NULL",
-      [year]
-    );
-    const max = rows[0]?.max_num;
-    return (max && max > 0 ? max : 0) + 1;
   }
 
   /**
@@ -119,12 +108,10 @@ export class DdtRepository {
    * Soft delete di un DDT
    */
   public async deleteDdt(id: string): Promise<void> {
-    const db = await getDatabase();
-    const now = new Date().toISOString();
-    await db.execute(
-      "UPDATE ddt_documents SET deleted_at = $1, sync_status = 'pending' WHERE id = $2",
-      [now, id]
-    );
+    await invoke("soft_delete_ddt_transaction", {
+      id,
+      deletedAt: new Date().toISOString(),
+    });
   }
 
   private async saveDocumentInternal(
@@ -132,167 +119,23 @@ export class DdtRepository {
     items: Partial<DdtItem>[],
     isEmission: boolean
   ): Promise<DdtDocument> {
-    const db = await getDatabase();
     const docId = ddt.id || crypto.randomUUID();
     const now = new Date().toISOString();
     const year = ddt.year || new Date().getFullYear();
+    const series = ddt.series?.trim() || "";
 
-    let docNumber = ddt.doc_number ?? null;
+    const docNumber = ddt.doc_number ?? null;
     let status = ddt.status || "bozza";
 
     if (isEmission) {
       status = "confermato";
-      if (!docNumber) {
-        docNumber = await this.getNextDocNumber(year);
-      }
     }
 
-    // Calcolo totali esatti a 5 decimali
     const totals = calculateDdtTotals(items);
-
-    // Verifica se documento esiste già
-    const existing = await db.select<any[]>(
-      "SELECT id FROM ddt_documents WHERE id = $1",
-      [docId]
-    );
-
-    const phonesJson = JSON.stringify(ddt.client_phones || []);
-
-    if (existing.length > 0) {
-      await db.execute(
-        `UPDATE ddt_documents SET
-          doc_number = $1,
-          year = $2,
-          doc_date = $3,
-          status = $4,
-          client_id = $5,
-          client_name = $6,
-          client_address = $7,
-          client_city = $8,
-          client_vat = $9,
-          client_fiscal_code = $10,
-          client_sdi = $11,
-          client_phones_json = $12,
-          destination_name = $13,
-          destination_address = $14,
-          destination_city = $15,
-          transport_reason = $16,
-          payment_method = $17,
-          order_reference = $18,
-          account_or_balance = $19,
-          operator = $20,
-          goods_appearance = $21,
-          carriage_terms = $22,
-          packages_count = $23,
-          weight_kg = $24,
-          carrier = $25,
-          pickup_date_time = $26,
-          internal_notes = $27,
-          total_taxable_subunits = $28,
-          total_vat_subunits = $29,
-          total_document_subunits = $30,
-          updated_at = $31,
-          updated_by = 'system',
-          sync_status = 'pending'
-        WHERE id = $32`,
-        [
-          docNumber,
-          year,
-          ddt.doc_date || now.split("T")[0],
-          status,
-          ddt.client_id || null,
-          (ddt.client_name || "").trim() || "Cliente",
-          ddt.client_address || null,
-          ddt.client_city || null,
-          ddt.client_vat || null,
-          ddt.client_fiscal_code || null,
-          ddt.client_sdi || null,
-          phonesJson,
-          ddt.destination_name || null,
-          ddt.destination_address || null,
-          ddt.destination_city || null,
-          ddt.transport_reason || "Vendita",
-          ddt.payment_method || null,
-          ddt.order_reference || null,
-          ddt.account_or_balance || "",
-          ddt.operator || null,
-          ddt.goods_appearance || null,
-          ddt.carriage_terms || "Franco stabilimento",
-          ddt.packages_count || null,
-          ddt.weight_kg || null,
-          ddt.carrier || null,
-          ddt.pickup_date_time || null,
-          ddt.internal_notes || null,
-          totals.totale_imponibile.toSubunits(),
-          totals.totale_iva.toSubunits(),
-          totals.totale_documento.toSubunits(),
-          now,
-          docId,
-        ]
-      );
-    } else {
-      await db.execute(
-        `INSERT INTO ddt_documents (
-          id, doc_number, year, doc_date, status,
-          client_id, client_name, client_address, client_city, client_vat,
-          client_fiscal_code, client_sdi, client_phones_json, destination_name,
-          destination_address, destination_city, transport_reason, payment_method,
-          order_reference, account_or_balance, operator, goods_appearance,
-          carriage_terms, packages_count, weight_kg, carrier, pickup_date_time,
-          internal_notes, total_taxable_subunits, total_vat_subunits,
-          total_document_subunits, created_at, updated_at, updated_by, sync_status
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-          $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-          $31, $32, $32, 'system', 'pending'
-        )`,
-        [
-          docId,
-          docNumber,
-          year,
-          ddt.doc_date || now.split("T")[0],
-          status,
-          ddt.client_id || null,
-          (ddt.client_name || "").trim() || "Cliente",
-          ddt.client_address || null,
-          ddt.client_city || null,
-          ddt.client_vat || null,
-          ddt.client_fiscal_code || null,
-          ddt.client_sdi || null,
-          phonesJson,
-          ddt.destination_name || null,
-          ddt.destination_address || null,
-          ddt.destination_city || null,
-          ddt.transport_reason || "Vendita",
-          ddt.payment_method || null,
-          ddt.order_reference || null,
-          ddt.account_or_balance || "",
-          ddt.operator || null,
-          ddt.goods_appearance || null,
-          ddt.carriage_terms || "Franco stabilimento",
-          ddt.packages_count || null,
-          ddt.weight_kg || null,
-          ddt.carrier || null,
-          ddt.pickup_date_time || null,
-          ddt.internal_notes || null,
-          totals.totale_imponibile.toSubunits(),
-          totals.totale_iva.toSubunits(),
-          totals.totale_documento.toSubunits(),
-          now,
-        ]
-      );
-    }
-
-    // Riscrivi le righe del documento
-    await db.execute("DELETE FROM ddt_items WHERE ddt_id = $1", [docId]);
-
-    // Inserisci solo righe compilate
     const validItems = items.filter(
       (it) => it.description?.trim().length || isPositivePrice(it.unit_price)
     );
-
-    for (let i = 0; i < validItems.length; i++) {
-      const it = validItems[i];
+    const itemPayloads = validItems.map((it, index) => {
       const p = safeMoney(it.unit_price);
       const q = it.quantity || "1";
       const disc = it.discount_pct || "0";
@@ -303,34 +146,63 @@ export class DdtRepository {
       const qNum = parseFloat(String(q).replace(",", ".")) || 1;
       const net = p.times(qNum).applyDiscount(parseFloat(String(disc).replace(",", ".")) || 0);
       const vatA = vatR > 0 ? net.calculateVat(vatR) : money(0);
+      return {
+        id: it.id || crypto.randomUUID(),
+        row_index: index + 1,
+        product_id: it.product_id || null,
+        code: it.code || null,
+        description: (it.description || "").trim(),
+        unit: it.unit || "NR",
+        quantity: String(q),
+        unit_price_subunits: p.toSubunits(),
+        discount_pct: String(disc),
+        net_amount_subunits: net.toSubunits(),
+        vat_rate: vatR,
+        vat_amount_subunits: vatA.toSubunits(),
+        purchase_price_subunits: it.purchase_price ? it.purchase_price.toSubunits() : 0,
+      };
+    });
 
-      await db.execute(
-        `INSERT INTO ddt_items (
-          id, ddt_id, row_index, product_id, code, description, unit, quantity,
-          unit_price_subunits, discount_pct, net_amount_subunits, vat_rate,
-          vat_amount_subunits, purchase_price_subunits, created_at, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15
-        )`,
-        [
-          it.id || crypto.randomUUID(),
-          docId,
-          i + 1,
-          it.product_id || null,
-          it.code || null,
-          (it.description || "").trim(),
-          it.unit || "NR",
-          String(q),
-          p.toSubunits(),
-          String(disc),
-          net.toSubunits(),
-          vatR,
-          vatA.toSubunits(),
-          it.purchase_price ? it.purchase_price.toSubunits() : 0,
-          now,
-        ]
-      );
-    }
+    const payload = {
+      id: docId,
+      doc_number: docNumber,
+      year,
+      series,
+      doc_date: ddt.doc_date || now.split("T")[0],
+      status,
+      is_emission: isEmission,
+      updated_at: now,
+      updated_by: "system",
+      client_id: ddt.client_id || null,
+      client_name: (ddt.client_name || "").trim() || "Cliente",
+      client_address: ddt.client_address || null,
+      client_city: ddt.client_city || null,
+      client_vat: ddt.client_vat || null,
+      client_fiscal_code: ddt.client_fiscal_code || null,
+      client_sdi: ddt.client_sdi || null,
+      client_phones_json: JSON.stringify(ddt.client_phones || []),
+      destination_name: ddt.destination_name || null,
+      destination_address: ddt.destination_address || null,
+      destination_city: ddt.destination_city || null,
+      transport_reason: ddt.transport_reason || "Vendita",
+      payment_method: ddt.payment_method || null,
+      order_reference: ddt.order_reference || null,
+      account_or_balance: ddt.account_or_balance || "",
+      operator: ddt.operator || null,
+      goods_appearance: ddt.goods_appearance || null,
+      carriage_terms: ddt.carriage_terms || "Franco stabilimento",
+      packages_count: ddt.packages_count || null,
+      weight_kg: ddt.weight_kg || null,
+      carrier: ddt.carrier || null,
+      pickup_date_time: ddt.pickup_date_time || null,
+      internal_notes: ddt.internal_notes || null,
+      total_taxable_subunits: totals.totale_imponibile.toSubunits(),
+      total_vat_subunits: totals.totale_iva.toSubunits(),
+      total_document_subunits: totals.totale_documento.toSubunits(),
+      items: itemPayloads,
+    };
+
+    await invoke("save_ddt_transaction", { payload });
 
     const saved = await this.getDdtById(docId);
     if (!saved) throw new Error("Errore durante il salvataggio del DDT");
@@ -350,6 +222,7 @@ export class DdtRepository {
     return {
       id: row.id,
       doc_number: row.doc_number ?? null,
+      series: row.series || "",
       year: row.year,
       doc_date: row.doc_date,
       status: row.status,
@@ -391,6 +264,11 @@ export class DdtRepository {
   private mapRowToItem(row: any): DdtItem {
     return {
       id: row.id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      updated_by: row.updated_by,
+      deleted_at: row.deleted_at ?? null,
+      sync_status: row.sync_status,
       ddt_id: row.ddt_id,
       row_index: row.row_index,
       product_id: row.product_id || undefined,

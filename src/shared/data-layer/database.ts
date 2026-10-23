@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { migrateDdtSchemaV5 } from "./migrations/ddtSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -214,6 +215,11 @@ const MIGRATIONS: Migration[] = [
         ON ddt_items(ddt_id, row_index);
       `);
     },
+  },
+  {
+    version: 5,
+    name: "add_ddt_series_and_soft_delete_items",
+    up: migrateDdtSchemaV5,
   },
 ];
 

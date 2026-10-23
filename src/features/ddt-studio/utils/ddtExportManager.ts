@@ -12,7 +12,9 @@ export function formatDdtImageFilename(
   pageIndex?: number,
   totalPages: number = 1
 ): string {
-  const docNum = ddt.doc_number ? String(ddt.doc_number) : "Bozza";
+  const docNum = ddt.doc_number === null || ddt.doc_number === undefined
+    ? "Bozza"
+    : `${ddt.series ? `${ddt.series}-` : ""}${ddt.doc_number}`;
   let dateStr = "";
   if (ddt.doc_date) {
     const parts = ddt.doc_date.split("-");

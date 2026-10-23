@@ -2,6 +2,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod ddt_commands;
+mod ddt_delete_command;
+mod ddt_types;
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -39,7 +43,8 @@ fn print_ddt_silent(images_bytes: Vec<Vec<u8>>, copies: u32) -> Result<(), Strin
 
     for (i, img) in images_bytes.iter().enumerate() {
         let file_path = temp_dir.join(format!("_ddt_print_{}_{}.png", timestamp, i));
-        fs::write(&file_path, img).map_err(|e| format!("Errore salvataggio immagine temporanea: {}", e))?;
+        fs::write(&file_path, img)
+            .map_err(|e| format!("Errore salvataggio immagine temporanea: {}", e))?;
         file_paths.push(file_path);
     }
 
@@ -112,10 +117,19 @@ foreach ($p in $imagePaths) {{
         );
 
         let mut cmd = Command::new("powershell");
-        cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &ps_script]);
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &ps_script,
+        ]);
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        
-        let output = cmd.output().map_err(|e| format!("Errore esecuzione comando di stampa: {}", e))?;
+
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Errore esecuzione comando di stampa: {}", e))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("Errore PowerShell durante la stampa: {}", stderr));
@@ -130,7 +144,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![save_file_to_desktop, save_pdf_to_desktop, print_ddt_silent])
+        .invoke_handler(tauri::generate_handler![
+            save_file_to_desktop,
+            save_pdf_to_desktop,
+            print_ddt_silent,
+            ddt_commands::save_ddt_transaction,
+            ddt_delete_command::soft_delete_ddt_transaction
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

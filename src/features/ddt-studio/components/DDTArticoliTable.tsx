@@ -140,6 +140,11 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         copy.splice(rowIndex, 1);
         copy.push({
           id: crypto.randomUUID(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          updated_by: "system",
+          deleted_at: null,
+          sync_status: "pending",
           ddt_id: "",
           row_index: 500,
           description: "",

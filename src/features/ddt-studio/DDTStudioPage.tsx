@@ -31,6 +31,7 @@ export function makeEmptyDdt(): Partial<DdtDocument> {
   return {
     id: crypto.randomUUID(),
     doc_number: null,
+    series: "",
     year,
     doc_date: todayIso,
     status: "bozza",
@@ -62,8 +63,14 @@ export function makeEmptyDdt(): Partial<DdtDocument> {
 }
 
 export function makeEmptyItems(): DdtItem[] {
+  const now = new Date().toISOString();
   return Array.from({ length: TOTAL_PRESET_ROWS }, (_, i) => ({
     id: crypto.randomUUID(),
+    created_at: now,
+    updated_at: now,
+    updated_by: "system",
+    deleted_at: null,
+    sync_status: "pending",
     ddt_id: "",
     row_index: i + 1,
     code: "",
@@ -104,6 +111,11 @@ export function makeTest48Items(): DdtItem[] {
     const { netAmount, vatAmount } = calculateRowAmounts(qty, pr, disc, s.v);
     fullList[i] = {
       id: crypto.randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: "system",
+      deleted_at: null,
+      sync_status: "pending",
       ddt_id: "",
       row_index: i + 1,
       code: `${s.code}-${String(i + 1).padStart(2, "0")}`,
@@ -225,6 +237,11 @@ export const DDTStudioPage: React.FC = () => {
       while (padded.length < TOTAL_PRESET_ROWS) {
         padded.push({
           id: crypto.randomUUID(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          updated_by: "system",
+          deleted_at: null,
+          sync_status: "pending",
           ddt_id: fullDoc.id,
           row_index: padded.length + 1,
           code: "",
@@ -243,7 +260,10 @@ export const DDTStudioPage: React.FC = () => {
       setGlobalDiscount("");
       setGlobalMarkup("");
       setItems(padded);
-      showToast(`DDT #${fullDoc.doc_number || "Bozza"} caricato`);
+      const identifier = fullDoc.doc_number === null
+        ? "Bozza"
+        : `${fullDoc.series ? `${fullDoc.series}/` : ""}${fullDoc.doc_number}`;
+      showToast(`DDT #${identifier} caricato`);
     } catch (e) {
       console.error("Errore apertura DDT:", e);
     }
@@ -286,7 +306,8 @@ export const DDTStudioPage: React.FC = () => {
       const saved = await ddtRepository.emitDdt(ddt, items);
       setDdt(saved);
       await loadRecentDdts();
-      showToast(`DDT emesso con successo! Numero assegnato: #${saved.doc_number}`);
+      const identifier = `${saved.series ? `${saved.series}/` : ""}${saved.doc_number}`;
+      showToast(`DDT emesso con successo! Numero assegnato: #${identifier}`);
     } catch (e) {
       console.error("Errore emissione DDT:", e);
       showToast("Errore durante l'emissione del DDT");

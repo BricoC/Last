@@ -55,13 +55,16 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = ({
           {ddtList.map((doc) => {
             const isSelected = currentDdtId === doc.id;
             const isConfirmed = doc.status === "confermato" && doc.doc_number !== null;
+            const numberLabel = doc.doc_number === null
+              ? "Bozza"
+              : `${doc.series ? `${doc.series}/` : ""}${doc.doc_number}`;
 
             return (
               <button
                 key={doc.id}
                 type="button"
                 onClick={() => onSelectDdt(doc.id)}
-                title={`DDT ${doc.doc_number || "Bozza"} - ${doc.client_name}`}
+                title={`DDT ${numberLabel} - ${doc.client_name}`}
                 className={cn(
                   "w-10 h-6 rounded flex items-center justify-center text-[10.5px] font-mono font-bold transition-all cursor-default",
                   isConfirmed
@@ -73,7 +76,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = ({
                     : "bg-amber-950/70 border border-amber-500/50 text-amber-300 hover:bg-amber-600 hover:text-white"
                 )}
               >
-                {doc.doc_number ? String(doc.doc_number) : "BOZ"}
+                {doc.doc_number === null ? "BOZ" : numberLabel}
               </button>
             );
           })}
