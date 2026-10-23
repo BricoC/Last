@@ -5,6 +5,9 @@ use std::process::Command;
 mod ddt_commands;
 mod ddt_delete_command;
 mod ddt_types;
+mod quote_commands;
+mod quote_persistence;
+mod quote_types;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -149,7 +152,9 @@ pub fn run() {
             save_pdf_to_desktop,
             print_ddt_silent,
             ddt_commands::save_ddt_transaction,
-            ddt_delete_command::soft_delete_ddt_transaction
+            ddt_delete_command::soft_delete_ddt_transaction,
+            quote_commands::save_quote_transaction,
+            quote_commands::soft_delete_quote_transaction
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
