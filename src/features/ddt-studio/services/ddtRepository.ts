@@ -3,6 +3,7 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { DdtItem, DdtDocument } from "../models/ddt";
 import { calculateDdtTotals } from "../utils/ddtCalculations";
+import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 
 export class DdtRepository {
   /**
@@ -21,16 +22,11 @@ export class DdtRepository {
       query += ` AND year = $${params.length}`;
     }
 
-    if (search.trim()) {
-      params.push(`%${search.trim()}%`);
+    const searchFields = ["client_name", "CAST(doc_number AS TEXT)"];
+    for (const token of tokenizeSearch(search)) {
+      params.push(`%${token}%`);
       const pIdx = params.length;
-      query += ` AND (
-        client_name LIKE $${pIdx} 
-        OR CAST(doc_number AS TEXT) LIKE $${pIdx}
-        OR series LIKE $${pIdx}
-        OR destination_name LIKE $${pIdx}
-        OR internal_notes LIKE $${pIdx}
-      )`;
+      query += ` AND (${searchFields.map((field) => `${field} LIKE $${pIdx}`).join(" OR ")})`;
     }
 
     query += " ORDER BY year DESC, series ASC, CASE WHEN doc_number IS NULL THEN 0 ELSE 1 END DESC, doc_number DESC, doc_date DESC LIMIT 150";
