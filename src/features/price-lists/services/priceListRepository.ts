@@ -58,12 +58,19 @@ export class PriceListRepository {
   async getClientPriceCount(clientFilter?: string): Promise<number> {
     const db = await getDatabase();
     if (clientFilter && clientFilter !== "TUTTI") {
+      const cleanFilter = clientFilter.trim().replace(/^LIST_/, "").toLowerCase();
       const rows = await db.select<{ count: number }[]>(
         `SELECT COUNT(*) as count FROM listini_clienti 
-         WHERE (cliente = $1 OR cliente = 'LIST_' || $1)
-           AND cliente NOT LIKE 'LIST_000%' 
-           AND cliente != 'LIST_';`,
-        [clientFilter]
+         WHERE (
+           LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) = $1
+           OR LOWER(cliente) = $1
+           OR LOWER(cliente) = 'list_' || $1
+           OR LOWER(cliente) LIKE '%' || $1 || '%'
+           OR $1 LIKE '%' || LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) || '%'
+         )
+         AND cliente NOT LIKE 'LIST_000%' 
+         AND cliente != 'LIST_';`,
+        [cleanFilter]
       );
       return rows[0]?.count ?? 0;
     }
@@ -114,9 +121,16 @@ export class PriceListRepository {
     const params: any[] = [];
 
     if (clientFilter && clientFilter !== "TUTTI") {
-      params.push(clientFilter);
+      const cleanFilter = clientFilter.trim().replace(/^LIST_/, "").toLowerCase();
+      params.push(cleanFilter);
       const cIdx = `$${params.length}`;
-      conditions.push(`(cliente = ${cIdx} OR cliente = 'LIST_' || ${cIdx})`);
+      conditions.push(`(
+        LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) = ${cIdx}
+        OR LOWER(cliente) = ${cIdx}
+        OR LOWER(cliente) = 'list_' || ${cIdx}
+        OR LOWER(cliente) LIKE '%' || ${cIdx} || '%'
+        OR ${cIdx} LIKE '%' || LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) || '%'
+      )`);
     }
 
     tokens.forEach((t) => {
