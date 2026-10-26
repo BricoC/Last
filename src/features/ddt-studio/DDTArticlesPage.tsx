@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
-import { GridCell, GridCellKind, GridColumn, Item } from "@glideapps/glide-data-grid";
-import { LoaderCircle, RefreshCw, Search, X } from "lucide-react";
-import { ExcelGrid } from "@/shared/components/data-grid/ExcelGrid";
+import { LoaderCircle, RefreshCw, Search, X, FileText } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { getDdtArticleViewRows, type DdtArticleViewRow } from "./services/ddtReadModelsRepository";
@@ -11,26 +9,22 @@ import { normalizeSearch, tokenizeSearch } from "@/shared/hooks/useFragmentSearc
 import { DDTQuickViewModal } from "./components/DDTQuickViewModal";
 import { DDTClientArticleHistoryModal } from "./components/DDTClientArticleHistoryModal";
 
-const columns: GridColumn[] = [
-  { title: "CLIENTE", width: 210 }, { title: "DESTINAZIONE", width: 190 },
-  { title: "DDT", width: 85 }, { title: "DATA", width: 125 }, { title: "UM", width: 75 },
-  { title: "QUANTITÀ", width: 100 }, { title: "DESCRIZIONE", width: 360 },
-  { title: "PREZZO UNIT.", width: 125 }, { title: "SCONTO", width: 95 },
-  { title: "IMPORTO", width: 125 }, { title: "IVA", width: 75 },
-];
-
-const asText = (value: string): GridCell => ({ kind: GridCellKind.Text, data: value, displayData: value, allowOverlay: true });
-
 type IndexedArticleRow = DdtArticleViewRow & { _searchIndex: string };
+
+const BATCH_SIZE = 150;
 
 export function DDTArticlesPage() {
   const [rows, setRows] = useState<DdtArticleViewRow[]>([]);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
   const [year, setYear] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+  const [selectedDdtId, setSelectedDdtId] = useState<string | null>(null);
+  const [selectedArticleForHistory, setSelectedArticleForHistory] = useState<DdtArticleViewRow | null>(null);
   const openWindow = useWindowStore((state) => state.openWindow);
 
   const load = async () => {
@@ -77,66 +71,26 @@ export function DDTArticlesPage() {
     });
   }, [indexedRows, searchTokens, year]);
 
-  const getCellContent = (cell: Item): GridCell => {
-    const row = filtered[cell[1]];
-    if (!row) return asText("");
-    const isDdtColumn = columns[cell[0]]?.title === "DDT";
-    const isDescColumn = columns[cell[0]]?.title === "DESCRIZIONE";
-    const informational = row.rowKind === "note";
-    const values = [
-      row.client, row.destination, formatDdtNumber(row.docNumber, row.series), formatDdtViewDate(row.date),
-      informational ? "" : row.unit, informational ? "" : row.quantity, row.description,
-      informational ? "" : formatDdtMoney(row.unitPriceSubunits), informational ? "" : row.discountPercent,
-      informational ? "" : formatDdtMoney(row.netAmountSubunits), informational || row.vatRate === 0 ? "" : `${row.vatRate}%`,
-    ];
-    const text = values[cell[0]] ?? "";
-    if (isDdtColumn) {
-      return {
-        kind: GridCellKind.Text,
-        data: text,
-        displayData: text,
-        allowOverlay: false,
-        themeOverride: {
-          textDark: "#38bdf8",
-          baseFontStyle: "bold 13px",
-        },
-      };
+  // Reset del numero di righe visibili al cambio filtri e scroll in cima
+  useEffect(() => {
+    setVisibleCount(BATCH_SIZE);
+    if (tableContainerRef.current) {
+      tableContainerRef.current.scrollTop = 0;
     }
-    if (isDescColumn) {
-      return {
-        kind: GridCellKind.Text,
-        data: text,
-        displayData: text,
-        allowOverlay: false,
-        themeOverride: {
-          baseFontStyle: "600 13px",
-        },
-      };
-    }
-    return asText(text);
-  };
+  }, [deferredSearch, year]);
 
-  const [selectedDdtId, setSelectedDdtId] = useState<string | null>(null);
-  const [selectedArticleForHistory, setSelectedArticleForHistory] = useState<DdtArticleViewRow | null>(null);
-
-  const openSelectedDdt = (cell: Item) => {
-    const column = columns[cell[0]];
-    const row = filtered[cell[1]];
-    if (!row) return;
-
-    if (column?.title === "DDT") {
-      setSelectedDdtId(row.ddtId);
-      return;
-    }
-
-    if (column?.title === "DESCRIZIONE") {
-      setSelectedArticleForHistory(row);
-      return;
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollTop + clientHeight >= scrollHeight - 350) {
+      setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, filtered.length));
     }
   };
+
+  const visibleRows = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2 text-[var(--foreground)]">
+      {/* Search Input Bar */}
       <label className="flex h-9 w-full shrink-0 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 text-xs">
         <Search className="h-4 w-4 shrink-0 text-[var(--muted-foreground)]" />
         <input
@@ -157,6 +111,8 @@ export function DDTArticlesPage() {
           </button>
         )}
       </label>
+
+      {/* Toolbar / Header */}
       <div className="flex h-7 shrink-0 items-center justify-between gap-3 px-1 text-xs">
         <div className="flex items-center gap-2 font-semibold">
           <h1>Articoli DDT</h1>
@@ -173,18 +129,148 @@ export function DDTArticlesPage() {
           </Button>
         </div>
       </div>
+
       {error && <p role="alert" className="text-xs text-[var(--destructive)]">{error}</p>}
+
+      {/* Tabella con stile dei popup (colorata, pulita e reattiva) */}
       {loading && rows.length === 0 ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-[var(--muted-foreground)]">
           <LoaderCircle className="h-4 w-4 animate-spin" />Caricamento righe…
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center p-8 text-xs text-[var(--muted-foreground)] border border-[var(--border)] rounded-md bg-[var(--card)]">
+          Nessuna voce trovata per i filtri selezionati.
+        </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-hidden border border-[var(--border)] bg-[var(--card)]">
-          <ExcelGrid columns={columns} rows={filtered.length} getCellContent={getCellContent} onCellClicked={openSelectedDdt} />
+        <div
+          ref={tableContainerRef}
+          onScroll={handleScroll}
+          className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)]"
+        >
+          <table className="w-full border-collapse text-xs">
+            <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">
+              <tr>
+                <th className="px-3 py-2 text-left w-48">CLIENTE</th>
+                <th className="px-3 py-2 text-left w-48">DESTINAZIONE</th>
+                <th className="px-3 py-2 text-left w-24">DDT</th>
+                <th className="px-3 py-2 text-left w-24">DATA</th>
+                <th className="px-2 py-2 text-center w-14">UM</th>
+                <th className="px-3 py-2 text-right w-20">QUANTITÀ</th>
+                <th className="px-3 py-2 text-left">DESCRIZIONE</th>
+                <th className="px-3 py-2 text-right w-28">PREZZO UNIT.</th>
+                <th className="px-2 py-2 text-center w-20">SCONTO</th>
+                <th className="px-3 py-2 text-right w-28">IMPORTO</th>
+                <th className="px-2 py-2 text-center w-16">IVA</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
+              {visibleRows.map((row) => {
+                const informational = row.rowKind === "note";
+
+                return (
+                  <tr
+                    key={row.id}
+                    className="hover:bg-[var(--background)]/60 transition-colors"
+                  >
+                    {/* CLIENTE */}
+                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[200px]" title={row.client}>
+                      {row.client}
+                    </td>
+
+                    {/* DESTINAZIONE */}
+                    <td className="px-3 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[200px]" title={row.destination}>
+                      {row.destination || "—"}
+                    </td>
+
+                    {/* DDT (Link al popup del DDT) */}
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDdtId(row.ddtId)}
+                        className="font-bold text-[var(--primary)] hover:underline inline-flex items-center gap-1.5 cursor-pointer"
+                        title={`Apri dettaglio DDT ${formatDdtNumber(row.docNumber, row.series)}`}
+                      >
+                        <FileText className="h-3 w-3" />
+                        <span>{formatDdtNumber(row.docNumber, row.series)}</span>
+                      </button>
+                    </td>
+
+                    {/* DATA */}
+                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap">
+                      {formatDdtViewDate(row.date)}
+                    </td>
+
+                    {/* UM */}
+                    <td className="px-2 py-2 text-center uppercase text-[var(--muted-foreground)]">
+                      {informational ? "" : (row.unit || "NR")}
+                    </td>
+
+                    {/* QUANTITÀ */}
+                    <td className="px-3 py-2 text-right font-bold text-[var(--foreground)]">
+                      {informational ? "" : row.quantity}
+                    </td>
+
+                    {/* DESCRIZIONE (Link al popup storico articolo del cliente) */}
+                    <td className="px-3 py-2 font-sans">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedArticleForHistory(row)}
+                        className="group text-left w-full hover:text-[var(--primary)] transition-colors cursor-pointer inline-flex items-center justify-between gap-2"
+                        title="Clicca per aprire lo storico acquisti di questo articolo"
+                      >
+                        <span className="truncate group-hover:underline font-semibold text-[var(--foreground)]">
+                          {row.description}
+                        </span>
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[var(--primary)]/20 px-1.5 py-0.5 text-[10px] font-sans text-[var(--primary)] shrink-0 font-semibold">
+                          Storico ↗
+                        </span>
+                      </button>
+                    </td>
+
+                    {/* PREZZO UNIT. */}
+                    <td className="px-3 py-2 text-right text-[var(--muted-foreground)]">
+                      {informational ? "" : (row.unitPriceSubunits > 0 ? formatDdtMoney(row.unitPriceSubunits) : "—")}
+                    </td>
+
+                    {/* SCONTO */}
+                    <td
+                      className={`px-2 py-2 text-center font-medium ${
+                        row.discountPercent && row.discountPercent !== "0"
+                          ? "text-amber-400"
+                          : "text-[var(--muted-foreground)]"
+                      }`}
+                    >
+                      {informational ? "" : (row.discountPercent ? `${row.discountPercent}%` : "—")}
+                    </td>
+
+                    {/* IMPORTO */}
+                    <td className="px-3 py-2 text-right font-bold text-sky-400">
+                      {informational ? "" : formatDdtMoney(row.netAmountSubunits)}
+                    </td>
+
+                    {/* IVA */}
+                    <td className="px-2 py-2 text-center text-[var(--muted-foreground)]">
+                      {informational || row.vatRate === 0 ? "—" : `${row.vatRate}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {visibleRows.length < filtered.length && (
+            <div className="p-3 text-center text-xs text-[var(--muted-foreground)] bg-[var(--background)]/40 border-t border-[var(--border)]/30">
+              Visualizzati {visibleRows.length} di {filtered.length} articoli. Scorri verso il basso per caricarne altri.
+            </div>
+          )}
         </div>
       )}
+
+      {/* Footer Totali */}
       <div className="flex h-7 shrink-0 items-center justify-end border-t border-[var(--border)] px-2 text-[11px] font-semibold">
-        Totale importi visibili: {formatDdtMoney(filtered.reduce((sum, row) => sum + row.netAmountSubunits, 0))}
+        <span>Totale importi visibili: </span>
+        <span className="ml-1.5 font-bold text-sky-400">
+          {formatDdtMoney(filtered.reduce((sum, row) => sum + row.netAmountSubunits, 0))}
+        </span>
       </div>
 
       {/* Popup Dettaglio DDT con chiusura rapida Esc */}
@@ -214,3 +300,4 @@ export function DDTArticlesPage() {
     </div>
   );
 }
+
