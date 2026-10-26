@@ -4,6 +4,7 @@ import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
 import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { CompanySettingsPanel } from "./CompanySettingsPanel";
+import { DatabaseQuerySettingsPanel } from "./DatabaseQuerySettingsPanel";
 
 export const SettingsPage: React.FC = () => {
   const { theme, setPreset, setBrightness, resetTheme } = useThemeStore();
@@ -124,8 +125,22 @@ export const SettingsPage: React.FC = () => {
           ))}
         </div>
 
-        {/* Contenuto Principale: Aspetto & Temi */}
-        {activeNav === "company" ? <div className="md:col-span-3"><CompanySettingsPanel /></div> : activeNav === "database" ? <div className="md:col-span-3"><SupabaseConnectionFields /></div> : <div className="md:col-span-3 space-y-6">
+        {/* Contenuto Principale: Aspetto & Temi / Database / Parametri Generali / Dati Aziendali */}
+        {activeNav === "company" ? (
+          <div className="md:col-span-3">
+            <CompanySettingsPanel />
+          </div>
+        ) : activeNav === "database" ? (
+          <div className="md:col-span-3 space-y-4">
+            <SupabaseConnectionFields />
+            <DatabaseQuerySettingsPanel />
+          </div>
+        ) : activeNav === "general" ? (
+          <div className="md:col-span-3 space-y-4">
+            <DatabaseQuerySettingsPanel />
+          </div>
+        ) : (
+          <div className="md:col-span-3 space-y-6">
           {/* Box Schemi di Colore Predefiniti */}
           <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between">
@@ -215,7 +230,8 @@ export const SettingsPage: React.FC = () => {
               ))}
             </div>
           </div>
-        </div>}
+        </div>
+      )}
       </div>
     </div>
   );

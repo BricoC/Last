@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useDeferredValue, useRef } from "r
 import { X, Search, History, User, Building2, FileText } from "lucide-react";
 import { getClientArticleHistory, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
+import { useAppSettingsStore } from "@/shared/stores/useAppSettingsStore";
 
 export interface DDTClientArticleHistoryModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const { historyModalLimit } = useAppSettingsStore();
 
   // Inizializza o aggiorna il testo di ricerca quando si apre il modal per un nuovo articolo
   useEffect(() => {
@@ -52,6 +54,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           description: deferredSearchTerm,
           code: deferredSearchTerm.trim() === articleDescription.trim() ? articleCode : undefined,
           onlyThisClient,
+          limit: historyModalLimit === "tutti" ? null : historyModalLimit,
         });
         if (isMounted) setRows(data);
       } catch (err) {
@@ -67,7 +70,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     return () => {
       isMounted = false;
     };
-  }, [isOpen, clientName, deferredSearchTerm, articleDescription, articleCode, onlyThisClient]);
+  }, [isOpen, clientName, deferredSearchTerm, articleDescription, articleCode, onlyThisClient, historyModalLimit]);
 
   // Reset del conteggio visibile e scroll quando cambiano i filtri
   useEffect(() => {
@@ -455,7 +458,14 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
         {/* Footer info tastiera */}
         <div className="flex shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--background)] px-5 py-2 text-xs text-[var(--muted-foreground)]">
-          <span>{filteredRows.length} movimenti trovati</span>
+          <span className="flex items-center gap-1.5">
+            <span>{filteredRows.length} movimenti trovati</span>
+            {historyModalLimit !== "tutti" && filteredRows.length >= historyModalLimit && (
+              <span className="rounded bg-[var(--card)] px-1.5 py-0.5 text-[10px] text-amber-400 border border-amber-500/30">
+                limite SQL impostato: {historyModalLimit.toLocaleString("it-IT")} record
+              </span>
+            )}
+          </span>
           <span className="flex items-center gap-1.5 font-sans">
             Premi <kbd className="rounded border border-[var(--border)] bg-[var(--card)] px-1.5 py-0.5 text-[10px] font-mono">Esc</kbd> per chiudere e tornare al DDT
           </span>

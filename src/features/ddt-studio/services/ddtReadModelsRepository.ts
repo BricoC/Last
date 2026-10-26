@@ -1,5 +1,6 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { useAppSettingsStore } from "@/shared/stores/useAppSettingsStore";
 
 export interface DdtListViewRow {
   id: string; year: number; docNumber: number | null; series: string; date: string;
@@ -114,6 +115,7 @@ export async function getClientArticleHistory(options: {
   description: string;
   code?: string;
   onlyThisClient?: boolean;
+  limit?: number | null;
 }): Promise<ClientArticleHistoryRow[]> {
   const db = await getDatabase();
   const trimmedDesc = options.description.trim();
@@ -167,7 +169,18 @@ export async function getClientArticleHistory(options: {
     query += ` AND (i.code IS NOT NULL AND LOWER(TRIM(i.code)) = LOWER(TRIM($${params.length})))`;
   }
 
+  const storeLimit = useAppSettingsStore.getState().historyModalLimit;
+  const effectiveLimit = options.limit !== undefined
+    ? options.limit
+    : storeLimit === "tutti"
+      ? null
+      : storeLimit;
+
   query += ` ORDER BY d.doc_date DESC, d.doc_number DESC`;
+
+  if (typeof effectiveLimit === "number" && effectiveLimit > 0) {
+    query += ` LIMIT ${Math.floor(effectiveLimit)}`;
+  }
 
   const rows = await db.select<any[]>(query, params);
 
