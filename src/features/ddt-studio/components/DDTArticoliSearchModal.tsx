@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from "react";
-import { Search, X, Check, ShoppingCart, ArrowDownUp, CheckCircle2 } from "lucide-react";
+import { Search, X, Check, ShoppingCart, ArrowDownUp, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import { ListinoGeneraleRow, ListinoClienteRow } from "@/features/price-lists/models/priceList";
 import { priceListRepository } from "@/features/price-lists/services/priceListRepository";
 import { getClientArticleHistory, ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
@@ -42,6 +42,11 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   const [prezziIvaEnabled, setPrezziIvaEnabled] = useState(true);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
+
+  // Dissolvenza: quando si clicca fuori dal popup, entra in dissolvenza (trasparente ~20%)
+  // senza chiudersi (si chiude solo con X o Esc). Cliccando sul popup la dissolvenza va via.
+  const [isFaded, setIsFaded] = useState(false);
+  const modalContainerRef = useRef<HTMLDivElement>(null);
 
   // Dimensioni personalizzabili memorizzate stabilmente per utente/postazione
   const [modalWidth, setModalWidth] = useState<number>(() => {
@@ -234,6 +239,27 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
     window.addEventListener("keydown", handleGlobalKeyDown, true);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
   }, [isOpen, pendingInsert, onClose]);
+
+  // Gestione dissolvenza: se l'utente clicca fuori dal popup, questo entra in dissolvenza
+  // (trasparente ~20%) senza chiudersi (si chiude solo con X o Esc).
+  // Cliccando sopra il popup, la dissolvenza scompare e torna solido al 100%.
+  useEffect(() => {
+    if (!isOpen) {
+      setIsFaded(false);
+      return;
+    }
+
+    const handleDocumentMouseDown = (e: MouseEvent) => {
+      if (pendingInsert) return;
+
+      if (modalContainerRef.current && !modalContainerRef.current.contains(e.target as Node)) {
+        setIsFaded(true);
+      }
+    };
+
+    window.addEventListener("mousedown", handleDocumentMouseDown, true);
+    return () => window.removeEventListener("mousedown", handleDocumentMouseDown, true);
+  }, [isOpen, pendingInsert]);
 
   // Focus automatico sul popup quantità
   useEffect(() => {
@@ -462,7 +488,15 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
         - Angolo in basso a sinistra (obliquo / diagonale)
       */}
       <div
-        className="absolute top-1 right-2 z-50 pointer-events-auto select-none animate-in fade-in duration-100"
+        ref={modalContainerRef}
+        onClick={() => {
+          if (isFaded) {
+            setIsFaded(false);
+          }
+        }}
+        className={`absolute top-1 right-2 z-50 pointer-events-auto select-none animate-in fade-in duration-100 transition-opacity duration-200 ease-out ${
+          isFaded ? "opacity-20 hover:opacity-35" : "opacity-100"
+        }`}
         onKeyDown={handleKeyDown}
         style={{ width: `${modalWidth}px` }}
       >
@@ -541,6 +575,27 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
                 title="Attiva o disattiva l'inserimento di Prezzo & IVA nel DDT"
               >
                 €: {prezziIvaEnabled ? "ON" : "OFF"}
+              </button>
+
+              {/* Tasto rapido manuale Dissolvenza */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsFaded(!isFaded);
+                }}
+                className={`p-1 rounded text-xs border transition-colors ${
+                  isFaded
+                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                    : "bg-[var(--card)] border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                }`}
+                title={
+                  isFaded
+                    ? "Dissolvenza attiva (clicca per tornare opaco)"
+                    : "Attiva dissolvenza (trasparente per vedere sotto)"
+                }
+              >
+                {isFaded ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
               </button>
 
               <button
