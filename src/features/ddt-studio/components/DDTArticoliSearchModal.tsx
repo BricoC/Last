@@ -5,6 +5,7 @@ import { priceListRepository } from "@/features/price-lists/services/priceListRe
 import { getClientArticleHistory, ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtViewDate } from "../services/ddtViewFormatting";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { AppPreferencesService } from "@/shared/services/appPreferencesService";
 
 export interface DDTArticoliSearchModalProps {
   isOpen: boolean;
@@ -40,6 +41,60 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   const [prezziIvaEnabled, setPrezziIvaEnabled] = useState(true);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
+
+  // Altezza personalizzabile memorizzata stabilmente nel database SQLite
+  const [modalHeight, setModalHeight] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const cached = localStorage.getItem("ddt_search_modal_height");
+      if (cached) {
+        const val = parseInt(cached, 10);
+        if (!isNaN(val) && val >= 180 && val <= 650) return val;
+      }
+    }
+    return 260; // Default più compatto: non copre le prime 3 righe del DDT!
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  // Caricamento stabile da SQLite all'avvio
+  useEffect(() => {
+    void AppPreferencesService.getPreference("ddt_search_modal_height", "260").then((saved) => {
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 180 && parsed <= 650) {
+          setModalHeight(parsed);
+          localStorage.setItem("ddt_search_modal_height", String(parsed));
+        }
+      }
+    });
+  }, []);
+
+  // Gestione trascinamento per ridimensionamento altezza
+  const handleMouseDownResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    const startY = e.clientY;
+    const startH = modalHeight;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      const newH = Math.max(180, Math.min(650, startH + deltaY));
+      setModalHeight(newH);
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      setIsResizing(false);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      const finalH = Math.max(180, Math.min(650, startH + (upEvent.clientY - startY)));
+      setModalHeight(finalH);
+      localStorage.setItem("ddt_search_modal_height", String(finalH));
+      void AppPreferencesService.setPreference("ddt_search_modal_height", String(finalH));
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
 
   // Dati Listino Generale & Cliente
   const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>([]);
@@ -162,24 +217,26 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
     };
   }, [deferredSearch, clientName, isOpen]);
 
-  // Filtraggio tokenizzato lista sinistra
+  // Filtraggio tokenizzato lista sinistra per entrambe le fonti
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
 
-  const filteredListItems = useMemo(() => {
-    if (sourceTab === "generale") {
-      if (searchTokens.length === 0) return generalItems;
-      return generalItems.filter((item) => {
-        const text = `${item.descrizione} ${item.codice_articolo || ""} ${item.fornitore || ""}`.toLowerCase();
-        return searchTokens.every((token) => text.includes(token));
-      });
-    } else {
-      if (searchTokens.length === 0) return clientItems;
-      return clientItems.filter((item) => {
-        const text = `${item.descrizione} ${item.codice_articolo || ""} ${item.cliente}`.toLowerCase();
-        return searchTokens.every((token) => text.includes(token));
-      });
-    }
-  }, [sourceTab, generalItems, clientItems, searchTokens]);
+  const filteredClientItems = useMemo(() => {
+    if (searchTokens.length === 0) return clientItems;
+    return clientItems.filter((item) => {
+      const text = `${item.descrizione} ${item.codice_articolo || ""} ${item.cliente}`.toLowerCase();
+      return searchTokens.every((token) => text.includes(token));
+    });
+  }, [clientItems, searchTokens]);
+
+  const filteredGeneralItems = useMemo(() => {
+    if (searchTokens.length === 0) return generalItems;
+    return generalItems.filter((item) => {
+      const text = `${item.descrizione} ${item.codice_articolo || ""} ${item.fornitore || ""}`.toLowerCase();
+      return searchTokens.every((token) => text.includes(token));
+    });
+  }, [generalItems, searchTokens]);
+
+  const filteredListItems = sourceTab === "generale" ? filteredGeneralItems : filteredClientItems;
 
   // Gestione tastiera per frecce su/giù e cambio colonna sinistra/destra
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -291,7 +348,12 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
         className="absolute top-1 left-2 right-2 z-50 pointer-events-auto select-none animate-in fade-in duration-100"
         onKeyDown={handleKeyDown}
       >
-        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] flex flex-col h-[380px] overflow-hidden">
+        <div 
+          style={{ height: `${modalHeight}px` }}
+          className={`bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden ${
+            isResizing ? "select-none pointer-events-none" : ""
+          }`}
+        >
           {/* 1. Header Modale */}
           <div className="px-4 py-2 border-b border-[var(--border)] flex items-center justify-between bg-[var(--background)] shrink-0">
             <div className="flex items-center space-x-2.5">
@@ -407,10 +469,66 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
               )}
             </div>
 
-            {/* Badge conteggi */}
-            <div className="text-[11px] font-mono text-[var(--muted-foreground)] shrink-0 px-2">
-              <span className="font-semibold text-[var(--primary)]">{filteredListItems.length}</span> list. {sourceTab === "generale" ? "gen" : "cli"} •{" "}
-              <span className="font-semibold text-emerald-400">{historyItems.length}</span> storico
+            {/* Badge conteggi sempre in vista: Clienti: xx • Generale: xx • Storico: xx */}
+            <div className="flex items-center space-x-2 text-xs font-mono shrink-0 px-2.5 py-1 bg-[var(--background)] border border-[var(--border)] rounded-md select-none">
+              <button
+                type="button"
+                onClick={() => {
+                  setSourceTab("cliente");
+                  setActivePane("list");
+                  setSelectedListIdx(0);
+                }}
+                className={`flex items-center space-x-1 px-1.5 py-0.5 rounded transition-all ${
+                  sourceTab === "cliente" && activePane === "list"
+                    ? "bg-amber-500/25 text-amber-300 font-bold border border-amber-500/40"
+                    : "text-[var(--muted-foreground)] hover:text-white"
+                }`}
+                title="Visualizza Listino Cliente"
+              >
+                <span>Clienti:</span>
+                <span className="font-bold text-amber-400">{filteredClientItems.length}</span>
+              </button>
+
+              <span className="text-[var(--border)] font-normal">•</span>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSourceTab("generale");
+                  setActivePane("list");
+                  setSelectedListIdx(0);
+                }}
+                className={`flex items-center space-x-1 px-1.5 py-0.5 rounded transition-all ${
+                  sourceTab === "generale" && activePane === "list"
+                    ? "bg-blue-500/25 text-blue-300 font-bold border border-blue-500/40"
+                    : "text-[var(--muted-foreground)] hover:text-white"
+                }`}
+                title="Visualizza Listino Generale"
+              >
+                <span>Generale:</span>
+                <span className="font-bold text-blue-400">{filteredGeneralItems.length}</span>
+              </button>
+
+              <span className="text-[var(--border)] font-normal">•</span>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (historyItems.length > 0) {
+                    setActivePane("history");
+                    setSelectedHistIdx(0);
+                  }
+                }}
+                className={`flex items-center space-x-1 px-1.5 py-0.5 rounded transition-all ${
+                  activePane === "history"
+                    ? "bg-emerald-500/25 text-emerald-300 font-bold border border-emerald-500/40"
+                    : "text-[var(--muted-foreground)] hover:text-white"
+                }`}
+                title="Passa allo Storico Vendite"
+              >
+                <span>Storico:</span>
+                <span className="font-bold text-emerald-400">{historyItems.length}</span>
+              </button>
             </div>
           </div>
 
@@ -594,6 +712,15 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
                 <span>Aggiungi al DDT</span>
               </button>
             </div>
+          </div>
+
+          {/* 5. Barra di ridimensionamento verticale (Altezza salvata stabilmente in SQLite) */}
+          <div
+            onMouseDown={handleMouseDownResize}
+            className="h-2.5 w-full bg-[var(--card)] hover:bg-[var(--primary)]/25 cursor-ns-resize flex items-center justify-center transition-colors border-t border-[var(--border)] shrink-0 group select-none"
+            title="Trascina verso l'alto o verso il basso per regolare l'altezza (salvata stabilmente nel database)"
+          >
+            <div className="w-14 h-1 bg-[var(--muted-foreground)]/30 rounded-full group-hover:bg-[var(--primary)] transition-colors" />
           </div>
         </div>
       </div>
