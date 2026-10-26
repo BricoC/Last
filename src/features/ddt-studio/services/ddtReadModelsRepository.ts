@@ -15,6 +15,7 @@ export interface DdtArticleViewRow {
   date: string; client: string; destination: string; unit: string; quantity: string;
   description: string; unitPriceSubunits: number; discountPercent: string;
   netAmountSubunits: number; vatRate: number; rowKind: string;
+  purchasePriceSubunits: number;
 }
 
 interface DdtListDbRow {
@@ -30,6 +31,7 @@ interface DdtArticleDbRow {
   doc_date: string; client_name: string; destination_name: string | null; destination_city: string | null;
   unit: string | null; quantity: string | null; description: string; unit_price_subunits: number;
   discount_pct: string | null; net_amount_subunits: number; vat_rate: number; row_kind: string | null;
+  purchase_price_subunits: number | null;
 }
 
 const numberValue = (value: number | string | null | undefined) => Number(value ?? 0);
@@ -72,7 +74,8 @@ export async function getDdtArticleViewRows(): Promise<DdtArticleViewRow[]> {
   const rows = await db.select<DdtArticleDbRow[]>(`
     SELECT i.id, i.ddt_id, d.year, d.doc_number, d.series, d.doc_date, d.client_name,
       d.destination_name, d.destination_city, i.unit, i.quantity, i.description,
-      i.unit_price_subunits, i.discount_pct, i.net_amount_subunits, i.vat_rate, i.row_kind
+      i.unit_price_subunits, i.discount_pct, i.net_amount_subunits, i.vat_rate, i.row_kind,
+      i.purchase_price_subunits
     FROM ddt_items i
     JOIN ddt_documents d ON d.id = i.ddt_id
     WHERE d.deleted_at IS NULL AND d.status <> 'bozza' AND d.doc_number IS NOT NULL
@@ -86,6 +89,7 @@ export async function getDdtArticleViewRows(): Promise<DdtArticleViewRow[]> {
     unitPriceSubunits: Number(row.unit_price_subunits), discountPercent: row.discount_pct || "",
     netAmountSubunits: Number(row.net_amount_subunits), vatRate: Number(row.vat_rate ?? 0),
     rowKind: row.row_kind || "item",
+    purchasePriceSubunits: Number(row.purchase_price_subunits || 0),
   }));
 }
 

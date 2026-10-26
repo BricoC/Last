@@ -262,7 +262,11 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
       quantity: insertQuantity.trim() || "1",
     });
     setPendingInsert(null);
-    onClose();
+    // Il popup rimane aperto per inserimenti successivi: si chiude solo con Esc o X!
+    setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 50);
   };
 
   const formatEuro = (val: number | null | undefined, digits: number = 4) => {
@@ -280,11 +284,11 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   return (
     <>
       {/* 
-        Contenitore Modale F3: Posizionata in alto (top-10) senza sfondo nero oscurante,
-        in modo che la tabella DDT sotto rimanga perfettamente visibile e scrivibile!
+        Contenitore Modale F3: Largo esattamente quanto la tabella di lavoro (left-2 right-2),
+        posizionato in alto sopra la card testata, lasciando le righe DDT sotto visibili e scrivibili!
       */}
       <div
-        className="fixed top-10 left-1/2 -translate-x-1/2 w-[95vw] max-w-6xl z-50 pointer-events-auto select-none animate-in fade-in zoom-in-95 duration-100"
+        className="absolute top-1 left-2 right-2 z-50 pointer-events-auto select-none animate-in fade-in duration-100"
         onKeyDown={handleKeyDown}
       >
         <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] flex flex-col h-[380px] overflow-hidden">

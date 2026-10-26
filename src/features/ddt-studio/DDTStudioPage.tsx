@@ -907,16 +907,16 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
               <DDTA4Document ddt={ddt} items={items} />
             </div>
           )}
+
+          {/* Modale Ricerca Articoli (F3) ancorata all'area di lavoro (stessa larghezza della tabella DDT) */}
+          <DDTArticoliSearchModal
+            isOpen={isSearchModalOpen}
+            onClose={() => setIsSearchModalOpen(false)}
+            clientName={ddt.client_name}
+            onSelectArticle={handleInsertArticle}
+          />
         </div>
       </div>
-
-      {/* Modale Ricerca Articoli (F3) */}
-      <DDTArticoliSearchModal
-        isOpen={isSearchModalOpen}
-        onClose={() => setIsSearchModalOpen(false)}
-        clientName={ddt.client_name}
-        onSelectArticle={handleInsertArticle}
-      />
 
       {/* Modale Alex: Ricerca Multi-Listino (4 Finestre Sincronizzate) */}
       <DDTMultiListinoModal

@@ -409,24 +409,24 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
 
                 <div className="flex-1 overflow-auto">
                   <table className="w-full border-collapse text-xs whitespace-nowrap">
-                    <thead className="bg-[var(--background)] sticky top-0 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)]">
+                    <thead className="bg-[var(--background)] sticky top-0 text-[11.5px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-bold">
                       <tr>
-                        <th className="px-2 py-1 text-left w-16">Fornit</th>
-                        <th className="px-2 py-1 text-left w-20">Art</th>
-                        <th className="px-2 py-1 text-center w-14">Data</th>
-                        <th className="px-3 py-1 text-left">Descrizione</th>
-                        <th className="px-1.5 py-1 text-center w-10">UM</th>
-                        <th className="px-2 py-1 text-right w-14">% Pub</th>
-                        <th className="px-2.5 py-1 text-right w-20">Pubblico</th>
-                        <th className="px-2 py-1 text-right w-14">% Prof</th>
-                        <th className="px-2.5 py-1 text-right w-20">Profess</th>
-                        <th className="px-2 py-1 text-right w-14">% Fatt</th>
-                        <th className="px-2.5 py-1 text-right w-20 bg-blue-500/10 text-amber-300 font-bold">Fattura</th>
-                        <th className="px-2.5 py-1 text-right w-20">Acquisto</th>
-                        <th className="px-1.5 py-1 text-center w-10">IVA</th>
+                        <th className="px-2.5 py-1.5 text-left w-20">Fornit</th>
+                        <th className="px-2.5 py-1.5 text-left w-24">Art</th>
+                        <th className="px-2 py-1.5 text-center w-16">Data</th>
+                        <th className="px-3 py-1.5 text-left">Descrizione</th>
+                        <th className="px-2 py-1.5 text-center w-12">UM</th>
+                        <th className="px-2.5 py-1.5 text-right w-16">% Pub</th>
+                        <th className="px-3 py-1.5 text-right w-24">Pubblico</th>
+                        <th className="px-2.5 py-1.5 text-right w-16">% Prof</th>
+                        <th className="px-3 py-1.5 text-right w-24">Profess</th>
+                        <th className="px-2.5 py-1.5 text-right w-16">% Fatt</th>
+                        <th className="px-3 py-1.5 text-right w-24 bg-blue-500/10 text-amber-300 font-bold">Fattura</th>
+                        <th className="px-3 py-1.5 text-right w-24">Acquisto</th>
+                        <th className="px-2 py-1.5 text-center w-12">IVA</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
+                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-xs">
                       {filteredGeneral.slice(0, 200).map((item) => (
                         <tr
                           key={item.id}
@@ -443,19 +443,19 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                           className="hover:bg-blue-600/15 cursor-pointer transition-colors group"
                           title="Doppio clic per inserire nel DDT"
                         >
-                          <td className="px-2 py-0.5 text-[var(--muted-foreground)] truncate max-w-[65px]">{item.fornitore || "—"}</td>
-                          <td className="px-2 py-0.5 font-bold text-blue-400 truncate max-w-[80px]">{item.codice_articolo || "—"}</td>
-                          <td className="px-2 py-0.5 text-center text-[var(--muted-foreground)] text-[10px]">{item.data_ref || "—"}</td>
-                          <td className="px-3 py-0.5 font-sans text-[var(--foreground)] truncate max-w-[280px]" title={item.descrizione}>{item.descrizione}</td>
-                          <td className="px-1.5 py-0.5 text-center text-[var(--muted-foreground)]">{item.um || "NR"}</td>
-                          <td className="px-2 py-0.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_pub)}</td>
-                          <td className="px-2.5 py-0.5 text-right font-medium">{formatEuro(item.prezzo_pubblico, 2)}</td>
-                          <td className="px-2 py-0.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_prof)}</td>
-                          <td className="px-2.5 py-0.5 text-right font-medium">{formatEuro(item.prezzo_profess, 2)}</td>
-                          <td className="px-2 py-0.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_fatt)}</td>
-                          <td className="px-2.5 py-0.5 text-right font-bold text-amber-300 bg-blue-500/10">{formatEuro(item.prezzo_fattura, 2)}</td>
-                          <td className="px-2.5 py-0.5 text-right text-[var(--muted-foreground)]">{formatEuro(item.prezzo_acquisto, 2)}</td>
-                          <td className="px-1.5 py-0.5 text-center text-[var(--muted-foreground)]">{formatPercent(item.perc_iva)}</td>
+                          <td className="px-2.5 py-1.5 text-[var(--muted-foreground)] truncate max-w-[75px]">{item.fornitore || "—"}</td>
+                          <td className="px-2.5 py-1.5 font-bold text-blue-400 truncate max-w-[90px]">{item.codice_articolo || "—"}</td>
+                          <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)] text-[11px]">{item.data_ref || "—"}</td>
+                          <td className="px-3 py-1.5 font-sans text-[var(--foreground)] truncate max-w-[320px] text-[12.5px] font-medium" title={item.descrizione}>{item.descrizione}</td>
+                          <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">{item.um || "NR"}</td>
+                          <td className="px-2.5 py-1.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_pub)}</td>
+                          <td className="px-3 py-1.5 text-right font-medium">{formatEuro(item.prezzo_pubblico, 2)}</td>
+                          <td className="px-2.5 py-1.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_prof)}</td>
+                          <td className="px-3 py-1.5 text-right font-medium">{formatEuro(item.prezzo_profess, 2)}</td>
+                          <td className="px-2.5 py-1.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_fatt)}</td>
+                          <td className="px-3 py-1.5 text-right font-bold text-amber-300 bg-blue-500/10">{formatEuro(item.prezzo_fattura, 2)}</td>
+                          <td className="px-3 py-1.5 text-right text-[var(--muted-foreground)]">{formatEuro(item.prezzo_acquisto, 2)}</td>
+                          <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">{formatPercent(item.perc_iva)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -468,22 +468,23 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
             {showCli && (
               <div
                 className={`flex flex-col overflow-hidden bg-[var(--card)] ${
-                  layoutMode === "horizontal" ? "flex-1 min-h-[130px]" : "flex-1 min-w-[280px]"
+                  layoutMode === "horizontal" ? "flex-1 min-h-[140px]" : "flex-1 min-w-[280px]"
                 }`}
               >
-                <div className="px-3 py-1 bg-amber-950/40 border-b border-amber-500/30 flex items-center justify-between text-xs text-amber-300 shrink-0 gap-2">
-                  <span className="font-bold whitespace-nowrap">
-                    Listino Clienti <span className="text-[10px] opacity-80">({filteredClients.length})</span>
+                <div className="px-3 py-1.5 bg-amber-950/40 border-b border-amber-500/30 flex items-center justify-between text-xs text-amber-300 shrink-0 gap-2">
+                  <span className="font-bold whitespace-nowrap flex items-center space-x-1.5">
+                    <span className="text-sm">Listino Clienti</span>
+                    <span className="text-[11px] opacity-80 font-normal">({filteredClients.length} voci)</span>
                   </span>
                   <div className="flex items-center space-x-1.5">
-                    <span className="text-[10px] text-[var(--muted-foreground)]">Filtro:</span>
+                    <span className="text-xs text-[var(--muted-foreground)] font-semibold">Filtro:</span>
                     <div className="relative">
                       <input
                         type="text"
                         value={clientFilter}
                         onChange={(e) => setClientFilter(e.target.value)}
                         placeholder="Cerca cliente (multi-parola)..."
-                        className="pl-2 pr-5 py-0.5 text-[11px] bg-[var(--background)] border border-amber-500/40 rounded text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none w-44"
+                        className="pl-2.5 pr-6 py-0.5 text-xs bg-[var(--background)] border border-amber-500/40 rounded text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none w-52 font-medium"
                       />
                       {clientFilter && (
                         <button
@@ -491,7 +492,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                           onClick={() => setClientFilter("")}
                           className="absolute right-1.5 top-1 text-[var(--muted-foreground)] hover:text-white"
                         >
-                          <X className="w-3 h-3" />
+                          <X className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
@@ -500,17 +501,19 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
 
                 <div className="flex-1 overflow-auto">
                   <table className="w-full border-collapse text-xs whitespace-nowrap">
-                    <thead className="bg-[var(--background)] sticky top-0 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)]">
+                    <thead className="bg-[var(--background)] sticky top-0 text-[11.5px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-bold">
                       <tr>
-                        <th className="px-2.5 py-1 text-left w-36">Cliente</th>
-                        <th className="px-3 py-1 text-left">Descrizione</th>
-                        <th className="px-2.5 py-1 text-right w-24">Fattura</th>
-                        <th className="px-2.5 py-1 text-right w-20">Acquisto</th>
-                        <th className="px-2 py-1 text-right w-16">Ricarico</th>
-                        <th className="px-3 py-1 text-left w-28">Note</th>
+                        <th className="px-3 py-1.5 text-left w-40">Cliente</th>
+                        <th className="px-3 py-1.5 text-left">Descrizione</th>
+                        <th className="px-3 py-1.5 text-right w-24">Fattura</th>
+                        <th className="px-3 py-1.5 text-right w-24">Acquisto</th>
+                        <th className="px-2.5 py-1.5 text-right w-20">Ricarico</th>
+                        <th className="px-3 py-1.5 text-left w-28">Note</th>
+                        <th className="px-3 py-1.5 text-left w-24">Note1</th>
+                        <th className="px-3 py-1.5 text-left w-24">Note2</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
+                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-xs">
                       {filteredClients.slice(0, 200).map((item) => (
                         <tr
                           key={item.id}
@@ -527,12 +530,14 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                           className="hover:bg-amber-500/15 cursor-pointer transition-colors group"
                           title="Doppio clic per inserire nel DDT"
                         >
-                          <td className="px-2.5 py-0.5 font-bold text-amber-400 truncate max-w-[130px]" title={item.cliente}>{item.cliente}</td>
-                          <td className="px-3 py-0.5 font-sans text-[var(--foreground)] truncate max-w-[320px]" title={item.descrizione}>{item.descrizione}</td>
-                          <td className="px-2.5 py-0.5 text-right font-bold text-[var(--foreground)]">{formatEuro(item.prezzo_fattura, 2)}</td>
-                          <td className="px-2.5 py-0.5 text-right text-[var(--muted-foreground)]">{formatEuro(item.prezzo_acquisto, 2)}</td>
-                          <td className="px-2 py-0.5 text-right text-[var(--muted-foreground)]">{item.ricarico ? `${item.ricarico.toFixed(1)}%` : "—"}</td>
-                          <td className="px-3 py-0.5 font-sans text-[10.5px] text-[var(--muted-foreground)] truncate max-w-[120px]">{item.note || ""}</td>
+                          <td className="px-3 py-1.5 font-bold text-amber-400 truncate max-w-[140px]" title={item.cliente}>{item.cliente}</td>
+                          <td className="px-3 py-1.5 font-sans text-[var(--foreground)] truncate max-w-[340px] text-[12.5px] font-medium" title={item.descrizione}>{item.descrizione}</td>
+                          <td className="px-3 py-1.5 text-right font-bold text-[var(--foreground)]">{formatEuro(item.prezzo_fattura, 2)}</td>
+                          <td className="px-3 py-1.5 text-right text-[var(--muted-foreground)]">{formatEuro(item.prezzo_acquisto, 2)}</td>
+                          <td className="px-2.5 py-1.5 text-right text-[var(--muted-foreground)]">{item.ricarico ? `${item.ricarico.toFixed(1)}%` : "—"}</td>
+                          <td className="px-3 py-1.5 font-sans text-xs text-[var(--muted-foreground)] truncate max-w-[120px]">{item.note || ""}</td>
+                          <td className="px-3 py-1.5 font-sans text-xs text-[var(--muted-foreground)] truncate max-w-[100px]">{item.note1 || ""}</td>
+                          <td className="px-3 py-1.5 font-sans text-xs text-[var(--muted-foreground)] truncate max-w-[100px]">{item.note2 || ""}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -548,28 +553,32 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                   layoutMode === "horizontal" ? "flex-1 min-h-[140px]" : "flex-1 min-w-[280px]"
                 }`}
               >
-                <div className="px-3 py-1 bg-emerald-950/40 border-b border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300 shrink-0">
-                  <span className="font-bold flex items-center space-x-1">
-                    <span>Storico Articoli Già Dati</span>
-                    <span className="text-[10px] opacity-80">({filteredHistory.length} vendite)</span>
+                <div className="px-3 py-1.5 bg-emerald-950/40 border-b border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300 shrink-0">
+                  <span className="font-bold flex items-center space-x-1.5">
+                    <span className="text-sm">Storico Articoli Già Dati</span>
+                    <span className="text-[11px] opacity-80 font-normal">({filteredHistory.length} vendite)</span>
                   </span>
                 </div>
 
                 <div className="flex-1 overflow-auto">
                   <table className="w-full border-collapse text-xs whitespace-nowrap">
-                    <thead className="bg-[var(--background)] sticky top-0 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)]">
+                    <thead className="bg-[var(--background)] sticky top-0 text-[11.5px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-bold">
                       <tr>
-                        <th className="px-2 py-1 text-left w-20">Data</th>
-                        <th className="px-2 py-1 text-center w-14">Nr. DDT</th>
-                        <th className="px-2.5 py-1 text-left w-32">Cliente</th>
-                        <th className="px-3 py-1 text-left">Descrizione</th>
-                        <th className="px-2.5 py-1 text-right w-24">Prezzo Vendita</th>
-                        <th className="px-2.5 py-1 text-right w-20">Prezzo Acq.</th>
+                        <th className="px-2.5 py-1.5 text-left w-24">Data</th>
+                        <th className="px-2.5 py-1.5 text-center w-16">Nr. DDT</th>
+                        <th className="px-3 py-1.5 text-left w-36">Cliente</th>
+                        <th className="px-3 py-1.5 text-left">Descrizione</th>
+                        <th className="px-3 py-1.5 text-right w-28">Prezzo Vendita</th>
+                        <th className="px-3 py-1.5 text-right w-24">Prezzo Acq.</th>
+                        <th className="px-3 py-1.5 text-right w-24">% Ricarico</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
+                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-xs">
                       {filteredHistory.slice(0, 200).map((row) => {
                         const priceVal = row.unitPriceSubunits / 100000;
+                        const acqVal = (row.purchasePriceSubunits || 0) / 100000;
+                        const ricaricoPct = acqVal > 0 ? ((priceVal - acqVal) / acqVal) * 100 : null;
+
                         return (
                           <tr
                             key={row.id}
@@ -579,18 +588,22 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                                 unit: row.unit || "NR.",
                                 quantity: "1",
                                 unit_price: priceVal,
+                                purchase_price: acqVal,
                                 vat_rate: row.vatRate || 22,
                               });
                             }}
                             className="hover:bg-emerald-600/15 cursor-pointer transition-colors group"
                             title="Doppio clic per inserire nel DDT"
                           >
-                            <td className="px-2 py-0.5 text-[var(--muted-foreground)] text-[10px]">{formatDdtViewDate(row.date)}</td>
-                            <td className="px-2 py-0.5 text-center font-bold text-emerald-400">{row.series ? `${row.series}/` : ""}{row.docNumber}</td>
-                            <td className="px-2.5 py-0.5 font-bold text-[var(--foreground)] truncate max-w-[120px]" title={row.client}>{row.client}</td>
-                            <td className="px-3 py-0.5 font-sans text-[var(--foreground)] truncate max-w-[320px]" title={row.description}>{row.description}</td>
-                            <td className="px-2.5 py-0.5 text-right font-bold text-emerald-400">{formatEuro(priceVal, 2)}</td>
-                            <td className="px-2.5 py-0.5 text-right text-[var(--muted-foreground)]">{formatEuro(row.unitPriceSubunits ? (row.unitPriceSubunits * 0.6) / 100000 : 0, 2)}</td>
+                            <td className="px-2.5 py-1.5 text-[var(--muted-foreground)] text-xs">{formatDdtViewDate(row.date)}</td>
+                            <td className="px-2.5 py-1.5 text-center font-bold text-emerald-400 text-xs">{row.series ? `${row.series}/` : ""}{row.docNumber}</td>
+                            <td className="px-3 py-1.5 font-bold text-[var(--foreground)] truncate max-w-[130px] text-xs" title={row.client}>{row.client}</td>
+                            <td className="px-3 py-1.5 font-sans text-[var(--foreground)] truncate max-w-[340px] text-[12.5px] font-medium" title={row.description}>{row.description}</td>
+                            <td className="px-3 py-1.5 text-right font-bold text-emerald-400 text-xs">{formatEuro(priceVal, 4)}</td>
+                            <td className="px-3 py-1.5 text-right text-[var(--muted-foreground)] text-xs">{formatEuro(acqVal, 4)}</td>
+                            <td className={`px-3 py-1.5 text-right font-bold text-xs ${ricaricoPct !== null && ricaricoPct >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
+                              {ricaricoPct !== null ? `${ricaricoPct >= 0 ? "+" : ""}${Math.round(ricaricoPct)}%` : "—"}
+                            </td>
                           </tr>
                         );
                       })}
@@ -604,18 +617,18 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
             {showCurrentDdt && (
               <div
                 className={`flex flex-col overflow-hidden bg-[var(--card)] ${
-                  layoutMode === "horizontal" ? "flex-1 min-h-[130px]" : "flex-1 min-w-[260px]"
+                  layoutMode === "horizontal" ? "flex-1 min-h-[140px]" : "flex-1 min-w-[280px]"
                 }`}
               >
-                <div className="px-3 py-1 bg-purple-950/40 border-b border-purple-500/30 flex items-center justify-between text-xs text-purple-300 shrink-0">
-                  <span className="font-bold flex items-center space-x-1">
-                    <span>Articoli nel DDT</span>
-                    <span className="text-[10px] opacity-80">({nonBlankCurrentItems.length} righe)</span>
+                <div className="px-3 py-1.5 bg-purple-950/40 border-b border-purple-500/30 flex items-center justify-between text-xs text-purple-300 shrink-0">
+                  <span className="font-bold flex items-center space-x-1.5">
+                    <span className="text-sm">Articoli nel DDT</span>
+                    <span className="text-[11px] opacity-80 font-normal">({nonBlankCurrentItems.length} righe)</span>
                   </span>
                   <button
                     type="button"
                     onClick={() => setFilterCurrentWithSearch(!filterCurrentWithSearch)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${
+                    className={`px-2.5 py-1 rounded text-xs font-bold border transition-colors ${
                       filterCurrentWithSearch
                         ? "bg-purple-600 text-white border-purple-400"
                         : "bg-purple-900/30 text-purple-300 border-purple-500/30 hover:bg-purple-800/40"
@@ -627,40 +640,63 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
 
                 <div className="flex-1 overflow-auto">
                   <table className="w-full border-collapse text-xs whitespace-nowrap">
-                    <thead className="bg-[var(--background)] sticky top-0 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)]">
+                    <thead className="bg-[var(--background)] sticky top-0 text-[11.5px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-bold">
                       <tr>
-                        <th className="px-2 py-1 text-center w-8">#</th>
-                        <th className="px-2 py-1 text-center w-10">U.M.</th>
-                        <th className="px-2 py-1 text-center w-12">Q.tà</th>
-                        <th className="px-3 py-1 text-left">Descrizione Articolo</th>
-                        <th className="px-2.5 py-1 text-right w-20">Prezzo €</th>
-                        <th className="px-2.5 py-1 text-right w-20">Importo €</th>
+                        <th className="px-2.5 py-1.5 text-center w-10">#</th>
+                        <th className="px-2.5 py-1.5 text-center w-12">U.M.</th>
+                        <th className="px-2.5 py-1.5 text-center w-14">Q.tà</th>
+                        <th className="px-3 py-1.5 text-left">Descrizione Articolo *</th>
+                        <th className="px-3 py-1.5 text-right w-24">Prezzo €</th>
+                        <th className="px-2 py-1.5 text-right w-16">Sc.%</th>
+                        <th className="px-3 py-1.5 text-right w-24">Importo €</th>
+                        <th className="px-2 py-1.5 text-center w-14">IVA</th>
+                        <th className="px-3 py-1.5 text-right w-24">Acq €</th>
+                        <th className="px-3 py-1.5 text-right w-20">Ric.%</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
+                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-xs">
                       {nonBlankCurrentItems.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="p-6 text-center text-xs text-[var(--muted-foreground)]">
+                          <td colSpan={10} className="p-6 text-center text-xs text-[var(--muted-foreground)]">
                             Nessun articolo inserito finora nel DDT.
                           </td>
                         </tr>
                       ) : (
-                        nonBlankCurrentItems.map((item, idx) => (
-                          <tr key={item.id} className="hover:bg-purple-600/15 cursor-default transition-colors">
-                            <td className="px-2 py-0.5 text-center font-bold text-purple-400">{idx + 1}</td>
-                            <td className="px-2 py-0.5 text-center text-[var(--muted-foreground)]">{item.unit || "NR"}</td>
-                            <td className="px-2 py-0.5 text-center font-bold text-[var(--foreground)]">{item.quantity}</td>
-                            <td className="px-3 py-0.5 font-sans text-[var(--foreground)] truncate max-w-[340px]" title={item.description}>
-                              {item.description}
-                            </td>
-                            <td className="px-2.5 py-0.5 text-right font-medium text-[var(--foreground)]">
-                              {formatEuro(item.unit_price ? item.unit_price.toNumber() : 0, 2)}
-                            </td>
-                            <td className="px-2.5 py-0.5 text-right font-bold text-purple-300">
-                              {formatEuro(item.net_amount ? item.net_amount.toNumber() : 0, 2)}
-                            </td>
-                          </tr>
-                        ))
+                        nonBlankCurrentItems.map((item, idx) => {
+                          const unitPrice = item.unit_price ? item.unit_price.toNumber() : 0;
+                          const netAmount = item.net_amount ? item.net_amount.toNumber() : 0;
+                          const purchasePrice = item.purchase_price ? item.purchase_price.toNumber() : 0;
+                          const ricPct = purchasePrice > 0 ? ((unitPrice - purchasePrice) / purchasePrice) * 100 : null;
+
+                          return (
+                            <tr key={item.id} className="hover:bg-purple-600/15 cursor-default transition-colors">
+                              <td className="px-2.5 py-1.5 text-center font-bold text-purple-400">{idx + 1}</td>
+                              <td className="px-2.5 py-1.5 text-center text-[var(--muted-foreground)]">{item.unit || "NR"}</td>
+                              <td className="px-2.5 py-1.5 text-center font-bold text-[var(--foreground)]">{item.quantity}</td>
+                              <td className="px-3 py-1.5 font-sans text-[var(--foreground)] truncate max-w-[340px] text-[12.5px] font-medium" title={item.description}>
+                                {item.description}
+                              </td>
+                              <td className="px-3 py-1.5 text-right font-medium text-[var(--foreground)]">
+                                {formatEuro(unitPrice, 4)}
+                              </td>
+                              <td className="px-2 py-1.5 text-right text-[var(--muted-foreground)]">
+                                {item.discount_pct && parseFloat(item.discount_pct) > 0 ? `${item.discount_pct}%` : "—"}
+                              </td>
+                              <td className="px-3 py-1.5 text-right font-bold text-purple-300">
+                                {formatEuro(netAmount, 4)}
+                              </td>
+                              <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">
+                                {item.vat_rate !== null && item.vat_rate !== undefined && String(item.vat_rate) !== "" ? `${item.vat_rate}%` : "22%"}
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-emerald-400 font-medium">
+                                {purchasePrice > 0 ? formatEuro(purchasePrice, 4) : "—"}
+                              </td>
+                              <td className={`px-3 py-1.5 text-right font-bold ${ricPct !== null && ricPct >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
+                                {ricPct !== null ? `${ricPct >= 0 ? "+" : ""}${ricPct.toFixed(1)}%` : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
