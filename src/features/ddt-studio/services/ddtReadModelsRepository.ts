@@ -86,3 +86,129 @@ export async function getDdtArticleViewRows(): Promise<DdtArticleViewRow[]> {
     rowKind: row.row_kind || "item",
   }));
 }
+
+export interface ClientArticleHistoryRow {
+  ddtId: string;
+  year: number;
+  docNumber: number | null;
+  series: string;
+  date: string;
+  client: string;
+  destination: string;
+  unit: string;
+  quantity: string;
+  description: string;
+  code: string;
+  unitPriceSubunits: number;
+  discountPercent: string;
+  netAmountSubunits: number;
+  vatRate: number;
+  purchasePriceSubunits: number;
+  revenueSubunits: number;
+  markupPercent: number | null;
+}
+
+export async function getClientArticleHistory(options: {
+  clientName?: string;
+  description: string;
+  code?: string;
+  onlyThisClient?: boolean;
+}): Promise<ClientArticleHistoryRow[]> {
+  const db = await getDatabase();
+  const trimmedDesc = options.description.trim();
+  const trimmedCode = (options.code || "").trim();
+  const trimmedClient = (options.clientName || "").trim();
+  const onlyThisClient = options.onlyThisClient !== false;
+
+  let query = `
+    SELECT 
+      d.id AS ddt_id,
+      d.year,
+      d.doc_number,
+      d.series,
+      d.doc_date,
+      d.client_name,
+      d.destination_name,
+      d.destination_city,
+      i.unit,
+      i.quantity,
+      i.description,
+      i.code,
+      i.unit_price_subunits,
+      i.discount_pct,
+      i.net_amount_subunits,
+      i.vat_rate,
+      i.purchase_price_subunits
+    FROM ddt_items i
+    JOIN ddt_documents d ON d.id = i.ddt_id
+    WHERE d.deleted_at IS NULL 
+      AND i.deleted_at IS NULL
+      AND d.status <> 'bozza'
+      AND d.doc_number IS NOT NULL
+  `;
+
+  const params: (string | number)[] = [];
+
+  if (onlyThisClient && trimmedClient) {
+    params.push(trimmedClient);
+    query += ` AND LOWER(TRIM(d.client_name)) = LOWER(TRIM($${params.length}))`;
+  }
+
+  if (trimmedCode) {
+    params.push(trimmedCode);
+    const codeIdx = params.length;
+    params.push(trimmedDesc);
+    const descIdx = params.length;
+    params.push(`%${trimmedDesc}%`);
+    const likeIdx = params.length;
+    query += ` AND (
+      (i.code IS NOT NULL AND LOWER(TRIM(i.code)) = LOWER(TRIM($${codeIdx})))
+      OR LOWER(TRIM(i.description)) = LOWER(TRIM($${descIdx}))
+      OR (i.description LIKE $${likeIdx})
+    )`;
+  } else if (trimmedDesc) {
+    params.push(trimmedDesc);
+    const descIdx = params.length;
+    params.push(`%${trimmedDesc}%`);
+    const likeIdx = params.length;
+    query += ` AND (
+      LOWER(TRIM(i.description)) = LOWER(TRIM($${descIdx}))
+      OR (i.description LIKE $${likeIdx})
+    )`;
+  }
+
+  query += ` ORDER BY d.doc_date DESC, d.doc_number DESC LIMIT 300`;
+
+  const rows = await db.select<any[]>(query, params);
+
+  return rows.map((row) => {
+    const qty = parseFloat(String(row.quantity || "0").replace(",", ".")) || 0;
+    const netAmount = Number(row.net_amount_subunits || 0);
+    const purchaseUnit = Number(row.purchase_price_subunits || 0);
+    const totalPurchase = Math.round(purchaseUnit * qty);
+    const revenue = netAmount - totalPurchase;
+    const markup = totalPurchase > 0 ? (revenue / totalPurchase) * 100 : null;
+
+    return {
+      ddtId: String(row.ddt_id),
+      year: Number(row.year),
+      docNumber: row.doc_number !== null ? Number(row.doc_number) : null,
+      series: row.series || "",
+      date: String(row.doc_date),
+      client: String(row.client_name),
+      destination: [row.destination_name, row.destination_city].filter(Boolean).join(" · "),
+      unit: String(row.unit || ""),
+      quantity: String(row.quantity || ""),
+      description: String(row.description || ""),
+      code: String(row.code || ""),
+      unitPriceSubunits: Number(row.unit_price_subunits || 0),
+      discountPercent: String(row.discount_pct || ""),
+      netAmountSubunits: netAmount,
+      vatRate: Number(row.vat_rate || 0),
+      purchasePriceSubunits: purchaseUnit,
+      revenueSubunits: revenue,
+      markupPercent: markup,
+    };
+  });
+}
+

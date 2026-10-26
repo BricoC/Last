@@ -11,8 +11,12 @@ export function useFragmentSearch<T>(
   }, [items, query, getSearchText]);
 }
 
+export function normalizeSearch(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
+}
+
 export function tokenizeSearch(query: string): string[] {
-  return normalize(query).split(/\s+/).filter(Boolean);
+  return normalizeSearch(query).split(/\s+/).filter(Boolean);
 }
 
 export function matchesFragmentSearch(
@@ -23,14 +27,7 @@ export function matchesFragmentSearch(
   if (!terms.length) return true;
   const fields = (Array.isArray(searchableText) ? searchableText : [searchableText])
     .filter((value): value is string => typeof value === "string")
-    .map(normalize);
-  return terms.every((term) => fields.some((field) => field.split(/\s+/).some((word) => matchesFragment(term, word))));
+    .map(normalizeSearch);
+  return terms.every((term) => fields.some((field) => field.includes(term)));
 }
 
-function matchesFragment(term: string, word: string): boolean {
-  return word.includes(term);
-}
-
-function normalize(value: string): string {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
-}

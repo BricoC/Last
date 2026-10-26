@@ -68,7 +68,7 @@ export function makeEmptyDdt(): Partial<DdtDocument> {
 export function makeEmptyItems(): DdtItem[] {
   const now = new Date().toISOString();
   return Array.from({ length: TOTAL_PRESET_ROWS }, (_, i) => ({
-    id: crypto.randomUUID(),
+    id: `empty-row-${i + 1}`,
     created_at: now,
     updated_at: now,
     updated_by: "system",
@@ -193,11 +193,64 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [globalDiscount, setGlobalDiscount] = useState("");
   const [globalMarkup, setGlobalMarkup] = useState("");
 
-  const signature = (doc: Partial<DdtDocument>, rows: DdtItem[], discount: string, markup: string) =>
-    JSON.stringify({ doc, rows, discount, markup });
+  const currentDdtIdRef = React.useRef<string | undefined>(ddt.id);
+  useEffect(() => {
+    currentDdtIdRef.current = ddt.id;
+  }, [ddt.id]);
+
+  const signature = useCallback(
+    (doc: Partial<DdtDocument>, rows: DdtItem[], discount: string, markup: string) => {
+      const activeRows = rows
+        .filter((r) => r.description?.trim() || isPositivePrice(r.unit_price) || (r.code && r.code.trim()) || r.quantity?.trim())
+        .map((r) => [
+          r.row_index,
+          r.code || "",
+          r.description || "",
+          r.unit || "",
+          r.quantity || "",
+          r.unit_price?.toSubunits?.() ?? 0,
+          r.discount_pct || "",
+          r.vat_rate ?? "",
+          r.purchase_price?.toSubunits?.() ?? 0,
+        ]);
+      return JSON.stringify({
+        id: doc.id,
+        doc_number: doc.doc_number,
+        series: doc.series,
+        year: doc.year,
+        doc_date: doc.doc_date,
+        status: doc.status,
+        client_name: doc.client_name,
+        client_address: doc.client_address,
+        client_city: doc.client_city,
+        client_vat: doc.client_vat,
+        client_fiscal_code: doc.client_fiscal_code,
+        client_sdi: doc.client_sdi,
+        destination_name: doc.destination_name,
+        destination_address: doc.destination_address,
+        destination_city: doc.destination_city,
+        transport_reason: doc.transport_reason,
+        payment_method: doc.payment_method,
+        order_reference: doc.order_reference,
+        account_or_balance: doc.account_or_balance,
+        operator: doc.operator,
+        goods_appearance: doc.goods_appearance,
+        carriage_terms: doc.carriage_terms,
+        packages_count: doc.packages_count,
+        weight_kg: doc.weight_kg,
+        carrier: doc.carrier,
+        pickup_date_time: doc.pickup_date_time,
+        internal_notes: doc.internal_notes,
+        discount,
+        markup,
+        activeRows,
+      });
+    },
+    []
+  );
   const currentSignature = useMemo(
     () => signature(ddt, items, globalDiscount, globalMarkup),
-    [ddt, items, globalDiscount, globalMarkup]
+    [ddt, items, globalDiscount, globalMarkup, signature]
   );
   const isDirty = savedSignature.current !== null && currentSignature !== savedSignature.current;
 
@@ -261,7 +314,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   }, []);
 
   // Carica un DDT esistente selezionato dalla sidebar
-  const handleSelectDdt = async (id: string) => {
+  const handleSelectDdt = useCallback(async (id: string) => {
+    if (currentDdtIdRef.current === id) return;
     const requestId = ++ddtLoadRequest.current;
     setLoadingDdtId(id);
     try {
@@ -269,9 +323,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       if (requestId !== ddtLoadRequest.current) return;
       if (!fullDoc) return;
 
+      currentDdtIdRef.current = fullDoc.id;
       setDdt(fullDoc);
       // Keep the archive sidebar on the same year as a DDT opened from List or Articles.
-      setSelectedYear(fullDoc.year);
+      setSelectedYear((prev) => (prev === fullDoc.year ? prev : fullDoc.year));
 
       // Riempi sempre fino a 500 righe esatte
       const existing: DdtItem[] = (fullDoc.items || []).map((it) => ({
@@ -281,15 +336,16 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       }));
       const padded: DdtItem[] = [...existing];
       const blankRowTimestamp = new Date().toISOString();
+      const docId = fullDoc.id;
       while (padded.length < TOTAL_PRESET_ROWS) {
         padded.push({
-          id: crypto.randomUUID(),
+          id: `${docId}-blank-${padded.length + 1}`,
           created_at: blankRowTimestamp,
           updated_at: blankRowTimestamp,
           updated_by: "system",
           deleted_at: null,
           sync_status: "pending",
-          ddt_id: fullDoc.id,
+          ddt_id: docId,
           row_index: padded.length + 1,
           code: "",
           description: "",
@@ -319,7 +375,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     } finally {
       if (requestId === ddtLoadRequest.current) setLoadingDdtId(null);
     }
-  };
+  }, [signature]);
 
   useEffect(() => subscribeToOpenDdt((id) => { void handleSelectDdt(id); }), []);
 

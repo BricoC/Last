@@ -36,20 +36,21 @@ export class DdtRepository {
 
     const ids = rows.map((row) => String(row.id));
     const placeholders = ids.map((_, index) => `$${index + 1}`).join(", ");
-    const itemRows = await db.select<any[]>(
-      `SELECT ddt_id, unit_price_subunits, purchase_price_subunits
+    const summaryRows = await db.select<Array<{ ddt_id: string; billed_rows: number; all_have_cost: number }>>(
+      `SELECT ddt_id,
+              COUNT(CASE WHEN unit_price_subunits > 0 THEN 1 END) AS billed_rows,
+              MIN(CASE WHEN unit_price_subunits > 0 THEN (purchase_price_subunits > 0) ELSE 1 END) AS all_have_cost
        FROM ddt_items
-       WHERE deleted_at IS NULL AND ddt_id IN (${placeholders})`,
+       WHERE deleted_at IS NULL AND ddt_id IN (${placeholders})
+       GROUP BY ddt_id`,
       ids
     );
     const marginState = new Map<string, { billedRows: number; allHaveCost: boolean }>();
-    for (const item of itemRows) {
-      const state = marginState.get(item.ddt_id) ?? { billedRows: 0, allHaveCost: true };
-      if (Number(item.unit_price_subunits) > 0) {
-        state.billedRows += 1;
-        if (Number(item.purchase_price_subunits) <= 0) state.allHaveCost = false;
-      }
-      marginState.set(item.ddt_id, state);
+    for (const item of summaryRows) {
+      marginState.set(String(item.ddt_id), {
+        billedRows: Number(item.billed_rows) || 0,
+        allHaveCost: Number(item.all_have_cost) === 1,
+      });
     }
 
     return rows.map((row) => {
