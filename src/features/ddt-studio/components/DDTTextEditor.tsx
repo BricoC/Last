@@ -306,6 +306,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
 
       e.preventDefault();
       e.stopPropagation();
+      e.nativeEvent?.stopImmediatePropagation?.();
       setShowSuggestions(false);
       props.api?.stopEditing(false);
 

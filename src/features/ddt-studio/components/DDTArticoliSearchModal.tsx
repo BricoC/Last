@@ -222,11 +222,27 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Listener globale ESC per chiudere senza blocchi
+  // Listener globale ESC per chiudere il popup solo quando NON si è in una cella attiva del DDT
   useEffect(() => {
     if (!isOpen) return;
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // NON chiudere il popup se l'utente si trova all'interno di una cella attiva del DDT
+      // o sta digitando in un input della griglia!
+      const target = e.target as HTMLElement | null;
+      const isInsideDdtCell =
+        Boolean(window.__isDDTCellEditing) ||
+        Boolean(
+          target?.closest?.(
+            ".ag-cell, .ag-cell-inline-editing, .ag-popup-editor, .ddt-items-grid, input, textarea"
+          ) && !modalContainerRef.current?.contains(target)
+        );
+
       if (e.key === "Escape") {
+        if (isInsideDdtCell) {
+          // L'utente vuole solo annullare l'editing della cella DDT, NON chiudere la ricerca articoli!
+          return;
+        }
+
         e.preventDefault();
         e.stopPropagation();
         if (pendingInsert) {
@@ -495,7 +511,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
           }
         }}
         className={`absolute top-1 right-2 z-50 pointer-events-auto select-none animate-in fade-in duration-100 transition-opacity duration-200 ease-out ${
-          isFaded ? "opacity-20 hover:opacity-35" : "opacity-100"
+          isFaded ? "opacity-50 hover:opacity-85 ring-2 ring-[var(--primary)]/60 shadow-2xl" : "opacity-100"
         }`}
         onKeyDown={handleKeyDown}
         style={{ width: `${modalWidth}px` }}
@@ -600,6 +616,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
 
               <button
                 type="button"
+                tabIndex={-1}
                 onClick={onClose}
                 className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] transition-colors ml-1"
                 title="Chiudi (Esc)"
@@ -839,6 +856,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
             <div className="flex items-center space-x-2">
               <button
                 type="button"
+                tabIndex={-1}
                 onClick={onClose}
                 className="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--background)] text-[var(--foreground)] font-medium text-xs transition-colors"
               >
