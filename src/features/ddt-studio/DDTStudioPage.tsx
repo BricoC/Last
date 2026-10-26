@@ -5,7 +5,6 @@ import { DdtArchiveEntry, DdtDocument, DdtItem } from "./models/ddt";
 import { ddtRepository } from "./services/ddtRepository";
 import { subscribeToOpenDdt } from "./services/ddtNavigation";
 import { clientRepository } from "@/features/clients/services/clientRepository";
-import { Product } from "@/features/price-lists/models/product";
 import { money, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { registerWindowCloseGuard } from "@/shared/stores/useWindowStore";
 import { calculateRowAmounts, calculateDdtTotals } from "./utils/ddtCalculations";
@@ -18,6 +17,7 @@ import { DDTFinancialBar } from "./components/DDTFinancialBar";
 import { DDTLogisticaCard } from "./components/DDTLogisticaCard";
 import { DDTA4Document } from "./document/DDTA4Document";
 import { DDTArticoliSearchModal } from "./components/DDTArticoliSearchModal";
+import { DDTMultiListinoModal } from "./components/DDTMultiListinoModal";
 import { DDTPrintCopiesModal } from "./components/DDTPrintCopiesModal";
 import {
   exportDdtPdfToDesktop,
@@ -267,6 +267,20 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   // Modale ricerca articoli F3
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  // Modale Alex (Ricerca Multi-Listino 4 finestre)
+  const [isAlexModalOpen, setIsAlexModalOpen] = useState(false);
+
+  // Scorciatoia globale F3 per ricerca rapida articoli
+  useEffect(() => {
+    const handleGlobalF3 = (e: KeyboardEvent) => {
+      if (e.key === "F3") {
+        e.preventDefault();
+        setIsSearchModalOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalF3);
+    return () => window.removeEventListener("keydown", handleGlobalF3);
+  }, []);
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -521,8 +535,16 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     }
   };
 
-  // Inserimento articolo selezionato da modale ricerca F3
-  const handleSelectProductFromModal = (prod: Product, quantityStr: string) => {
+  // Inserimento articolo selezionato da modale ricerca F3 o Alex
+  const handleInsertArticle = (article: {
+    code?: string;
+    description: string;
+    unit?: string;
+    quantity: string;
+    unit_price: number;
+    purchase_price?: number;
+    vat_rate?: number;
+  }) => {
     setItems((prev) => {
       const copy = [...prev];
       let targetIdx = copy.findIndex(
@@ -530,9 +552,9 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       );
       if (targetIdx === -1) targetIdx = 0;
 
-      const price = money(prod.sale_price_cents / 100);
-      const purchasePrice = money(prod.purchase_price_cents / 100);
-      const q = quantityStr || "1";
+      const price = money(article.unit_price || 0);
+      const purchasePrice = money(article.purchase_price || 0);
+      const q = article.quantity || "1";
 
       let effectivePrice = price;
       const markupClean = globalMarkup.trim().replace("%", "").replace(",", ".");
@@ -541,21 +563,21 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         effectivePrice = price.times(1 + markupNum / 100);
       }
       const disc = globalDiscount.trim();
-      const { netAmount, vatAmount } = calculateRowAmounts(q, effectivePrice, disc, prod.vat_rate);
+      const vat = article.vat_rate != null ? article.vat_rate : 22;
+      const { netAmount, vatAmount } = calculateRowAmounts(q, effectivePrice, disc, vat);
 
       copy[targetIdx] = {
         ...copy[targetIdx],
-        product_id: prod.id,
-        code: prod.code,
-        description: prod.description.toUpperCase(),
-        unit: prod.unit || "NR",
+        code: article.code || "",
+        description: (article.description || "").toUpperCase(),
+        unit: article.unit || "NR",
         quantity: q,
         unit_price: effectivePrice,
         base_price: price,
         discount_pct: disc,
         base_discount_pct: "",
         net_amount: netAmount,
-        vat_rate: prod.vat_rate,
+        vat_rate: vat,
         vat_amount: vatAmount,
         purchase_price: purchasePrice,
       };
@@ -563,7 +585,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       return copy;
     });
 
-    showToast(`Inserito: ${prod.description}`);
+    showToast(`Inserito: ${article.description}`);
   };
 
   // Stampa diretta con popup numero copie e lato singolo (Simplex)
@@ -861,7 +883,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                 showMargini={showMargini}
                 setShowMargini={setShowMargini}
                 onOpenSearchModal={() => setIsSearchModalOpen(true)}
-                onOpenAlexModal={() => setIsSearchModalOpen(true)}
+                onOpenAlexModal={() => setIsAlexModalOpen(true)}
                 globalDiscount={globalDiscount}
                 onChangeGlobalDiscount={handleChangeGlobalDiscount}
                 globalMarkup={globalMarkup}
@@ -892,7 +914,17 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       <DDTArticoliSearchModal
         isOpen={isSearchModalOpen}
         onClose={() => setIsSearchModalOpen(false)}
-        onSelectProduct={handleSelectProductFromModal}
+        clientName={ddt.client_name}
+        onSelectArticle={handleInsertArticle}
+      />
+
+      {/* Modale Alex: Ricerca Multi-Listino (4 Finestre Sincronizzate) */}
+      <DDTMultiListinoModal
+        isOpen={isAlexModalOpen}
+        onClose={() => setIsAlexModalOpen(false)}
+        currentClientName={ddt.client_name}
+        currentDdtItems={items}
+        onSelectArticle={handleInsertArticle}
       />
 
       {/* Modale Numero Copie Stampa */}
