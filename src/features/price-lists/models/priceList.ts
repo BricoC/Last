@@ -38,3 +38,18 @@ export interface ListinoClienteRow {
   created_at?: string;
   updated_at?: string;
 }
+
+export interface PriceListLogEntry {
+  id: number;
+  created_at: string;
+  tipo_listino: string;
+  cliente: string;
+  codice_articolo: string;
+  descrizione: string | null;
+  campo_modificato: string;
+  vecchio_valore: number | null;
+  nuovo_valore: number | null;
+  variazione_pct: number | null;
+  operatore: string;
+  motivo: string | null;
+}

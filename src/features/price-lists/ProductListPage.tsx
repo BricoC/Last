@@ -2,17 +2,15 @@ import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from "r
 import {
   Search,
   RefreshCw,
-  Cloud,
   AlertCircle,
   X,
   ArrowUpDown,
-  Tag,
-  LoaderCircle,
+  RotateCcw,
 } from "lucide-react";
 import { ListinoGeneraleRow } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
-import { priceListSyncService, SyncProgress } from "./services/priceListSyncService";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { ItemPriceHistoryModal } from "./components/ItemPriceHistoryModal";
 
 const BATCH_SIZE = 150;
 
@@ -39,9 +37,8 @@ export const ProductListPage: React.FC = () => {
   const [sortField, setSortField] = useState<SortField>("descrizione");
   const [sortAsc, setSortAsc] = useState(true);
 
-  // Stato sincronizzazione Supabase
-  const [syncing, setSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  // Modale Storico Variazioni Riga (Colonna A...)
+  const [historyModalItem, setHistoryModalItem] = useState<ListinoGeneraleRow | null>(null);
 
   // Caricamento iniziale da SQLite locale
   const loadData = async () => {
@@ -64,7 +61,7 @@ export const ProductListPage: React.FC = () => {
     void loadData();
   }, []);
 
-  // Scorciatoia F4 per ricerca
+  // Scorciatoia F4 per ricerca rapida
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "F4") {
@@ -76,25 +73,6 @@ export const ProductListPage: React.FC = () => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
-
-  // Esecuzione sincronizzazione da Supabase Cloud
-  const handleSyncCloud = async () => {
-    if (syncing) return;
-    setSyncing(true);
-    setError(null);
-    try {
-      await priceListSyncService.syncAllFromSupabase((prog) => {
-        setSyncProgress(prog);
-      });
-      await loadData();
-    } catch (err) {
-      console.error("Errore durante sincronizzazione listini:", err);
-      setError(err instanceof Error ? err.message : "Errore sincronizzazione con Supabase.");
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncProgress(null), 4000);
-    }
-  };
 
   // Filtraggio tokenizzato istantaneo
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
@@ -151,99 +129,60 @@ export const ProductListPage: React.FC = () => {
     })}`;
   };
 
+  // Corretta formattazione percentuale es. 1.06 -> 106%, 0.89 -> 89%, 1.01 -> 101%
   const formatPercent = (val: number | null | undefined) => {
     if (val == null) return "—";
-    const pct = val > 1 ? val : val * 100;
-    return `${Math.round(pct)}%`;
+    return `${Math.round(val * 100)}%`;
   };
 
   return (
     <div className="flex flex-col h-full bg-[var(--background)] text-[var(--foreground)] select-none">
-      {/* 1. Header Toolbar identica al gestionale */}
-      <div className="p-3 border-b border-[var(--border)] bg-[var(--card)] flex flex-wrap items-center justify-between gap-3 shrink-0">
-        {/* Ricerca Rapida F4 */}
-        <div className="flex items-center space-x-2 flex-1 max-w-md">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-[var(--muted-foreground)] absolute left-3 top-2.5" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setVisibleCount(BATCH_SIZE);
-              }}
-              placeholder="Quick Filter (F4 per cercare)..."
-              className="w-full pl-9 pr-8 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-medium"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+      {/* 1. Header Toolbar: Quick Filter estesa fino alla fine dei tasti */}
+      <div className="p-2.5 border-b border-[var(--border)] bg-[var(--card)] flex items-center space-x-3 shrink-0">
+        {/* Ricerca Rapida F4 estesa a tutta la larghezza disponibile */}
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-[var(--muted-foreground)] absolute left-3 top-2.5" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setVisibleCount(BATCH_SIZE);
+            }}
+            placeholder="Quick Filter (F4 per cercare)..."
+            className="w-full pl-9 pr-8 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-medium"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        {/* Azioni e Badge Informativi */}
-        <div className="flex items-center space-x-2 text-xs">
-          {/* Tasto Sincronizza Cloud */}
-          <button
-            type="button"
-            onClick={handleSyncCloud}
-            disabled={syncing}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md bg-[var(--primary)] text-white hover:opacity-90 font-medium transition-all disabled:opacity-50"
-            title="Scarica e sincronizza listino da Supabase Cloud a SQLite"
-          >
-            {syncing ? (
-              <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Cloud className="w-3.5 h-3.5" />
-            )}
-            <span>{syncing ? "Sincronizzazione..." : "Sincronizza Cloud"}</span>
-          </button>
-
+        {/* Azioni destra */}
+        <div className="flex items-center space-x-2 text-xs shrink-0">
           {/* Ricarica Locale */}
           <button
             type="button"
             onClick={loadData}
-            disabled={loading || syncing}
-            className="p-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-            title="Ricarica da SQLite locale"
+            disabled={loading}
+            className="p-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+            title="Ricarica lista da SQLite locale"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
 
-          {/* Badge Articoli Presenti (esattamente come in foto: 9763) */}
+          {/* Badge Articoli Presenti (9763) */}
           <span className="px-2.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] font-semibold text-[var(--primary)]">
             Articoli presenti: {totalDbCount}
           </span>
-
-          {/* Badge Stato Cloud */}
-          <span className="flex items-center space-x-1 px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Cloud Sincronizzato</span>
-          </span>
         </div>
       </div>
-
-      {/* Notifica Progress Bar / Errori */}
-      {syncProgress && (
-        <div className="px-4 py-2 bg-[var(--card)] border-b border-[var(--border)] flex items-center justify-between text-xs animate-in fade-in">
-          <div className="flex items-center space-x-2">
-            <LoaderCircle className="w-3.5 h-3.5 animate-spin text-[var(--primary)]" />
-            <span className="font-medium text-[var(--foreground)]">{syncProgress.message}</span>
-          </div>
-          {syncProgress.total > 0 && (
-            <span className="font-mono text-[var(--muted-foreground)]">
-              {Math.round((syncProgress.current / syncProgress.total) * 100)}%
-            </span>
-          )}
-        </div>
-      )}
 
       {error && (
         <div className="p-3 bg-red-500/10 border-b border-red-500/30 text-red-400 text-xs flex items-center justify-between">
@@ -261,7 +200,7 @@ export const ProductListPage: React.FC = () => {
         </div>
       )}
 
-      {/* 2. Tabella Listino Generale con colonne complete */}
+      {/* 2. Tabella Listino Generale */}
       <div
         className="flex-1 overflow-auto bg-[var(--card)] divide-y divide-[var(--border)]/40"
         onScroll={handleScroll}
@@ -269,12 +208,16 @@ export const ProductListPage: React.FC = () => {
         <table className="w-full border-collapse text-left text-xs whitespace-nowrap">
           <thead className="bg-[var(--background)] sticky top-0 z-10 text-[11px] uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] shadow-sm">
             <tr>
-              <th className="px-2.5 py-2 w-8 text-center">
+              <th className="px-2 py-2 w-8 text-center">
                 <input type="checkbox" className="rounded border-[var(--border)]" />
               </th>
-              <th className="px-2 py-2 w-10 text-center">A...</th>
+              {/* Colonna A... con icona storico modifiche */}
+              <th className="px-2 py-2 w-10 text-center" title="Storico modifiche riga">
+                A...
+              </th>
+              {/* Fornitore più piccolo di larghezza */}
               <th
-                className="px-3 py-2 cursor-pointer hover:text-[var(--foreground)]"
+                className="px-2.5 py-2 w-20 max-w-[85px] cursor-pointer hover:text-[var(--foreground)]"
                 onClick={() => handleToggleSort("fornitore")}
               >
                 <div className="flex items-center space-x-1">
@@ -282,8 +225,9 @@ export const ProductListPage: React.FC = () => {
                   <ArrowUpDown className="w-3 h-3" />
                 </div>
               </th>
+              {/* Articolo più piccolo di larghezza */}
               <th
-                className="px-3 py-2 cursor-pointer hover:text-[var(--foreground)]"
+                className="px-2.5 py-2 w-24 max-w-[95px] cursor-pointer hover:text-[var(--foreground)]"
                 onClick={() => handleToggleSort("codice_articolo")}
               >
                 <div className="flex items-center space-x-1">
@@ -307,7 +251,7 @@ export const ProductListPage: React.FC = () => {
               <th className="px-2.5 py-2 text-right w-16">% PROF</th>
               <th className="px-3 py-2 text-right w-24">PROFESS</th>
               <th className="px-2.5 py-2 text-right w-16">% FATT</th>
-              {/* Colonna FATTURA evidenziata in giallino tenue come da screenshot */}
+              {/* Colonna FATTURA evidenziata in giallino tenue */}
               <th className="px-3 py-2 text-right w-28 bg-amber-500/20 text-amber-300 font-bold border-x border-amber-500/30">
                 FATTURA
               </th>
@@ -322,22 +266,39 @@ export const ProductListPage: React.FC = () => {
                   key={item.id}
                   className="hover:bg-[var(--background)] transition-colors group cursor-default"
                 >
-                  <td className="px-2.5 py-1.5 text-center">
+                  <td className="px-2 py-1.5 text-center">
                     <input type="checkbox" className="rounded border-[var(--border)]" />
                   </td>
-                  <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)] group-hover:text-[var(--primary)]">
-                    <Tag className="w-3.5 h-3.5 inline" />
+                  {/* Tasto A... per visualizzare storico modifiche (massimo 15) */}
+                  <td className="px-2 py-1.5 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setHistoryModalItem(item)}
+                      className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-[var(--card)] transition-colors"
+                      title="Visualizza storico modifiche riga (max 15)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
                   </td>
-                  <td className="px-3 py-1.5 font-sans font-medium text-[var(--foreground)] truncate max-w-[120px]">
+                  <td
+                    className="px-2.5 py-1.5 font-sans font-medium text-[var(--foreground)] truncate w-20 max-w-[85px]"
+                    title={item.fornitore || ""}
+                  >
                     {item.fornitore || "—"}
                   </td>
-                  <td className="px-3 py-1.5 font-bold text-[var(--primary)] truncate max-w-[140px]">
+                  <td
+                    className="px-2.5 py-1.5 font-bold text-[var(--primary)] truncate w-24 max-w-[95px]"
+                    title={item.codice_articolo || ""}
+                  >
                     {item.codice_articolo || "—"}
                   </td>
                   <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">
                     {item.data_ref || "—"}
                   </td>
-                  <td className="px-3 py-1.5 font-sans font-medium text-[var(--foreground)] truncate max-w-[420px]" title={item.descrizione}>
+                  <td
+                    className="px-3 py-1.5 font-sans font-medium text-[var(--foreground)] truncate max-w-[420px]"
+                    title={item.descrizione}
+                  >
                     {item.descrizione}
                   </td>
                   <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">
@@ -376,20 +337,7 @@ export const ProductListPage: React.FC = () => {
 
         {filteredItems.length === 0 && !loading && (
           <div className="p-12 text-center text-xs text-[var(--muted-foreground)]">
-            {totalDbCount === 0 ? (
-              <div className="flex flex-col items-center space-y-2">
-                <p>Nessun articolo nel database locale.</p>
-                <button
-                  type="button"
-                  onClick={handleSyncCloud}
-                  className="px-3 py-1.5 rounded-md bg-[var(--primary)] text-white font-medium"
-                >
-                  Sincronizza ora da Supabase
-                </button>
-              </div>
-            ) : (
-              <p>Nessun articolo corrispondente ai criteri di ricerca.</p>
-            )}
+            Nessun articolo corrispondente ai criteri di ricerca.
           </div>
         )}
       </div>
@@ -401,6 +349,13 @@ export const ProductListPage: React.FC = () => {
         </span>
         <span>Listino Generale + Listini Vari (Unificati)</span>
       </div>
+
+      {/* Modale Storico Modifiche Riga */}
+      <ItemPriceHistoryModal
+        isOpen={Boolean(historyModalItem)}
+        onClose={() => setHistoryModalItem(null)}
+        item={historyModalItem}
+      />
     </div>
   );
 };

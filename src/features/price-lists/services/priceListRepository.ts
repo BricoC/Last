@@ -1,5 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
-import { ListinoGeneraleRow, ListinoClienteRow } from "../models/priceList";
+import { ListinoGeneraleRow, ListinoClienteRow, PriceListLogEntry } from "../models/priceList";
 
 export class PriceListRepository {
   /**
@@ -53,51 +53,70 @@ export class PriceListRepository {
   }
 
   /**
-   * Conteggio totale voci Listini Clienti in SQLite locale.
+   * Conteggio totale voci Listini Clienti reali in SQLite locale (esclusi test LIST_000 e LIST_).
    */
   async getClientPriceCount(clientFilter?: string): Promise<number> {
     const db = await getDatabase();
     if (clientFilter && clientFilter !== "TUTTI") {
       const rows = await db.select<{ count: number }[]>(
-        "SELECT COUNT(*) as count FROM listini_clienti WHERE cliente = $1;",
+        `SELECT COUNT(*) as count FROM listini_clienti 
+         WHERE (cliente = $1 OR cliente = 'LIST_' || $1)
+           AND cliente NOT LIKE 'LIST_000%' 
+           AND cliente != 'LIST_';`,
         [clientFilter]
       );
       return rows[0]?.count ?? 0;
     }
     const rows = await db.select<{ count: number }[]>(
-      "SELECT COUNT(*) as count FROM listini_clienti;"
+      `SELECT COUNT(*) as count FROM listini_clienti 
+       WHERE cliente NOT LIKE 'LIST_000%' 
+         AND cliente != 'LIST_' 
+         AND TRIM(REPLACE(cliente, 'LIST_', '')) != '';`
     );
     return rows[0]?.count ?? 0;
   }
 
   /**
-   * Restituisce tutti i clienti distinti presenti nei listini clienti per il filtro/tendina.
+   * Restituisce tutti i clienti distinti reali (con prefisso LIST_ già rimosso).
    */
   async getDistinctClients(): Promise<string[]> {
     const db = await getDatabase();
     const rows = await db.select<{ cliente: string }[]>(
-      "SELECT DISTINCT cliente FROM listini_clienti WHERE cliente IS NOT NULL AND cliente != '' ORDER BY cliente ASC;"
+      `SELECT DISTINCT cliente FROM listini_clienti 
+       WHERE cliente NOT LIKE 'LIST_000%' 
+         AND cliente != 'LIST_' 
+         AND TRIM(REPLACE(cliente, 'LIST_', '')) != ''
+       ORDER BY cliente ASC;`
     );
-    return rows.map((r) => r.cliente);
+    return rows
+      .map((r) => r.cliente.replace(/^LIST_/, "").trim())
+      .filter(Boolean)
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .sort((a, b) => a.localeCompare(b, "it"));
   }
 
   /**
-   * Ricerca full-text su Listini Clienti con filtro cliente facoltativo.
+   * Ricerca full-text su Listini Clienti (esclusi test LIST_000 e LIST_).
    */
   async searchClientPrices(
     query: string,
     clientFilter?: string,
-    limit: number = 2000
+    limit: number = 20000
   ): Promise<ListinoClienteRow[]> {
     const db = await getDatabase();
     const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 
-    const conditions: string[] = [];
+    const conditions: string[] = [
+      "cliente NOT LIKE 'LIST_000%'",
+      "cliente != 'LIST_'",
+      "TRIM(REPLACE(cliente, 'LIST_', '')) != ''",
+    ];
     const params: any[] = [];
 
     if (clientFilter && clientFilter !== "TUTTI") {
       params.push(clientFilter);
-      conditions.push(`cliente = $${params.length}`);
+      const cIdx = `$${params.length}`;
+      conditions.push(`(cliente = ${cIdx} OR cliente = 'LIST_' || ${cIdx})`);
     }
 
     tokens.forEach((t) => {
@@ -111,7 +130,7 @@ export class PriceListRepository {
     params.push(limit);
     const limitIdx = `$${params.length}`;
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
 
     const sql = `
       SELECT * FROM listini_clienti 
@@ -120,19 +139,26 @@ export class PriceListRepository {
       LIMIT ${limitIdx};
     `;
 
-    return await db.select<ListinoClienteRow[]>(sql, params);
+    const rows = await db.select<ListinoClienteRow[]>(sql, params);
+    // Pulizia a runtime del nome cliente da prefisso LIST_
+    return rows.map((r) => ({
+      ...r,
+      cliente: r.cliente.replace(/^LIST_/, "").trim(),
+    }));
   }
 
   /**
-   * Ricerca prezzi praticati a un determinato cliente su uno o più articoli.
+   * Ricerca storico modifiche di una riga/articolo da listini_prezzi_log (massimo 15 modifiche).
    */
-  async getClientPricesForCustomer(clientName: string): Promise<ListinoClienteRow[]> {
+  async getItemPriceHistory(codiceArticolo: string): Promise<PriceListLogEntry[]> {
+    if (!codiceArticolo) return [];
     const db = await getDatabase();
-    return await db.select<ListinoClienteRow[]>(
-      `SELECT * FROM listini_clienti 
-       WHERE cliente = $1 
-       ORDER BY descrizione ASC;`,
-      [clientName]
+    return await db.select<PriceListLogEntry[]>(
+      `SELECT * FROM listini_prezzi_log 
+       WHERE codice_articolo = $1 
+       ORDER BY created_at DESC 
+       LIMIT 15;`,
+      [codiceArticolo]
     );
   }
 }

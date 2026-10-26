@@ -2,17 +2,14 @@ import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from "r
 import {
   Search,
   RefreshCw,
-  Cloud,
   X,
   ArrowUpDown,
   Tag,
-  LoaderCircle,
   AlertCircle,
   Filter,
 } from "lucide-react";
 import { ListinoClienteRow } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
-import { priceListSyncService, SyncProgress } from "./services/priceListSyncService";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 
 const BATCH_SIZE = 150;
@@ -43,10 +40,6 @@ export const CustomerPriceListPage: React.FC = () => {
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const [sortField, setSortField] = useState<SortField>("cliente");
   const [sortAsc, setSortAsc] = useState(true);
-
-  // Stato sincronizzazione Supabase
-  const [syncing, setSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -83,34 +76,17 @@ export const CustomerPriceListPage: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Esecuzione sincronizzazione da Supabase Cloud
-  const handleSyncCloud = async () => {
-    if (syncing) return;
-    setSyncing(true);
-    setError(null);
-    try {
-      await priceListSyncService.syncAllFromSupabase((prog) => {
-        setSyncProgress(prog);
-      });
-      await loadData();
-    } catch (err) {
-      console.error("Errore durante sincronizzazione listini clienti:", err);
-      setError(err instanceof Error ? err.message : "Errore sincronizzazione con Supabase.");
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncProgress(null), 4000);
-    }
-  };
-
   // Filtraggio tokenizzato istantaneo
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
 
   const filteredItems = useMemo(() => {
     let result = items;
 
-    // Filtro per cliente selezionato da tendina
+    // Filtro per cliente selezionato da tendina (confrontando il nome pulito senza LIST_)
     if (selectedClientFilter !== "TUTTI") {
-      result = result.filter((item) => item.cliente === selectedClientFilter);
+      result = result.filter(
+        (item) => item.cliente.toLowerCase() === selectedClientFilter.toLowerCase()
+      );
     }
 
     // Filtro tab: Duplicati (stesso cliente e stessa descrizione)
@@ -184,89 +160,65 @@ export const CustomerPriceListPage: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full bg-[var(--background)] text-[var(--foreground)] select-none">
-      {/* 1. Header Toolbar identica al gestionale noManV1 */}
-      <div className="p-3 border-b border-[var(--border)] bg-[var(--card)] flex flex-wrap items-center justify-between gap-3 shrink-0">
-        {/* Ricerca Rapida F4 */}
-        <div className="flex items-center space-x-2 flex-1 max-w-md">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-[var(--muted-foreground)] absolute left-3 top-2.5" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setVisibleCount(BATCH_SIZE);
-              }}
-              placeholder="Quick Filter (F4 per cercare)..."
-              className="w-full pl-9 pr-8 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-medium"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Filtro Cliente dedicato */}
-          <div className="flex items-center space-x-1 shrink-0">
-            <Filter className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
-            <select
-              value={selectedClientFilter}
-              onChange={(e) => {
-                setSelectedClientFilter(e.target.value);
-                setVisibleCount(BATCH_SIZE);
-              }}
-              className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] outline-none focus:border-[var(--primary)] max-w-[160px]"
+      {/* 1. Header Toolbar: Quickfilter estesa fino alla fine con tendina clienti e refresh */}
+      <div className="p-2.5 border-b border-[var(--border)] bg-[var(--card)] flex items-center space-x-3 shrink-0">
+        {/* Ricerca Rapida F4 estesa a tutta la larghezza disponibile */}
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-[var(--muted-foreground)] absolute left-3 top-2.5" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setVisibleCount(BATCH_SIZE);
+            }}
+            placeholder="Quick Filter (F4 per cercare)..."
+            className="w-full pl-9 pr-8 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-medium"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             >
-              <option value="TUTTI">Tutti i Clienti ({distinctClients.length})</option>
-              {distinctClients.map((cli) => (
-                <option key={cli} value={cli}>
-                  {cli}
-                </option>
-              ))}
-            </select>
-          </div>
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        {/* Azioni e Badge Informativi */}
-        <div className="flex items-center space-x-2 text-xs">
-          {/* Tasto Sincronizza Cloud */}
-          <button
-            type="button"
-            onClick={handleSyncCloud}
-            disabled={syncing}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md bg-[var(--primary)] text-white hover:opacity-90 font-medium transition-all disabled:opacity-50"
-            title="Scarica e sincronizza listini clienti da Supabase Cloud a SQLite"
+        {/* Filtro Cliente dedicato a tendina (nomi puliti) */}
+        <div className="flex items-center space-x-1 shrink-0">
+          <Filter className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
+          <select
+            value={selectedClientFilter}
+            onChange={(e) => {
+              setSelectedClientFilter(e.target.value);
+              setVisibleCount(BATCH_SIZE);
+            }}
+            className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] outline-none focus:border-[var(--primary)] max-w-[200px]"
           >
-            {syncing ? (
-              <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Cloud className="w-3.5 h-3.5" />
-            )}
-            <span>{syncing ? "Sincronizzazione..." : "Sincronizza Cloud"}</span>
-          </button>
+            <option value="TUTTI">Tutti i Clienti ({distinctClients.length})</option>
+            {distinctClients.map((cli) => (
+              <option key={cli} value={cli}>
+                {cli}
+              </option>
+            ))}
+          </select>
+        </div>
 
+        {/* Azioni destra */}
+        <div className="flex items-center space-x-2 text-xs shrink-0">
           {/* Ricarica Locale */}
           <button
             type="button"
             onClick={loadData}
-            disabled={loading || syncing}
-            className="p-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-            title="Ricarica da SQLite locale"
+            disabled={loading}
+            className="p-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+            title="Ricarica lista da SQLite locale"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
-
-          {/* Badge Stato Cloud */}
-          <span className="flex items-center space-x-1 px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Cloud Sincronizzato</span>
-          </span>
 
           {/* Badge Visualizzati */}
           <span className="px-2.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] font-semibold text-[var(--foreground)]">
@@ -275,7 +227,7 @@ export const CustomerPriceListPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. Schede Tab: Tutti (18558), Duplicati (36), Prezzi da Verificare */}
+      {/* 2. Schede Tab: Tutti, Duplicati, Prezzi da Verificare */}
       <div className="px-3 py-2 bg-[var(--card)] border-b border-[var(--border)] flex items-center space-x-2 text-xs shrink-0">
         <span className="font-bold text-sm text-[var(--foreground)] mr-2">Listini Clienti</span>
 
@@ -287,7 +239,7 @@ export const CustomerPriceListPage: React.FC = () => {
           }}
           className={`px-3 py-1 rounded-full font-medium transition-all ${
             activeTab === "tutti"
-              ? "bg-[var(--primary)] text-white shadow-sm"
+              ? "bg-[var(--primary)] text-white shadow-sm font-semibold"
               : "bg-[var(--background)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]"
           }`}
         >
@@ -325,21 +277,6 @@ export const CustomerPriceListPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Notifica Progress Bar / Errori */}
-      {syncProgress && (
-        <div className="px-4 py-2 bg-[var(--card)] border-b border-[var(--border)] flex items-center justify-between text-xs animate-in fade-in">
-          <div className="flex items-center space-x-2">
-            <LoaderCircle className="w-3.5 h-3.5 animate-spin text-[var(--primary)]" />
-            <span className="font-medium text-[var(--foreground)]">{syncProgress.message}</span>
-          </div>
-          {syncProgress.total > 0 && (
-            <span className="font-mono text-[var(--muted-foreground)]">
-              {Math.round((syncProgress.current / syncProgress.total) * 100)}%
-            </span>
-          )}
-        </div>
-      )}
-
       {error && (
         <div className="p-3 bg-red-500/10 border-b border-red-500/30 text-red-400 text-xs flex items-center justify-between">
           <div className="flex items-center space-x-2">
@@ -356,7 +293,7 @@ export const CustomerPriceListPage: React.FC = () => {
         </div>
       )}
 
-      {/* 3. Tabella Listini Clienti */}
+      {/* 3. Tabella Listini Clienti: Colonna Cliente ingrandita */}
       <div
         className="flex-1 overflow-auto bg-[var(--card)] divide-y divide-[var(--border)]/40"
         onScroll={handleScroll}
@@ -368,8 +305,9 @@ export const CustomerPriceListPage: React.FC = () => {
                 <input type="checkbox" className="rounded border-[var(--border)]" />
               </th>
               <th className="px-2 py-2 w-10 text-center">A...</th>
+              {/* Colonna CLIENTE ingrandita come richiesto */}
               <th
-                className="px-3 py-2 cursor-pointer hover:text-[var(--foreground)] w-48"
+                className="px-3 py-2 cursor-pointer hover:text-[var(--foreground)] w-72 min-w-[260px] max-w-[340px]"
                 onClick={() => handleToggleSort("cliente")}
               >
                 <div className="flex items-center space-x-1">
@@ -431,7 +369,11 @@ export const CustomerPriceListPage: React.FC = () => {
                   <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)] group-hover:text-[var(--primary)]">
                     <Tag className="w-3.5 h-3.5 inline" />
                   </td>
-                  <td className="px-3 py-1.5 font-bold text-[var(--primary)] truncate max-w-[180px]">
+                  {/* Nome Cliente senza LIST_ e con larghezza generosa */}
+                  <td
+                    className="px-3 py-1.5 font-bold text-[var(--primary)] truncate w-72 min-w-[260px] max-w-[340px]"
+                    title={item.cliente}
+                  >
                     {item.cliente}
                   </td>
                   <td
@@ -466,20 +408,7 @@ export const CustomerPriceListPage: React.FC = () => {
 
         {filteredItems.length === 0 && !loading && (
           <div className="p-12 text-center text-xs text-[var(--muted-foreground)]">
-            {totalDbCount === 0 ? (
-              <div className="flex flex-col items-center space-y-2">
-                <p>Nessun listino cliente nel database locale.</p>
-                <button
-                  type="button"
-                  onClick={handleSyncCloud}
-                  className="px-3 py-1.5 rounded-md bg-[var(--primary)] text-white font-medium"
-                >
-                  Sincronizza ora da Supabase
-                </button>
-              </div>
-            ) : (
-              <p>Nessun articolo cliente corrispondente ai criteri di ricerca.</p>
-            )}
+            Nessun articolo cliente corrispondente ai criteri di ricerca.
           </div>
         )}
       </div>
@@ -487,7 +416,7 @@ export const CustomerPriceListPage: React.FC = () => {
       {/* 4. Footer con conteggio visualizzati */}
       <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-[11px] text-[var(--muted-foreground)] font-mono">
         <span>
-          Visualizzati: {Math.min(visibleCount, filteredItems.length)} su {filteredItems.length} filtrati (Totale DB: {totalDbCount})
+          Visualizzati: {Math.min(visibleCount, filteredItems.length)} su {filteredItems.length} filtrati (Totale Reali: {totalDbCount})
         </span>
         <span>Listini Personalizzati per Cliente</span>
       </div>

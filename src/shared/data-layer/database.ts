@@ -8,6 +8,7 @@ import {
 import { migrateQuoteSchemaV6 } from "./migrations/quoteSchema";
 import { migrateCompanySettingsSchemaV7 } from "./migrations/companySettingsSchema";
 import { migratePriceListsSchemaV11 } from "./migrations/priceListSchema";
+import { migratePriceListLogSchemaV12 } from "./migrations/priceListLogSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -258,6 +259,11 @@ const MIGRATIONS: Migration[] = [
     version: 11,
     name: "create_price_lists_tables",
     up: migratePriceListsSchemaV11,
+  },
+  {
+    version: 12,
+    name: "create_price_list_log_table",
+    up: migratePriceListLogSchemaV12,
   },
 ];
 
