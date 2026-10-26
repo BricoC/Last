@@ -18,7 +18,6 @@ export function DDTListPage() {
   const deferredSearch = useDeferredValue(search);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
-  const [year, setYear] = useState(String(new Date().getFullYear()));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
@@ -46,13 +45,11 @@ export function DDTListPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const years = useMemo(() => [...new Set(rows.map((row) => row.year))].sort((a, b) => b - a), [rows]);
-
   const indexedRows = useMemo<IndexedDdtRow[]>(() => {
     return rows.map((row) => ({
       ...row,
       _searchIndex: normalizeSearch(
-        `${formatDdtNumber(row.docNumber, row.series)} ${row.client} ${row.destination} ${row.orderReference} ${row.operator || ""} ${row.reason || ""}`
+        `${formatDdtNumber(row.docNumber, row.series)} ${row.date} ${formatDdtViewDate(row.date)} ${row.year} ${row.client} ${row.destination} ${row.orderReference} ${row.operator || ""} ${row.reason || ""}`
       ),
     }));
   }, [rows]);
@@ -60,14 +57,11 @@ export function DDTListPage() {
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
 
   const filtered = useMemo(() => {
-    const targetYear = year === "all" ? null : Number(year);
-    if (!searchTokens.length && targetYear === null) return indexedRows;
+    if (!searchTokens.length) return indexedRows;
     return indexedRows.filter((row) => {
-      if (targetYear !== null && row.year !== targetYear) return false;
-      if (!searchTokens.length) return true;
       return searchTokens.every((token) => row._searchIndex.includes(token));
     });
-  }, [indexedRows, searchTokens, year]);
+  }, [indexedRows, searchTokens]);
 
   // Reset del numero di righe visibili al cambio filtri e scroll in cima
   useEffect(() => {
@@ -75,7 +69,7 @@ export function DDTListPage() {
     if (tableContainerRef.current) {
       tableContainerRef.current.scrollTop = 0;
     }
-  }, [deferredSearch, year]);
+  }, [deferredSearch]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -91,7 +85,6 @@ export function DDTListPage() {
     purchase: sum.purchase + row.purchaseSubunits,
     revenue: sum.revenue + row.revenueSubunits,
   }), { taxable: 0, purchase: 0, revenue: 0 }), [filtered]);
-  const yearCount = year === "all" ? rows.length : rows.filter((row) => row.year === Number(year)).length;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2 text-[var(--foreground)]">
@@ -102,7 +95,7 @@ export function DDTListPage() {
           ref={searchInputRef}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Cerca numero DDT, cliente, destinazione o ordine… (F4 per cercare)"
+          placeholder="Cerca numero DDT, data, mese (es. Settembre), cliente, destinazione o ordine… (F4 per cercare)"
           className="w-full bg-transparent outline-none"
         />
         {search && (
@@ -120,15 +113,13 @@ export function DDTListPage() {
       {/* Toolbar / Header */}
       <div className="flex h-7 shrink-0 items-center justify-between gap-3 px-1 text-xs">
         <div className="flex items-center gap-2 font-semibold">
-          <span>Totale DDT {year === "all" ? "archivio" : year}: {yearCount.toLocaleString("it-IT")}</span>
-          <select aria-label="Anno DDT" value={year} onChange={(event) => setYear(event.target.value)} className="h-6 rounded border border-[var(--border)] bg-[var(--card)] px-2 text-[11px] font-normal cursor-pointer">
-            {years.map((value) => <option key={value} value={String(value)}>{value}</option>)}<option value="all">Tutti</option>
-          </select>
+          <h1 className="text-xs font-bold uppercase tracking-wider text-[var(--foreground)]">DDT Emesse</h1>
+          <span className="text-[var(--muted-foreground)] text-[11px] font-normal">
+            ({rows.length.toLocaleString("it-IT")} totali)
+          </span>
         </div>
-        <h1 className="hidden font-semibold sm:block">DDT EMESSE</h1>
         <div className="flex items-center gap-3">
           <span>Visibili: {filtered.length.toLocaleString("it-IT")}</span>
-          <span>Totale DDT presenti: {rows.length.toLocaleString("it-IT")}</span>
           <Button type="button" size="sm" variant="secondary" className="h-6 px-2 cursor-pointer" onClick={() => void load()} disabled={loading}>
             {loading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
@@ -155,7 +146,7 @@ export function DDTListPage() {
           <table className="w-full border-collapse text-xs">
             <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">
               <tr>
-                <th className="px-3 py-2 text-left w-24">DATA</th>
+                <th className="px-3 py-2 text-left w-36">DATA</th>
                 <th className="px-3 py-2 text-left w-28">DDT</th>
                 <th className="px-3 py-2 text-left w-48">CLIENTE</th>
                 <th className="px-3 py-2 text-left">DESTINAZIONE</th>

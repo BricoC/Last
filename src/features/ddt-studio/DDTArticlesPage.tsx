@@ -19,7 +19,6 @@ export function DDTArticlesPage() {
   const deferredSearch = useDeferredValue(search);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
-  const [year, setYear] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
@@ -48,13 +47,11 @@ export function DDTArticlesPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const years = useMemo(() => [...new Set(rows.map((row) => row.year))].sort((a, b) => b - a), [rows]);
-
   const indexedRows = useMemo<IndexedArticleRow[]>(() => {
     return rows.map((row) => ({
       ...row,
       _searchIndex: normalizeSearch(
-        `${row.description} ${row.date} ${formatDdtViewDate(row.date)} ${row.client} ${row.destination} ${formatDdtNumber(row.docNumber, row.series)}`
+        `${row.description} ${row.date} ${formatDdtViewDate(row.date)} ${row.year} ${row.client} ${row.destination} ${formatDdtNumber(row.docNumber, row.series)}`
       ),
     }));
   }, [rows]);
@@ -62,14 +59,11 @@ export function DDTArticlesPage() {
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
 
   const filtered = useMemo(() => {
-    const targetYear = year === "all" ? null : Number(year);
-    if (!searchTokens.length && targetYear === null) return indexedRows;
+    if (!searchTokens.length) return indexedRows;
     return indexedRows.filter((row) => {
-      if (targetYear !== null && row.year !== targetYear) return false;
-      if (!searchTokens.length) return true;
       return searchTokens.every((token) => row._searchIndex.includes(token));
     });
-  }, [indexedRows, searchTokens, year]);
+  }, [indexedRows, searchTokens]);
 
   // Reset del numero di righe visibili al cambio filtri e scroll in cima
   useEffect(() => {
@@ -77,7 +71,7 @@ export function DDTArticlesPage() {
     if (tableContainerRef.current) {
       tableContainerRef.current.scrollTop = 0;
     }
-  }, [deferredSearch, year]);
+  }, [deferredSearch]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -97,7 +91,7 @@ export function DDTArticlesPage() {
           ref={searchInputRef}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Cerca descrizione, data, cliente, destinazione o numero DDT… (F4 per cercare)"
+          placeholder="Cerca descrizione, data, mese (es. Settembre), cliente, destinazione o numero DDT… (F4 per cercare)"
           className="w-full bg-transparent outline-none"
         />
         {search && (
@@ -115,15 +109,13 @@ export function DDTArticlesPage() {
       {/* Toolbar / Header */}
       <div className="flex h-7 shrink-0 items-center justify-between gap-3 px-1 text-xs">
         <div className="flex items-center gap-2 font-semibold">
-          <h1>Articoli DDT</h1>
-          <select aria-label="Anno DDT" value={year} onChange={(event) => setYear(event.target.value)} className="h-6 rounded border border-[var(--border)] bg-[var(--card)] px-2 text-[11px] font-normal cursor-pointer">
-            <option value="all">Tutti gli anni</option>
-            {years.map((value) => <option key={value} value={String(value)}>{value}</option>)}
-          </select>
+          <h1 className="text-xs font-bold uppercase tracking-wider text-[var(--foreground)]">Articoli DDT</h1>
+          <span className="text-[var(--muted-foreground)] text-[11px] font-normal">
+            ({rows.length.toLocaleString("it-IT")} totali)
+          </span>
         </div>
         <div className="flex items-center gap-3">
           <span>Righe visibili: {filtered.length.toLocaleString("it-IT")}</span>
-          <span>Totale voci presenti: {rows.length.toLocaleString("it-IT")}</span>
           <Button type="button" size="sm" variant="secondary" className="h-6 px-2 cursor-pointer" onClick={() => void load()} disabled={loading}>
             {loading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
@@ -150,10 +142,10 @@ export function DDTArticlesPage() {
           <table className="w-full border-collapse text-xs">
             <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">
               <tr>
+                <th className="px-3 py-2 text-left w-36">DATA</th>
+                <th className="px-3 py-2 text-left w-24">DDT</th>
                 <th className="px-3 py-2 text-left w-48">CLIENTE</th>
                 <th className="px-3 py-2 text-left w-48">DESTINAZIONE</th>
-                <th className="px-3 py-2 text-left w-24">DDT</th>
-                <th className="px-3 py-2 text-left w-24">DATA</th>
                 <th className="px-2 py-2 text-center w-14">UM</th>
                 <th className="px-3 py-2 text-right w-20">QUANTITÀ</th>
                 <th className="px-3 py-2 text-left">DESCRIZIONE</th>
@@ -172,14 +164,9 @@ export function DDTArticlesPage() {
                     key={row.id}
                     className="hover:bg-[var(--background)]/60 transition-colors"
                   >
-                    {/* CLIENTE */}
-                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[200px]" title={row.client}>
-                      {row.client}
-                    </td>
-
-                    {/* DESTINAZIONE */}
-                    <td className="px-3 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[200px]" title={row.destination}>
-                      {row.destination || "—"}
+                    {/* DATA */}
+                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap">
+                      {formatDdtViewDate(row.date)}
                     </td>
 
                     {/* DDT (Link al popup del DDT) */}
@@ -195,9 +182,14 @@ export function DDTArticlesPage() {
                       </button>
                     </td>
 
-                    {/* DATA */}
-                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap">
-                      {formatDdtViewDate(row.date)}
+                    {/* CLIENTE */}
+                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[200px]" title={row.client}>
+                      {row.client}
+                    </td>
+
+                    {/* DESTINAZIONE */}
+                    <td className="px-3 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[200px]" title={row.destination}>
+                      {row.destination || "—"}
                     </td>
 
                     {/* UM */}
