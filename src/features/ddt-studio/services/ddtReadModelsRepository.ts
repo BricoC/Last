@@ -1,4 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
+import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 
 export interface DdtListViewRow {
   id: string; year: number; docNumber: number | null; series: string; date: string;
@@ -154,27 +155,16 @@ export async function getClientArticleHistory(options: {
     query += ` AND LOWER(TRIM(d.client_name)) = LOWER(TRIM($${params.length}))`;
   }
 
-  if (trimmedCode) {
+  if (trimmedDesc) {
+    const tokens = tokenizeSearch(trimmedDesc);
+    for (const token of tokens) {
+      params.push(`%${token}%`);
+      const pIdx = params.length;
+      query += ` AND (i.description LIKE $${pIdx} OR (i.code IS NOT NULL AND i.code LIKE $${pIdx}))`;
+    }
+  } else if (trimmedCode) {
     params.push(trimmedCode);
-    const codeIdx = params.length;
-    params.push(trimmedDesc);
-    const descIdx = params.length;
-    params.push(`%${trimmedDesc}%`);
-    const likeIdx = params.length;
-    query += ` AND (
-      (i.code IS NOT NULL AND LOWER(TRIM(i.code)) = LOWER(TRIM($${codeIdx})))
-      OR LOWER(TRIM(i.description)) = LOWER(TRIM($${descIdx}))
-      OR (i.description LIKE $${likeIdx})
-    )`;
-  } else if (trimmedDesc) {
-    params.push(trimmedDesc);
-    const descIdx = params.length;
-    params.push(`%${trimmedDesc}%`);
-    const likeIdx = params.length;
-    query += ` AND (
-      LOWER(TRIM(i.description)) = LOWER(TRIM($${descIdx}))
-      OR (i.description LIKE $${likeIdx})
-    )`;
+    query += ` AND (i.code IS NOT NULL AND LOWER(TRIM(i.code)) = LOWER(TRIM($${params.length})))`;
   }
 
   query += ` ORDER BY d.doc_date DESC, d.doc_number DESC LIMIT 300`;

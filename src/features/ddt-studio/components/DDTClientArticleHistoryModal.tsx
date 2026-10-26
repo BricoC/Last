@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useDeferredValue } from "react";
 import { X, Search, History, User, Building2, FileText } from "lucide-react";
 import { getClientArticleHistory, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
-import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 
 export interface DDTClientArticleHistoryModalProps {
   isOpen: boolean;
@@ -25,9 +24,17 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [onlyThisClient, setOnlyThisClient] = useState(true);
-  const [searchFilter, setSearchFilter] = useState("");
+  const [searchTerm, setSearchTerm] = useState(articleDescription);
+  const deferredSearchTerm = useDeferredValue(searchTerm);
 
-  // Carica i dati quando si apre il modal o cambia il filtro cliente
+  // Inizializza o aggiorna il testo di ricerca quando si apre il modal per un nuovo articolo
+  useEffect(() => {
+    if (isOpen) {
+      setSearchTerm(articleDescription);
+    }
+  }, [isOpen, articleDescription]);
+
+  // Carica i dati quando cambia deferredSearchTerm, il cliente o il toggle onlyThisClient
   useEffect(() => {
     if (!isOpen) return;
 
@@ -38,8 +45,8 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
       try {
         const data = await getClientArticleHistory({
           clientName,
-          description: articleDescription,
-          code: articleCode,
+          description: deferredSearchTerm,
+          code: deferredSearchTerm.trim() === articleDescription.trim() ? articleCode : undefined,
           onlyThisClient,
         });
         if (isMounted) setRows(data);
@@ -56,7 +63,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     return () => {
       isMounted = false;
     };
-  }, [isOpen, clientName, articleDescription, articleCode, onlyThisClient]);
+  }, [isOpen, clientName, deferredSearchTerm, articleDescription, articleCode, onlyThisClient]);
 
   // Gestione tasto Escape in capture phase per chiudere solo questo popup
   useEffect(() => {
@@ -72,15 +79,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [isOpen, onClose]);
 
-  // Filtro locale aggiuntivo (per rifinire la ricerca se ci sono molte righe)
-  const filteredRows = useMemo(() => {
-    const tokens = tokenizeSearch(searchFilter);
-    if (!tokens.length) return rows;
-    return rows.filter((row) => {
-      const text = `${row.client} ${row.description} ${row.destination} ${formatDdtNumber(row.docNumber, row.series)} ${row.date}`.toLowerCase();
-      return tokens.every((token) => text.includes(token));
-    });
-  }, [rows, searchFilter]);
+  const filteredRows = rows;
 
   // Statistiche e totali
   const stats = useMemo(() => {
@@ -143,6 +142,11 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold tracking-tight">Storico Articolo</h2>
+                {searchTerm && (
+                  <span className="rounded bg-[var(--primary)]/15 px-2 py-0.5 font-sans text-xs font-semibold text-[var(--primary)] max-w-md truncate">
+                    {searchTerm}
+                  </span>
+                )}
                 {articleCode && (
                   <span className="rounded bg-[var(--primary)]/20 px-2 py-0.5 font-mono text-xs font-semibold text-[var(--primary)]">
                     {articleCode}
@@ -150,7 +154,9 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                 )}
               </div>
               <p className="text-xs text-[var(--muted-foreground)] line-clamp-1 max-w-2xl font-medium">
-                {articleDescription}
+                {onlyThisClient
+                  ? `Storico vendite per ${clientName || "cliente"}`
+                  : "Storico vendite su tutti i clienti"}
               </p>
             </div>
           </div>
@@ -199,19 +205,24 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
         {/* Toolbar & KPI bar */}
         <div className="shrink-0 border-b border-[var(--border)] bg-[var(--background)]/50 px-5 py-2.5 flex flex-wrap items-center justify-between gap-3">
-          {/* Quick search input */}
-          <div className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs w-72">
-            <Search className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+          {/* Article Search Input */}
+          <div className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-1 text-xs w-80 shadow-sm focus-within:border-[var(--primary)] transition-colors">
+            <Search className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
             <input
               type="text"
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Filtra tra questi movimenti…"
-              className="w-full bg-transparent outline-none"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cerca qualsiasi articolo o codice…"
+              className="w-full bg-transparent outline-none font-medium text-[var(--foreground)]"
             />
-            {searchFilter && (
-              <button type="button" onClick={() => setSearchFilter("")} className="cursor-pointer">
-                <X className="h-3 w-3 text-[var(--muted-foreground)]" />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm("")}
+                className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] p-0.5 rounded cursor-pointer"
+                title="Svuota ricerca"
+              >
+                <X className="h-3 w-3" />
               </button>
             )}
           </div>
@@ -269,19 +280,21 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           ) : filteredRows.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center p-8 text-center text-sm text-[var(--muted-foreground)]">
               <History className="h-10 w-10 opacity-30 mb-2" />
-              <p className="font-medium">Nessun precedente acquisto registrato.</p>
+              <p className="font-medium">
+                {searchTerm ? `Nessun acquisto trovato per "${searchTerm}".` : "Nessun acquisto registrato."}
+              </p>
               <p className="text-xs opacity-70 mt-1">
                 {onlyThisClient
-                  ? `Il cliente ${clientName} non ha altri DDT con questo articolo.`
-                  : "Nessun DDT trovato per questo articolo."}
+                  ? `Il cliente ${clientName} non ha DDT corrispondenti a questa ricerca.`
+                  : "Nessun DDT trovato nel database corrispondente a questa ricerca."}
               </p>
               {onlyThisClient && (
                 <button
                   type="button"
                   onClick={() => setOnlyThisClient(false)}
-                  className="mt-3 text-xs text-[var(--primary)] hover:underline cursor-pointer"
+                  className="mt-3 text-xs text-[var(--primary)] hover:underline cursor-pointer font-semibold"
                 >
-                  Cerca tra tutti i clienti
+                  Cerca tra tutti i clienti ↗
                 </button>
               )}
             </div>
