@@ -167,7 +167,7 @@ export async function getClientArticleHistory(options: {
     query += ` AND (i.code IS NOT NULL AND LOWER(TRIM(i.code)) = LOWER(TRIM($${params.length})))`;
   }
 
-  query += ` ORDER BY d.doc_date DESC, d.doc_number DESC LIMIT 300`;
+  query += ` ORDER BY d.doc_date DESC, d.doc_number DESC`;
 
   const rows = await db.select<any[]>(query, params);
 

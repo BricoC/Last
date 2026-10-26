@@ -138,11 +138,9 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
     <>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-[2px] p-2 sm:p-3 text-[var(--foreground)] animate-in fade-in duration-150"
-        onClick={onClose}
       >
         <div
           className="flex h-[94vh] w-[98vw] max-w-[1680px] flex-col rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
         >
           {/* Top Bar Header */}
           <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-6 py-3">

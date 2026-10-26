@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useDeferredValue } from "react";
+import React, { useEffect, useMemo, useState, useDeferredValue, useRef } from "react";
 import { X, Search, History, User, Building2, FileText } from "lucide-react";
 import { getClientArticleHistory, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
@@ -11,6 +11,8 @@ export interface DDTClientArticleHistoryModalProps {
   articleCode?: string;
   onSelectDdt?: (ddtId: string) => void;
 }
+
+const BATCH_SIZE = 150;
 
 export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModalProps> = ({
   isOpen,
@@ -26,6 +28,8 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   const [onlyThisClient, setOnlyThisClient] = useState(true);
   const [searchTerm, setSearchTerm] = useState(articleDescription);
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
 
   // Inizializza o aggiorna il testo di ricerca quando si apre il modal per un nuovo articolo
   useEffect(() => {
@@ -64,6 +68,23 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
       isMounted = false;
     };
   }, [isOpen, clientName, deferredSearchTerm, articleDescription, articleCode, onlyThisClient]);
+
+  // Reset del conteggio visibile e scroll quando cambiano i filtri
+  useEffect(() => {
+    setVisibleCount(BATCH_SIZE);
+    if (tableContainerRef.current) {
+      tableContainerRef.current.scrollTop = 0;
+    }
+  }, [deferredSearchTerm, onlyThisClient]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollTop + clientHeight >= scrollHeight - 350) {
+      setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, rows.length));
+    }
+  };
+
+  const visibleRows = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
 
   // Gestione tasto Escape in capture phase per chiudere solo questo popup
   useEffect(() => {
@@ -127,11 +148,9 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-[2px] p-2 sm:p-3 text-[var(--foreground)] animate-in fade-in duration-150"
-      onClick={onClose}
     >
       <div
         className="flex h-[92vh] w-[98vw] max-w-[1600px] flex-col rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-6 py-3.5">
@@ -229,13 +248,19 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
           {/* KPI metrics */}
           {stats && (
-            <div className="flex items-center gap-4 text-xs font-medium">
+            <div className="flex items-center gap-3 text-xs font-medium">
               <div className="flex items-center gap-1.5 rounded bg-[var(--card)] border border-[var(--border)] px-2.5 py-1">
-                <span className="text-[var(--muted-foreground)]">Acquistato:</span>
+                <span className="text-[var(--muted-foreground)]">Quantità:</span>
                 <span className="font-bold text-[var(--foreground)]">
-                  {stats.totalQty.toLocaleString("it-IT", { maximumFractionDigits: 2 })} {stats.unit}
+                  NR. {stats.totalQty.toLocaleString("it-IT", { maximumFractionDigits: 2 })}
                 </span>
-                <span className="text-[10px] text-[var(--muted-foreground)]">({stats.totalPurchases} DDT)</span>
+              </div>
+
+              <div className="flex items-center gap-1.5 rounded bg-[var(--card)] border border-[var(--border)] px-2.5 py-1">
+                <span className="text-[var(--muted-foreground)]">Documenti:</span>
+                <span className="font-bold text-[var(--foreground)]">
+                  NR. {stats.totalPurchases.toLocaleString("it-IT")} DDT
+                </span>
               </div>
 
               <div className="flex items-center gap-1.5 rounded bg-[var(--card)] border border-[var(--border)] px-2.5 py-1">
@@ -269,7 +294,11 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
         </div>
 
         {/* Tabella Storico */}
-        <div className="flex-1 min-h-0 overflow-auto bg-[var(--card)]">
+        <div
+          ref={tableContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 min-h-0 overflow-auto bg-[var(--card)]"
+        >
           {isLoading ? (
             <div className="flex h-full items-center justify-center gap-2 text-sm text-[var(--muted-foreground)]">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" />
@@ -317,7 +346,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
-                {filteredRows.map((row, idx) => {
+                {visibleRows.map((row, idx) => {
                   const qty = parseFloat(row.quantity.replace(",", ".")) || 0;
                   const unitNet = qty > 0 ? row.netAmountSubunits / qty : row.unitPriceSubunits;
                   const isPositiveRev = row.revenueSubunits > 0;
@@ -416,6 +445,11 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                 })}
               </tbody>
             </table>
+          )}
+          {visibleRows.length < filteredRows.length && (
+            <div className="p-3 text-center text-xs text-[var(--muted-foreground)] bg-[var(--background)]/40 border-t border-[var(--border)]/30">
+              Visualizzati {visibleRows.length} di {filteredRows.length} movimenti. Scorri verso il basso per caricarne altri.
+            </div>
           )}
         </div>
 
