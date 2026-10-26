@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useDeferredValue, useRef } from "react";
-import { X, Search, History, User, Building2, FileText } from "lucide-react";
+import { X, Search, History, User, Building2, FileText, ArrowUp, ArrowDown, ArrowUpDown, Calendar } from "lucide-react";
 import { getClientArticleHistory, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
 import { useAppSettingsStore } from "@/shared/stores/useAppSettingsStore";
@@ -15,6 +15,27 @@ export interface DDTClientArticleHistoryModalProps {
 
 const BATCH_SIZE = 150;
 
+type SortField =
+  | "date"
+  | "docNumber"
+  | "client"
+  | "destination"
+  | "quantity"
+  | "unitPrice"
+  | "discount"
+  | "netPrice"
+  | "netAmount"
+  | "purchasePrice"
+  | "revenue"
+  | "markup";
+
+type SortDirection = "asc" | "desc";
+
+interface SortConfig {
+  field: SortField;
+  direction: SortDirection;
+}
+
 export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModalProps> = ({
   isOpen,
   onClose,
@@ -29,6 +50,11 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   const [onlyThisClient, setOnlyThisClient] = useState(true);
   const [searchTerm, setSearchTerm] = useState(articleDescription);
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [selectedYear, setSelectedYear] = useState<string>("all");
+  const [sortConfig, setSortConfig] = useState<SortConfig>({
+    field: "date",
+    direction: "desc",
+  });
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const { historyModalLimit } = useAppSettingsStore();
@@ -37,6 +63,8 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   useEffect(() => {
     if (isOpen) {
       setSearchTerm(articleDescription);
+      setSelectedYear("all");
+      setSortConfig({ field: "date", direction: "desc" });
     }
   }, [isOpen, articleDescription]);
 
@@ -72,22 +100,151 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     };
   }, [isOpen, clientName, deferredSearchTerm, articleDescription, articleCode, onlyThisClient, historyModalLimit]);
 
-  // Reset del conteggio visibile e scroll quando cambiano i filtri
+  // Anni disponibili ricavati dai dati estratti
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    for (const r of rows) {
+      if (r.year) {
+        yearsSet.add(r.year);
+      } else if (r.date) {
+        const parsedYear = new Date(r.date).getFullYear();
+        if (!isNaN(parsedYear)) yearsSet.add(parsedYear);
+      }
+    }
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [rows]);
+
+  // Se l'anno precedentemente selezionato non è più presente nei risultati, torna a "all"
+  useEffect(() => {
+    if (selectedYear !== "all" && availableYears.length > 0 && !availableYears.includes(Number(selectedYear))) {
+      setSelectedYear("all");
+    }
+  }, [availableYears, selectedYear]);
+
+  // Filtro per anno
+  const filteredRows = useMemo(() => {
+    if (selectedYear === "all") return rows;
+    const yrNum = Number(selectedYear);
+    return rows.filter((r) => r.year === yrNum || new Date(r.date).getFullYear() === yrNum);
+  }, [rows, selectedYear]);
+
+  // Ordinamento colonne
+  const sortedRows = useMemo(() => {
+    const { field, direction } = sortConfig;
+    const multiplier = direction === "asc" ? 1 : -1;
+
+    return [...filteredRows].sort((a, b) => {
+      let comparison = 0;
+      switch (field) {
+        case "date": {
+          const da = a.date || "";
+          const db = b.date || "";
+          comparison = da.localeCompare(db);
+          if (comparison === 0) {
+            comparison = (a.docNumber ?? 0) - (b.docNumber ?? 0);
+          }
+          break;
+        }
+        case "docNumber": {
+          const na = a.docNumber ?? 0;
+          const nb = b.docNumber ?? 0;
+          comparison = na - nb;
+          if (comparison === 0) {
+            comparison = (a.series || "").localeCompare(b.series || "");
+          }
+          break;
+        }
+        case "client":
+          comparison = (a.client || "").localeCompare(b.client || "");
+          break;
+        case "destination":
+          comparison = (a.destination || "").localeCompare(b.destination || "");
+          break;
+        case "quantity": {
+          const qa = parseFloat(a.quantity.replace(",", ".")) || 0;
+          const qb = parseFloat(b.quantity.replace(",", ".")) || 0;
+          comparison = qa - qb;
+          break;
+        }
+        case "unitPrice":
+          comparison = a.unitPriceSubunits - b.unitPriceSubunits;
+          break;
+        case "discount": {
+          const da = parseFloat((a.discountPercent || "0").replace(",", ".")) || 0;
+          const db = parseFloat((b.discountPercent || "0").replace(",", ".")) || 0;
+          comparison = da - db;
+          break;
+        }
+        case "netPrice": {
+          const qa = parseFloat(a.quantity.replace(",", ".")) || 0;
+          const qb = parseFloat(b.quantity.replace(",", ".")) || 0;
+          const pa = qa > 0 ? a.netAmountSubunits / qa : a.unitPriceSubunits;
+          const pb = qb > 0 ? b.netAmountSubunits / qb : b.unitPriceSubunits;
+          comparison = pa - pb;
+          break;
+        }
+        case "netAmount":
+          comparison = a.netAmountSubunits - b.netAmountSubunits;
+          break;
+        case "purchasePrice":
+          comparison = a.purchasePriceSubunits - b.purchasePriceSubunits;
+          break;
+        case "revenue":
+          comparison = a.revenueSubunits - b.revenueSubunits;
+          break;
+        case "markup": {
+          const ma = a.markupPercent ?? -9999999;
+          const mb = b.markupPercent ?? -9999999;
+          comparison = ma - mb;
+          break;
+        }
+      }
+      return comparison * multiplier;
+    });
+  }, [filteredRows, sortConfig]);
+
+  // Reset del conteggio visibile e scroll quando cambiano i filtri o l'ordinamento
   useEffect(() => {
     setVisibleCount(BATCH_SIZE);
     if (tableContainerRef.current) {
       tableContainerRef.current.scrollTop = 0;
     }
-  }, [deferredSearchTerm, onlyThisClient]);
+  }, [deferredSearchTerm, onlyThisClient, selectedYear, sortConfig]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     if (scrollTop + clientHeight >= scrollHeight - 350) {
-      setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, rows.length));
+      setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, sortedRows.length));
     }
   };
 
-  const visibleRows = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
+  const visibleRows = useMemo(() => sortedRows.slice(0, visibleCount), [sortedRows, visibleCount]);
+
+  const handleSort = (field: SortField) => {
+    setSortConfig((prev) => {
+      if (prev.field === field) {
+        return {
+          field,
+          direction: prev.direction === "asc" ? "desc" : "asc",
+        };
+      }
+      return {
+        field,
+        direction: field === "client" || field === "destination" ? "asc" : "desc",
+      };
+    });
+  };
+
+  const renderSortIndicator = (field: SortField) => {
+    if (sortConfig.field !== field) {
+      return <ArrowUpDown className="h-3 w-3 opacity-25 group-hover:opacity-75 transition-opacity shrink-0 ml-1" />;
+    }
+    return sortConfig.direction === "asc" ? (
+      <ArrowUp className="h-3 w-3 text-[var(--primary)] shrink-0 ml-1" />
+    ) : (
+      <ArrowDown className="h-3 w-3 text-[var(--primary)] shrink-0 ml-1" />
+    );
+  };
 
   // Gestione tasto Escape in capture phase per chiudere solo questo popup
   useEffect(() => {
@@ -103,9 +260,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [isOpen, onClose]);
 
-  const filteredRows = rows;
-
-  // Statistiche e totali
+  // Statistiche e totali (basati sui record filtrati per anno)
   const stats = useMemo(() => {
     if (!filteredRows.length) return null;
 
@@ -227,26 +382,49 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
         {/* Toolbar & KPI bar */}
         <div className="shrink-0 border-b border-[var(--border)] bg-[var(--background)]/50 px-5 py-2.5 flex flex-wrap items-center justify-between gap-3">
-          {/* Article Search Input */}
-          <div className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-1 text-xs w-80 shadow-sm focus-within:border-[var(--primary)] transition-colors">
-            <Search className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cerca qualsiasi articolo o codice…"
-              className="w-full bg-transparent outline-none font-medium text-[var(--foreground)]"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={() => setSearchTerm("")}
-                className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] p-0.5 rounded cursor-pointer"
-                title="Svuota ricerca"
+          {/* Ricerca e Filtro Anno */}
+          <div className="flex items-center gap-2">
+            {/* Article Search Input */}
+            <div className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs w-80 shadow-sm focus-within:border-[var(--primary)] transition-colors">
+              <Search className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Cerca qualsiasi articolo o codice…"
+                className="w-full bg-transparent outline-none font-medium text-[var(--foreground)]"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] p-0.5 rounded cursor-pointer"
+                  title="Svuota ricerca"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Filtro Anno */}
+            <div className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] px-2.5 py-1.5 text-xs shadow-sm focus-within:border-[var(--primary)] transition-colors">
+              <Calendar className="h-3.5 w-3.5 shrink-0 text-[var(--primary)]" />
+              <select
+                aria-label="Filtra per Anno"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                className="bg-transparent outline-none font-medium text-[var(--foreground)] cursor-pointer pr-1"
               >
-                <X className="h-3 w-3" />
-              </button>
-            )}
+                <option value="all" className="bg-[var(--card)] text-[var(--foreground)]">
+                  Tutti gli anni {availableYears.length > 0 ? `(${availableYears.length})` : ""}
+                </option>
+                {availableYears.map((yr) => (
+                  <option key={yr} value={String(yr)} className="bg-[var(--card)] text-[var(--foreground)]">
+                    Anno {yr}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* KPI metrics */}
@@ -313,12 +491,16 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
             <div className="flex h-full flex-col items-center justify-center p-8 text-center text-sm text-[var(--muted-foreground)]">
               <History className="h-10 w-10 opacity-30 mb-2" />
               <p className="font-medium">
-                {searchTerm ? `Nessun acquisto trovato per "${searchTerm}".` : "Nessun acquisto registrato."}
+                {selectedYear !== "all"
+                  ? `Nessun acquisto trovato nell'anno ${selectedYear}${searchTerm ? ` per "${searchTerm}"` : ""}.`
+                  : searchTerm
+                  ? `Nessun acquisto trovato per "${searchTerm}".`
+                  : "Nessun acquisto registrato."}
               </p>
               <p className="text-xs opacity-70 mt-1">
                 {onlyThisClient
-                  ? `Il cliente ${clientName} non ha DDT corrispondenti a questa ricerca.`
-                  : "Nessun DDT trovato nel database corrispondente a questa ricerca."}
+                  ? `Il cliente ${clientName} non ha DDT corrispondenti ai filtri impostati.`
+                  : "Nessun DDT trovato nel database corrispondente ai filtri impostati."}
               </p>
               {onlyThisClient && (
                 <button
@@ -331,21 +513,154 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
               )}
             </div>
           ) : (
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)]">
+            <table className="w-full min-w-full border-collapse text-xs">
+              <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] select-none">
                 <tr>
-                  <th className="px-3 py-2 text-left w-24">DATA</th>
-                  <th className="px-3 py-2 text-left w-28">DDT</th>
-                  {!onlyThisClient && <th className="px-3 py-2 text-left w-48">CLIENTE</th>}
-                  <th className="px-3 py-2 text-left">DESTINAZIONE</th>
-                  <th className="px-3 py-2 text-right w-24">QUANTITÀ</th>
-                  <th className="px-3 py-2 text-right w-28">PREZZO LIST.</th>
-                  <th className="px-2 py-2 text-center w-20">SCONTO</th>
-                  <th className="px-3 py-2 text-right w-28">PREZZO NETTO</th>
-                  <th className="px-3 py-2 text-right w-28">TOT. NETTO</th>
-                  <th className="px-3 py-2 text-right w-28">COSTO ACQ.</th>
-                  <th className="px-3 py-2 text-right w-24">MARGINE €</th>
-                  <th className="px-3 py-2 text-right w-24">RICARICO %</th>
+                  {/* DATA */}
+                  <th
+                    onClick={() => handleSort("date")}
+                    className="px-4 py-2.5 text-left w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Data"
+                  >
+                    <div className="inline-flex items-center gap-1">
+                      <span>DATA</span>
+                      {renderSortIndicator("date")}
+                    </div>
+                  </th>
+
+                  {/* DDT */}
+                  <th
+                    onClick={() => handleSort("docNumber")}
+                    className="px-4 py-2.5 text-left w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Numero DDT"
+                  >
+                    <div className="inline-flex items-center gap-1">
+                      <span>DDT</span>
+                      {renderSortIndicator("docNumber")}
+                    </div>
+                  </th>
+
+                  {/* CLIENTE */}
+                  {!onlyThisClient && (
+                    <th
+                      onClick={() => handleSort("client")}
+                      className="px-4 py-2.5 text-left w-64 max-w-[240px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per Cliente"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>CLIENTE</span>
+                        {renderSortIndicator("client")}
+                      </div>
+                    </th>
+                  )}
+
+                  {/* DESTINAZIONE - Ridotta del 50% con larghezza controllata */}
+                  <th
+                    onClick={() => handleSort("destination")}
+                    className="px-3 py-2.5 text-left w-44 max-w-[180px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Destinazione"
+                  >
+                    <div className="inline-flex items-center gap-1">
+                      <span>DESTINAZIONE</span>
+                      {renderSortIndicator("destination")}
+                    </div>
+                  </th>
+
+                  {/* QUANTITÀ */}
+                  <th
+                    onClick={() => handleSort("quantity")}
+                    className="px-4 py-2.5 text-right w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Quantità"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1 w-full">
+                      <span>QUANTITÀ</span>
+                      {renderSortIndicator("quantity")}
+                    </div>
+                  </th>
+
+                  {/* PREZZO LIST. */}
+                  <th
+                    onClick={() => handleSort("unitPrice")}
+                    className="px-4 py-2.5 text-right w-36 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Prezzo Listino"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1 w-full">
+                      <span>PREZZO LIST.</span>
+                      {renderSortIndicator("unitPrice")}
+                    </div>
+                  </th>
+
+                  {/* SCONTO */}
+                  <th
+                    onClick={() => handleSort("discount")}
+                    className="px-3 py-2.5 text-center w-24 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Sconto"
+                  >
+                    <div className="inline-flex items-center justify-center gap-1 w-full">
+                      <span>SCONTO</span>
+                      {renderSortIndicator("discount")}
+                    </div>
+                  </th>
+
+                  {/* PREZZO NETTO */}
+                  <th
+                    onClick={() => handleSort("netPrice")}
+                    className="px-4 py-2.5 text-right w-36 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Prezzo Netto"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1 w-full">
+                      <span>PREZZO NETTO</span>
+                      {renderSortIndicator("netPrice")}
+                    </div>
+                  </th>
+
+                  {/* TOT. NETTO */}
+                  <th
+                    onClick={() => handleSort("netAmount")}
+                    className="px-4 py-2.5 text-right w-36 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Totale Netto"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1 w-full">
+                      <span>TOT. NETTO</span>
+                      {renderSortIndicator("netAmount")}
+                    </div>
+                  </th>
+
+                  {/* COSTO ACQ. */}
+                  <th
+                    onClick={() => handleSort("purchasePrice")}
+                    className="px-4 py-2.5 text-right w-36 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Costo Acquisto"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1 w-full">
+                      <span>COSTO ACQ.</span>
+                      {renderSortIndicator("purchasePrice")}
+                    </div>
+                  </th>
+
+                  {/* MARGINE € */}
+                  <th
+                    onClick={() => handleSort("revenue")}
+                    className="px-4 py-2.5 text-right w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Margine"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1 w-full">
+                      <span>MARGINE €</span>
+                      {renderSortIndicator("revenue")}
+                    </div>
+                  </th>
+
+                  {/* RICARICO % */}
+                  <th
+                    onClick={() => handleSort("markup")}
+                    className="px-4 py-2.5 text-right w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Ricarico %"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1 w-full">
+                      <span>RICARICO %</span>
+                      {renderSortIndicator("markup")}
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
@@ -361,12 +676,12 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                       className="hover:bg-[var(--background)]/60 transition-colors"
                     >
                       {/* Data */}
-                      <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)]">
+                      <td className="px-4 py-2.5 font-sans font-medium text-[var(--foreground)]">
                         {formatDdtViewDate(row.date)}
                       </td>
 
                       {/* DDT */}
-                      <td className="px-3 py-2">
+                      <td className="px-4 py-2.5">
                         {onSelectDdt ? (
                           <button
                             type="button"
@@ -386,49 +701,52 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
                       {/* Cliente (se tutti) */}
                       {!onlyThisClient && (
-                        <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[180px]">
+                        <td className="px-4 py-2.5 font-sans font-medium text-[var(--foreground)] truncate max-w-[240px]">
                           {row.client}
                         </td>
                       )}
 
-                      {/* Destinazione */}
-                      <td className="px-3 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[200px]">
+                      {/* Destinazione - rimpicciolita con max-width e tooltip */}
+                      <td
+                        className="px-3 py-2.5 font-sans text-[var(--muted-foreground)] truncate max-w-[180px]"
+                        title={row.destination || "—"}
+                      >
                         {row.destination || "—"}
                       </td>
 
                       {/* Quantità */}
-                      <td className="px-3 py-2 text-right font-bold text-[var(--foreground)]">
+                      <td className="px-4 py-2.5 text-right font-bold text-[var(--foreground)]">
                         {row.quantity} {row.unit && <span className="text-[10px] text-[var(--muted-foreground)] font-normal">{row.unit}</span>}
                       </td>
 
                       {/* Prezzo Listino */}
-                      <td className="px-3 py-2 text-right text-[var(--muted-foreground)]">
+                      <td className="px-4 py-2.5 text-right text-[var(--muted-foreground)]">
                         {formatDdtMoney(row.unitPriceSubunits)}
                       </td>
 
                       {/* Sconto */}
-                      <td className="px-2 py-2 text-center text-amber-400">
+                      <td className="px-3 py-2.5 text-center text-amber-400">
                         {row.discountPercent ? `${row.discountPercent}%` : "—"}
                       </td>
 
                       {/* Prezzo Netto Unitario */}
-                      <td className="px-3 py-2 text-right font-bold text-sky-400">
+                      <td className="px-4 py-2.5 text-right font-bold text-sky-400">
                         {formatDdtMoney(Math.round(unitNet))}
                       </td>
 
                       {/* Totale Netto */}
-                      <td className="px-3 py-2 text-right font-semibold text-[var(--foreground)]">
+                      <td className="px-4 py-2.5 text-right font-semibold text-[var(--foreground)]">
                         {formatDdtMoney(row.netAmountSubunits)}
                       </td>
 
                       {/* Costo Acquisto */}
-                      <td className="px-3 py-2 text-right text-[var(--muted-foreground)]">
+                      <td className="px-4 py-2.5 text-right text-[var(--muted-foreground)]">
                         {row.purchasePriceSubunits > 0 ? formatDdtMoney(row.purchasePriceSubunits) : "—"}
                       </td>
 
                       {/* Margine € */}
                       <td
-                        className={`px-3 py-2 text-right font-semibold ${
+                        className={`px-4 py-2.5 text-right font-semibold ${
                           isPositiveRev ? "text-emerald-400" : isNegativeRev ? "text-rose-400" : "text-[var(--muted-foreground)]"
                         }`}
                       >
@@ -437,7 +755,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
                       {/* Ricarico % */}
                       <td
-                        className={`px-3 py-2 text-right font-medium ${
+                        className={`px-4 py-2.5 text-right font-medium ${
                           isPositiveRev ? "text-emerald-400" : isNegativeRev ? "text-rose-400" : "text-[var(--muted-foreground)]"
                         }`}
                       >
@@ -459,8 +777,11 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
         {/* Footer info tastiera */}
         <div className="flex shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--background)] px-5 py-2 text-xs text-[var(--muted-foreground)]">
           <span className="flex items-center gap-1.5">
-            <span>{filteredRows.length} movimenti trovati</span>
-            {historyModalLimit !== "tutti" && filteredRows.length >= historyModalLimit && (
+            <span>
+              {filteredRows.length} movimenti trovati
+              {selectedYear !== "all" && <span className="font-semibold text-[var(--primary)] ml-1">(Anno {selectedYear})</span>}
+            </span>
+            {historyModalLimit !== "tutti" && rows.length >= historyModalLimit && (
               <span className="rounded bg-[var(--card)] px-1.5 py-0.5 text-[10px] text-amber-400 border border-amber-500/30">
                 limite SQL impostato: {historyModalLimit.toLocaleString("it-IT")} record
               </span>
