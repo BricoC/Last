@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
+import { useUserStore } from "@/shared/stores/useUserStore";
 import {
   LayoutGrid,
   ShoppingCart,
@@ -18,6 +19,7 @@ import {
   Grid2X2,
   Layers,
   Minimize2,
+  User,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
@@ -39,6 +41,12 @@ export const TopNavBar: React.FC = () => {
     toggleShowDesktop,
     areAllWindowsMinimized,
   } = useWindowStore();
+
+  const { users, currentUser, loadUsers, switchUser } = useUserStore();
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
 
   const modules: NavModule[] = [
     { id: "dashboard", title: "Dashboard", componentId: "dashboard", icon: <LayoutGrid className="w-3.5 h-3.5" /> },
@@ -144,26 +152,45 @@ export const TopNavBar: React.FC = () => {
           </button>
         </div>
 
-        {/* Pulsante Impostazioni */}
-        <button
-          type="button"
-          onClick={() =>
-            openWindow({
-              id: "settings",
-              title: "Impostazioni",
-              componentId: "settings",
-            })
-          }
-          className={cn(
-            "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-colors cursor-default",
-            activeWindowId === "settings"
-              ? "bg-[var(--background)] text-[var(--foreground)] border border-[var(--primary)] shadow-sm font-semibold"
-              : "text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)]"
-          )}
-        >
-          <SettingsIcon className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
-          <span>Settings</span>
-        </button>
+        {/* Indicatore e Selettore Rapido Utente / Postazione PC */}
+        <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md bg-[var(--background)] border border-[var(--border)] text-xs">
+          <User className="w-3.5 h-3.5 text-[var(--primary)] shrink-0" />
+          <select
+            value={currentUser?.id || ""}
+            onChange={(e) => switchUser(e.target.value)}
+            className="bg-transparent text-xs font-semibold text-[var(--foreground)] outline-none cursor-pointer border-none p-0 pr-1 max-w-[130px] truncate"
+            title="Postazione / Utente attivo su questo computer"
+          >
+            {users.map((u) => (
+              <option key={u.id} value={u.id} className="bg-[var(--card)] text-[var(--foreground)]">
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Pulsante Impostazioni (visibile solo se l'utente ha il permesso can_access_settings) */}
+        {currentUser?.can_access_settings && (
+          <button
+            type="button"
+            onClick={() =>
+              openWindow({
+                id: "settings",
+                title: "Impostazioni",
+                componentId: "settings",
+              })
+            }
+            className={cn(
+              "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-colors cursor-default",
+              activeWindowId === "settings"
+                ? "bg-[var(--background)] text-[var(--foreground)] border border-[var(--primary)] shadow-sm font-semibold"
+                : "text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)]"
+            )}
+          >
+            <SettingsIcon className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
+            <span>Settings</span>
+          </button>
+        )}
       </div>
     </header>
   );

@@ -12,10 +12,13 @@ import { DDTArticlesPage } from "@/features/ddt-studio/DDTArticlesPage";
 import { ClientListPage } from "@/features/clients/ClientListPage";
 import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
+import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
+import { ShieldAlert } from "lucide-react";
 
 export function App() {
   const { applyToDom } = useThemeStore();
+  const { currentUser } = useUserStore();
 
   useEffect(() => {
     // Applica le variabili CSS del tema Grigio L4 all'avvio dell'applicazione
@@ -30,6 +33,22 @@ export function App() {
       case "price-lists":
         return <ProductListPage />;
       case "settings":
+        if (currentUser && !currentUser.can_access_settings) {
+          return (
+            <div className="p-8 max-w-xl mx-auto flex flex-col items-center justify-center text-center space-y-4 select-none">
+              <div className="p-4 rounded-full bg-red-500/10 text-red-400 border border-red-500/30">
+                <ShieldAlert className="w-10 h-10" />
+              </div>
+              <h2 className="text-lg font-bold text-[var(--foreground)]">Accesso Riservato</h2>
+              <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
+                L'utente o la postazione attiva (<strong className="text-white">{currentUser.name}</strong>) non dispone dei privilegi per accedere o modificare le Impostazioni di sistema.
+              </p>
+              <p className="text-[11px] text-[var(--muted-foreground)]">
+                Per sbloccare l'accesso, seleziona una postazione autorizzata (es. Amministratore) dalla barra superiore o richiedi l'abilitazione dei permessi.
+              </p>
+            </div>
+          );
+        }
         return <SettingsPage />;
       case "ddt-studio":
         return <DDTStudioPage windowId={windowId} />;

@@ -1,14 +1,16 @@
 import { SupabaseConnectionFields } from "./data-import/SupabaseConnectionFields";
 import React, { useState } from "react";
 import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
-import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2 } from "lucide-react";
+import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2, Users } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { CompanySettingsPanel } from "./CompanySettingsPanel";
 import { DatabaseQuerySettingsPanel } from "./DatabaseQuerySettingsPanel";
 
+import { UserManagementPanel } from "./UserManagementPanel";
+
 export const SettingsPage: React.FC = () => {
   const { theme, setPreset, setBrightness, resetTheme } = useThemeStore();
-  const [activeNav, setActiveNav] = useState("theme");
+  const [activeNav, setActiveNav] = useState("users");
   const [editEnabled, setEditEnabled] = useState(true);
 
   const presets: { id: ThemePresetId; name: string; desc: string; colors: string[] }[] = [
@@ -99,6 +101,7 @@ export const SettingsPage: React.FC = () => {
         {/* Sidebar Impostazioni */}
         <div className="space-y-1">
           {[
+            { id: "users", label: "Utenti & Postazioni", icon: <Users className="w-4 h-4" /> },
             { id: "theme", label: "Aspetto & Temi", icon: <Palette className="w-4 h-4" /> },
             { id: "company", label: "Dati aziendali", icon: <Building2 className="w-4 h-4" /> },
             { id: "general", label: "Parametri Generali", icon: <Sliders className="w-4 h-4" /> },
@@ -125,8 +128,12 @@ export const SettingsPage: React.FC = () => {
           ))}
         </div>
 
-        {/* Contenuto Principale: Aspetto & Temi / Database / Parametri Generali / Dati Aziendali */}
-        {activeNav === "company" ? (
+        {/* Contenuto Principale: Utenti / Aspetto & Temi / Database / Parametri Generali / Dati Aziendali */}
+        {activeNav === "users" || activeNav === "security" ? (
+          <div className="md:col-span-3">
+            <UserManagementPanel />
+          </div>
+        ) : activeNav === "company" ? (
           <div className="md:col-span-3">
             <CompanySettingsPanel />
           </div>

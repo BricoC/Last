@@ -1,4 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
+import { AppUserService } from "./appUserService";
 
 export class AppPreferencesService {
   private static tableEnsured = false;
@@ -50,5 +51,29 @@ export class AppPreferencesService {
     } catch (e) {
       console.error(`Errore salvataggio preferenza ${key}:`, e);
     }
+  }
+
+  /**
+   * Recupera una preferenza specifica per l'utente/postazione PC attualmente attiva.
+   * Se l'utente non ha ancora personalizzato il valore, ripiega sul valore globale o sul default.
+   */
+  public static async getUserPreference(key: string, defaultValue?: string): Promise<string | null> {
+    const userId = AppUserService.getActiveUserId();
+    const userKey = `user:${userId}:${key}`;
+    const userVal = await this.getPreference(userKey);
+    if (userVal !== null && userVal !== undefined) {
+      return userVal;
+    }
+    return this.getPreference(key, defaultValue);
+  }
+
+  /**
+   * Salva una preferenza vincolata all'utente/postazione PC attualmente attiva,
+   * evitando collisioni o sovrascritture tra computer diversi del negozio.
+   */
+  public static async setUserPreference(key: string, value: string): Promise<void> {
+    const userId = AppUserService.getActiveUserId();
+    const userKey = `user:${userId}:${key}`;
+    await this.setPreference(userKey, value);
   }
 }

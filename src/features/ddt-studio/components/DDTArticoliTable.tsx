@@ -326,9 +326,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "#",
         field: "row_index",
-        width: 58,
-        minWidth: 50,
-        maxWidth: 68,
+        width: 44,
+        minWidth: 38,
+        maxWidth: 50,
         pinned: "left",
         rowDrag: true,
         editable: false,
@@ -346,8 +346,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "U.M.",
         field: "unit",
-        width: 75,
-        minWidth: 70,
+        width: 56,
+        minWidth: 48,
+        maxWidth: 65,
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => (p.newValue ? String(p.newValue).trim().toUpperCase() : ""),
@@ -362,8 +363,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "Q.TA'",
         field: "quantity",
-        width: 75,
-        minWidth: 65,
+        width: 68,
+        minWidth: 58,
+        maxWidth: 78,
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => (p.newValue === "" ? "" : p.newValue),
@@ -377,8 +379,8 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "DESCRIZIONE ARTICOLO / PRESTAZIONE *",
         field: "description",
-        flex: 2,
-        minWidth: 200,
+        flex: 3,
+        minWidth: 560,
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase() : ""),
@@ -392,8 +394,8 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "PREZZO €",
         field: "unit_price",
-        width: 115,
-        minWidth: 105,
+        width: 105,
+        minWidth: 95,
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => safeMoney(p.newValue),
@@ -411,8 +413,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "SC.%",
         field: "discount_pct",
-        width: 110,
-        minWidth: 95,
+        width: 75,
+        minWidth: 65,
+        maxWidth: 85,
         editable: true,
         cellEditor: DDTTextEditor,
         cellStyle: {
@@ -435,8 +438,8 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "IMPORTO €",
         field: "net_amount",
-        width: 145,
-        minWidth: 135,
+        width: 125,
+        minWidth: 110,
         editable: false,
         sortable: false,
         cellStyle: {
@@ -455,8 +458,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "IVA",
         field: "vat_rate",
-        width: 75,
-        minWidth: 70,
+        width: 55,
+        minWidth: 48,
+        maxWidth: 65,
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => {
