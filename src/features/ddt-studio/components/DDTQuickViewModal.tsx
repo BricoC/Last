@@ -9,12 +9,37 @@ import {
   CreditCard,
   Calendar,
   History,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react";
 import { DdtRepository } from "../services/ddtRepository";
 import { DdtDocument, DdtItem } from "../models/ddt";
 import { formatDdtMoney, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
 import { DDTClientArticleHistoryModal } from "./DDTClientArticleHistoryModal";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+
+type QuickViewSortField =
+  | "rowIndex"
+  | "code"
+  | "description"
+  | "unit"
+  | "quantity"
+  | "unitPrice"
+  | "discount"
+  | "netPrice"
+  | "netAmount"
+  | "vatRate"
+  | "purchasePrice"
+  | "revenue"
+  | "markup";
+
+type SortDirection = "asc" | "desc";
+
+interface QuickViewSortConfig {
+  field: QuickViewSortField;
+  direction: SortDirection;
+}
 
 export interface DDTQuickViewModalProps {
   isOpen: boolean;
@@ -34,12 +59,17 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState("");
   const [historyTarget, setHistoryTarget] = useState<DdtItem | null>(null);
+  const [sortConfig, setSortConfig] = useState<QuickViewSortConfig>({
+    field: "rowIndex",
+    direction: "asc",
+  });
 
   useEffect(() => {
     if (!isOpen || !ddtId) {
       setDoc(null);
       setHistoryTarget(null);
       setSearchFilter("");
+      setSortConfig({ field: "rowIndex", direction: "asc" });
       return;
     }
 
@@ -99,6 +129,132 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
       return tokens.every((t) => text.includes(t));
     });
   }, [doc, searchFilter]);
+
+  // Ordinamento articoli del DDT
+  const sortedItems = useMemo(() => {
+    const { field, direction } = sortConfig;
+    const multiplier = direction === "asc" ? 1 : -1;
+
+    return [...activeItems].sort((a, b) => {
+      let comparison = 0;
+      switch (field) {
+        case "rowIndex": {
+          const ra = a.row_index ?? 0;
+          const rb = b.row_index ?? 0;
+          comparison = ra - rb;
+          break;
+        }
+        case "code":
+          comparison = (a.code || "").localeCompare(b.code || "");
+          break;
+        case "description":
+          comparison = (a.description || "").localeCompare(b.description || "");
+          break;
+        case "unit":
+          comparison = (a.unit || "").localeCompare(b.unit || "");
+          break;
+        case "quantity": {
+          const qa = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
+          const qb = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          comparison = qa - qb;
+          break;
+        }
+        case "unitPrice": {
+          const pa = a.unit_price?.toSubunits?.() ?? 0;
+          const pb = b.unit_price?.toSubunits?.() ?? 0;
+          comparison = pa - pb;
+          break;
+        }
+        case "discount": {
+          const da = parseFloat((a.discount_pct || "0").replace(",", ".")) || 0;
+          const db = parseFloat((b.discount_pct || "0").replace(",", ".")) || 0;
+          comparison = da - db;
+          break;
+        }
+        case "netPrice": {
+          const qa = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
+          const qb = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          const na = a.net_amount?.toSubunits?.() ?? 0;
+          const nb = b.net_amount?.toSubunits?.() ?? 0;
+          const pa = qa > 0 ? na / qa : (a.unit_price?.toSubunits?.() ?? 0);
+          const pb = qb > 0 ? nb / qb : (b.unit_price?.toSubunits?.() ?? 0);
+          comparison = pa - pb;
+          break;
+        }
+        case "netAmount": {
+          const na = a.net_amount?.toSubunits?.() ?? 0;
+          const nb = b.net_amount?.toSubunits?.() ?? 0;
+          comparison = na - nb;
+          break;
+        }
+        case "vatRate": {
+          const va = parseFloat(String(a.vat_rate ?? "22").replace(",", ".")) || 22;
+          const vb = parseFloat(String(b.vat_rate ?? "22").replace(",", ".")) || 22;
+          comparison = va - vb;
+          break;
+        }
+        case "purchasePrice": {
+          const pa = a.purchase_price?.toSubunits?.() ?? 0;
+          const pb = b.purchase_price?.toSubunits?.() ?? 0;
+          comparison = pa - pb;
+          break;
+        }
+        case "revenue": {
+          const qa = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
+          const qb = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          const na = a.net_amount?.toSubunits?.() ?? 0;
+          const nb = b.net_amount?.toSubunits?.() ?? 0;
+          const pa = a.purchase_price?.toSubunits?.() ?? 0;
+          const pb = b.purchase_price?.toSubunits?.() ?? 0;
+          const ra = na - Math.round(pa * qa);
+          const rb = nb - Math.round(pb * qb);
+          comparison = ra - rb;
+          break;
+        }
+        case "markup": {
+          const qa = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
+          const qb = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          const na = a.net_amount?.toSubunits?.() ?? 0;
+          const nb = b.net_amount?.toSubunits?.() ?? 0;
+          const pa = a.purchase_price?.toSubunits?.() ?? 0;
+          const pb = b.purchase_price?.toSubunits?.() ?? 0;
+          const ta = Math.round(pa * qa);
+          const tb = Math.round(pb * qb);
+          const ma = ta > 0 ? ((na - ta) / ta) * 100 : -9999999;
+          const mb = tb > 0 ? ((nb - tb) / tb) * 100 : -9999999;
+          comparison = ma - mb;
+          break;
+        }
+      }
+      return comparison * multiplier;
+    });
+  }, [activeItems, sortConfig]);
+
+  const handleSort = (field: QuickViewSortField) => {
+    setSortConfig((prev) => {
+      if (prev.field === field) {
+        return {
+          field,
+          direction: prev.direction === "asc" ? "desc" : "asc",
+        };
+      }
+      return {
+        field,
+        direction: field === "rowIndex" || field === "code" || field === "description" || field === "unit" ? "asc" : "desc",
+      };
+    });
+  };
+
+  const renderSortIndicator = (field: QuickViewSortField) => {
+    if (sortConfig.field !== field) {
+      return <ArrowUpDown className="h-3 w-3 opacity-25 group-hover:opacity-70 transition-opacity shrink-0 ml-1" />;
+    }
+    return sortConfig.direction === "asc" ? (
+      <ArrowUp className="h-3 w-3 text-[var(--primary)] shrink-0 ml-1" />
+    ) : (
+      <ArrowDown className="h-3 w-3 text-[var(--primary)] shrink-0 ml-1" />
+    );
+  };
 
   // Statistiche e margini di questo DDT
   const totals = useMemo(() => {
@@ -314,25 +470,167 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
               </div>
             ) : (
               <table className="w-full border-collapse text-xs">
-                <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)]">
+                <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] select-none">
                   <tr>
-                    <th className="px-3 py-2 text-center w-12">#</th>
-                    <th className="px-3 py-2 text-left w-28">CODICE</th>
-                    <th className="px-3 py-2 text-left">DESCRIZIONE (CLICCA PER STORICO)</th>
-                    <th className="px-2 py-2 text-center w-14">U.M.</th>
-                    <th className="px-3 py-2 text-right w-20">Q.TÀ</th>
-                    <th className="px-3 py-2 text-right w-28">PREZZO LIST.</th>
-                    <th className="px-2 py-2 text-center w-20">SCONTO</th>
-                    <th className="px-3 py-2 text-right w-28">PREZZO NETTO</th>
-                    <th className="px-3 py-2 text-right w-28">TOT. NETTO</th>
-                    <th className="px-2 py-2 text-center w-16">IVA</th>
-                    <th className="px-3 py-2 text-right w-28">COSTO ACQ.</th>
-                    <th className="px-3 py-2 text-right w-24">MARGINE €</th>
-                    <th className="px-3 py-2 text-right w-24">RICARICO %</th>
+                    {/* # */}
+                    <th
+                      onClick={() => handleSort("rowIndex")}
+                      className="px-3 py-2 text-center w-12 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per numero riga"
+                    >
+                      <div className="inline-flex items-center justify-center gap-0.5">
+                        <span>#</span>
+                        {renderSortIndicator("rowIndex")}
+                      </div>
+                    </th>
+
+                    {/* CODICE */}
+                    <th
+                      onClick={() => handleSort("code")}
+                      className="px-3 py-2 text-left w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per codice articolo"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>CODICE</span>
+                        {renderSortIndicator("code")}
+                      </div>
+                    </th>
+
+                    {/* DESCRIZIONE */}
+                    <th
+                      onClick={() => handleSort("description")}
+                      className="px-3 py-2 text-left cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per descrizione"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>DESCRIZIONE (CLICCA PER STORICO)</span>
+                        {renderSortIndicator("description")}
+                      </div>
+                    </th>
+
+                    {/* U.M. */}
+                    <th
+                      onClick={() => handleSort("unit")}
+                      className="px-2 py-2 text-center w-14 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per unità di misura"
+                    >
+                      <div className="inline-flex items-center justify-center gap-0.5">
+                        <span>U.M.</span>
+                        {renderSortIndicator("unit")}
+                      </div>
+                    </th>
+
+                    {/* Q.TÀ */}
+                    <th
+                      onClick={() => handleSort("quantity")}
+                      className="px-3 py-2 text-right w-20 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per quantità"
+                    >
+                      <div className="inline-flex items-center justify-end gap-1 w-full">
+                        <span>Q.TÀ</span>
+                        {renderSortIndicator("quantity")}
+                      </div>
+                    </th>
+
+                    {/* PREZZO LIST. */}
+                    <th
+                      onClick={() => handleSort("unitPrice")}
+                      className="px-3 py-2 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per prezzo listino"
+                    >
+                      <div className="inline-flex items-center justify-end gap-1 w-full">
+                        <span>PREZZO LIST.</span>
+                        {renderSortIndicator("unitPrice")}
+                      </div>
+                    </th>
+
+                    {/* SCONTO */}
+                    <th
+                      onClick={() => handleSort("discount")}
+                      className="px-2 py-2 text-center w-20 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per sconto"
+                    >
+                      <div className="inline-flex items-center justify-center gap-1 w-full">
+                        <span>SCONTO</span>
+                        {renderSortIndicator("discount")}
+                      </div>
+                    </th>
+
+                    {/* PREZZO NETTO */}
+                    <th
+                      onClick={() => handleSort("netPrice")}
+                      className="px-3 py-2 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per prezzo netto unitario"
+                    >
+                      <div className="inline-flex items-center justify-end gap-1 w-full">
+                        <span>PREZZO NETTO</span>
+                        {renderSortIndicator("netPrice")}
+                      </div>
+                    </th>
+
+                    {/* TOT. NETTO */}
+                    <th
+                      onClick={() => handleSort("netAmount")}
+                      className="px-3 py-2 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per totale netto"
+                    >
+                      <div className="inline-flex items-center justify-end gap-1 w-full">
+                        <span>TOT. NETTO</span>
+                        {renderSortIndicator("netAmount")}
+                      </div>
+                    </th>
+
+                    {/* IVA */}
+                    <th
+                      onClick={() => handleSort("vatRate")}
+                      className="px-2 py-2 text-center w-16 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per aliquota IVA"
+                    >
+                      <div className="inline-flex items-center justify-center gap-0.5">
+                        <span>IVA</span>
+                        {renderSortIndicator("vatRate")}
+                      </div>
+                    </th>
+
+                    {/* COSTO ACQ. */}
+                    <th
+                      onClick={() => handleSort("purchasePrice")}
+                      className="px-3 py-2 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per costo acquisto"
+                    >
+                      <div className="inline-flex items-center justify-end gap-1 w-full">
+                        <span>COSTO ACQ.</span>
+                        {renderSortIndicator("purchasePrice")}
+                      </div>
+                    </th>
+
+                    {/* MARGINE € */}
+                    <th
+                      onClick={() => handleSort("revenue")}
+                      className="px-3 py-2 text-right w-24 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per margine euro"
+                    >
+                      <div className="inline-flex items-center justify-end gap-1 w-full">
+                        <span>MARGINE €</span>
+                        {renderSortIndicator("revenue")}
+                      </div>
+                    </th>
+
+                    {/* RICARICO % */}
+                    <th
+                      onClick={() => handleSort("markup")}
+                      className="px-3 py-2 text-right w-24 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      title="Clicca per ordinare per ricarico percentuale"
+                    >
+                      <div className="inline-flex items-center justify-end gap-1 w-full">
+                        <span>RICARICO %</span>
+                        {renderSortIndicator("markup")}
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
-                  {activeItems.map((it, idx) => {
+                  {sortedItems.map((it, idx) => {
                     const unitPriceSub = it.unit_price?.toSubunits?.() ?? 0;
                     const netSub = it.net_amount?.toSubunits?.() ?? 0;
                     const purchaseSub = it.purchase_price?.toSubunits?.() ?? 0;
