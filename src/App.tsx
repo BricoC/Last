@@ -4,6 +4,7 @@ import { WindowTabBar } from "@/shared/components/navigation/WindowTabBar";
 import { DesktopWorkspace } from "@/shared/components/desktop/DesktopWorkspace";
 import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { ProductListPage } from "@/features/price-lists/ProductListPage";
+import { CustomerPriceListPage } from "@/features/price-lists/CustomerPriceListPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { DDTStudioPage } from "@/features/ddt-studio/DDTStudioPage";
 import { DDTListPage } from "@/features/ddt-studio/DDTListPage";
@@ -36,6 +37,8 @@ export function App() {
         return <DDTListPage />;
       case "ddt-articles":
         return <DDTArticlesPage />;
+      case "client-lists":
+        return <CustomerPriceListPage />;
       case "clients":
         return <ClientListPage />;
       case "quotes":

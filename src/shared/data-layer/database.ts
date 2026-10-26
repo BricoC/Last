@@ -7,6 +7,7 @@ import {
 } from "./migrations/ddtSchema";
 import { migrateQuoteSchemaV6 } from "./migrations/quoteSchema";
 import { migrateCompanySettingsSchemaV7 } from "./migrations/companySettingsSchema";
+import { migratePriceListsSchemaV11 } from "./migrations/priceListSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -252,6 +253,11 @@ const MIGRATIONS: Migration[] = [
     version: 10,
     name: "preserve_informational_ddt_rows",
     up: migrateDdtInformationalRowsV10,
+  },
+  {
+    version: 11,
+    name: "create_price_lists_tables",
+    up: migratePriceListsSchemaV11,
   },
 ];
 
