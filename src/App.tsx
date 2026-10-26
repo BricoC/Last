@@ -6,6 +6,8 @@ import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { ProductListPage } from "@/features/price-lists/ProductListPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { DDTStudioPage } from "@/features/ddt-studio/DDTStudioPage";
+import { DDTListPage } from "@/features/ddt-studio/DDTListPage";
+import { DDTArticlesPage } from "@/features/ddt-studio/DDTArticlesPage";
 import { ClientListPage } from "@/features/clients/ClientListPage";
 import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
@@ -30,6 +32,10 @@ export function App() {
         return <SettingsPage />;
       case "ddt-studio":
         return <DDTStudioPage windowId={windowId} />;
+      case "ddt-list":
+        return <DDTListPage />;
+      case "ddt-articles":
+        return <DDTArticlesPage />;
       case "clients":
         return <ClientListPage />;
       case "quotes":

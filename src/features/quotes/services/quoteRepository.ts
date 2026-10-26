@@ -11,16 +11,19 @@ import type {
 import { buildQuoteDdtConversion } from "./quoteDdtConversion";
 import { buildQuoteSavePayload } from "./quotePayload";
 import { quoteToDraft, toQuoteInput } from "../models/quoteDraft";
+import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
 
 export class QuoteRepository {
   public async getQuotes(search = ""): Promise<Quote[]> {
     const db = await getDatabase();
-    const term = search.trim();
+    const searchSql = buildMultiTermSqlSearch(search, [
+      "client_name", "subject", "quote_date", "CAST(quote_number AS TEXT)", "CAST(year AS TEXT)", "status",
+    ], { numberedParameters: false });
     const rows = await db.select<QuoteRow[]>(
       `SELECT * FROM quotes WHERE deleted_at IS NULL
-       AND (? = '' OR client_name LIKE ? OR subject LIKE ? OR CAST(quote_number AS TEXT) LIKE ?)
+       ${searchSql.sql ? `AND (${searchSql.sql})` : ""}
        ORDER BY quote_date DESC, updated_at DESC LIMIT 200`,
-      [term, `%${term}%`, `%${term}%`, `%${term}%`]
+      searchSql.params
     );
     return rows.map((row) => this.mapQuote(row, []));
   }

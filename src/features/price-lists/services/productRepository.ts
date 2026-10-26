@@ -1,6 +1,7 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import { Product, CreateProductInput, UpdateProductInput } from "../models/product";
 import { validateProductInput } from "../utils/productValidation";
+import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
 
 export class ProductRepository {
   /**
@@ -10,14 +11,14 @@ export class ProductRepository {
   async getActiveProducts(searchQuery?: string): Promise<Product[]> {
     const db = await getDatabase();
 
-    if (searchQuery && searchQuery.trim()) {
-      const term = `%${searchQuery.trim()}%`;
+    const searchSql = buildMultiTermSqlSearch(searchQuery ?? "", ["code", "description"]);
+    if (searchSql.sql) {
       return db.select<Product[]>(
         `SELECT * FROM products 
          WHERE deleted_at IS NULL 
-           AND (code LIKE $1 OR description LIKE $1)
+           AND (${searchSql.sql})
          ORDER BY code ASC`,
-        [term]
+        searchSql.params
       );
     }
 

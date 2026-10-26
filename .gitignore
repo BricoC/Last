@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local connection configuration (never commit real values)
+.env
+.env.*
+!.env.example
+supabase.local.json
+supabase.local.json.tmp

@@ -66,17 +66,18 @@ export class DdtRepository {
    */
   public async getDdtById(id: string): Promise<DdtDocument | null> {
     const db = await getDatabase();
-    const docRows = await db.select<any[]>(
-      "SELECT * FROM ddt_documents WHERE id = $1 AND deleted_at IS NULL",
-      [id]
-    );
+    const [docRows, itemRows] = await Promise.all([
+      db.select<any[]>(
+        "SELECT * FROM ddt_documents WHERE id = $1 AND deleted_at IS NULL",
+        [id]
+      ),
+      db.select<any[]>(
+        "SELECT * FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NULL ORDER BY row_index ASC",
+        [id]
+      ),
+    ]);
 
     if (docRows.length === 0) return null;
-
-    const itemRows = await db.select<any[]>(
-      "SELECT * FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NULL ORDER BY row_index ASC",
-      [id]
-    );
 
     const items = itemRows.map(this.mapRowToItem);
     return this.mapRowToDocument(docRows[0], items);
@@ -158,10 +159,11 @@ export class DdtRepository {
       (it) => it.description?.trim().length || isPositivePrice(it.unit_price)
     );
     const itemPayloads = validItems.map((it, index) => {
-      const p = safeMoney(it.unit_price);
-      const q = it.quantity || "1";
-      const disc = it.discount_pct || "0";
-      const vatR = it.vat_rate !== undefined && it.vat_rate !== null && String(it.vat_rate).trim() !== ""
+      const isNote = it.row_kind === "note";
+      const p = isNote ? money(0) : safeMoney(it.unit_price);
+      const q = isNote ? "" : it.quantity || "1";
+      const disc = isNote ? "" : it.discount_pct || "0";
+      const vatR = !isNote && it.vat_rate !== undefined && it.vat_rate !== null && String(it.vat_rate).trim() !== ""
         ? parseFloat(String(it.vat_rate).replace(",", "."))
         : 0;
 
@@ -171,10 +173,11 @@ export class DdtRepository {
       return {
         id: it.id || crypto.randomUUID(),
         row_index: index + 1,
+        row_kind: isNote ? "note" : "item",
         product_id: it.product_id || null,
         code: it.code || null,
         description: (it.description || "").trim(),
-        unit: it.unit || "NR",
+        unit: isNote ? "" : it.unit || "NR",
         quantity: String(q),
         unit_price_subunits: p.toSubunits(),
         discount_pct: String(disc),
@@ -296,12 +299,13 @@ export class DdtRepository {
       product_id: row.product_id || undefined,
       code: row.code || undefined,
       description: row.description,
-      unit: row.unit || "NR",
-      quantity: String(row.quantity ?? "1"),
+      row_kind: row.row_kind === "note" ? "note" : "item",
+      unit: row.row_kind === "note" ? "" : row.unit || "NR",
+      quantity: row.row_kind === "note" ? "" : String(row.quantity ?? "1"),
       unit_price: MonetaryValue.fromSubunits(row.unit_price_subunits || 0),
-      discount_pct: String(row.discount_pct ?? "0"),
+      discount_pct: row.row_kind === "note" ? "" : String(row.discount_pct ?? "0"),
       net_amount: MonetaryValue.fromSubunits(row.net_amount_subunits || 0),
-      vat_rate: row.vat_rate !== null && row.vat_rate !== undefined ? row.vat_rate : "",
+      vat_rate: row.row_kind === "note" ? "" : row.vat_rate !== null && row.vat_rate !== undefined ? row.vat_rate : "",
       vat_amount: MonetaryValue.fromSubunits(row.vat_amount_subunits || 0),
       purchase_price: row.purchase_price_subunits
         ? MonetaryValue.fromSubunits(row.purchase_price_subunits)

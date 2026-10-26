@@ -57,14 +57,34 @@ pub(crate) async fn persist_ddt(
     if payload.is_emission && payload.doc_number.is_none() {
         payload.doc_number = Some(
             sqlx::query_scalar::<_, i64>(
-                "SELECT COALESCE(MAX(doc_number), 0) + 1 FROM ddt_documents WHERE year = $1 AND series = $2",
+                "SELECT COALESCE(MAX(doc_number), 0) + 1 FROM ddt_documents
+                 WHERE year = $1 AND deleted_at IS NULL",
             )
             .bind(payload.year)
-            .bind(&payload.series)
             .fetch_one(&mut *connection)
             .await
             .map_err(|error| error.to_string())?,
         );
+    }
+
+    if let Some(doc_number) = payload.doc_number {
+        let conflict = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT id, deleted_at FROM ddt_documents
+             WHERE year = $1 AND doc_number = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1",
+        )
+        .bind(payload.year)
+        .bind(doc_number)
+        .bind(&payload.id)
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(|error| format!("Impossibile verificare l'univocità del numero DDT: {error}"))?;
+        if let Some((_existing_id, deleted_at)) = conflict {
+            let state = if deleted_at.is_some() { "anche in un DDT cancellato" } else { "in un altro DDT" };
+            return Err(format!(
+                "Il DDT n. {doc_number}/{year} è già presente {state}. Il numero non può essere riutilizzato.",
+                year = payload.year
+            ));
+        }
     }
 
     let existing = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM ddt_documents WHERE id = $1")
@@ -198,12 +218,13 @@ pub(crate) async fn persist_ddt(
         let result = sqlx::query(
             "INSERT INTO ddt_items (
              id, ddt_id, row_index, product_id, code, description, unit, quantity, unit_price_subunits,
-             discount_pct, net_amount_subunits, vat_rate, vat_amount_subunits, purchase_price_subunits,
+             row_kind, discount_pct, net_amount_subunits, vat_rate, vat_amount_subunits, purchase_price_subunits,
              created_at, updated_at, updated_by, deleted_at, sync_status
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15, $16, NULL, 'pending')
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16, $17, NULL, 'pending')
              ON CONFLICT(id) DO UPDATE SET
              row_index = excluded.row_index, product_id = excluded.product_id, code = excluded.code,
              description = excluded.description, unit = excluded.unit, quantity = excluded.quantity,
+             row_kind = excluded.row_kind,
              unit_price_subunits = excluded.unit_price_subunits, discount_pct = excluded.discount_pct,
              net_amount_subunits = excluded.net_amount_subunits, vat_rate = excluded.vat_rate,
              vat_amount_subunits = excluded.vat_amount_subunits,
@@ -220,6 +241,7 @@ pub(crate) async fn persist_ddt(
         .bind(&item.unit)
         .bind(&item.quantity)
         .bind(item.unit_price_subunits)
+        .bind(&item.row_kind)
         .bind(&item.discount_pct)
         .bind(item.net_amount_subunits)
         .bind(item.vat_rate)

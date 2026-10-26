@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { LoaderCircle } from "lucide-react";
 import { DdtArchiveEntry, DdtDocument, DdtItem } from "./models/ddt";
 import { ddtRepository } from "./services/ddtRepository";
+import { subscribeToOpenDdt } from "./services/ddtNavigation";
 import { clientRepository } from "@/features/clients/services/clientRepository";
 import { Product } from "@/features/price-lists/models/product";
 import { money, isPositivePrice } from "@/shared/domain/monetaryValue";
@@ -193,8 +195,11 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   const signature = (doc: Partial<DdtDocument>, rows: DdtItem[], discount: string, markup: string) =>
     JSON.stringify({ doc, rows, discount, markup });
-  const isDirty = savedSignature.current !== null
-    && signature(ddt, items, globalDiscount, globalMarkup) !== savedSignature.current;
+  const currentSignature = useMemo(
+    () => signature(ddt, items, globalDiscount, globalMarkup),
+    [ddt, items, globalDiscount, globalMarkup]
+  );
+  const isDirty = savedSignature.current !== null && currentSignature !== savedSignature.current;
 
   useEffect(() => {
     savedSignature.current = signature(ddt, items, globalDiscount, globalMarkup);
@@ -265,6 +270,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       if (!fullDoc) return;
 
       setDdt(fullDoc);
+      // Keep the archive sidebar on the same year as a DDT opened from List or Articles.
+      setSelectedYear(fullDoc.year);
 
       // Riempi sempre fino a 500 righe esatte
       const existing: DdtItem[] = (fullDoc.items || []).map((it) => ({
@@ -273,11 +280,12 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         base_discount_pct: it.base_discount_pct !== undefined ? it.base_discount_pct : it.discount_pct,
       }));
       const padded: DdtItem[] = [...existing];
+      const blankRowTimestamp = new Date().toISOString();
       while (padded.length < TOTAL_PRESET_ROWS) {
         padded.push({
           id: crypto.randomUUID(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          created_at: blankRowTimestamp,
+          updated_at: blankRowTimestamp,
           updated_by: "system",
           deleted_at: null,
           sync_status: "pending",
@@ -312,6 +320,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       if (requestId === ddtLoadRequest.current) setLoadingDdtId(null);
     }
   };
+
+  useEffect(() => subscribeToOpenDdt((id) => { void handleSelectDdt(id); }), []);
 
   // Nuovo DDT vuoto
   const handleNewDdt = () => {
@@ -756,7 +766,13 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         />
 
         {/* Area di Lavoro */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#181a20]">
+        <div className="relative flex-1 flex flex-col overflow-hidden bg-[#181a20]">
+          {loadingDdtId && (
+            <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)]/95 px-3 py-2 text-xs font-medium text-[var(--foreground)] shadow-lg" role="status" aria-live="polite">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[var(--primary)]" />
+              Caricamento DDT...
+            </div>
+          )}
           {activeView === "editor" ? (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Card Cliente & Testata */}

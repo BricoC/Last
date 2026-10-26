@@ -62,7 +62,10 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
     (params: any) => {
       const rowIndex = params.node.rowIndex;
       const colId = params.column.getColId();
-      const updatedData: DdtItem = { ...params.data };
+      const updatedData: DdtItem = {
+        ...params.data,
+        row_kind: params.data.row_kind === "note" && colId !== "description" ? "item" : params.data.row_kind,
+      };
 
       if (colId === "unit" && updatedData.unit) {
         updatedData.unit = String(updatedData.unit).trim().toUpperCase();

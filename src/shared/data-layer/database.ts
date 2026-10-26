@@ -1,5 +1,10 @@
 import Database from "@tauri-apps/plugin-sql";
-import { migrateDdtSchemaV5 } from "./migrations/ddtSchema";
+import {
+  migrateDdtNumberReuseAfterSoftDeleteV9,
+  migrateDdtInformationalRowsV10,
+  migrateDdtNumberUniquenessV8,
+  migrateDdtSchemaV5,
+} from "./migrations/ddtSchema";
 import { migrateQuoteSchemaV6 } from "./migrations/quoteSchema";
 import { migrateCompanySettingsSchemaV7 } from "./migrations/companySettingsSchema";
 
@@ -232,6 +237,21 @@ const MIGRATIONS: Migration[] = [
     version: 7,
     name: "create_company_settings",
     up: migrateCompanySettingsSchemaV7,
+  },
+  {
+    version: 8,
+    name: "enforce_unique_ddt_number_per_year",
+    up: migrateDdtNumberUniquenessV8,
+  },
+  {
+    version: 9,
+    name: "allow_ddt_number_reuse_after_soft_delete",
+    up: migrateDdtNumberReuseAfterSoftDeleteV9,
+  },
+  {
+    version: 10,
+    name: "preserve_informational_ddt_rows",
+    up: migrateDdtInformationalRowsV10,
   },
 ];
 

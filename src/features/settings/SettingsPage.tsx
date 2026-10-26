@@ -1,3 +1,4 @@
+import { SupabaseConnectionFields } from "./data-import/SupabaseConnectionFields";
 import React, { useState } from "react";
 import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
 import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2 } from "lucide-react";
@@ -124,7 +125,7 @@ export const SettingsPage: React.FC = () => {
         </div>
 
         {/* Contenuto Principale: Aspetto & Temi */}
-        {activeNav === "company" ? <div className="md:col-span-3"><CompanySettingsPanel /></div> : <div className="md:col-span-3 space-y-6">
+        {activeNav === "company" ? <div className="md:col-span-3"><CompanySettingsPanel /></div> : activeNav === "database" ? <div className="md:col-span-3"><SupabaseConnectionFields /></div> : <div className="md:col-span-3 space-y-6">
           {/* Box Schemi di Colore Predefiniti */}
           <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between">

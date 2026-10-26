@@ -10,6 +10,7 @@ export interface DdtItem extends BaseEntity {
   product_id?: string;
   code?: string;
   description: string;
+  row_kind?: "item" | "note";
   unit: string;
   quantity: string;
   unit_price: MonetaryValue; // 5 decimali

@@ -4,6 +4,9 @@ use std::process::Command;
 
 mod ddt_commands;
 mod ddt_delete_command;
+mod supabase_config;
+mod supabase_ddt_preview;
+mod supabase_ddt_import;
 mod ddt_types;
 mod quote_commands;
 mod quote_persistence;
@@ -153,6 +156,10 @@ pub fn run() {
             print_ddt_silent,
             ddt_commands::save_ddt_transaction,
             ddt_delete_command::soft_delete_ddt_transaction,
+            supabase_config::load_supabase_config,
+            supabase_config::save_supabase_config,
+            supabase_ddt_preview::load_local_ddt_preview_keys,
+            supabase_ddt_import::import_supabase_ddt_into_local,
             quote_commands::save_quote_transaction,
             quote_commands::soft_delete_quote_transaction,
             quote_commands::convert_quote_to_ddt_transaction

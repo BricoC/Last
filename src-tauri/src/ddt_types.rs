@@ -1,5 +1,9 @@
 use serde::Deserialize;
 
+fn default_ddt_row_kind() -> String {
+    "item".to_string()
+}
+
 #[derive(Deserialize)]
 pub struct DdtSavePayload {
     pub(crate) id: String,
@@ -47,6 +51,8 @@ pub(crate) struct DdtItemPayload {
     pub(crate) product_id: Option<String>,
     pub(crate) code: Option<String>,
     pub(crate) description: String,
+    #[serde(default = "default_ddt_row_kind")]
+    pub(crate) row_kind: String,
     pub(crate) unit: String,
     pub(crate) quantity: String,
     pub(crate) unit_price_subunits: i64,

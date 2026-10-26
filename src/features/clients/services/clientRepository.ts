@@ -1,5 +1,6 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import { Client, ClientPhone, CreateClientInput } from "../models/client";
+import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
 
 export class ClientRepository {
   public async getClients(search = ""): Promise<Client[]> {
@@ -10,14 +11,10 @@ export class ClientRepository {
     `;
     const params: string[] = [];
 
-    if (search.trim()) {
-      query += ` AND (
-        business_name LIKE $1 
-        OR vat_number LIKE $1 
-        OR fiscal_code LIKE $1 
-        OR city LIKE $1
-      )`;
-      params.push(`%${search.trim()}%`);
+    const searchSql = buildMultiTermSqlSearch(search, ["business_name", "vat_number", "fiscal_code", "city"]);
+    if (searchSql.sql) {
+      query += ` AND (${searchSql.sql})`;
+      params.push(...searchSql.params);
     }
 
     query += " ORDER BY business_name ASC LIMIT 200";
