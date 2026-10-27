@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from "react";
-import { Search, X, Check, ShoppingCart, ArrowDownUp, CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { Search, X, Check, ShoppingCart, CheckCircle2 } from "lucide-react";
 import { ListinoGeneraleRow, ListinoClienteRow } from "@/features/price-lists/models/priceList";
 import { priceListRepository } from "@/features/price-lists/services/priceListRepository";
 import { getClientArticleHistory, ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtViewDate } from "../services/ddtViewFormatting";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
-import { AppPreferencesService } from "@/shared/services/appPreferencesService";
-import { AppUserService } from "@/shared/services/appUserService";
 
 export interface DDTArticoliSearchModalProps {
   isOpen: boolean;
@@ -32,7 +30,10 @@ interface PendingArticleInsert {
   vat_rate?: number;
 }
 
-export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
+// Cache in memoria globale del listino generale per evitare query pesanti ripetute a ogni ri-render
+let cachedGeneralList: ListinoGeneraleRow[] | null = null;
+
+export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = React.memo(({
   isOpen,
   onClose,
   clientName,
@@ -43,169 +44,10 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
 
-  // Dissolvenza: quando si clicca fuori dal popup, entra in dissolvenza (trasparente ~20%)
-  // senza chiudersi (si chiude solo con X o Esc). Cliccando sul popup la dissolvenza va via.
-  const [isFaded, setIsFaded] = useState(false);
-  const modalContainerRef = useRef<HTMLDivElement>(null);
-
-  // Dimensioni personalizzabili memorizzate stabilmente per utente/postazione
-  const [modalWidth, setModalWidth] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const activeId = AppUserService.getActiveUserId();
-      const cached =
-        localStorage.getItem(`user_${activeId}_ddt_search_modal_width`) ||
-        localStorage.getItem("ddt_search_modal_width");
-      if (cached) {
-        const val = parseInt(cached, 10);
-        if (!isNaN(val) && val >= 380 && val <= 900) return val;
-      }
-    }
-    return 540;
-  });
-
-  const [modalHeight, setModalHeight] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const activeId = AppUserService.getActiveUserId();
-      const cached =
-        localStorage.getItem(`user_${activeId}_ddt_search_modal_height`) ||
-        localStorage.getItem("ddt_search_modal_height");
-      if (cached) {
-        const val = parseInt(cached, 10);
-        if (!isNaN(val) && val >= 300 && val <= 900) return val;
-      }
-    }
-    return 580;
-  });
-
-  const [isResizing, setIsResizing] = useState(false);
-
-  // Caricamento stabile da SQLite all'avvio con isolamento per utente/postazione
-  useEffect(() => {
-    void AppPreferencesService.getUserPreference("ddt_search_modal_width", "540").then((saved) => {
-      if (saved) {
-        const parsed = parseInt(saved, 10);
-        if (!isNaN(parsed) && parsed >= 380 && parsed <= 900) {
-          setModalWidth(parsed);
-          const activeId = AppUserService.getActiveUserId();
-          localStorage.setItem(`user_${activeId}_ddt_search_modal_width`, String(parsed));
-        }
-      }
-    });
-
-    void AppPreferencesService.getUserPreference("ddt_search_modal_height", "580").then((saved) => {
-      if (saved) {
-        const parsed = parseInt(saved, 10);
-        if (!isNaN(parsed) && parsed >= 300 && parsed <= 900) {
-          setModalHeight(parsed);
-          const activeId = AppUserService.getActiveUserId();
-          localStorage.setItem(`user_${activeId}_ddt_search_modal_height`, String(parsed));
-        }
-      }
-    });
-  }, []);
-
-  // 1. Ridimensionamento laterale (bordo sinistro)
-  const handleMouseDownResizeWidth = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    const startX = e.clientX;
-    const startW = modalWidth;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = startX - moveEvent.clientX;
-      const newW = Math.max(380, Math.min(900, startW + deltaX));
-      setModalWidth(newW);
-    };
-
-    const onMouseUp = (upEvent: MouseEvent) => {
-      setIsResizing(false);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      const deltaX = startX - upEvent.clientX;
-      const finalW = Math.max(380, Math.min(900, startW + deltaX));
-      setModalWidth(finalW);
-      const activeId = AppUserService.getActiveUserId();
-      localStorage.setItem(`user_${activeId}_ddt_search_modal_width`, String(finalW));
-      void AppPreferencesService.setUserPreference("ddt_search_modal_width", String(finalW));
-    };
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
-
-  // 2. Ridimensionamento verticale (bordo inferiore)
-  const handleMouseDownResizeHeight = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    const startY = e.clientY;
-    const startH = modalHeight;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const deltaY = moveEvent.clientY - startY;
-      const newH = Math.max(300, Math.min(900, startH + deltaY));
-      setModalHeight(newH);
-    };
-
-    const onMouseUp = (upEvent: MouseEvent) => {
-      setIsResizing(false);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      const deltaY = upEvent.clientY - startY;
-      const finalH = Math.max(300, Math.min(900, startH + deltaY));
-      setModalHeight(finalH);
-      const activeId = AppUserService.getActiveUserId();
-      localStorage.setItem(`user_${activeId}_ddt_search_modal_height`, String(finalH));
-      void AppPreferencesService.setUserPreference("ddt_search_modal_height", String(finalH));
-    };
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
-
-  // 3. Ridimensionamento obliquo / diagonale (angolo in basso a sinistra)
-  const handleMouseDownResizeOblique = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startW = modalWidth;
-    const startH = modalHeight;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = startX - moveEvent.clientX;
-      const deltaY = moveEvent.clientY - startY;
-      const newW = Math.max(380, Math.min(900, startW + deltaX));
-      const newH = Math.max(300, Math.min(900, startH + deltaY));
-      setModalWidth(newW);
-      setModalHeight(newH);
-    };
-
-    const onMouseUp = (upEvent: MouseEvent) => {
-      setIsResizing(false);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      const deltaX = startX - upEvent.clientX;
-      const deltaY = upEvent.clientY - startY;
-      const finalW = Math.max(380, Math.min(900, startW + deltaX));
-      const finalH = Math.max(300, Math.min(900, startH + deltaY));
-      setModalWidth(finalW);
-      setModalHeight(finalH);
-      const activeId = AppUserService.getActiveUserId();
-      localStorage.setItem(`user_${activeId}_ddt_search_modal_width`, String(finalW));
-      localStorage.setItem(`user_${activeId}_ddt_search_modal_height`, String(finalH));
-      void AppPreferencesService.setUserPreference("ddt_search_modal_width", String(finalW));
-      void AppPreferencesService.setUserPreference("ddt_search_modal_height", String(finalH));
-    };
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Dati Listino Generale & Cliente
-  const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>([]);
+  const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>(() => cachedGeneralList || []);
   const [clientItems, setClientItems] = useState<ListinoClienteRow[]>([]);
   const [historyItems, setHistoryItems] = useState<ClientArticleHistoryRow[]>([]);
 
@@ -222,59 +64,6 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Listener globale ESC: chiude il popup solo se non si sta modificando testo in una cella del DDT
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-
-      // Verifichiamo se l'utente sta modificando del testo all'interno di una cella del DDT
-      const activeEl = (e.target as HTMLElement | null) || (document.activeElement as HTMLElement | null);
-      const isEditingCellText = Boolean(
-        activeEl &&
-        (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) &&
-        Boolean(activeEl.closest(".ag-cell-inline-editing, .ag-cell-editing, .ag-popup-editor, .ag-cell")) &&
-        !modalContainerRef.current?.contains(activeEl)
-      );
-
-      // Se si sta modificando del testo nella cella, l'Esc chiude la cella e lascia il popup aperto
-      if (isEditingCellText) {
-        return;
-      }
-
-      e.preventDefault();
-      e.stopPropagation();
-      if (pendingInsert) {
-        setPendingInsert(null);
-      } else {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleGlobalKeyDown, true);
-    return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
-  }, [isOpen, pendingInsert, onClose]);
-
-  // Gestione dissolvenza: se l'utente clicca fuori dal popup, questo entra in dissolvenza
-  // (trasparente ~20%) senza chiudersi (si chiude solo con X o Esc).
-  // Cliccando sopra il popup, la dissolvenza scompare e torna solido al 100%.
-  useEffect(() => {
-    if (!isOpen) {
-      setIsFaded(false);
-      return;
-    }
-
-    const handleDocumentMouseDown = (e: MouseEvent) => {
-      if (pendingInsert) return;
-
-      if (modalContainerRef.current && !modalContainerRef.current.contains(e.target as Node)) {
-        setIsFaded(true);
-      }
-    };
-
-    window.addEventListener("mousedown", handleDocumentMouseDown, true);
-    return () => window.removeEventListener("mousedown", handleDocumentMouseDown, true);
-  }, [isOpen, pendingInsert]);
-
   // Focus automatico sul popup quantità
   useEffect(() => {
     if (pendingInsert) {
@@ -285,44 +74,57 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
     }
   }, [pendingInsert]);
 
-  // Inizializzazione all'apertura
+  // Inizializzazione dati
   useEffect(() => {
-    if (isOpen) {
-      setPendingInsert(null);
-      setInsertQuantity("1");
-      setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }, 50);
-      void loadInitialData();
-    }
-  }, [isOpen, clientName]);
+    if (!isOpen) return;
 
-  const loadInitialData = async () => {
-    setIsLoading(true);
-    try {
-      const genRows = await priceListRepository.searchGeneral("", 10000);
-      setGeneralItems(genRows);
-
-      if (clientName && clientName.trim()) {
-        const cleanName = clientName.trim().replace(/^LIST_/, "");
-        const cliRows = await priceListRepository.searchClientPrices("", cleanName, 10000);
-        setClientItems(cliRows);
-        if (cliRows.length > 0) {
-          setSourceTab("cliente");
-        } else {
-          setSourceTab("generale");
+    let active = true;
+    const init = async () => {
+      // 1. Carica listino generale se non già in cache
+      if (!cachedGeneralList) {
+        setIsLoading(true);
+        try {
+          const genRows = await priceListRepository.searchGeneral("", 8000);
+          if (active) {
+            cachedGeneralList = genRows;
+            setGeneralItems(genRows);
+          }
+        } catch (e) {
+          console.error("Errore caricamento listino generale:", e);
+        } finally {
+          if (active) setIsLoading(false);
         }
       } else {
-        setClientItems([]);
-        setSourceTab("generale");
+        setGeneralItems(cachedGeneralList);
       }
-    } catch (e) {
-      console.error("Errore caricamento dati modale F3:", e);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+
+      // 2. Carica listino specifico cliente se presente
+      if (clientName && clientName.trim()) {
+        const cleanName = clientName.trim().replace(/^LIST_/, "");
+        try {
+          const cliRows = await priceListRepository.searchClientPrices("", cleanName, 5000);
+          if (active) {
+            setClientItems(cliRows);
+            if (cliRows.length > 0) {
+              setSourceTab("cliente");
+            }
+          }
+        } catch (e) {
+          console.error("Errore caricamento listino cliente:", e);
+        }
+      } else {
+        if (active) {
+          setClientItems([]);
+          setSourceTab("generale");
+        }
+      }
+    };
+
+    void init();
+    return () => {
+      active = false;
+    };
+  }, [isOpen, clientName]);
 
   // Caricamento storico vendite per il cliente corrente
   useEffect(() => {
@@ -378,6 +180,9 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   }, [generalItems, searchTokens]);
 
   const filteredListItems = sourceTab === "generale" ? filteredGeneralItems : filteredClientItems;
+  // Limitazione a max 80 elementi nel DOM: elimina all'istante qualsiasi lag o scatto
+  const visibleListItems = useMemo(() => filteredListItems.slice(0, 80), [filteredListItems]);
+  const visibleHistoryItems = useMemo(() => historyItems.slice(0, 40), [historyItems]);
 
   // Gestione tastiera fluida tra tabella sopra e tabella sotto
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -386,23 +191,21 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (activePane === "list") {
-        if (selectedListIdx >= filteredListItems.length - 1 && historyItems.length > 0) {
-          // Passa alla tabella storico sottostante
+        if (selectedListIdx >= visibleListItems.length - 1 && visibleHistoryItems.length > 0) {
           setActivePane("history");
           setSelectedHistIdx(0);
         } else {
-          setSelectedListIdx((prev) => Math.min(prev + 1, Math.max(0, filteredListItems.length - 1)));
+          setSelectedListIdx((prev) => Math.min(prev + 1, Math.max(0, visibleListItems.length - 1)));
         }
       } else {
-        setSelectedHistIdx((prev) => Math.min(prev + 1, Math.max(0, historyItems.length - 1)));
+        setSelectedHistIdx((prev) => Math.min(prev + 1, Math.max(0, visibleHistoryItems.length - 1)));
       }
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (activePane === "history") {
-        if (selectedHistIdx <= 0 && filteredListItems.length > 0) {
-          // Torna alla tabella listino soprastante
+        if (selectedHistIdx <= 0 && visibleListItems.length > 0) {
           setActivePane("list");
-          setSelectedListIdx(filteredListItems.length - 1);
+          setSelectedListIdx(visibleListItems.length - 1);
         } else {
           setSelectedHistIdx((prev) => Math.max(prev - 1, 0));
         }
@@ -410,8 +213,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
         setSelectedListIdx((prev) => Math.max(prev - 1, 0));
       }
     } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-      // Toggle rapido tra pannello sopra e pannello sotto
-      if (activePane === "list" && historyItems.length > 0) {
+      if (activePane === "list" && visibleHistoryItems.length > 0) {
         setActivePane("history");
       } else {
         setActivePane("list");
@@ -419,13 +221,16 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
     } else if (e.key === "Enter") {
       e.preventDefault();
       handleOpenQuantityModal();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
     }
   };
 
   // Apertura popup quantità articolo
   const handleOpenQuantityModal = () => {
     if (activePane === "list") {
-      const selected = filteredListItems[selectedListIdx];
+      const selected = visibleListItems[selectedListIdx];
       if (!selected) return;
 
       if (sourceTab === "generale") {
@@ -451,7 +256,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
       }
       setInsertQuantity("1");
     } else {
-      const hist = historyItems[selectedHistIdx];
+      const hist = visibleHistoryItems[selectedHistIdx];
       if (!hist) return;
       setPendingInsert({
         code: hist.code || undefined,
@@ -492,415 +297,302 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   const displayClientName = clientName ? clientName.trim().replace(/^LIST_/, "") : "";
 
   return (
-    <>
-      {/* 
-        Contenitore Modale F3 Laterale: Ancorato a destra (come Excel dell'utente),
-        lasciando l'intero foglio DDT visibile e compilabile a sinistra!
-        Supporta ridimensionamento a 3 vie:
-        - Bordo sinistro (orizzontale)
-        - Bordo inferiore (verticale)
-        - Angolo in basso a sinistra (obliquo / diagonale)
-      */}
-      <div
-        ref={modalContainerRef}
-        onClick={() => {
-          if (isFaded) {
-            setIsFaded(false);
-          }
-        }}
-        className={`absolute top-1 right-2 z-50 pointer-events-auto select-none animate-in fade-in duration-100 transition-opacity duration-200 ease-out ${
-          isFaded ? "opacity-50 hover:opacity-85 ring-2 ring-[var(--primary)]/60 shadow-2xl" : "opacity-100"
-        }`}
-        onKeyDown={handleKeyDown}
-        style={{ width: `${modalWidth}px` }}
-      >
-        <div
-          style={{ height: `${modalHeight}px` }}
-          className={`relative bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-[0_25px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden ${
-            isResizing ? "select-none pointer-events-none" : ""
-          }`}
-        >
-          {/* 1. Header Finestra: Titolo Stile Excel Ricerca Articoli - CLIENTE */}
-          <div className="px-3.5 py-2 border-b border-[var(--border)] flex items-center justify-between bg-[var(--background)] shrink-0">
-            <div className="flex items-center space-x-2 min-w-0">
-              <div className="p-1 rounded bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20 shrink-0">
-                <Search className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <span className="font-bold text-xs text-[var(--foreground)] truncate block">
-                  Ricerca Articoli —{" "}
-                  <span className="text-[var(--primary)] font-black">
-                    {displayClientName ? displayClientName.toUpperCase() : "NESSUN CLIENTE"}
-                  </span>
-                </span>
-              </div>
-            </div>
-
-            {/* Pillole selezione Listino & Toggle Prezzi */}
-            <div className="flex items-center space-x-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setSourceTab("cliente");
-                  setActivePane("list");
-                  setSelectedListIdx(0);
-                }}
-                className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition-all ${
-                  sourceTab === "cliente"
-                    ? "bg-amber-500 text-black font-bold shadow-sm"
-                    : "bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]"
-                }`}
-                title="Visualizza Listino Cliente"
-              >
-                <span>Cliente</span>
-                <span className="px-1 py-0.1 rounded-full text-[9px] bg-black/20 font-bold">
-                  {clientItems.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSourceTab("generale");
-                  setActivePane("list");
-                  setSelectedListIdx(0);
-                }}
-                className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition-all ${
-                  sourceTab === "generale"
-                    ? "bg-[var(--primary)] text-white font-bold shadow-sm"
-                    : "bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]"
-                }`}
-                title="Visualizza Listino Generale"
-              >
-                <span>Generale</span>
-                <span className="px-1 py-0.1 rounded-full text-[9px] bg-white/20 font-bold">
-                  {generalItems.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPrezziIvaEnabled(!prezziIvaEnabled)}
-                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border transition-colors ${
-                  prezziIvaEnabled
-                    ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 font-bold"
-                    : "bg-[var(--card)] border-[var(--border)] text-[var(--muted-foreground)]"
-                }`}
-                title="Attiva o disattiva l'inserimento di Prezzo & IVA nel DDT"
-              >
-                €: {prezziIvaEnabled ? "ON" : "OFF"}
-              </button>
-
-              {/* Tasto rapido manuale Dissolvenza */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsFaded(!isFaded);
-                }}
-                className={`p-1 rounded text-xs border transition-colors ${
-                  isFaded
-                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                    : "bg-[var(--card)] border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-                }`}
-                title={
-                  isFaded
-                    ? "Dissolvenza attiva (clicca per tornare opaco)"
-                    : "Attiva dissolvenza (trasparente per vedere sotto)"
-                }
-              >
-                {isFaded ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              </button>
-
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={onClose}
-                className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] transition-colors ml-1"
-                title="Chiudi (Esc)"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+    <div
+      ref={containerRef}
+      onKeyDown={handleKeyDown}
+      className="w-full h-full flex flex-col bg-[var(--card)] select-none overflow-hidden"
+    >
+      {/* 1. Header Pannello: Titolo Ricerca Articoli - CLIENTE + Tasti Listino e Chiusura */}
+      <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between bg-[var(--background)] shrink-0 gap-2">
+        <div className="flex items-center space-x-2 min-w-0">
+          <div className="p-1 rounded bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20 shrink-0">
+            <Search className="w-3.5 h-3.5" />
           </div>
-
-          {/* 2. Barra Ricerca & Contatori Filtrati Live */}
-          <div className="p-2 border-b border-[var(--border)] bg-[var(--card)] flex items-center space-x-2 shrink-0">
-            <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-2" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setSelectedListIdx(0);
-                }}
-                placeholder="CERCA ARTICOLO O STORICO..."
-                className="w-full pl-8 pr-7 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-bold tracking-wide uppercase"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch("")}
-                  className="absolute right-2 top-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Badges conteggi compatti */}
-            <div className="flex items-center space-x-1.5 text-[11px] font-mono shrink-0 px-2 py-1 bg-[var(--background)] border border-[var(--border)] rounded-md select-none">
-              <button
-                type="button"
-                onClick={() => {
-                  setSourceTab("cliente");
-                  setActivePane("list");
-                }}
-                className={`flex items-center space-x-1 ${
-                  sourceTab === "cliente" && activePane === "list" ? "text-amber-400 font-bold" : "text-[var(--muted-foreground)]"
-                }`}
-                title="Elementi Listino Clienti"
-              >
-                <span>Cli:</span>
-                <span className="text-amber-400 font-bold">{filteredClientItems.length}</span>
-              </button>
-              <span className="text-[var(--border)]">•</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setSourceTab("generale");
-                  setActivePane("list");
-                }}
-                className={`flex items-center space-x-1 ${
-                  sourceTab === "generale" && activePane === "list" ? "text-blue-400 font-bold" : "text-[var(--muted-foreground)]"
-                }`}
-                title="Elementi Listino Generale"
-              >
-                <span>Gen:</span>
-                <span className="text-blue-400 font-bold">{filteredGeneralItems.length}</span>
-              </button>
-              <span className="text-[var(--border)]">•</span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (historyItems.length > 0) setActivePane("history");
-                }}
-                className={`flex items-center space-x-1 ${
-                  activePane === "history" ? "text-emerald-400 font-bold" : "text-[var(--muted-foreground)]"
-                }`}
-                title="Elementi Storico"
-              >
-                <span>Sto:</span>
-                <span className="text-emerald-400 font-bold">{historyItems.length}</span>
-              </button>
-            </div>
+          <div className="min-w-0">
+            <span className="font-bold text-xs text-[var(--foreground)] truncate block">
+              Ricerca Articoli —{" "}
+              <span className="text-[var(--primary)] font-black">
+                {displayClientName ? displayClientName.toUpperCase() : "NESSUN CLIENTE"}
+              </span>
+            </span>
           </div>
+        </div>
 
-          {/* 3. Sezione a 2 Tabelle Sovrapposte Verticalmente (Top = Listino, Bottom = Storico) */}
-          <div className="flex-1 flex flex-col overflow-hidden divide-y-2 divide-[var(--border)]">
-            {/* TABELLA SUPERIORE: Listino Cliente / Generale */}
-            <div
-              className={`flex-1 flex flex-col overflow-hidden min-h-[140px] ${
-                activePane === "list" ? "ring-1 ring-inset ring-[var(--primary)]/50" : ""
-              }`}
-              onClick={() => setActivePane("list")}
-            >
-              <div className="px-3 py-1 bg-[var(--background)] border-b border-[var(--border)] flex items-center justify-between text-[10.5px] font-bold text-[var(--muted-foreground)] uppercase shrink-0">
-                <span className="truncate">
-                  DESCRIZIONE ({sourceTab === "generale" ? "LISTINO GENERALE" : `LISTINO CLIENTE`})
-                </span>
-                <span className="w-24 text-right shrink-0">PREZZO (€)</span>
-              </div>
-
-              <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]/30">
-                {isLoading ? (
-                  <div className="p-6 text-center text-xs text-[var(--muted-foreground)]">
-                    Caricamento listino in corso...
-                  </div>
-                ) : filteredListItems.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-[var(--muted-foreground)]">
-                    Nessun articolo trovato per "{search}".
-                  </div>
-                ) : (
-                  <table className="w-full border-collapse text-xs">
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
-                      {filteredListItems.slice(0, 300).map((row, idx) => {
-                        const isSelected = activePane === "list" && selectedListIdx === idx;
-                        const priceVal =
-                          sourceTab === "generale"
-                            ? (row as ListinoGeneraleRow).prezzo_fattura
-                            : (row as ListinoClienteRow).prezzo_fattura;
-
-                        return (
-                          <tr
-                            key={row.id}
-                            onClick={() => {
-                              setActivePane("list");
-                              setSelectedListIdx(idx);
-                            }}
-                            onDoubleClick={handleOpenQuantityModal}
-                            className={`cursor-pointer transition-colors ${
-                              isSelected
-                                ? "bg-[var(--primary)] text-white font-bold"
-                                : "hover:bg-[var(--background)] text-[var(--foreground)]"
-                            }`}
-                          >
-                            <td className="px-3 py-1 font-sans truncate" title={row.descrizione}>
-                              {row.descrizione}
-                            </td>
-                            <td
-                              className={`px-3 py-1 text-right w-24 whitespace-nowrap font-bold ${
-                                isSelected ? "text-white" : "text-amber-400"
-                              }`}
-                            >
-                              {formatEuro(priceVal)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-
-            {/* TABELLA INFERIORE: Storico Vendite (Data, Descrizione, Prezzo) Esattamente come Screenshot */}
-            <div
-              className={`flex-1 flex flex-col overflow-hidden min-h-[140px] bg-[var(--background)]/15 ${
-                activePane === "history" ? "ring-1 ring-inset ring-emerald-500/50" : ""
-              }`}
-              onClick={() => setActivePane("history")}
-            >
-              <div className="px-3 py-1 bg-[var(--background)] border-b border-[var(--border)] flex items-center justify-between text-[10.5px] font-bold text-emerald-400 uppercase shrink-0">
-                <div className="flex items-center space-x-1.5 truncate">
-                  <ArrowDownUp className="w-3 h-3 text-emerald-400 shrink-0" />
-                  <span className="truncate">
-                    STORICO PREZZI PRATICATI: {displayClientName || "—"}
-                  </span>
-                </div>
-                <span className="text-[var(--muted-foreground)] font-mono text-[10px] shrink-0 ml-2">
-                  {historyItems.length} voci
-                </span>
-              </div>
-
-              <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]/30">
-                {!clientName || !clientName.trim() ? (
-                  <div className="p-6 text-center text-xs text-[var(--muted-foreground)]">
-                    Seleziona un cliente nel DDT per visualizzare lo storico prezzi.
-                  </div>
-                ) : historyItems.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-[var(--muted-foreground)]">
-                    Nessuna vendita precedente registrata per "{search || displayClientName}".
-                  </div>
-                ) : (
-                  <table className="w-full border-collapse text-xs">
-                    <thead className="bg-[var(--background)] sticky top-0 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)]">
-                      <tr>
-                        <th className="px-2 py-1 text-left w-20">Data</th>
-                        <th className="px-2 py-1 text-left">Descrizione</th>
-                        <th className="px-2.5 py-1 text-right w-24">Prezzo (€)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
-                      {historyItems.map((h, idx) => {
-                        const isSelected = activePane === "history" && selectedHistIdx === idx;
-                        const priceVal = h.unitPriceSubunits / 100000;
-
-                        return (
-                          <tr
-                            key={`${h.ddtId}_${idx}`}
-                            onClick={() => {
-                              setActivePane("history");
-                              setSelectedHistIdx(idx);
-                            }}
-                            onDoubleClick={handleOpenQuantityModal}
-                            className={`cursor-pointer transition-colors ${
-                              isSelected
-                                ? "bg-emerald-600 text-white font-bold"
-                                : "hover:bg-[var(--card)] text-[var(--foreground)]"
-                            }`}
-                          >
-                            <td className="px-2 py-1 text-[var(--muted-foreground)] whitespace-nowrap text-[10.5px]">
-                              {formatDdtViewDate(h.date)}
-                            </td>
-                            <td className="px-2 py-1 font-sans truncate" title={h.description}>
-                              <span className="text-[var(--foreground)]">{h.description}</span>
-                            </td>
-                            <td
-                              className={`px-2.5 py-1 text-right font-bold whitespace-nowrap ${
-                                isSelected ? "text-white" : "text-emerald-400"
-                              }`}
-                            >
-                              {formatEuro(priceVal, 2)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* 4. Footer Modale con Azioni Rapide */}
-          <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-xs shrink-0">
-            <div className="text-[10px] text-[var(--muted-foreground)] font-medium">
-              <span>Invio / DblClick inserisce • Frecce ↑↓ scorrono</span>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={onClose}
-                className="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--background)] text-[var(--foreground)] font-medium text-xs transition-colors"
-              >
-                Chiudi (Esc)
-              </button>
-
-              <button
-                type="button"
-                onClick={handleOpenQuantityModal}
-                className="flex items-center space-x-1.5 px-3 py-1 rounded-md bg-[var(--primary)] text-white hover:opacity-95 font-bold text-xs shadow-md transition-all"
-              >
-                <ShoppingCart className="w-3.5 h-3.5" />
-                <span>Inserisci</span>
-              </button>
-            </div>
-          </div>
-
-          {/* 5. GESTIONE RIDIMENSIONAMENTO A 3 VIE */}
-          {/* Maniglia Bordo Sinistro (Orizzontale) */}
-          <div
-            onMouseDown={handleMouseDownResizeWidth}
-            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-[var(--primary)]/30 transition-colors z-20"
-            title="Trascina verso sinistra/destra per regolare la larghezza"
-          />
-
-          {/* Maniglia Bordo Inferiore (Verticale) */}
-          <div
-            onMouseDown={handleMouseDownResizeHeight}
-            className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-[var(--primary)]/30 transition-colors z-20"
-            title="Trascina verso l'alto/basso per regolare l'altezza"
-          />
-
-          {/* Maniglia Angolo in Basso a Sinistra (Obliquo / Diagonale) */}
-          <div
-            onMouseDown={handleMouseDownResizeOblique}
-            className="absolute bottom-0 left-0 w-4 h-4 cursor-nesw-resize hover:bg-[var(--primary)]/50 rounded-bl-xl transition-colors z-30 flex items-end justify-start p-0.5 group"
-            title="Trascina in diagonale per ridimensionare larghezza e altezza contemporaneamente"
+        {/* Pillole selezione Listino & Toggle Prezzi */}
+        <div className="flex items-center space-x-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setSourceTab("cliente");
+              setActivePane("list");
+              setSelectedListIdx(0);
+            }}
+            className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition-all ${
+              sourceTab === "cliente"
+                ? "bg-amber-500 text-black font-bold shadow-sm"
+                : "bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]"
+            }`}
+            title="Visualizza Listino Cliente"
           >
-            <div className="w-2 h-2 border-l-2 border-b-2 border-[var(--primary)] group-hover:border-white transition-colors" />
+            <span>Cliente</span>
+            <span className="px-1 py-0.1 rounded-full text-[9px] bg-black/20 font-bold">
+              {clientItems.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSourceTab("generale");
+              setActivePane("list");
+              setSelectedListIdx(0);
+            }}
+            className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition-all ${
+              sourceTab === "generale"
+                ? "bg-[var(--primary)] text-white font-bold shadow-sm"
+                : "bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]"
+            }`}
+            title="Visualizza Listino Generale"
+          >
+            <span>Generale</span>
+            <span className="px-1 py-0.1 rounded-full text-[9px] bg-white/20 font-bold">
+              {generalItems.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPrezziIvaEnabled(!prezziIvaEnabled)}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border transition-colors ${
+              prezziIvaEnabled
+                ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 font-bold"
+                : "bg-[var(--card)] border-[var(--border)] text-[var(--muted-foreground)]"
+            }`}
+            title="Attiva o disattiva l'inserimento di Prezzo & IVA nel DDT"
+          >
+            €: {prezziIvaEnabled ? "ON" : "OFF"}
+          </button>
+
+          {/* Tasto Chiudi Pannello */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--border)] transition-colors ml-1"
+            title="Nascondi pannello cerca articoli (F3)"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Barra di Ricerca Multi-Termine */}
+      <div className="px-3 py-1.5 border-b border-[var(--border)] bg-[var(--card)] shrink-0">
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setSelectedListIdx(0);
+              setSelectedHistIdx(0);
+            }}
+            placeholder="Cerca per descrizione, codice o parole chiave..."
+            className="w-full pl-8 pr-7 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]"
+          />
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-[var(--muted-foreground)]" />
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                inputRef.current?.focus();
+              }}
+              className="absolute right-2 top-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 3. Sezione Dati Split (Tabella Listino sopra + Tabella Storico sotto a uguale altezza 50/50) */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {/* TABELLA 1: LISTINO GENERALE O CLIENTE (50% altezza) */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden border-b border-[var(--border)]">
+          <div className="px-3 py-1 bg-[var(--background)]/80 text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] flex justify-between items-center shrink-0">
+            <span>
+              {sourceTab === "generale" ? "Listino Generale Articoli" : `Listino Cliente (${displayClientName})`}
+            </span>
+            <span className="font-mono text-[10px]">
+              {visibleListItems.length < filteredListItems.length
+                ? `Mostrati ${visibleListItems.length} di ${filteredListItems.length}`
+                : `${filteredListItems.length} voci trovate`}
+            </span>
           </div>
+
+          <div className="flex-1 overflow-y-auto overflow-x-hidden">
+            {isLoading ? (
+              <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
+                Caricamento listini in corso...
+              </div>
+            ) : visibleListItems.length === 0 ? (
+              <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
+                Nessun articolo trovato con i criteri di ricerca.
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 bg-[var(--card)] z-10 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-semibold">
+                  <tr>
+                    <th className="px-2 py-1 text-left">Descrizione</th>
+                    <th className="px-2.5 py-1 text-right w-24">Prezzo (€)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11px]">
+                  {visibleListItems.map((item, idx) => {
+                    const isSelected = activePane === "list" && selectedListIdx === idx;
+                    const priceVal =
+                      sourceTab === "generale"
+                        ? (item as ListinoGeneraleRow).prezzo_fattura || (item as ListinoGeneraleRow).prezzo_pubblico || 0
+                        : (item as ListinoClienteRow).prezzo_fattura || 0;
+
+                    return (
+                      <tr
+                        key={`${item.id}_${idx}`}
+                        onClick={() => {
+                          setActivePane("list");
+                          setSelectedListIdx(idx);
+                        }}
+                        onDoubleClick={handleOpenQuantityModal}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected
+                            ? "bg-[var(--primary)] text-white font-bold"
+                            : "hover:bg-[var(--background)]/60 text-[var(--foreground)]"
+                        }`}
+                      >
+                        <td className="px-2 py-1 font-sans truncate max-w-[280px]" title={item.descrizione}>
+                          <span className="text-[var(--foreground)]">{item.descrizione}</span>
+                          {item.codice_articolo && (
+                            <span className={`text-[10px] font-mono ml-2 ${isSelected ? "text-white/80" : "text-[var(--muted-foreground)]"}`}>
+                              [{item.codice_articolo}]
+                            </span>
+                          )}
+                        </td>
+                        <td
+                          className={`px-2.5 py-1 text-right font-bold whitespace-nowrap ${
+                            isSelected ? "text-white" : "text-amber-400"
+                          }`}
+                        >
+                          {formatEuro(priceVal, 2)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* TABELLA 2: STORICO PREZZI PRATICATI AL CLIENTE (50% altezza) */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-[var(--background)]/40">
+          <div className="px-3 py-1 bg-[var(--background)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] flex justify-between items-center shrink-0">
+            <span className="text-emerald-400 font-bold">
+              Storico Prezzi Praticati {displayClientName && `a ${displayClientName}`}
+            </span>
+            <span className="font-mono text-[10px]">
+              {visibleHistoryItems.length < historyItems.length
+                ? `Mostrati ${visibleHistoryItems.length} di ${historyItems.length}`
+                : `${historyItems.length} ddt precedenti`}
+            </span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto overflow-x-hidden">
+            {visibleHistoryItems.length === 0 ? (
+              <div className="p-3 text-center text-xs text-[var(--muted-foreground)]">
+                Nessun prezzo storico trovato nei DDT precedenti per questo cliente.
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 bg-[var(--card)] z-10 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-semibold">
+                  <tr>
+                    <th className="px-2 py-1 text-left w-20">Data</th>
+                    <th className="px-2 py-1 text-left">Descrizione</th>
+                    <th className="px-2.5 py-1 text-right w-24">Prezzo (€)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
+                  {visibleHistoryItems.map((h, idx) => {
+                    const isSelected = activePane === "history" && selectedHistIdx === idx;
+                    const priceVal = h.unitPriceSubunits / 100000;
+
+                    return (
+                      <tr
+                        key={`${h.ddtId}_${idx}`}
+                        onClick={() => {
+                          setActivePane("history");
+                          setSelectedHistIdx(idx);
+                        }}
+                        onDoubleClick={handleOpenQuantityModal}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected
+                            ? "bg-emerald-600 text-white font-bold"
+                            : "hover:bg-[var(--card)] text-[var(--foreground)]"
+                        }`}
+                      >
+                        <td className="px-2 py-1 text-[var(--muted-foreground)] whitespace-nowrap text-[10.5px]">
+                          {formatDdtViewDate(h.date)}
+                        </td>
+                        <td className="px-2 py-1 font-sans truncate max-w-[200px]" title={h.description}>
+                          <span className="text-[var(--foreground)]">{h.description}</span>
+                        </td>
+                        <td
+                          className={`px-2.5 py-1 text-right font-bold whitespace-nowrap ${
+                            isSelected ? "text-white" : "text-emerald-400"
+                          }`}
+                        >
+                          {formatEuro(priceVal, 2)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Footer Pannello con Azioni Rapide */}
+      <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-xs shrink-0">
+        <div className="text-[10px] text-[var(--muted-foreground)] font-medium">
+          <span>Invio / DblClick inserisce • Frecce ↑↓ scorrono</span>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={onClose}
+            className="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--background)] text-[var(--foreground)] font-medium text-xs transition-colors"
+          >
+            Chiudi (F3/Esc)
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenQuantityModal}
+            className="flex items-center space-x-1.5 px-3 py-1 rounded-md bg-[var(--primary)] text-white hover:opacity-95 font-bold text-xs shadow-md transition-all"
+          >
+            <ShoppingCart className="w-3.5 h-3.5" />
+            <span>Inserisci</span>
+          </button>
         </div>
       </div>
 
       {/* POPUP "INSERIMENTO ARTICOLO" CON QUANTITA' */}
       {pendingInsert && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-100">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-100">
           <div className="w-full max-w-lg bg-[#0f172a] border border-blue-500/40 rounded-xl shadow-2xl p-5 flex flex-col space-y-4">
             <div className="flex items-center justify-between border-b border-blue-500/30 pb-2.5">
               <div className="flex items-center space-x-2 text-blue-400">
@@ -974,6 +666,6 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
-};
+});

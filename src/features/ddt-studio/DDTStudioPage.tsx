@@ -265,21 +265,62 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     tableRef.current?.clearFocusedCell();
   }, []);
 
-  // Modale ricerca articoli F3
-  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  // Pannello ricerca articoli F3 (docked a lato della tabella, attivo di default)
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(true);
+  const [searchPanelWidth, setSearchPanelWidth] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("ddt_search_panel_width");
+      if (saved) {
+        const val = parseInt(saved, 10);
+        if (!isNaN(val) && val >= 320 && val <= 850) return val;
+      }
+    }
+    return 480;
+  });
+
+  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = searchPanelWidth;
+    let rafId: number | null = null;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const delta = startX - moveEvent.clientX;
+        const newWidth = Math.max(320, Math.min(850, startWidth + delta));
+        setSearchPanelWidth(newWidth);
+      });
+    };
+
+    const onMouseUp = (upEvent: MouseEvent) => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      const delta = startX - upEvent.clientX;
+      const finalWidth = Math.max(320, Math.min(850, startWidth + delta));
+      setSearchPanelWidth(finalWidth);
+      localStorage.setItem("ddt_search_panel_width", String(finalWidth));
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [searchPanelWidth]);
+
   // Modale Alex (Ricerca Multi-Listino 4 finestre)
   const [isAlexModalOpen, setIsAlexModalOpen] = useState(false);
 
-  // Scorciatoia globale F3 per ricerca rapida articoli
+  // Scorciatoia globale F3 per mostrare/nascondere il pannello rapido articoli
   useEffect(() => {
     const handleGlobalF3 = (e: KeyboardEvent) => {
       if (e.key === "F3") {
         e.preventDefault();
-        setIsSearchModalOpen(true);
+        e.stopPropagation();
+        setIsSearchModalOpen((prev) => !prev);
       }
     };
-    window.addEventListener("keydown", handleGlobalF3);
-    return () => window.removeEventListener("keydown", handleGlobalF3);
+    window.addEventListener("keydown", handleGlobalF3, true);
+    return () => window.removeEventListener("keydown", handleGlobalF3, true);
   }, []);
 
   // Toast feedback
@@ -393,18 +434,37 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   useEffect(() => subscribeToOpenDdt((id) => { void handleSelectDdt(id); }), []);
 
-  // Nuovo DDT vuoto
-  const handleNewDdt = () => {
+  // Calcola e assegna il prossimo numero DDT disponibile se documento vuoto
+  useEffect(() => {
+    let active = true;
+    if (ddt.doc_number === null) {
+      ddtRepository.getNextDocNumber(ddt.year || new Date().getFullYear(), ddt.series || "").then((num) => {
+        if (active && num) {
+          setDdt((prev) => (prev.doc_number === null ? { ...prev, doc_number: num } : prev));
+        }
+      });
+    }
+    return () => { active = false; };
+  }, []);
+
+  // Nuovo DDT vuoto con numero progressivo già visibile
+  const handleNewDdt = async () => {
     ddtLoadRequest.current += 1;
     setLoadingDdtId(null);
     const nextDdt = makeEmptyDdt();
     const nextItems = makeEmptyItems();
+    try {
+      const nextNum = await ddtRepository.getNextDocNumber(nextDdt.year || new Date().getFullYear(), nextDdt.series || "");
+      nextDdt.doc_number = nextNum;
+    } catch (e) {
+      console.warn("Impossibile calcolare prossimo numero DDT:", e);
+    }
     setDdt(nextDdt);
     setItems(nextItems);
     setGlobalDiscount("");
     setGlobalMarkup("");
     savedSignature.current = signature(nextDdt, nextItems, "", "");
-    showToast("Nuova Bozza DDT creata");
+    showToast(`Nuova Bozza DDT creata (N° ${nextDdt.doc_number || "Provvisorio"})`);
   };
 
   // Salva Bozza
@@ -415,6 +475,24 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       setDdt(saved);
       savedSignature.current = signature(saved, items, globalDiscount, globalMarkup);
       await loadRecentDdts();
+
+      // Salvataggio automatico silenzioso del cliente in anagrafica
+      if (ddt.client_name?.trim()) {
+        void clientRepository.createOrUpdateClient({
+          business_name: ddt.client_name.trim(),
+          address: ddt.client_address || undefined,
+          city: ddt.client_city || undefined,
+          vat_number: ddt.client_vat || undefined,
+          fiscal_code: ddt.client_fiscal_code || undefined,
+          sdi_code: ddt.client_sdi || undefined,
+          payment_method: ddt.payment_method || undefined,
+          destination_name: ddt.destination_name || undefined,
+          destination_address: ddt.destination_address || undefined,
+          destination_city: ddt.destination_city || undefined,
+          phones: ddt.client_phones || [],
+        }).catch((e) => console.warn("Auto-salvataggio cliente bozza:", e));
+      }
+
       showToast("Bozza salvata con successo");
       return true;
     } catch (e) {
@@ -439,6 +517,24 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       setDdt(saved);
       savedSignature.current = signature(saved, items, globalDiscount, globalMarkup);
       await loadRecentDdts();
+
+      // Salvataggio automatico del cliente in anagrafica
+      if (saved.client_name?.trim()) {
+        void clientRepository.createOrUpdateClient({
+          business_name: saved.client_name.trim(),
+          address: saved.client_address || undefined,
+          city: saved.client_city || undefined,
+          vat_number: saved.client_vat || undefined,
+          fiscal_code: saved.client_fiscal_code || undefined,
+          sdi_code: saved.client_sdi || undefined,
+          payment_method: saved.payment_method || undefined,
+          destination_name: saved.destination_name || undefined,
+          destination_address: saved.destination_address || undefined,
+          destination_city: saved.destination_city || undefined,
+          phones: saved.client_phones || [],
+        }).catch((e) => console.warn("Auto-salvataggio cliente emissione:", e));
+      }
+
       const identifier = `${saved.series ? `${saved.series}/` : ""}${saved.doc_number}`;
       showToast(`DDT emesso con successo! Numero assegnato: #${identifier}`);
       return true;
@@ -508,33 +604,6 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     }
   };
 
-  // Salva cliente in anagrafica SQLite
-  const handleSaveClientToDb = async () => {
-    if (!ddt.client_name?.trim()) {
-      showToast("Nessun cliente da salvare");
-      return;
-    }
-
-    try {
-      await clientRepository.createOrUpdateClient({
-        business_name: ddt.client_name,
-        address: ddt.client_address,
-        city: ddt.client_city,
-        vat_number: ddt.client_vat,
-        fiscal_code: ddt.client_fiscal_code,
-        sdi_code: ddt.client_sdi,
-        payment_method: ddt.payment_method,
-        destination_name: ddt.destination_name,
-        destination_address: ddt.destination_address,
-        destination_city: ddt.destination_city,
-        phones: ddt.client_phones || [],
-      });
-      showToast(`Cliente '${ddt.client_name}' salvato in anagrafica SQLite`);
-    } catch (e) {
-      console.error("Errore salvataggio cliente:", e);
-    }
-  };
-
   // Inserimento articolo selezionato da modale ricerca F3 o Alex
   const handleInsertArticle = (article: {
     code?: string;
@@ -569,7 +638,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       copy[targetIdx] = {
         ...copy[targetIdx],
         code: article.code || "",
-        description: (article.description || "").toUpperCase(),
+        description: (article.description || "").toUpperCase().slice(0, 55),
         unit: article.unit || "NR",
         quantity: q,
         unit_price: effectivePrice,
@@ -858,21 +927,48 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                 <DDTClienteCard
                   ddt={ddt}
                   setDdt={setDdt}
-                  onSaveClientToDb={handleSaveClientToDb}
                 />
               </div>
 
-              {/* Tabella Articoli (Excel-Like con 500 righe e bianco/grigio alternato) */}
-              <div className="flex-1 min-h-0 w-full overflow-hidden flex flex-col">
-                <DDTArticoliTable
-                  ref={tableRef}
-                  items={items}
-                  setItems={setItems}
-                  showMargini={showMargini}
-                  globalDiscount={globalDiscount}
-                  globalMarkup={globalMarkup}
-                  onOpenSearchModal={() => setIsSearchModalOpen(true)}
-                />
+              {/* Area Centrale: Tabella Articoli + Splitter + Cerca Articoli Docked */}
+              <div className="flex-1 min-h-0 w-full overflow-hidden flex flex-row">
+                {/* Sinistra: Tabella Articoli DDT */}
+                <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
+                  <DDTArticoliTable
+                    ref={tableRef}
+                    items={items}
+                    setItems={setItems}
+                    showMargini={showMargini}
+                    globalDiscount={globalDiscount}
+                    globalMarkup={globalMarkup}
+                    onOpenSearchModal={() => setIsSearchModalOpen((p) => !p)}
+                  />
+                </div>
+
+                {/* Destra: Splitter e Pannello Cerca Articoli Docked */}
+                {isSearchModalOpen && (
+                  <>
+                    <div
+                      onMouseDown={handleSplitterMouseDown}
+                      className="w-1.5 hover:w-2 bg-[var(--border)] hover:bg-[var(--primary)] cursor-col-resize shrink-0 transition-colors z-10 flex items-center justify-center select-none group"
+                      title="Trascina per ridimensionare tabella e cerca articoli"
+                    >
+                      <div className="w-0.5 h-8 bg-[var(--muted-foreground)]/40 group-hover:bg-white rounded" />
+                    </div>
+
+                    <div
+                      style={{ width: `${searchPanelWidth}px` }}
+                      className="h-full shrink-0 flex flex-col border-l border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-lg"
+                    >
+                      <DDTArticoliSearchModal
+                        isOpen={isSearchModalOpen}
+                        onClose={() => setIsSearchModalOpen(false)}
+                        clientName={ddt.client_name}
+                        onSelectArticle={handleInsertArticle}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Barra Finanziaria Colorata (Tot. Acquisto, Totale Netto, Ricavo, Ricarico % + Alex + Sconto & Maggiorazione) */}
@@ -882,7 +978,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                 totals={totals}
                 showMargini={showMargini}
                 setShowMargini={setShowMargini}
-                onOpenSearchModal={() => setIsSearchModalOpen(true)}
+                onOpenSearchModal={() => setIsSearchModalOpen((p) => !p)}
                 onOpenAlexModal={() => setIsAlexModalOpen(true)}
                 globalDiscount={globalDiscount}
                 onChangeGlobalDiscount={handleChangeGlobalDiscount}
@@ -897,7 +993,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                   ddt={ddt}
                   setDdt={setDdt}
                   items={items}
-                  onOpenSearchModal={() => setIsSearchModalOpen(true)}
+                  onOpenSearchModal={() => setIsSearchModalOpen((p) => !p)}
                 />
               </div>
             </div>
@@ -907,14 +1003,6 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
               <DDTA4Document ddt={ddt} items={items} />
             </div>
           )}
-
-          {/* Modale Ricerca Articoli (F3) ancorata all'area di lavoro (stessa larghezza della tabella DDT) */}
-          <DDTArticoliSearchModal
-            isOpen={isSearchModalOpen}
-            onClose={() => setIsSearchModalOpen(false)}
-            clientName={ddt.client_name}
-            onSelectArticle={handleInsertArticle}
-          />
         </div>
       </div>
 

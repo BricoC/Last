@@ -80,8 +80,50 @@ export class DdtRepository {
 
     if (docRows.length === 0) return null;
 
+    const row = docRows[0];
+    if ((!row.client_address || !row.client_city) && row.client_name) {
+      try {
+        const clientRows = await db.select<any[]>(
+          "SELECT * FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL LIMIT 1",
+          [row.client_name]
+        );
+        if (clientRows.length > 0) {
+          const c = clientRows[0];
+          row.client_id = row.client_id || c.id;
+          row.client_address = row.client_address || c.address;
+          const fullCity = [c.city, c.province].filter(Boolean).join(" ");
+          row.client_city = row.client_city || (fullCity || undefined);
+          row.client_vat = row.client_vat || c.vat_number;
+          row.client_fiscal_code = row.client_fiscal_code || c.fiscal_code;
+          row.client_sdi = row.client_sdi || c.sdi_code;
+        }
+      } catch (err) {
+        console.warn("Auto-enrich client data on getDdtById:", err);
+      }
+    }
+
     const items = itemRows.map(this.mapRowToItem);
-    return this.mapRowToDocument(docRows[0], items);
+    return this.mapRowToDocument(row, items);
+  }
+
+  /**
+   * Arricchisce in massa i dati cliente (sede, città, P.IVA) per tutti i DDT che ne sono sprovvisti
+   */
+  public async enrichMissingDdtClientData(): Promise<void> {
+    const db = await getDatabase();
+    await db.execute(`
+      UPDATE ddt_documents
+      SET 
+        client_id = COALESCE(client_id, (SELECT c.id FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+        client_address = COALESCE(client_address, (SELECT c.address FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+        client_city = COALESCE(client_city, (SELECT (c.city || CASE WHEN c.province IS NOT NULL AND c.province != '' THEN ' ' || c.province ELSE '' END) FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+        client_vat = COALESCE(client_vat, (SELECT c.vat_number FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+        client_fiscal_code = COALESCE(client_fiscal_code, (SELECT c.fiscal_code FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+        client_sdi = COALESCE(client_sdi, (SELECT c.sdi_code FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1))
+      WHERE (client_address IS NULL OR client_address = '')
+        AND client_name IS NOT NULL
+        AND EXISTS (SELECT 1 FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL);
+    `);
   }
 
   /**
@@ -136,6 +178,20 @@ export class DdtRepository {
       id,
       deletedAt: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Calcola il prossimo numero progressivo disponibile per l'anno e serie specificati
+   */
+  public async getNextDocNumber(year: number, series = ""): Promise<number> {
+    const db = await getDatabase();
+    const rows = await db.select<{ next_num: number }[]>(
+      `SELECT COALESCE(MAX(doc_number), 0) + 1 as next_num 
+       FROM ddt_documents 
+       WHERE year = $1 AND series = $2 AND deleted_at IS NULL`,
+      [year, series]
+    );
+    return rows[0]?.next_num ?? 1;
   }
 
   private async saveDocumentInternal(

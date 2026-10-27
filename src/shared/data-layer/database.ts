@@ -265,6 +265,42 @@ const MIGRATIONS: Migration[] = [
     name: "create_price_list_log_table",
     up: migratePriceListLogSchemaV12,
   },
+  {
+    version: 13,
+    name: "add_client_destinations_price_lists_and_email",
+    up: async (db: Database) => {
+      const tableInfo = await db.select<{ name: string }[]>("PRAGMA table_info(clients)");
+      const colNames = new Set(tableInfo.map((c) => c.name));
+      if (!colNames.has("destinations_json")) {
+        await db.execute("ALTER TABLE clients ADD COLUMN destinations_json TEXT DEFAULT '[]'");
+      }
+      if (!colNames.has("price_lists_json")) {
+        await db.execute("ALTER TABLE clients ADD COLUMN price_lists_json TEXT DEFAULT '[]'");
+      }
+      if (!colNames.has("email")) {
+        await db.execute("ALTER TABLE clients ADD COLUMN email TEXT");
+      }
+    },
+  },
+  {
+    version: 14,
+    name: "enrich_ddt_client_details",
+    up: async (db: Database) => {
+      await db.execute(`
+        UPDATE ddt_documents
+        SET 
+          client_id = COALESCE(client_id, (SELECT c.id FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+          client_address = COALESCE(client_address, (SELECT c.address FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+          client_city = COALESCE(client_city, (SELECT (c.city || CASE WHEN c.province IS NOT NULL AND c.province != '' THEN ' ' || c.province ELSE '' END) FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+          client_vat = COALESCE(client_vat, (SELECT c.vat_number FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+          client_fiscal_code = COALESCE(client_fiscal_code, (SELECT c.fiscal_code FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1)),
+          client_sdi = COALESCE(client_sdi, (SELECT c.sdi_code FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL LIMIT 1))
+        WHERE (client_address IS NULL OR client_address = '')
+          AND client_name IS NOT NULL
+          AND EXISTS (SELECT 1 FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL);
+      `);
+    },
+  },
 ];
 
 /**

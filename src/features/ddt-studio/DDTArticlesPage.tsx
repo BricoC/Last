@@ -5,7 +5,7 @@ import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { getDdtArticleViewRows, type DdtArticleViewRow } from "./services/ddtReadModelsRepository";
 import { requestOpenDdt } from "./services/ddtNavigation";
 import { formatDdtMoney, formatDdtNumber, formatDdtViewDate } from "./services/ddtViewFormatting";
-import { normalizeSearch, tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { normalizeSearch, tokenizeSearch, matchesSearchToken } from "@/shared/hooks/useFragmentSearch";
 import { DDTQuickViewModal } from "./components/DDTQuickViewModal";
 import { DDTClientArticleHistoryModal } from "./components/DDTClientArticleHistoryModal";
 
@@ -72,7 +72,7 @@ export function DDTArticlesPage() {
   const filtered = useMemo(() => {
     if (!searchTokens.length) return indexedRows;
     return indexedRows.filter((row) => {
-      return searchTokens.every((token) => row._searchIndex.includes(token));
+      return searchTokens.every((token) => matchesSearchToken(row._searchIndex, token));
     });
   }, [indexedRows, searchTokens]);
 

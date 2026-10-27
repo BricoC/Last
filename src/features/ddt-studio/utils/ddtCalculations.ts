@@ -42,6 +42,76 @@ export function formatAddressOrCity(str?: string): string {
   return s;
 }
 
+export interface DestinazioneDisplay {
+  nome: string;
+  indirizzo: string;
+  citta: string;
+}
+
+/**
+ * Risolve in modo coerente e intelligente i dati da mostrare nel box "Luogo di destinazione merce".
+ * Gestisce sia i nuovi DDT che i vecchi DDT storici importati da Access/Supabase.
+ */
+export function resolveDestinazioneDisplay(ddt: {
+  client_name?: string;
+  client_address?: string;
+  client_city?: string;
+  destination_name?: string;
+  destination_address?: string;
+  destination_city?: string;
+}): DestinazioneDisplay {
+  const clientName = (ddt.client_name || "—").trim();
+  const clientAddr = (ddt.client_address || "").trim();
+  const clientCity = (ddt.client_city || "").trim();
+
+  const rawDestName = (ddt.destination_name || "").trim();
+  const rawDestAddr = (ddt.destination_address || "").trim();
+  const rawDestCity = (ddt.destination_city || "").trim();
+
+  const isStreetPattern = (s: string) =>
+    /^(via|viale|corso|piazza|p\.zza|strada|loc\.|localit[aà]|f\.sso|fosso|borgo|largo|vicolo|c\.so)\b/i.test(s);
+
+  // Caso 1: destination_address è valorizzato esplicitamente (es. "CV5", o indirizzo di consegna)
+  if (rawDestAddr) {
+    const isDestNameSameAsClientOrEmpty = !rawDestName || rawDestName.toUpperCase() === clientName.toUpperCase();
+    const isDestNameSameAsAddr = rawDestName.toUpperCase() === rawDestAddr.toUpperCase() || isStreetPattern(rawDestName);
+
+    const nome = isDestNameSameAsAddr || isDestNameSameAsClientOrEmpty ? clientName : rawDestName;
+    const indirizzo = rawDestAddr;
+    const citta = rawDestCity || (rawDestAddr.toUpperCase() === clientAddr.toUpperCase() ? clientCity : "");
+    return { nome, indirizzo, citta };
+  }
+
+  // Caso 2: destination_address non è valorizzato (es. vecchi DDT storici o nessun indirizzo alternativo)
+  if (!rawDestName || rawDestName.toUpperCase() === clientName.toUpperCase()) {
+    return {
+      nome: clientName,
+      indirizzo: clientAddr,
+      citta: clientCity,
+    };
+  }
+
+  // Se rawDestName coincide con la sede legale del cliente o contiene una via/strada
+  const isStreetOrClientAddr =
+    (clientAddr && rawDestName.toUpperCase() === clientAddr.toUpperCase()) ||
+    isStreetPattern(rawDestName);
+
+  if (isStreetOrClientAddr) {
+    return {
+      nome: clientName,
+      indirizzo: rawDestName || clientAddr,
+      citta: rawDestCity || clientCity,
+    };
+  }
+
+  // Se rawDestName è una sigla o codice di destinazione (es. "CV2", "Stab. Ferrania"):
+  return {
+    nome: clientName,
+    indirizzo: rawDestName,
+    citta: rawDestCity,
+  };
+}
+
 /**
  * Parsea una stringa di sconto singola o a cascata (es. "10", "10+3", "(10 + 3)", "10+5+2")
  * Restituisce l'array di percentuali di sconto da applicare sequenzialmente.

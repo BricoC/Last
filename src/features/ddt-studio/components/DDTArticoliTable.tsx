@@ -202,12 +202,6 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
     async (e: any) => {
       if (!e.event) return;
 
-      if (e.event.key === "F3") {
-        e.event.preventDefault();
-        onOpenSearchModal();
-        return;
-      }
-
       // Tasto Canc o Backspace su cella evidenziata (non in edit mode): svuota la cella stile Excel
       if (
         (e.event.key === "Delete" || e.event.key === "Backspace") &&
@@ -401,11 +395,11 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       {
         headerName: "DESCRIZIONE ARTICOLO / PRESTAZIONE *",
         field: "description",
-        flex: 3,
-        minWidth: 560,
+        flex: 2,
+        minWidth: 260,
         editable: true,
         cellEditor: DDTTextEditor,
-        valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase() : ""),
+        valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase().slice(0, 55) : ""),
         valueFormatter: (p: any) => (p.value ? String(p.value).toUpperCase() : ""),
         cellStyle: {
           fontSize: "12px",

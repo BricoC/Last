@@ -5,7 +5,7 @@ import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { getDdtListViewRows, type DdtListViewRow } from "./services/ddtReadModelsRepository";
 import { requestOpenDdt } from "./services/ddtNavigation";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "./services/ddtViewFormatting";
-import { normalizeSearch, tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { normalizeSearch, tokenizeSearch, matchesSearchToken } from "@/shared/hooks/useFragmentSearch";
 import { DDTQuickViewModal } from "./components/DDTQuickViewModal";
 
 type IndexedDdtRow = DdtListViewRow & { _searchIndex: string };
@@ -59,7 +59,7 @@ export function DDTListPage() {
   const filtered = useMemo(() => {
     if (!searchTokens.length) return indexedRows;
     return indexedRows.filter((row) => {
-      return searchTokens.every((token) => row._searchIndex.includes(token));
+      return searchTokens.every((token) => matchesSearchToken(row._searchIndex, token));
     });
   }, [indexedRows, searchTokens]);
 

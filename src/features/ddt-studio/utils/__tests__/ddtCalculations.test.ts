@@ -8,6 +8,7 @@ import {
   normalizeOperator,
   parseCascadeDiscounts,
   formatCascadeDiscountDisplay,
+  resolveDestinazioneDisplay,
 } from "../ddtCalculations";
 import { DdtItem } from "../../models/ddt";
 import { formatDdtImageFilename, formatDdtPdfFilename } from "../ddtExportManager";
@@ -128,5 +129,68 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
       client_name: "MARIO ROSSI S.R.L.",
     });
     expect(pdfFilename).toBe("DDT 12 del 22.10.2026 MARIO ROSSI S.R.L..pdf");
+  });
+
+  describe("resolveDestinazioneDisplay (corretto rendering box Luogo di destinazione merce)", () => {
+    it("gestisce vecchi DDT storici con via memorizzata in destination_name (es. LUMART)", () => {
+      const res = resolveDestinazioneDisplay({
+        client_name: "LUMART",
+        client_address: "VIA DI TIGLIO",
+        client_city: "PIEVE DI COMPITO LU",
+        destination_name: "Via di Tiglio",
+      });
+      expect(res.nome).toBe("LUMART");
+      expect(res.indirizzo).toBe("Via di Tiglio");
+      expect(res.citta).toBe("PIEVE DI COMPITO LU");
+    });
+
+    it("gestisce vecchi DDT storici con via memorizzata in destination_name (es. MIB)", () => {
+      const res = resolveDestinazioneDisplay({
+        client_name: "MIB",
+        client_address: "VIA TAZIO NUVOLARI",
+        client_city: "CARRAIA LU",
+        destination_name: "Via Tazio Nuvolari",
+      });
+      expect(res.nome).toBe("MIB");
+      expect(res.indirizzo).toBe("Via Tazio Nuvolari");
+      expect(res.citta).toBe("CARRAIA LU");
+    });
+
+    it("gestisce vecchi DDT storici con sigla cantiere in destination_name (es. Cartiere Carrara CV2)", () => {
+      const res = resolveDestinazioneDisplay({
+        client_name: "CARTIERE CARRARA",
+        client_address: "VIA CAVALIERI DEL LAVORO 17",
+        client_city: "CAPANNORI LU",
+        destination_name: "CV2",
+      });
+      expect(res.nome).toBe("CARTIERE CARRARA");
+      expect(res.indirizzo).toBe("CV2");
+      expect(res.citta).toBe("");
+    });
+
+    it("gestisce nuovi DDT con destinazione alternativa in destination_address (es. Cartiere Carrara CV5)", () => {
+      const res = resolveDestinazioneDisplay({
+        client_name: "CARTIERE CARRARA",
+        client_address: "VIA CAVALIERI DEL LAVORO 17",
+        client_city: "CAPANNORI LU",
+        destination_name: "CARTIERE CARRARA",
+        destination_address: "CV5",
+        destination_city: "",
+      });
+      expect(res.nome).toBe("CARTIERE CARRARA");
+      expect(res.indirizzo).toBe("CV5");
+      expect(res.citta).toBe("");
+    });
+
+    it("mostra sede legale del cliente se non vi è alcuna destinazione", () => {
+      const res = resolveDestinazioneDisplay({
+        client_name: "ACME S.P.A.",
+        client_address: "VIA ROMA 1",
+        client_city: "LUCCA LU",
+      });
+      expect(res.nome).toBe("ACME S.P.A.");
+      expect(res.indirizzo).toBe("VIA ROMA 1");
+      expect(res.citta).toBe("LUCCA LU");
+    });
   });
 });

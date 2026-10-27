@@ -2,6 +2,8 @@ import { useState } from "react";
 import { AlertTriangle, Database, Download, LoaderCircle, Search } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { createDdtReadOnlyPreview, importAllReadableSupabaseDdts, type DdtImportResult, type DdtPreview } from "./ddtReadOnlyPreviewService";
+import { clientSyncService } from "@/features/clients/services/clientSyncService";
+import { ddtRepository } from "@/features/ddt-studio/services/ddtRepository";
 
 interface Props { projectUrl: string; anonKey: string; }
 
@@ -31,7 +33,11 @@ export function DdtReadOnlyPreview({ projectUrl, anonKey }: Props) {
       const result = await importAllReadableSupabaseDdts(projectUrl, anonKey);
       setImportResult(result);
       setPreview(await createDdtReadOnlyPreview(projectUrl, anonKey));
-      } catch (cause) {
+      // Auto-estrazione istantanea di eventuali nuovi clienti nei DDT appena importati
+      await clientSyncService.importMissingClientsFromDdts();
+      // Auto-arricchimento istantaneo dell'indirizzo sede e città per tutti i DDT importati
+      await ddtRepository.enrichMissingDdtClientData();
+    } catch (cause) {
         const detail = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : JSON.stringify(cause);
         setError(detail && detail !== "{}" ? `Importazione DDT non riuscita: ${detail}` : "Importazione DDT non riuscita.");
       }

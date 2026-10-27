@@ -8,6 +8,7 @@ import {
   getOperatorSymbol,
   formatAddressOrCity,
   formatCascadeDiscountDisplay,
+  resolveDestinazioneDisplay,
 } from "../utils/ddtCalculations";
 import bricoLogo from "@/assets/logo_brico_class.jpg";
 
@@ -299,52 +300,57 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                     </div>
 
                     {/* Luogo di destinazione merce */}
-                    <div
-                      style={{
-                        border: "1px solid #000",
-                        paddingTop: DDT_CONFIG.clienti.paddingTop,
-                        paddingBottom: "5px",
-                        paddingLeft: DDT_CONFIG.clienti.paddingLeft,
-                        paddingRight: DDT_CONFIG.clienti.paddingRight,
-                        height: DDT_CONFIG.clienti.altezza,
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "space-between",
-                        textAlign: "left",
-                        backgroundColor: "#ffffff",
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: DDT_CONFIG.clienti.fontSizeTitolo,
-                          fontStyle: "italic",
-                          color: "#3f3f46",
-                          lineHeight: "1.2",
-                        }}
-                      >
-                        Luogo di destinazione merce
-                      </div>
-                      <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-around", paddingTop: "1px" }}>
+                    {(() => {
+                      const dest = resolveDestinazioneDisplay(ddt);
+                      return (
                         <div
                           style={{
-                            fontSize: DDT_CONFIG.clienti.fontSizeNome,
-                            textTransform: "uppercase",
-                            color: "#09090b",
-                            lineHeight: "1.2",
-                            fontWeight: "normal",
+                            border: "1px solid #000",
+                            paddingTop: DDT_CONFIG.clienti.paddingTop,
+                            paddingBottom: "5px",
+                            paddingLeft: DDT_CONFIG.clienti.paddingLeft,
+                            paddingRight: DDT_CONFIG.clienti.paddingRight,
+                            height: DDT_CONFIG.clienti.altezza,
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: "space-between",
+                            textAlign: "left",
+                            backgroundColor: "#ffffff",
+                            boxSizing: "border-box",
                           }}
                         >
-                          {ddt.destination_name || ddt.client_name || "—"}
+                          <div
+                            style={{
+                              fontSize: DDT_CONFIG.clienti.fontSizeTitolo,
+                              fontStyle: "italic",
+                              color: "#3f3f46",
+                              lineHeight: "1.2",
+                            }}
+                          >
+                            Luogo di destinazione merce
+                          </div>
+                          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-around", paddingTop: "1px" }}>
+                            <div
+                              style={{
+                                fontSize: DDT_CONFIG.clienti.fontSizeNome,
+                                textTransform: "uppercase",
+                                color: "#09090b",
+                                lineHeight: "1.2",
+                                fontWeight: "normal",
+                              }}
+                            >
+                              {dest.nome}
+                            </div>
+                            <div style={{ fontSize: DDT_CONFIG.clienti.fontSizeIndirizzo, color: "#18181b", lineHeight: "1.2" }}>
+                              {formatAddressOrCity(dest.indirizzo)}
+                            </div>
+                            <div style={{ fontSize: DDT_CONFIG.clienti.fontSizeIndirizzo, color: "#18181b", lineHeight: "1.2" }}>
+                              {formatAddressOrCity(dest.citta)}
+                            </div>
+                          </div>
                         </div>
-                        <div style={{ fontSize: DDT_CONFIG.clienti.fontSizeIndirizzo, color: "#18181b", lineHeight: "1.2" }}>
-                          {formatAddressOrCity(ddt.destination_address || ddt.client_address)}
-                        </div>
-                        <div style={{ fontSize: DDT_CONFIG.clienti.fontSizeIndirizzo, color: "#18181b", lineHeight: "1.2" }}>
-                          {formatAddressOrCity(ddt.destination_city || ddt.client_city)}
-                        </div>
-                      </div>
-                    </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Riga Commerciale: Causale | OP | Pagamento & Nr vs ordine | In conto / A Saldo */}

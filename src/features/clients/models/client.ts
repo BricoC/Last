@@ -6,6 +6,13 @@ export interface ClientPhone {
   numero: string;
 }
 
+export interface ClientDestination {
+  id: number | string;
+  citta: string;
+  luogo: string;
+  note?: string;
+}
+
 export interface Client extends BaseEntity {
   code?: string;
   business_name: string;
@@ -17,10 +24,13 @@ export interface Client extends BaseEntity {
   fiscal_code?: string;
   sdi_code?: string;
   pec?: string;
+  email?: string;
   payment_method?: string;
   destination_name?: string;
   destination_address?: string;
   destination_city?: string;
+  destinations: ClientDestination[];
+  price_lists: string[];
   phones: ClientPhone[];
   notes?: string;
   is_active: boolean;
@@ -37,10 +47,13 @@ export interface CreateClientInput {
   fiscal_code?: string;
   sdi_code?: string;
   pec?: string;
+  email?: string;
   payment_method?: string;
   destination_name?: string;
   destination_address?: string;
   destination_city?: string;
+  destinations?: ClientDestination[];
+  price_lists?: string[];
   phones?: ClientPhone[];
   notes?: string;
   is_active?: boolean;
