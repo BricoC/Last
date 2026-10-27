@@ -95,6 +95,25 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         updatedData.purchase_price = safeMoney(updatedData.purchase_price);
       }
 
+      if (colId === "ric_pct") {
+        const clean = String(params.newValue ?? "")
+          .replace("%", "")
+          .replace("+", "")
+          .replace(",", ".")
+          .trim();
+        const ricNum = parseFloat(clean);
+        const pp = isPositivePrice(updatedData.purchase_price)
+          ? safeMoney(updatedData.purchase_price).toNumber()
+          : 0;
+
+        if (!isNaN(ricNum) && pp > 0) {
+          const newUpNum = pp * (1 + ricNum / 100);
+          const newUnitPrice = money(newUpNum);
+          updatedData.unit_price = newUnitPrice;
+          updatedData.base_price = newUnitPrice;
+        }
+      }
+
       if (colId === "vat_rate") {
         if (params.newValue === "" || params.newValue === null || params.newValue === undefined) {
           updatedData.vat_rate = "";
@@ -249,7 +268,10 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         "discount_pct",
         "vat_rate",
       ];
-      if (showMargini) editableCols.push("purchase_price");
+      if (showMargini) {
+        editableCols.push("purchase_price");
+        editableCols.push("ric_pct");
+      }
 
       const currentColId = previousCellPosition.column.getColId();
       let colIdx = editableCols.indexOf(currentColId);
@@ -507,6 +529,67 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           return m.isZero() ? "" : m.formatIT(false);
         },
       });
+
+      cols.push({
+        headerName: "RIC. %",
+        field: "ric_pct",
+        width: 85,
+        minWidth: 78,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        headerClass: "ddt-col-ric-header",
+        cellClass: "ddt-col-ric-cell",
+        valueGetter: (p: any) => {
+          const up = isPositivePrice(p.data?.unit_price) ? safeMoney(p.data?.unit_price).toNumber() : 0;
+          const pp = isPositivePrice(p.data?.purchase_price) ? safeMoney(p.data?.purchase_price).toNumber() : 0;
+          if (pp > 0 && up > 0) {
+            return ((up - pp) / pp) * 100;
+          }
+          return null;
+        },
+        valueSetter: (params: any) => {
+          const clean = String(params.newValue ?? "")
+            .replace("%", "")
+            .replace("+", "")
+            .replace(",", ".")
+            .trim();
+          const ricNum = parseFloat(clean);
+          const pp = isPositivePrice(params.data?.purchase_price)
+            ? safeMoney(params.data?.purchase_price).toNumber()
+            : 0;
+
+          if (!isNaN(ricNum) && pp > 0) {
+            const newUpNum = pp * (1 + ricNum / 100);
+            params.data.unit_price = money(newUpNum);
+            params.data.base_price = money(newUpNum);
+          }
+          return true;
+        },
+        valueParser: (p: any) => {
+          if (p.newValue === "" || p.newValue === null || p.newValue === undefined) return null;
+          const clean = String(p.newValue).replace("%", "").replace("+", "").replace(",", ".").trim();
+          const parsed = parseFloat(clean);
+          return isNaN(parsed) ? null : parsed;
+        },
+        valueFormatter: (p: any) => {
+          if (p.value === null || p.value === undefined || p.value === "") return "";
+          const num = typeof p.value === "number" ? p.value : parseFloat(p.value);
+          if (isNaN(num)) return "";
+          return `${num >= 0 ? "+" : ""}${num.toFixed(1)}%`;
+        },
+        cellStyle: (p: any) => {
+          const num = typeof p.value === "number" ? p.value : parseFloat(p.value);
+          const isPos = !isNaN(num) && num >= 0;
+          return {
+            textAlign: "right",
+            fontFamily: "monospace",
+            fontSize: "12px",
+            fontWeight: 700,
+            color: isPos ? "#10b981" : "#f59e0b",
+            backgroundColor: "rgba(16, 185, 129, 0.05)",
+          };
+        },
+      });
     }
 
     cols.push({
@@ -546,45 +629,49 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
   return (
     <div className="ddt-items-grid ag-theme-alpine w-full h-full flex-1 min-h-0 overflow-hidden relative border border-zinc-300">
       <style>{`
-        /* Focus chiaro e visibile sull'intera riga */
-        .ag-theme-alpine .ag-row.ag-row-focus {
+        /* Focus chiaro e visibile sull'intera riga (solo tabella DDT principale) */
+        .ddt-items-grid.ag-theme-alpine .ag-row.ag-row-focus {
           background-color: #dbeafe !important;
         }
-        .ag-theme-alpine .ag-row.ag-row-focus .ag-cell:not(.ddt-col-acq-cell) {
+        .ddt-items-grid.ag-theme-alpine .ag-row.ag-row-focus .ag-cell:not(.ddt-col-acq-cell) {
           background-color: #dbeafe !important;
         }
-        .ag-theme-alpine .ag-row-hover {
+        .ddt-items-grid.ag-theme-alpine .ag-row-hover {
           background-color: #eff6ff !important;
         }
-        .ag-theme-alpine .ag-row-even {
+        .ddt-items-grid.ag-theme-alpine .ag-row-even {
           background-color: #ffffff;
         }
-        .ag-theme-alpine .ag-row-odd {
+        .ddt-items-grid.ag-theme-alpine .ag-row-odd {
           background-color: #f8f9fa;
         }
         /* Intestazione tabella non selezionabile con mouse o drag */
-        .ag-theme-alpine .ag-header,
-        .ag-theme-alpine .ag-header-cell,
-        .ag-theme-alpine .ag-header-cell-label,
-        .ag-theme-alpine .ag-header-cell-text,
-        .ag-theme-alpine .ag-header-group-cell,
-        .ag-theme-alpine .ag-header-row {
+        .ddt-items-grid.ag-theme-alpine .ag-header,
+        .ddt-items-grid.ag-theme-alpine .ag-header-cell,
+        .ddt-items-grid.ag-theme-alpine .ag-header-cell-label,
+        .ddt-items-grid.ag-theme-alpine .ag-header-cell-text,
+        .ddt-items-grid.ag-theme-alpine .ag-header-group-cell,
+        .ddt-items-grid.ag-theme-alpine .ag-header-row {
           user-select: none !important;
           -webkit-user-select: none !important;
           -moz-user-select: none !important;
           -ms-user-select: none !important;
           cursor: default !important;
         }
-        .ag-theme-alpine .ag-header-cell-label {
+        .ddt-items-grid.ag-theme-alpine .ag-header-cell-label {
           justify-content: center;
           font-weight: 700;
           font-size: 11px;
           color: #334155;
         }
-        .ag-theme-alpine .ddt-col-acq-header {
+        .ddt-items-grid.ag-theme-alpine .ddt-col-acq-header {
           background-color: var(--grid-sheet-acquisition-header) !important;
         }
-        .ag-theme-alpine .ag-cell-focus {
+        .ddt-items-grid.ag-theme-alpine .ddt-col-ric-header {
+          background-color: rgba(16, 185, 129, 0.15) !important;
+          color: #047857 !important;
+        }
+        .ddt-items-grid.ag-theme-alpine .ag-cell-focus {
           outline: 2px solid #2563eb !important;
           outline-offset: -2px !important;
         }

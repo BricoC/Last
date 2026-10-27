@@ -1,4 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from "react";
+import React, { useState, useEffect, useRef, useMemo, useDeferredValue, useCallback } from "react";
+import { AgGridReact } from "ag-grid-react";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-alpine.css";
+import DDTTextEditor from "./DDTTextEditor";
 import {
   Search,
   X,
@@ -15,12 +19,15 @@ import { getDdtArticleViewRows, DdtArticleViewRow } from "../services/ddtReadMod
 import { DdtItem } from "../models/ddt";
 import { formatDdtViewDate } from "../services/ddtViewFormatting";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
+import { calculateRowAmounts } from "../utils/ddtCalculations";
 
 export interface DDTMultiListinoModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentClientName?: string;
   currentDdtItems: DdtItem[];
+  onUpdateDdtItems?: React.Dispatch<React.SetStateAction<DdtItem[]>>;
   onSelectArticle: (article: {
     code?: string;
     description: string;
@@ -42,11 +49,14 @@ interface PendingArticleInsert {
   vat_rate?: number;
 }
 
+
+
 export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
   isOpen,
   onClose,
   currentClientName,
   currentDdtItems,
+  onUpdateDdtItems,
   onSelectArticle,
 }) => {
   // Modalità disposizione: 'horizontal' (4 fasce orizzontali sovrapposte come Foto 3) o 'vertical' (4 colonne affiancate)
@@ -69,6 +79,9 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
   const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>([]);
   const [clientItems, setClientItems] = useState<ListinoClienteRow[]>([]);
   const [historyRows, setHistoryRows] = useState<DdtArticleViewRow[]>([]);
+
+  // Grid ref per tabella Articoli nel DDT (Finestra 4 - AG Grid puro come la tabella DDT principale)
+  const currentDdtGridRef = useRef<AgGridReact<DdtItem>>(null);
 
   // Filtra DDT corrente con ricerca
   const [filterCurrentWithSearch, setFilterCurrentWithSearch] = useState(false);
@@ -118,18 +131,59 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
     }
   }, [isOpen]);
 
-  // Gestione tasto ESC globale
+  // Gestione tasto ESC globale: non chiudere se una cella è attiva/in edit mode
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // 1. Cella in fase di digitazione / modifica (inline editing)
+        const isEditingCell = Boolean(
+          window.__isDDTCellEditing ||
+          document.querySelector(".ag-cell-inline-editing, .ag-cell-editing, .ag-popup-editor") ||
+          (currentDdtGridRef.current?.api?.getEditingCells?.()?.length ?? 0) > 0 ||
+          (document.activeElement && document.activeElement.closest(".alex-ddt-grid") && document.activeElement.tagName === "INPUT")
+        );
+
+        if (isEditingCell) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          window.__isDDTCellEditing = false;
+          currentDdtGridRef.current?.api?.stopEditing(true);
+          return;
+        }
+
+        // 2. Cella selezionata / attiva nella tabella (focus)
+        const focusedCell = currentDdtGridRef.current?.api?.getFocusedCell();
+        const isGridFocused = Boolean(
+          focusedCell ||
+          (document.activeElement && document.activeElement.closest(".alex-ddt-grid"))
+        );
+
+        if (isGridFocused) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          currentDdtGridRef.current?.api?.clearFocusedCell();
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+          return;
+        }
+
+        // 3. Popup quantità di inserimento
+        if (pendingInsert) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          setPendingInsert(null);
+          return;
+        }
+
+        // 4. Nessuna cella attiva/in modifica: chiudi il popup Alex!
         e.preventDefault();
         e.stopPropagation();
-        if (pendingInsert) {
-          setPendingInsert(null);
-        } else {
-          onClose();
-        }
+        onClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown, true);
@@ -218,6 +272,496 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
     });
     setPendingInsert(null);
   };
+
+  // Verifica se una riga contiene solo testo/nota (es. ASDASD) senza prezzi o quantità
+  const isTextOnlyRow = (item?: DdtItem | null) => {
+    if (!item) return false;
+    return (
+      !isPositivePrice(item.unit_price) &&
+      (!item.quantity || item.quantity.trim() === "" || item.quantity.trim() === "0") &&
+      !isPositivePrice(item.purchase_price)
+    );
+  };
+
+  // Navigazione Tab in avanti e indietro stile Excel tra le sole colonne editabili
+  const tabToNextCell = useCallback(
+    (params: any) => {
+      const { previousCellPosition, backwards } = params;
+      const editableCols = [
+        "unit",
+        "quantity",
+        "description",
+        "unit_price",
+        "discount_pct",
+        "vat_rate",
+        "purchase_price",
+        "ric_pct",
+      ];
+
+      const currentColId = previousCellPosition.column.getColId();
+      let colIdx = editableCols.indexOf(currentColId);
+      let rowIndex = previousCellPosition.rowIndex;
+
+      if (colIdx === -1) {
+        colIdx = backwards ? editableCols.length - 1 : 0;
+      } else if (backwards) {
+        colIdx--;
+        if (colIdx < 0) {
+          if (rowIndex > 0) {
+            rowIndex--;
+            colIdx = editableCols.length - 1;
+          } else {
+            return null;
+          }
+        }
+      } else {
+        colIdx++;
+        if (colIdx >= editableCols.length) {
+          if (rowIndex < nonBlankCurrentItems.length - 1) {
+            rowIndex++;
+            colIdx = 0;
+          } else {
+            return null;
+          }
+        }
+      }
+
+      const nextCol = params.api.getColumn(editableCols[colIdx]);
+      return {
+        rowIndex,
+        column: nextCol,
+        rowPinned: previousCellPosition.rowPinned ?? null,
+      };
+    },
+    [nonBlankCurrentItems.length]
+  );
+
+  // Navigazione frecce orizzontali stile Excel
+  const navigateToNextCell = useCallback((params: any) => {
+    const { nextCellPosition, key } = params;
+    if (!nextCellPosition) return null;
+
+    const targetColId = nextCellPosition.column.getColId();
+    if (key === "ArrowRight" || key === 39) {
+      if (targetColId === "net_amount") {
+        const vatCol = params.api.getColumn("vat_rate");
+        return { ...nextCellPosition, column: vatCol };
+      }
+    }
+    return nextCellPosition;
+  }, []);
+
+  // Gestione tastiera celle (Delete / Backspace svuota la cella come in Excel)
+  const handleCurrentDdtCellKeyDown = useCallback(
+    (e: any) => {
+      if (!e.event) return;
+
+      if (
+        (e.event.key === "Delete" || e.event.key === "Backspace") &&
+        !window.__isDDTCellEditing
+      ) {
+        if (e.column?.isCellEditable(e.node)) {
+          const colId = e.column.getColId();
+          const itemId = e.node.data.id;
+          if (!onUpdateDdtItems) return;
+
+          onUpdateDdtItems((prev) => {
+            const copy = [...prev];
+            const targetIdx = copy.findIndex((it) => it.id === itemId);
+            if (targetIdx === -1) return prev;
+
+            const target = copy[targetIdx];
+            const updatedRow: DdtItem = { ...target };
+
+            if (colId === "unit_price") {
+              updatedRow.unit_price = money(0);
+              updatedRow.base_price = money(0);
+            } else if (colId === "purchase_price") {
+              updatedRow.purchase_price = money(0);
+            } else if (colId === "discount_pct") {
+              updatedRow.discount_pct = "";
+              updatedRow.base_discount_pct = "";
+            } else if (colId === "vat_rate") {
+              updatedRow.vat_rate = "";
+            } else if (colId === "quantity") {
+              updatedRow.quantity = "";
+            } else if (colId === "description") {
+              updatedRow.description = "";
+            } else if (colId === "unit") {
+              updatedRow.unit = "";
+            }
+
+            const { netAmount, vatAmount } = calculateRowAmounts(
+              updatedRow.quantity || (isPositivePrice(updatedRow.unit_price) ? "1" : ""),
+              safeMoney(updatedRow.unit_price),
+              updatedRow.discount_pct || "0",
+              updatedRow.vat_rate
+            );
+            updatedRow.net_amount = netAmount;
+            updatedRow.vat_amount = vatAmount;
+
+            copy[targetIdx] = updatedRow;
+            return copy;
+          });
+
+          if (currentDdtGridRef.current?.api) {
+            currentDdtGridRef.current.api.refreshCells({ rowNodes: [e.node], force: true });
+          }
+        }
+      }
+    },
+    [onUpdateDdtItems]
+  );
+
+  // Sincronizzazione modifiche celle Finestra 4 con ricalcolo bidirezionale Prezzo <-> Ricarico
+  const handleCurrentDdtCellValueChanged = useCallback(
+    (params: any) => {
+      if (!onUpdateDdtItems) return;
+      const colId = params.column.getColId();
+      const itemId = params.data.id;
+
+      onUpdateDdtItems((prev) => {
+        const copy = [...prev];
+        const targetIdx = copy.findIndex((it) => it.id === itemId);
+        if (targetIdx === -1) return prev;
+
+        const target = copy[targetIdx];
+        const updatedData: DdtItem = {
+          ...target,
+          row_kind: target.row_kind === "note" && colId !== "description" ? "item" : target.row_kind,
+        };
+
+        if (colId === "unit") {
+          updatedData.unit = params.newValue ? String(params.newValue).trim().toUpperCase() : "";
+        } else if (colId === "quantity") {
+          updatedData.quantity = params.newValue ? String(params.newValue).trim() : "";
+        } else if (colId === "description") {
+          updatedData.description = params.newValue ? String(params.newValue).toUpperCase() : "";
+        } else if (colId === "unit_price") {
+          const parsedPrice = safeMoney(params.newValue);
+          updatedData.unit_price = parsedPrice;
+          updatedData.base_price = parsedPrice;
+        } else if (colId === "discount_pct") {
+          updatedData.discount_pct = params.newValue ? String(params.newValue).trim() : "";
+          updatedData.base_discount_pct = updatedData.discount_pct;
+        } else if (colId === "vat_rate") {
+          if (params.newValue === "" || params.newValue === null || params.newValue === undefined) {
+            updatedData.vat_rate = "";
+          } else {
+            const parsed = parseInt(String(params.newValue).replace("%", "").trim(), 10);
+            updatedData.vat_rate = isNaN(parsed) ? "" : parsed;
+          }
+        } else if (colId === "purchase_price") {
+          updatedData.purchase_price = safeMoney(params.newValue);
+        } else if (colId === "ric_pct") {
+          const clean = String(params.newValue ?? "")
+            .replace("%", "")
+            .replace("+", "")
+            .replace(",", ".")
+            .trim();
+          const ricNum = parseFloat(clean);
+          const pp = isPositivePrice(updatedData.purchase_price)
+            ? safeMoney(updatedData.purchase_price).toNumber()
+            : 0;
+
+          if (!isNaN(ricNum) && pp > 0) {
+            const newUpNum = pp * (1 + ricNum / 100);
+            const newUnitPrice = money(newUpNum);
+            updatedData.unit_price = newUnitPrice;
+            updatedData.base_price = newUnitPrice;
+          }
+        }
+
+        // Ricalcola importo netto e IVA riga
+        const { netAmount, vatAmount } = calculateRowAmounts(
+          updatedData.quantity || (isPositivePrice(updatedData.unit_price) ? "1" : ""),
+          updatedData.unit_price,
+          updatedData.discount_pct || "0",
+          updatedData.vat_rate
+        );
+        updatedData.net_amount = netAmount;
+        updatedData.vat_amount = vatAmount;
+
+        copy[targetIdx] = updatedData;
+        return copy;
+      });
+
+      if (currentDdtGridRef.current?.api) {
+        currentDdtGridRef.current.api.refreshCells({ rowNodes: [params.node], force: true });
+      }
+    },
+    [onUpdateDdtItems]
+  );
+
+  // Definizione colonne AG Grid per "Articoli nel DDT" (Finestra 4)
+  const currentDdtColumnDefs: any[] = useMemo(
+    () => [
+      {
+        headerName: "#",
+        valueGetter: (p: any) => (p.node?.rowIndex ?? 0) + 1,
+        width: 44,
+        minWidth: 40,
+        maxWidth: 50,
+        pinned: "left" as const,
+        editable: false,
+        sortable: false,
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "monospace",
+          fontSize: "11px",
+          fontWeight: 700,
+          color: "#c084fc",
+        },
+      },
+      {
+        headerName: "U.M.",
+        field: "unit",
+        width: 56,
+        minWidth: 48,
+        maxWidth: 65,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        valueParser: (p: any) => (p.newValue ? String(p.newValue).trim().toUpperCase() : ""),
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          return p.value ? String(p.value).trim().toUpperCase() : "NR";
+        },
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontWeight: 700,
+          fontSize: "11px",
+          color: "#cbd5e1",
+          textTransform: "uppercase" as const,
+        },
+      },
+      {
+        headerName: "Q.TÀ",
+        field: "quantity",
+        width: 68,
+        minWidth: 58,
+        maxWidth: 78,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        valueParser: (p: any) => (p.newValue === "" ? "" : p.newValue),
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          return p.value || "1";
+        },
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontWeight: 700,
+          fontFamily: "monospace",
+          fontSize: "12px",
+          color: "#ffffff",
+        },
+      },
+      {
+        headerName: "DESCRIZIONE ARTICOLO *",
+        field: "description",
+        minWidth: 350,
+        flex: 4,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase() : ""),
+        valueFormatter: (p: any) => (p.value ? String(p.value).toUpperCase() : ""),
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          fontSize: "12.5px",
+          fontWeight: 600,
+          color: "#f8fafc",
+          textTransform: "uppercase" as const,
+        },
+      },
+      {
+        headerName: "PREZZO €",
+        field: "unit_price",
+        minWidth: 120,
+        flex: 1.2,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        valueParser: (p: any) => safeMoney(p.newValue),
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          fontFamily: "monospace",
+          fontSize: "12px",
+          fontWeight: 700,
+          color: "#ffffff",
+        },
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          if (!p.value) return "";
+          const m = safeMoney(p.value);
+          return m.isZero() ? "" : m.formatIT(false);
+        },
+      },
+      {
+        headerName: "SC.%",
+        field: "discount_pct",
+        minWidth: 80,
+        flex: 0.8,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          fontFamily: "monospace",
+          fontSize: "11px",
+          color: "#cbd5e1",
+        },
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          if (!p.value || p.value === "0") return "—";
+          return `${p.value}%`;
+        },
+      },
+      {
+        headerName: "IMPORTO €",
+        field: "net_amount",
+        minWidth: 130,
+        flex: 1.3,
+        editable: false,
+        sortable: false,
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          fontWeight: 800,
+          fontFamily: "monospace",
+          fontSize: "12px",
+          color: "#d8b4fe",
+        },
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          if (!p.value) return "";
+          const m = safeMoney(p.value);
+          return m.isZero() ? "" : `€ ${m.formatIT(false)}`;
+        },
+      },
+      {
+        headerName: "IVA",
+        field: "vat_rate",
+        minWidth: 70,
+        flex: 0.7,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        valueParser: (p: any) => {
+          if (p.newValue === "" || p.newValue === null || p.newValue === undefined) return "";
+          const parsed = parseInt(String(p.newValue).replace("%", "").trim(), 10);
+          return isNaN(parsed) ? "" : parsed;
+        },
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "monospace",
+          fontSize: "11px",
+          color: "#94a3b8",
+        },
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          if (p.value !== "" && p.value !== null && p.value !== undefined) {
+            return `${p.value}%`;
+          }
+          return "22%";
+        },
+      },
+      {
+        headerName: "ACQ. €",
+        field: "purchase_price",
+        minWidth: 120,
+        flex: 1.2,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        valueParser: (p: any) => safeMoney(p.newValue),
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          fontFamily: "monospace",
+          fontSize: "12px",
+          fontWeight: 700,
+          color: "#34d399",
+        },
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          if (!p.value) return "—";
+          const m = safeMoney(p.value);
+          return m.isZero() ? "—" : m.formatIT(false);
+        },
+      },
+      {
+        headerName: "RIC. %",
+        field: "ric_pct",
+        minWidth: 110,
+        flex: 1.1,
+        editable: true,
+        cellEditor: DDTTextEditor,
+        valueGetter: (p: any) => {
+          const up = isPositivePrice(p.data?.unit_price) ? safeMoney(p.data?.unit_price).toNumber() : 0;
+          const pp = isPositivePrice(p.data?.purchase_price) ? safeMoney(p.data?.purchase_price).toNumber() : 0;
+          if (pp > 0 && up > 0) {
+            return ((up - pp) / pp) * 100;
+          }
+          return null;
+        },
+        valueSetter: (params: any) => {
+          const clean = String(params.newValue ?? "")
+            .replace("%", "")
+            .replace("+", "")
+            .replace(",", ".")
+            .trim();
+          const ricNum = parseFloat(clean);
+          const pp = isPositivePrice(params.data?.purchase_price)
+            ? safeMoney(params.data?.purchase_price).toNumber()
+            : 0;
+
+          if (!isNaN(ricNum) && pp > 0) {
+            const newUpNum = pp * (1 + ricNum / 100);
+            params.data.unit_price = money(newUpNum);
+            params.data.base_price = money(newUpNum);
+          }
+          return true;
+        },
+        valueParser: (p: any) => {
+          if (p.newValue === "" || p.newValue === null || p.newValue === undefined) return null;
+          const clean = String(p.newValue).replace("%", "").replace("+", "").replace(",", ".").trim();
+          const parsed = parseFloat(clean);
+          return isNaN(parsed) ? null : parsed;
+        },
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          if (p.value === null || p.value === undefined || p.value === "") return "—";
+          const num = typeof p.value === "number" ? p.value : parseFloat(p.value);
+          if (isNaN(num)) return "—";
+          return `${num >= 0 ? "+" : ""}${num.toFixed(1)}%`;
+        },
+        cellStyle: (p: any) => {
+          const num = typeof p.value === "number" ? p.value : parseFloat(p.value);
+          const isPos = !isNaN(num) && num >= 0;
+          return {
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            fontFamily: "monospace",
+            fontSize: "12px",
+            fontWeight: 800,
+            color: isPos ? "#34d399" : "#fbbf24",
+          };
+        },
+      },
+    ],
+    []
+  );
 
   const formatEuro = (val: number | null | undefined, digits: number = 3) => {
     if (val == null || isNaN(val)) return "—";
@@ -613,11 +1157,11 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
               </div>
             )}
 
-            {/* FINESTRA 4: Articoli nel DDT attuale (Viola) */}
+            {/* FINESTRA 4: Articoli nel DDT attuale (Viola - AG Grid come la tabella DDT) */}
             {showCurrentDdt && (
               <div
                 className={`flex flex-col overflow-hidden bg-[var(--card)] ${
-                  layoutMode === "horizontal" ? "flex-1 min-h-[140px]" : "flex-1 min-w-[280px]"
+                  layoutMode === "horizontal" ? "flex-1 min-h-[160px]" : "flex-1 min-w-[280px]"
                 }`}
               >
                 <div className="px-3 py-1.5 bg-purple-950/40 border-b border-purple-500/30 flex items-center justify-between text-xs text-purple-300 shrink-0">
@@ -638,68 +1182,131 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-auto">
-                  <table className="w-full border-collapse text-xs whitespace-nowrap">
-                    <thead className="bg-[var(--background)] sticky top-0 text-[11.5px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-bold">
-                      <tr>
-                        <th className="px-2.5 py-1.5 text-center w-10">#</th>
-                        <th className="px-2.5 py-1.5 text-center w-12">U.M.</th>
-                        <th className="px-2.5 py-1.5 text-center w-14">Q.tà</th>
-                        <th className="px-3 py-1.5 text-left">Descrizione Articolo *</th>
-                        <th className="px-3 py-1.5 text-right w-24">Prezzo €</th>
-                        <th className="px-2 py-1.5 text-right w-16">Sc.%</th>
-                        <th className="px-3 py-1.5 text-right w-24">Importo €</th>
-                        <th className="px-2 py-1.5 text-center w-14">IVA</th>
-                        <th className="px-3 py-1.5 text-right w-24">Acq €</th>
-                        <th className="px-3 py-1.5 text-right w-20">Ric.%</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-xs">
-                      {nonBlankCurrentItems.length === 0 ? (
-                        <tr>
-                          <td colSpan={10} className="p-6 text-center text-xs text-[var(--muted-foreground)]">
-                            Nessun articolo inserito finora nel DDT.
-                          </td>
-                        </tr>
-                      ) : (
-                        nonBlankCurrentItems.map((item, idx) => {
-                          const unitPrice = item.unit_price ? item.unit_price.toNumber() : 0;
-                          const netAmount = item.net_amount ? item.net_amount.toNumber() : 0;
-                          const purchasePrice = item.purchase_price ? item.purchase_price.toNumber() : 0;
-                          const ricPct = purchasePrice > 0 ? ((unitPrice - purchasePrice) / purchasePrice) * 100 : null;
+                <div className="alex-ddt-grid ag-theme-alpine flex-1 w-full min-h-[120px] overflow-hidden relative">
+                  <style>{`
+                    .alex-ddt-grid.ag-theme-alpine {
+                      --ag-background-color: #0b0f19 !important;
+                      --ag-foreground-color: #f8fafc !important;
+                      --ag-header-background-color: #1e1b4b !important;
+                      --ag-header-foreground-color: #e9d5ff !important;
+                      --ag-row-hover-color: rgba(168, 85, 247, 0.15) !important;
+                      --ag-selected-row-background-color: #121024 !important;
+                      --ag-border-color: rgba(168, 85, 247, 0.25) !important;
+                      --ag-odd-row-background-color: #080c14 !important;
+                      font-size: 12px;
+                    }
+                    .alex-ddt-grid .ag-root-wrapper,
+                    .alex-ddt-grid .ag-root,
+                    .alex-ddt-grid .ag-body-viewport {
+                      background-color: #0b0f19 !important;
+                      border-color: rgba(168, 85, 247, 0.3) !important;
+                    }
+                    .alex-ddt-grid .ag-header {
+                      background-color: #1e1b4b !important;
+                      border-bottom: 1px solid rgba(168, 85, 247, 0.4) !important;
+                    }
+                    .alex-ddt-grid .ag-header-cell {
+                      background-color: #1e1b4b !important;
+                    }
+                    .alex-ddt-grid .ag-header-cell-label {
+                      justify-content: center;
+                      font-weight: 700;
+                      font-size: 11px;
+                      color: #e9d5ff !important;
+                    }
+                    .alex-ddt-grid .ag-row {
+                      background-color: #0b0f19 !important;
+                      color: #f8fafc !important;
+                      border-bottom: 1px solid rgba(148, 163, 184, 0.12) !important;
+                    }
+                    .alex-ddt-grid .ag-row-even,
+                    .alex-ddt-grid .ag-row-even .ag-cell {
+                      background-color: #0b0f19 !important;
+                    }
+                    .alex-ddt-grid .ag-row-odd,
+                    .alex-ddt-grid .ag-row-odd .ag-cell {
+                      background-color: #080c14 !important;
+                    }
+                    .alex-ddt-grid .ag-row.ag-row-hover,
+                    .alex-ddt-grid .ag-row-hover,
+                    .alex-ddt-grid .ag-row-hover .ag-cell {
+                      background-color: rgba(168, 85, 247, 0.18) !important;
+                    }
+                    /* Selezione e Focus cella/riga: mantiene colore scuro nitido, NIENTE BIANCO */
+                    .alex-ddt-grid .ag-row.ag-row-focus,
+                    .alex-ddt-grid .ag-row.ag-row-selected,
+                    .alex-ddt-grid .ag-row:focus {
+                      background-color: #121024 !important;
+                    }
+                    .alex-ddt-grid .ag-row.ag-row-focus .ag-cell,
+                    .alex-ddt-grid .ag-row.ag-row-selected .ag-cell,
+                    .alex-ddt-grid .ag-cell-range-selected,
+                    .alex-ddt-grid .ag-cell-range-single-cell {
+                      background-color: #121024 !important;
+                      color: #f8fafc !important;
+                    }
+                    .alex-ddt-grid .ag-cell {
+                      color: #f8fafc !important;
+                      border-right: 1px solid rgba(148, 163, 184, 0.1) !important;
+                      display: flex !important;
+                      align-items: center !important;
+                    }
+                    .alex-ddt-grid .ag-cell.ag-cell-focus {
+                      outline: 2px solid #c084fc !important;
+                      outline-offset: -2px !important;
+                      background-color: #1c1836 !important;
+                      color: #ffffff !important;
+                    }
+                    /* Cella in fase di digitazione / editor */
+                    .alex-ddt-grid .ag-cell-inline-editing,
+                    .alex-ddt-grid .ag-cell-inline-editing div,
+                    .alex-ddt-grid .ag-cell-inline-editing input {
+                      background-color: #1c1836 !important;
+                      color: #ffffff !important;
+                      outline: 2px solid #c084fc !important;
+                      font-weight: 700 !important;
+                    }
+                  `}</style>
 
-                          return (
-                            <tr key={item.id} className="hover:bg-purple-600/15 cursor-default transition-colors">
-                              <td className="px-2.5 py-1.5 text-center font-bold text-purple-400">{idx + 1}</td>
-                              <td className="px-2.5 py-1.5 text-center text-[var(--muted-foreground)]">{item.unit || "NR"}</td>
-                              <td className="px-2.5 py-1.5 text-center font-bold text-[var(--foreground)]">{item.quantity}</td>
-                              <td className="px-3 py-1.5 font-sans text-[var(--foreground)] truncate max-w-[340px] text-[12.5px] font-medium" title={item.description}>
-                                {item.description}
-                              </td>
-                              <td className="px-3 py-1.5 text-right font-medium text-[var(--foreground)]">
-                                {formatEuro(unitPrice, 4)}
-                              </td>
-                              <td className="px-2 py-1.5 text-right text-[var(--muted-foreground)]">
-                                {item.discount_pct && parseFloat(item.discount_pct) > 0 ? `${item.discount_pct}%` : "—"}
-                              </td>
-                              <td className="px-3 py-1.5 text-right font-bold text-purple-300">
-                                {formatEuro(netAmount, 4)}
-                              </td>
-                              <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">
-                                {item.vat_rate !== null && item.vat_rate !== undefined && String(item.vat_rate) !== "" ? `${item.vat_rate}%` : "22%"}
-                              </td>
-                              <td className="px-3 py-1.5 text-right text-emerald-400 font-medium">
-                                {purchasePrice > 0 ? formatEuro(purchasePrice, 4) : "—"}
-                              </td>
-                              <td className={`px-3 py-1.5 text-right font-bold ${ricPct !== null && ricPct >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
-                                {ricPct !== null ? `${ricPct >= 0 ? "+" : ""}${ricPct.toFixed(1)}%` : "—"}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
+                  <AgGridReact<DdtItem>
+                    ref={currentDdtGridRef}
+                    rowData={nonBlankCurrentItems}
+                    getRowId={(params) => params.data.id || String(params.data.row_index)}
+                    suppressScrollOnNewData={true}
+                    animateRows={true}
+                    columnDefs={currentDdtColumnDefs}
+                    rowHeight={30}
+                    headerHeight={32}
+                    onGridReady={(params) => {
+                      params.api.sizeColumnsToFit();
+                    }}
+                    onGridSizeChanged={(params) => {
+                      params.api.sizeColumnsToFit();
+                    }}
+                    onCellKeyDown={handleCurrentDdtCellKeyDown}
+                    tabToNextCell={tabToNextCell}
+                    navigateToNextCell={navigateToNextCell}
+                    onCellEditingStarted={() => {
+                      window.__isDDTCellEditing = true;
+                    }}
+                    onCellEditingStopped={() => {
+                      setTimeout(() => {
+                        window.__isDDTCellEditing = false;
+                      }, 200);
+                    }}
+                    stopEditingWhenCellsLoseFocus={true}
+                    enterNavigatesVertically={true}
+                    enterNavigatesVerticallyAfterEdit={true}
+                    onCellValueChanged={handleCurrentDdtCellValueChanged}
+                    suppressMovableColumns={true}
+                    overlayNoRowsTemplate='<span class="text-xs text-purple-300/70">Nessun articolo inserito finora nel DDT.</span>'
+                    defaultColDef={{
+                      resizable: true,
+                      sortable: false,
+                      filter: false,
+                      headerClass: "select-none !cursor-default",
+                    }}
+                  />
                 </div>
               </div>
             )}

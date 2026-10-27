@@ -924,6 +924,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         onClose={() => setIsAlexModalOpen(false)}
         currentClientName={ddt.client_name}
         currentDdtItems={items}
+        onUpdateDdtItems={setItems}
         onSelectArticle={handleInsertArticle}
       />
 

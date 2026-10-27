@@ -222,34 +222,32 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Listener globale ESC per chiudere il popup solo quando NON si è in una cella attiva del DDT
+  // Listener globale ESC: chiude il popup solo se non si sta modificando testo in una cella del DDT
   useEffect(() => {
     if (!isOpen) return;
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // NON chiudere il popup se l'utente si trova all'interno di una cella attiva del DDT
-      // o sta digitando in un input della griglia!
-      const target = e.target as HTMLElement | null;
-      const isInsideDdtCell =
-        Boolean(window.__isDDTCellEditing) ||
-        Boolean(
-          target?.closest?.(
-            ".ag-cell, .ag-cell-inline-editing, .ag-popup-editor, .ddt-items-grid, input, textarea"
-          ) && !modalContainerRef.current?.contains(target)
-        );
+      if (e.key !== "Escape") return;
 
-      if (e.key === "Escape") {
-        if (isInsideDdtCell) {
-          // L'utente vuole solo annullare l'editing della cella DDT, NON chiudere la ricerca articoli!
-          return;
-        }
+      // Verifichiamo se l'utente sta modificando del testo all'interno di una cella del DDT
+      const activeEl = (e.target as HTMLElement | null) || (document.activeElement as HTMLElement | null);
+      const isEditingCellText = Boolean(
+        activeEl &&
+        (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) &&
+        Boolean(activeEl.closest(".ag-cell-inline-editing, .ag-cell-editing, .ag-popup-editor, .ag-cell")) &&
+        !modalContainerRef.current?.contains(activeEl)
+      );
 
-        e.preventDefault();
-        e.stopPropagation();
-        if (pendingInsert) {
-          setPendingInsert(null);
-        } else {
-          onClose();
-        }
+      // Se si sta modificando del testo nella cella, l'Esc chiude la cella e lascia il popup aperto
+      if (isEditingCellText) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      if (pendingInsert) {
+        setPendingInsert(null);
+      } else {
+        onClose();
       }
     };
     window.addEventListener("keydown", handleGlobalKeyDown, true);
