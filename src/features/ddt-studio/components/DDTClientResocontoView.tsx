@@ -11,7 +11,11 @@ import {
   Sparkles,
   Check,
   Package,
-  UserCheck
+  UserCheck,
+  Eye,
+  EyeOff,
+  ChevronsUpDown,
+  RotateCcw
 } from "lucide-react";
 import { type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
@@ -77,12 +81,24 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
   onSelectClient,
 }) => {
   const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
+  const [excludedClients, setExcludedClients] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<ClientSortField>("totalNetAmount");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [isExporting, setIsExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const pagesContainerRef = useRef<HTMLDivElement>(null);
+
+  const toggleExclude = (client: string) => {
+    setExcludedClients((prev) => {
+      const next = new Set(prev);
+      if (next.has(client)) next.delete(client);
+      else next.add(client);
+      return next;
+    });
+  };
+
+  const resetExclusions = () => setExcludedClients(new Set());
 
   // Raggruppamento per Cliente
   const clientGroups = useMemo<ClientResocontoGroup[]>(() => {
@@ -273,14 +289,23 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
     });
   }, [clientGroups, sortField, sortDirection]);
 
-  // Totali globali
+  // Clienti attivi (escludendo le righe disattivate dall'utente)
+  const activeClients = useMemo(() => {
+    return clientGroups.filter((c) => !excludedClients.has(c.clientName));
+  }, [clientGroups, excludedClients]);
+
+  const activeSortedClients = useMemo(() => {
+    return sortedClients.filter((c) => !excludedClients.has(c.clientName));
+  }, [sortedClients, excludedClients]);
+
+  // Totali globali calcolati esclusivamente sui clienti attivi
   const totals = useMemo(() => {
     let totalQty = 0;
     let totalNet = 0;
     let totalPurchase = 0;
     let totalDocs = 0;
 
-    for (const c of clientGroups) {
+    for (const c of activeClients) {
       totalQty += c.totalQuantity;
       totalNet += c.totalNetAmount;
       totalPurchase += c.totalPurchaseAmount;
@@ -291,7 +316,7 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
     const avgMarkup = totalPurchase > 0 ? (totalRevenue / totalPurchase) * 100 : null;
 
     return {
-      clientsCount: clientGroups.length,
+      clientsCount: activeClients.length,
       totalQty,
       totalNet,
       totalPurchase,
@@ -299,23 +324,51 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
       avgMarkup,
       totalDocs,
     };
-  }, [clientGroups]);
+  }, [activeClients]);
 
-  // Paginazione A4 Portrait per PDF
+  const allExpanded = clientGroups.length > 0 && clientGroups.every((c) => expandedClients.has(c.clientName));
+  const toggleExpandAll = () => {
+    if (allExpanded) {
+      setExpandedClients(new Set());
+    } else {
+      setExpandedClients(new Set(clientGroups.map((c) => c.clientName)));
+    }
+  };
+
+  // Paginazione A4 Portrait per PDF/stampa con tabelle articoli APERTE
   const pageChunks = useMemo(() => {
-    if (sortedClients.length <= 18) {
-      return [sortedClients];
-    }
+    if (activeSortedClients.length === 0) return [[]];
+
     const chunks: ClientResocontoGroup[][] = [];
-    chunks.push(sortedClients.slice(0, 18));
-    let start = 18;
-    const PER_PAGE = 24;
-    while (start < sortedClients.length) {
-      chunks.push(sortedClients.slice(start, start + PER_PAGE));
-      start += PER_PAGE;
+    let currentChunk: ClientResocontoGroup[] = [];
+    let currentUnits = 0;
+    let isFirstPage = true;
+    const PAGE1_LIMIT = 20;
+    const PAGE_LIMIT = 26;
+
+    for (const c of activeSortedClients) {
+      const articlesCount = c.articles.length;
+      // Costo: riga cliente + testata articoli + righe articoli
+      const itemUnits = Math.max(2, 2.2 + articlesCount * 0.85);
+      const limit = isFirstPage ? PAGE1_LIMIT : PAGE_LIMIT;
+
+      if (currentChunk.length > 0 && currentUnits + itemUnits > limit) {
+        chunks.push(currentChunk);
+        currentChunk = [c];
+        currentUnits = itemUnits;
+        isFirstPage = false;
+      } else {
+        currentChunk.push(c);
+        currentUnits += itemUnits;
+      }
     }
-    return chunks;
-  }, [sortedClients]);
+
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk);
+    }
+
+    return chunks.length > 0 ? chunks : [[]];
+  }, [activeSortedClients]);
 
   const handleSort = (field: ClientSortField) => {
     if (sortField === field) {
@@ -400,8 +453,41 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
             </span>
           </button>
 
+          {/* Toggle Espandi / Chiudi tutto */}
+          <button
+            type="button"
+            onClick={toggleExpandAll}
+            className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-all cursor-pointer shadow-sm"
+            title={allExpanded ? "Comprimi tutte le sezioni" : "Espandi tutte le tabelle"}
+          >
+            <ChevronsUpDown className="h-3.5 w-3.5" />
+            <span>{allExpanded ? "Chiudi tutte" : "Espandi tutte"}</span>
+          </button>
+
+          {/* Badge Clienti Esclusi con Ripristina */}
+          {excludedClients.size > 0 && (
+            <div className="flex items-center gap-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 text-xs text-amber-400">
+              <EyeOff className="h-3.5 w-3.5" />
+              <span className="font-semibold">
+                {excludedClients.size} {excludedClients.size === 1 ? "cliente escluso" : "clienti esclusi"}
+              </span>
+              <button
+                type="button"
+                onClick={resetExclusions}
+                className="flex items-center gap-1 text-[11px] font-bold text-amber-300 hover:text-white underline cursor-pointer ml-1"
+                title="Ripristina tutti i clienti esclusi nel calcolo e nella stampa"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Ripristina</span>
+              </button>
+            </div>
+          )}
+
           <span className="text-xs text-[var(--muted-foreground)] border-l border-[var(--border)] pl-2.5">
-            <strong>{clientGroups.length}</strong> clienti acquirenti per il materiale filtrato
+            <strong>{activeClients.length}</strong> / {clientGroups.length} clienti attivi
+            {excludedClients.size > 0 && (
+              <span className="text-amber-400/80 ml-1 font-medium">({excludedClients.size} esclusi)</span>
+            )}
           </span>
         </div>
 
@@ -584,6 +670,11 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
                   </div>
                 </th>
 
+                {/* STATO */}
+                <th className="px-2 py-2.5 text-center w-14 text-[10px] text-[var(--muted-foreground)] font-semibold">
+                  STATO
+                </th>
+
                 {/* AZIONE */}
                 {onSelectClient && (
                   <th className="px-3 py-2.5 text-center w-24">
@@ -595,20 +686,27 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
             <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
               {sortedClients.map((c) => {
                 const isExpanded = expandedClients.has(c.clientName);
+                const isExcluded = excludedClients.has(c.clientName);
                 const isPositiveRev = c.totalRevenue > 0;
                 const isNegativeRev = c.totalRevenue < 0;
                 const pctOfTotal = totals.totalNet > 0 ? (c.totalNetAmount / totals.totalNet) * 100 : 0;
 
                 return (
                   <React.Fragment key={c.clientName}>
-                    <tr className="hover:bg-[var(--background)]/60 transition-colors">
+                    <tr
+                      className={`transition-colors ${
+                        isExcluded
+                          ? "opacity-40 bg-zinc-900/40 line-through select-none"
+                          : "hover:bg-[var(--background)]/60"
+                      }`}
+                    >
                       {/* Cliente */}
                       <td className="px-4 py-2.5 font-sans font-medium text-[var(--foreground)]">
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => toggleExpand(c.clientName)}
-                            className="text-[var(--muted-foreground)] hover:text-[var(--primary)] cursor-pointer p-0.5"
+                            className="text-[var(--muted-foreground)] hover:text-[var(--primary)] cursor-pointer p-0.5 no-underline"
                             title="Espandi per vedere gli articoli acquistati da questo cliente"
                           >
                             {isExpanded ? (
@@ -618,9 +716,14 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
                             )}
                           </button>
                           <div>
-                            <span className="font-bold text-[var(--foreground)] text-xs">
-                              {c.clientName}
-                            </span>
+                            <div className="font-bold text-[var(--foreground)] text-xs flex items-center gap-1.5 flex-wrap">
+                              <span>{c.clientName}</span>
+                              {isExcluded && (
+                                <span className="rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 text-[9px] font-bold font-sans tracking-wide no-underline">
+                                  ESCLUSO
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[10px] text-[var(--muted-foreground)] font-sans">
                               {c.articles.length} {c.articles.length === 1 ? "articolo" : "articoli differenti"}
                             </div>
@@ -680,6 +783,29 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
                         {formatDdtMoney(c.totalNetAmount)}
                       </td>
 
+                      {/* Azione Escludi / Includi */}
+                      <td className="px-2 py-2.5 text-center no-underline">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExclude(c.clientName);
+                          }}
+                          className={`p-1.5 rounded-md transition-colors cursor-pointer inline-flex items-center justify-center ${
+                            isExcluded
+                              ? "text-amber-400 bg-amber-500/20 hover:bg-amber-500/30 ring-1 ring-amber-500/40"
+                              : "text-[var(--muted-foreground)]/50 hover:text-rose-400 hover:bg-rose-500/15"
+                          }`}
+                          title={
+                            isExcluded
+                              ? "Reincludi questo cliente nel resoconto e nella stampa"
+                              : "Escludi questo cliente dal resoconto e dalla stampa"
+                          }
+                        >
+                          {isExcluded ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                        </button>
+                      </td>
+
                       {/* Tasto Filtra solo questo cliente */}
                       {onSelectClient && (
                         <td className="px-3 py-2.5 text-center">
@@ -699,7 +825,7 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
                     {/* SOTTO-TABELLA ESPANDIBILE: ARTICOLI ACQUISTATI DA QUESTO CLIENTE */}
                     {isExpanded && (
                       <tr className="bg-[var(--background)]/30">
-                        <td colSpan={onSelectClient ? 10 : 9} className="px-6 py-3 border-l-2 border-[var(--primary)]">
+                        <td colSpan={onSelectClient ? 11 : 10} className="px-6 py-3 border-l-2 border-[var(--primary)]">
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
                               <Package className="h-3.5 w-3.5" />
@@ -901,27 +1027,102 @@ export const DDTClientResocontoView: React.FC<DDTClientResocontoViewProps> = ({
                         {chunk.map((c, idx) => {
                           const pct = totals.totalNet > 0 ? (c.totalNetAmount / totals.totalNet) * 100 : 0;
                           return (
-                            <tr key={idx} className={idx % 2 === 1 ? "bg-zinc-50/70" : ""}>
-                              <td className="py-1.5 px-2 font-bold text-zinc-900 leading-tight">
-                                {c.clientName}
-                              </td>
-                              <td className="py-1.5 px-1.5 text-right font-bold text-zinc-900 whitespace-nowrap">
-                                {c.totalQuantity.toLocaleString("it-IT", { maximumFractionDigits: 1 })}
-                              </td>
-                              <td className="py-1.5 px-1 text-center font-bold text-zinc-700">{pct.toFixed(1)}%</td>
-                              <td className="py-1.5 px-1 text-center text-zinc-600 font-mono">{c.docCount}</td>
-                              <td className="py-1.5 px-1 text-center text-zinc-700 font-mono">{c.articlesCount}</td>
-                              <td className="py-1.5 px-2 text-center text-zinc-600 font-sans">{formatDdtViewDate(c.lastDate)}</td>
-                              <td className="py-1.5 px-1.5 text-right font-medium text-zinc-800 whitespace-nowrap">
-                                {formatDdtPercent(c.markupAvgPercent)}
-                              </td>
-                              <td className="py-1.5 px-2 text-right font-bold text-emerald-700 whitespace-nowrap">
-                                {formatDdtMoney(c.totalRevenue)}
-                              </td>
-                              <td className="py-1.5 px-2 text-right font-black text-zinc-900 whitespace-nowrap">
-                                {formatDdtMoney(c.totalNetAmount)}
-                              </td>
-                            </tr>
+                            <React.Fragment key={idx}>
+                              <tr className="bg-zinc-100/90 font-bold">
+                                <td className="py-1.5 px-2 font-bold text-zinc-900 leading-tight">
+                                  {c.clientName}
+                                </td>
+                                <td className="py-1.5 px-1.5 text-right font-bold text-zinc-900 whitespace-nowrap">
+                                  {c.totalQuantity.toLocaleString("it-IT", { maximumFractionDigits: 1 })}
+                                </td>
+                                <td className="py-1.5 px-1 text-center font-bold text-zinc-700">{pct.toFixed(1)}%</td>
+                                <td className="py-1.5 px-1 text-center text-zinc-600 font-mono">{c.docCount}</td>
+                                <td className="py-1.5 px-1 text-center text-zinc-700 font-mono">{c.articlesCount}</td>
+                                <td className="py-1.5 px-2 text-center text-zinc-600 font-sans">{formatDdtViewDate(c.lastDate)}</td>
+                                <td className="py-1.5 px-1.5 text-right font-medium text-zinc-800 whitespace-nowrap">
+                                  {formatDdtPercent(c.markupAvgPercent)}
+                                </td>
+                                <td className="py-1.5 px-2 text-right font-bold text-emerald-700 whitespace-nowrap">
+                                  {formatDdtMoney(c.totalRevenue)}
+                                </td>
+                                <td className="py-1.5 px-2 text-right font-black text-zinc-900 whitespace-nowrap">
+                                  {formatDdtMoney(c.totalNetAmount)}
+                                </td>
+                              </tr>
+
+                              {/* SOTTO-TABELLA ARTICOLI CLIENTE APERTA IN STAMPA */}
+                              {c.articles && c.articles.length > 0 && (
+                                <tr>
+                                  <td colSpan={9} className="p-0 pb-1.5 border-b-2 border-zinc-300">
+                                    <div className="bg-white px-2 py-1 border-l-4 border-zinc-700 ml-2 mr-1">
+                                      <div className="text-[8px] font-bold uppercase tracking-wider text-zinc-600 mb-0.5 flex justify-between">
+                                        <span>Articoli acquistati da {c.clientName} ({c.articles.length})</span>
+                                        <span>Ordinati per spesa decrescente</span>
+                                      </div>
+                                      <table className="w-full text-[8.5px] border-collapse border border-zinc-200">
+                                        <thead>
+                                          <tr className="bg-zinc-50 text-zinc-700 font-bold border-b border-zinc-200 text-left">
+                                            <th className="py-0.5 px-1.5">Descrizione Articolo</th>
+                                            <th className="py-0.5 px-1.5 text-right w-20">Quantità</th>
+                                            <th className="py-0.5 px-1 text-center w-12">% Quota</th>
+                                            <th className="py-0.5 px-1 text-center w-8">DDT</th>
+                                            <th className="py-0.5 px-1.5 text-right w-24">Netto Med. (Range)</th>
+                                            <th className="py-0.5 px-1.5 text-right w-24">Ultimo Netto (Data)</th>
+                                            <th className="py-0.5 px-1 text-right w-12">Ric. %</th>
+                                            <th className="py-0.5 px-1.5 text-right w-16">Margine €</th>
+                                            <th className="py-0.5 px-1.5 text-right w-20">Fatturato</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-zinc-200 font-mono text-[8px]">
+                                          {c.articles.map((art, aIdx) => (
+                                            <tr key={aIdx} className={aIdx % 2 === 1 ? "bg-zinc-50/50" : ""}>
+                                              <td className="py-0.5 px-1.5 font-sans font-semibold text-zinc-900">
+                                                {art.canonicalDescription}
+                                                {art.originalDescriptions.length > 1 && (
+                                                  <span className="text-[7px] text-zinc-500 font-normal ml-0.5">
+                                                    ({art.originalDescriptions.length} var.)
+                                                  </span>
+                                                )}
+                                              </td>
+                                              <td className="py-0.5 px-1.5 text-right font-bold text-zinc-900">
+                                                {art.quantity.toLocaleString("it-IT", { maximumFractionDigits: 1 })} {art.unit}
+                                              </td>
+                                              <td className="py-0.5 px-1 text-center text-zinc-600 font-sans">
+                                                {art.percentageOfClientTotal.toFixed(1)}%
+                                              </td>
+                                              <td className="py-0.5 px-1 text-center text-zinc-600">{art.docCount}</td>
+                                              <td className="py-0.5 px-1.5 text-right text-zinc-800">
+                                                {formatDdtMoney(Math.round(art.netPriceAvg))}
+                                                {art.netPriceMin !== art.netPriceMax && (
+                                                  <span className="text-[7px] text-zinc-500 ml-0.5">
+                                                    ({formatDdtMoney(Math.round(art.netPriceMin))}~{formatDdtMoney(Math.round(art.netPriceMax))})
+                                                  </span>
+                                                )}
+                                              </td>
+                                              <td className="py-0.5 px-1.5 text-right text-zinc-800">
+                                                {formatDdtMoney(Math.round(art.lastNetPrice))}
+                                                <span className="text-[7px] text-zinc-500 ml-0.5 font-sans">
+                                                  ({formatDdtViewDate(art.lastDate)})
+                                                </span>
+                                              </td>
+                                              <td className="py-0.5 px-1 text-right font-medium text-zinc-800">
+                                                {formatDdtPercent(art.markupAvgPercent)}
+                                              </td>
+                                              <td className="py-0.5 px-1.5 text-right font-bold text-emerald-800">
+                                                {formatDdtMoney(art.totalRevenue)}
+                                              </td>
+                                              <td className="py-0.5 px-1.5 text-right font-black text-zinc-900">
+                                                {formatDdtMoney(art.totalNetAmount)}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
                           );
                         })}
                       </tbody>

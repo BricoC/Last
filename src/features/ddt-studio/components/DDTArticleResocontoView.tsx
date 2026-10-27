@@ -11,7 +11,11 @@ import {
   ChevronDown, 
   ChevronRight,
   Sparkles,
-  Check
+  Check,
+  Eye,
+  EyeOff,
+  ChevronsUpDown,
+  RotateCcw
 } from "lucide-react";
 import { type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
@@ -94,12 +98,24 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
   onToggleMergeVariants,
 }) => {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const [excludedKeys, setExcludedKeys] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<ResocontoSortField>("totalNetAmount");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [isExporting, setIsExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const pagesContainerRef = useRef<HTMLDivElement>(null);
+
+  const toggleExclude = (key: string) => {
+    setExcludedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const resetExclusions = () => setExcludedKeys(new Set());
 
   // Raggruppamento dati
   const groups = useMemo<ArticleResocontoGroup[]>(() => {
@@ -328,14 +344,23 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
     });
   }, [groups, sortField, sortDirection]);
 
-  // Statistiche globali del resoconto
+  // Gruppi attivi (escludendo le righe disattivate dall'utente)
+  const activeGroups = useMemo(() => {
+    return groups.filter((g) => !excludedKeys.has(g.key));
+  }, [groups, excludedKeys]);
+
+  const activeSortedGroups = useMemo(() => {
+    return sortedGroups.filter((g) => !excludedKeys.has(g.key));
+  }, [sortedGroups, excludedKeys]);
+
+  // Statistiche globali del resoconto (basate esclusivamente sulle righe attive)
   const overallTotals = useMemo(() => {
     let totalQty = 0;
     let totalNet = 0;
     let totalPurchase = 0;
     let totalDocs = 0;
 
-    for (const g of groups) {
+    for (const g of activeGroups) {
       totalQty += g.totalQuantity;
       totalNet += g.totalNetAmount;
       totalPurchase += g.totalPurchaseAmount;
@@ -346,7 +371,7 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
     const avgMarkup = totalPurchase > 0 ? (totalRevenue / totalPurchase) * 100 : null;
 
     return {
-      articlesCount: groups.length,
+      articlesCount: activeGroups.length,
       totalQty,
       totalNet,
       totalPurchase,
@@ -354,7 +379,7 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
       avgMarkup,
       totalDocs,
     };
-  }, [groups]);
+  }, [activeGroups]);
 
   const handleSort = (field: ResocontoSortField) => {
     if (sortField === field) {
@@ -385,21 +410,66 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
     });
   };
 
-  // Suddivisione dinamica in pagine A4 Portrait (verticali)
+  const allExpanded = groups.length > 0 && groups.every((g) => expandedKeys.has(g.key));
+  const toggleExpandAll = () => {
+    if (allExpanded) {
+      setExpandedKeys(new Set());
+    } else {
+      setExpandedKeys(new Set(groups.map((g) => g.key)));
+    }
+  };
+
+  // Suddivisione dinamica in pagine A4 Portrait (verticali) per stampa/PDF
+  // Quando isAllClients è true: le sotto-tabelle dei clienti per articolo sono APERTE!
   const pageChunks = useMemo(() => {
-    if (sortedGroups.length <= 20) {
-      return [sortedGroups];
+    if (activeSortedGroups.length === 0) return [[]];
+
+    if (!isAllClients) {
+      if (activeSortedGroups.length <= 20) {
+        return [activeSortedGroups];
+      }
+      const chunks: ArticleResocontoGroup[][] = [];
+      chunks.push(activeSortedGroups.slice(0, 20));
+      let start = 20;
+      const PER_PAGE = 26;
+      while (start < activeSortedGroups.length) {
+        chunks.push(activeSortedGroups.slice(start, start + PER_PAGE));
+        start += PER_PAGE;
+      }
+      return chunks;
     }
+
+    // Modalità TUTTI I CLIENTI: Tabelle clienti APERTE in stampa!
     const chunks: ArticleResocontoGroup[][] = [];
-    chunks.push(sortedGroups.slice(0, 20));
-    let start = 20;
-    const PER_PAGE = 26;
-    while (start < sortedGroups.length) {
-      chunks.push(sortedGroups.slice(start, start + PER_PAGE));
-      start += PER_PAGE;
+    let currentChunk: ArticleResocontoGroup[] = [];
+    let currentUnits = 0;
+    let isFirstPage = true;
+    const PAGE1_LIMIT = 20;
+    const PAGE_LIMIT = 26;
+
+    for (const g of activeSortedGroups) {
+      const clientsCount = g.clientsBreakdown?.length || 0;
+      // Costo in altezza: riga principale articolo + testata clienti + righe clienti
+      const itemUnits = Math.max(2, 2.2 + clientsCount * 0.85);
+      const limit = isFirstPage ? PAGE1_LIMIT : PAGE_LIMIT;
+
+      if (currentChunk.length > 0 && currentUnits + itemUnits > limit) {
+        chunks.push(currentChunk);
+        currentChunk = [g];
+        currentUnits = itemUnits;
+        isFirstPage = false;
+      } else {
+        currentChunk.push(g);
+        currentUnits += itemUnits;
+      }
     }
-    return chunks;
-  }, [sortedGroups]);
+
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk);
+    }
+
+    return chunks.length > 0 ? chunks : [[]];
+  }, [activeSortedGroups, isAllClients]);
 
   const handleExportPdf = async () => {
     const pageElements = Array.from(
@@ -456,11 +526,44 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
             </span>
           </button>
 
+          {/* Toggle Espandi / Chiudi tutto */}
+          <button
+            type="button"
+            onClick={toggleExpandAll}
+            className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-all cursor-pointer shadow-sm"
+            title={allExpanded ? "Comprimi tutte le sezioni" : "Espandi tutte le tabelle"}
+          >
+            <ChevronsUpDown className="h-3.5 w-3.5" />
+            <span>{allExpanded ? "Chiudi tutte" : "Espandi tutte"}</span>
+          </button>
+
+          {/* Badge Voci Escluse con Ripristina */}
+          {excludedKeys.size > 0 && (
+            <div className="flex items-center gap-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 text-xs text-amber-400">
+              <EyeOff className="h-3.5 w-3.5" />
+              <span className="font-semibold">
+                {excludedKeys.size} {excludedKeys.size === 1 ? "esclusa" : "escluse"}
+              </span>
+              <button
+                type="button"
+                onClick={resetExclusions}
+                className="flex items-center gap-1 text-[11px] font-bold text-amber-300 hover:text-white underline cursor-pointer ml-1"
+                title="Ripristina tutte le voci escluse nel calcolo e nella stampa"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Ripristina</span>
+              </button>
+            </div>
+          )}
+
           <span className="text-xs text-[var(--muted-foreground)] border-l border-[var(--border)] pl-2.5">
-            {groups.length} {groups.length === 1 ? "articolo distinto" : "articoli distinti"}
+            {activeGroups.length} {activeGroups.length === 1 ? "articolo" : "articoli"}
+            {excludedKeys.size > 0 && (
+              <span className="text-amber-400/80 ml-1 font-medium">({excludedKeys.size} escluse)</span>
+            )}
             {mergeVariants && (
               <span className="text-sky-400/80 ml-1 font-medium">
-                (da {rows.length} movimenti grezzi)
+                (da {rows.length} movimenti)
               </span>
             )}
           </span>
@@ -650,11 +753,17 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
                     {renderSortIndicator("totalNetAmount")}
                   </div>
                 </th>
+
+                {/* STATO / ESCLUDI */}
+                <th className="px-2 py-2.5 text-center w-14 text-[10px] text-[var(--muted-foreground)] font-semibold">
+                  STATO
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
               {sortedGroups.map((g) => {
                 const isExpanded = expandedKeys.has(g.key);
+                const isExcluded = excludedKeys.has(g.key);
                 const hasMultipleVariants = g.originalDescriptions.length > 1;
                 const hasClientBreakdown = isAllClients && g.clientsBreakdown && g.clientsBreakdown.length > 0;
                 const canExpand = hasMultipleVariants || hasClientBreakdown;
@@ -663,7 +772,13 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
 
                 return (
                   <React.Fragment key={g.key}>
-                    <tr className="hover:bg-[var(--background)]/60 transition-colors">
+                    <tr
+                      className={`transition-colors ${
+                        isExcluded
+                          ? "opacity-40 bg-zinc-900/40 line-through select-none"
+                          : "hover:bg-[var(--background)]/60"
+                      }`}
+                    >
                       {/* Descrizione Articolo */}
                       <td className="px-4 py-2.5 font-sans font-medium text-[var(--foreground)]">
                         <div className="flex items-start gap-2">
@@ -671,7 +786,7 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
                             <button
                               type="button"
                               onClick={() => toggleExpand(g.key)}
-                              className="text-[var(--muted-foreground)] hover:text-[var(--primary)] mt-0.5 cursor-pointer"
+                              className="text-[var(--muted-foreground)] hover:text-[var(--primary)] mt-0.5 cursor-pointer no-underline"
                               title={
                                 hasClientBreakdown
                                   ? "Mostra suddivisione clienti e varianti"
@@ -686,8 +801,13 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
                             </button>
                           )}
                           <div>
-                            <div className="font-semibold text-[var(--foreground)]">
-                              {g.canonicalDescription}
+                            <div className="font-semibold text-[var(--foreground)] flex items-center gap-1.5 flex-wrap">
+                              <span>{g.canonicalDescription}</span>
+                              {isExcluded && (
+                                <span className="rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 text-[9px] font-bold font-sans tracking-wide no-underline">
+                                  ESCLUSA
+                                </span>
+                              )}
                             </div>
                             <div className="flex flex-wrap items-center gap-2 mt-0.5">
                               {hasMultipleVariants && (
@@ -784,12 +904,35 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
                       <td className="px-4 py-2.5 text-right font-bold text-[var(--foreground)] whitespace-nowrap">
                         {formatDdtMoney(g.totalNetAmount)}
                       </td>
+
+                      {/* Azione Escludi / Includi */}
+                      <td className="px-2 py-2.5 text-center no-underline">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExclude(g.key);
+                          }}
+                          className={`p-1.5 rounded-md transition-colors cursor-pointer inline-flex items-center justify-center ${
+                            isExcluded
+                              ? "text-amber-400 bg-amber-500/20 hover:bg-amber-500/30 ring-1 ring-amber-500/40"
+                              : "text-[var(--muted-foreground)]/50 hover:text-rose-400 hover:bg-rose-500/15"
+                          }`}
+                          title={
+                            isExcluded
+                              ? "Reincludi questa voce nel resoconto e nella stampa"
+                              : "Escludi questa voce dal resoconto e dalla stampa"
+                          }
+                        >
+                          {isExcluded ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                        </button>
+                      </td>
                     </tr>
 
                     {/* Riga dettagli espandibile con varianti e/o clienti */}
                     {isExpanded && canExpand && (
                       <tr className="bg-[var(--background)]/30">
-                        <td colSpan={9} className="px-6 py-3 border-l-2 border-sky-500/60 font-sans text-xs space-y-3">
+                        <td colSpan={10} className="px-6 py-3 border-l-2 border-sky-500/60 font-sans text-xs space-y-3">
                           {/* Varianti originali grezze */}
                           {hasMultipleVariants && (
                             <div>
@@ -1028,41 +1171,107 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
                   </thead>
                   <tbody className="divide-y divide-zinc-200">
                     {chunk.map((g, idx) => (
-                      <tr key={idx} className={idx % 2 === 1 ? "bg-zinc-50/70" : ""}>
-                        <td className="py-1.5 px-2 font-semibold text-zinc-900 leading-tight">
-                          {g.canonicalDescription}
-                          {g.originalDescriptions.length > 1 && (
-                            <span className="text-[8.5px] text-zinc-500 font-normal ml-1">
-                              ({g.originalDescriptions.length} var.)
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-1.5 px-1.5 text-right font-bold text-zinc-900 whitespace-nowrap">
-                          {g.totalQuantity.toLocaleString("it-IT", { maximumFractionDigits: 1 })} {g.unit}
-                        </td>
-                        <td className="py-1.5 px-1 text-center text-zinc-600 font-mono">{g.docCount}</td>
-                        <td className="py-1.5 px-1.5 text-right font-bold text-zinc-900 whitespace-nowrap">
-                          {formatDdtMoney(Math.round(g.netPriceAvg))}
-                        </td>
-                        <td className="py-1.5 px-1.5 text-right text-zinc-500 text-[9px] whitespace-nowrap">
-                          {formatDdtMoney(Math.round(g.netPriceMin))}~{formatDdtMoney(Math.round(g.netPriceMax))}
-                        </td>
-                        <td className="py-1.5 px-1.5 text-right font-medium text-zinc-700 whitespace-nowrap">
-                          {formatDdtMoney(Math.round(g.lastNetPrice))}
-                        </td>
-                        <td className="py-1.5 px-1.5 text-right text-zinc-600 whitespace-nowrap">
-                          {g.purchasePriceAvg > 0 ? formatDdtMoney(Math.round(g.purchasePriceAvg)) : "—"}
-                        </td>
-                        <td className="py-1.5 px-1 text-right font-medium text-zinc-800 whitespace-nowrap">
-                          {formatDdtPercent(g.markupAvgPercent)}
-                        </td>
-                        <td className="py-1.5 px-1.5 text-right font-bold text-emerald-700 whitespace-nowrap">
-                          {formatDdtMoney(g.totalRevenue)}
-                        </td>
-                        <td className="py-1.5 px-2 text-right font-black text-zinc-900 whitespace-nowrap">
-                          {formatDdtMoney(g.totalNetAmount)}
-                        </td>
-                      </tr>
+                      <React.Fragment key={idx}>
+                        <tr className={idx % 2 === 1 && !isAllClients ? "bg-zinc-50/70" : isAllClients ? "bg-zinc-100/90 font-bold" : ""}>
+                          <td className="py-1.5 px-2 font-semibold text-zinc-900 leading-tight">
+                            {g.canonicalDescription}
+                            {g.originalDescriptions.length > 1 && (
+                              <span className="text-[8.5px] text-zinc-500 font-normal ml-1">
+                                ({g.originalDescriptions.length} var.)
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-1.5 px-1.5 text-right font-bold text-zinc-900 whitespace-nowrap">
+                            {g.totalQuantity.toLocaleString("it-IT", { maximumFractionDigits: 1 })} {g.unit}
+                          </td>
+                          <td className="py-1.5 px-1 text-center text-zinc-600 font-mono">{g.docCount}</td>
+                          <td className="py-1.5 px-1.5 text-right font-bold text-zinc-900 whitespace-nowrap">
+                            {formatDdtMoney(Math.round(g.netPriceAvg))}
+                          </td>
+                          <td className="py-1.5 px-1.5 text-right text-zinc-500 text-[9px] whitespace-nowrap">
+                            {formatDdtMoney(Math.round(g.netPriceMin))}~{formatDdtMoney(Math.round(g.netPriceMax))}
+                          </td>
+                          <td className="py-1.5 px-1.5 text-right font-medium text-zinc-700 whitespace-nowrap">
+                            {formatDdtMoney(Math.round(g.lastNetPrice))}
+                          </td>
+                          <td className="py-1.5 px-1.5 text-right text-zinc-600 whitespace-nowrap">
+                            {g.purchasePriceAvg > 0 ? formatDdtMoney(Math.round(g.purchasePriceAvg)) : "—"}
+                          </td>
+                          <td className="py-1.5 px-1 text-right font-medium text-zinc-800 whitespace-nowrap">
+                            {formatDdtPercent(g.markupAvgPercent)}
+                          </td>
+                          <td className="py-1.5 px-1.5 text-right font-bold text-emerald-700 whitespace-nowrap">
+                            {formatDdtMoney(g.totalRevenue)}
+                          </td>
+                          <td className="py-1.5 px-2 text-right font-black text-zinc-900 whitespace-nowrap">
+                            {formatDdtMoney(g.totalNetAmount)}
+                          </td>
+                        </tr>
+
+                        {/* Sotto-tabella clienti APERTA in stampa (quando si stampa Tutti i Clienti) */}
+                        {isAllClients && g.clientsBreakdown && g.clientsBreakdown.length > 0 && (
+                          <tr>
+                            <td colSpan={10} className="p-0 pb-1.5 border-b-2 border-zinc-300">
+                              <div className="bg-white px-2 py-1 border-l-4 border-zinc-700 ml-2 mr-1">
+                                <div className="text-[8px] font-bold uppercase tracking-wider text-zinc-600 mb-0.5 flex justify-between">
+                                  <span>Dettaglio Clienti Acquirenti ({g.clientsBreakdown.length})</span>
+                                  <span>Ordinati per spesa decrescente</span>
+                                </div>
+                                <table className="w-full text-[8.5px] border-collapse border border-zinc-200">
+                                  <thead>
+                                    <tr className="bg-zinc-50 text-zinc-700 font-bold border-b border-zinc-200 text-left">
+                                      <th className="py-0.5 px-1.5">Cliente</th>
+                                      <th className="py-0.5 px-1.5 text-right w-20">Q.tà</th>
+                                      <th className="py-0.5 px-1 text-center w-12">% Quota</th>
+                                      <th className="py-0.5 px-1 text-center w-8">DDT</th>
+                                      <th className="py-0.5 px-1.5 text-right w-24">Netto Med. (Range)</th>
+                                      <th className="py-0.5 px-1.5 text-right w-24">Ultimo Netto (Data)</th>
+                                      <th className="py-0.5 px-1 text-right w-12">Ric. %</th>
+                                      <th className="py-0.5 px-1.5 text-right w-16">Margine €</th>
+                                      <th className="py-0.5 px-1.5 text-right w-20">Fatturato</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-zinc-200 font-mono text-[8px]">
+                                    {g.clientsBreakdown.map((cb, cIdx) => (
+                                      <tr key={cIdx} className={cIdx % 2 === 1 ? "bg-zinc-50/50" : ""}>
+                                        <td className="py-0.5 px-1.5 font-sans font-semibold text-zinc-900">{cb.clientName}</td>
+                                        <td className="py-0.5 px-1.5 text-right font-bold text-zinc-900">
+                                          {cb.quantity.toLocaleString("it-IT", { maximumFractionDigits: 1 })} {cb.unit}
+                                        </td>
+                                        <td className="py-0.5 px-1 text-center text-zinc-600 font-sans">{cb.percentageOfArticleQty.toFixed(1)}%</td>
+                                        <td className="py-0.5 px-1 text-center text-zinc-600">{cb.docCount}</td>
+                                        <td className="py-0.5 px-1.5 text-right text-zinc-800">
+                                          {formatDdtMoney(Math.round(cb.netPriceAvg))}
+                                          {cb.netPriceMin !== cb.netPriceMax && (
+                                            <span className="text-[7px] text-zinc-500 ml-0.5">
+                                              ({formatDdtMoney(Math.round(cb.netPriceMin))}~{formatDdtMoney(Math.round(cb.netPriceMax))})
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="py-0.5 px-1.5 text-right text-zinc-800">
+                                          {formatDdtMoney(Math.round(cb.lastNetPrice))}
+                                          <span className="text-[7px] text-zinc-500 ml-0.5 font-sans">
+                                            ({formatDdtViewDate(cb.lastDate)})
+                                          </span>
+                                        </td>
+                                        <td className="py-0.5 px-1 text-right font-medium text-zinc-800">
+                                          {formatDdtPercent(cb.markupAvgPercent)}
+                                        </td>
+                                        <td className="py-0.5 px-1.5 text-right font-bold text-emerald-800">
+                                          {formatDdtMoney(cb.totalRevenue)}
+                                        </td>
+                                        <td className="py-0.5 px-1.5 text-right font-black text-zinc-900">
+                                          {formatDdtMoney(cb.totalNetAmount)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                   {/* Totali in calce solo sull'ultima pagina */}
