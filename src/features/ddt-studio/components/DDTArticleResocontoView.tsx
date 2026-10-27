@@ -4,6 +4,7 @@ import {
   FileDown, 
   Printer, 
   Layers, 
+  Users,
   ArrowUp, 
   ArrowDown, 
   ArrowUpDown, 
@@ -25,6 +26,23 @@ export interface DDTArticleResocontoViewProps {
   searchTerm: string;
   mergeVariants: boolean;
   onToggleMergeVariants: () => void;
+}
+
+export interface ArticleClientBreakdown {
+  clientName: string;
+  quantity: number;
+  unit: string;
+  docCount: number;
+  netPriceAvg: number;
+  netPriceMin: number;
+  netPriceMax: number;
+  lastNetPrice: number;
+  lastDate: string;
+  totalNetAmount: number;
+  totalPurchaseAmount: number;
+  totalRevenue: number;
+  markupAvgPercent: number | null;
+  percentageOfArticleQty: number;
 }
 
 export interface ArticleResocontoGroup {
@@ -51,6 +69,8 @@ export interface ArticleResocontoGroup {
   markupAvgPercent: number | null;
   markupMinPercent: number | null;
   markupMaxPercent: number | null;
+  // Dettaglio clienti per questo articolo (usato in visualizzazione Tutti i Clienti)
+  clientsBreakdown: ArticleClientBreakdown[];
 }
 
 type ResocontoSortField =
@@ -99,6 +119,21 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
         markupPercents: number[];
         lastDate: string;
         lastNetPrice: number;
+        clientsMap: Map<
+          string,
+          {
+            clientName: string;
+            quantity: number;
+            unit: string;
+            docCount: number;
+            totalNetAmount: number;
+            totalPurchaseAmount: number;
+            netPrices: number[];
+            lastDate: string;
+            lastNetPrice: number;
+            markupPercents: number[];
+          }
+        >;
       }
     >();
 
@@ -125,6 +160,7 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
           markupPercents: [],
           lastDate: r.date,
           lastNetPrice: 0,
+          clientsMap: new Map(),
         };
         map.set(key, group);
       }
@@ -151,6 +187,37 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
         group.lastDate = r.date;
         group.lastNetPrice = unitNet;
       }
+
+      // Suddivisione per cliente
+      const clientName = (r.client || "CLIENTE SCONOSCIUTO").trim();
+      let cData = group.clientsMap.get(clientName);
+      if (!cData) {
+        cData = {
+          clientName,
+          quantity: 0,
+          unit: r.unit || "NR",
+          docCount: 0,
+          totalNetAmount: 0,
+          totalPurchaseAmount: 0,
+          netPrices: [],
+          lastDate: r.date,
+          lastNetPrice: 0,
+          markupPercents: [],
+        };
+        group.clientsMap.set(clientName, cData);
+      }
+      cData.quantity += qty;
+      cData.docCount += 1;
+      cData.totalNetAmount += r.netAmountSubunits;
+      cData.totalPurchaseAmount += Math.round(purchaseUnit * qty);
+      if (unitNet > 0) cData.netPrices.push(unitNet);
+      if (r.markupPercent !== null && r.markupPercent !== undefined) {
+        cData.markupPercents.push(r.markupPercent);
+      }
+      if (!cData.lastDate || (r.date && r.date >= cData.lastDate)) {
+        cData.lastDate = r.date;
+        cData.lastNetPrice = unitNet;
+      }
     }
 
     return Array.from(map.values()).map((g) => {
@@ -167,6 +234,35 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
         g.totalPurchaseAmount > 0 ? (totalRevenue / g.totalPurchaseAmount) * 100 : null;
       const markupMinPercent = g.markupPercents.length ? Math.min(...g.markupPercents) : null;
       const markupMaxPercent = g.markupPercents.length ? Math.max(...g.markupPercents) : null;
+
+      const clientsBreakdown: ArticleClientBreakdown[] = Array.from(g.clientsMap.values())
+        .map((c) => {
+          const cNetAvg = c.quantity > 0 ? c.totalNetAmount / c.quantity : 0;
+          const cNetMin = c.netPrices.length ? Math.min(...c.netPrices) : 0;
+          const cNetMax = c.netPrices.length ? Math.max(...c.netPrices) : 0;
+          const cRevenue = c.totalNetAmount - c.totalPurchaseAmount;
+          const cMarkup = c.totalPurchaseAmount > 0 ? (cRevenue / c.totalPurchaseAmount) * 100 : null;
+          const percentageOfArticleQty =
+            g.totalQuantity > 0 ? (c.quantity / g.totalQuantity) * 100 : 0;
+
+          return {
+            clientName: c.clientName,
+            quantity: c.quantity,
+            unit: c.unit,
+            docCount: c.docCount,
+            netPriceAvg: cNetAvg,
+            netPriceMin: cNetMin,
+            netPriceMax: cNetMax,
+            lastNetPrice: c.lastNetPrice,
+            lastDate: c.lastDate,
+            totalNetAmount: c.totalNetAmount,
+            totalPurchaseAmount: c.totalPurchaseAmount,
+            totalRevenue: cRevenue,
+            markupAvgPercent: cMarkup,
+            percentageOfArticleQty,
+          };
+        })
+        .sort((a, b) => b.totalNetAmount - a.totalNetAmount);
 
       return {
         key: g.key,
@@ -189,6 +285,7 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
         markupAvgPercent,
         markupMinPercent,
         markupMaxPercent,
+        clientsBreakdown,
       };
     });
   }, [rows, mergeVariants]);
@@ -559,6 +656,8 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
               {sortedGroups.map((g) => {
                 const isExpanded = expandedKeys.has(g.key);
                 const hasMultipleVariants = g.originalDescriptions.length > 1;
+                const hasClientBreakdown = isAllClients && g.clientsBreakdown && g.clientsBreakdown.length > 0;
+                const canExpand = hasMultipleVariants || hasClientBreakdown;
                 const isPositiveRev = g.totalRevenue > 0;
                 const isNegativeRev = g.totalRevenue < 0;
 
@@ -568,12 +667,16 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
                       {/* Descrizione Articolo */}
                       <td className="px-4 py-2.5 font-sans font-medium text-[var(--foreground)]">
                         <div className="flex items-start gap-2">
-                          {hasMultipleVariants && (
+                          {canExpand && (
                             <button
                               type="button"
                               onClick={() => toggleExpand(g.key)}
                               className="text-[var(--muted-foreground)] hover:text-[var(--primary)] mt-0.5 cursor-pointer"
-                              title="Mostra varianti originali accorpate"
+                              title={
+                                hasClientBreakdown
+                                  ? "Mostra suddivisione clienti e varianti"
+                                  : "Mostra varianti originali accorpate"
+                              }
                             >
                               {isExpanded ? (
                                 <ChevronDown className="h-3.5 w-3.5" />
@@ -586,12 +689,23 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
                             <div className="font-semibold text-[var(--foreground)]">
                               {g.canonicalDescription}
                             </div>
-                            {hasMultipleVariants && (
-                              <div className="text-[10px] text-sky-400 font-sans mt-0.5 flex items-center gap-1">
-                                <Layers className="h-3 w-3" />
-                                <span>{g.originalDescriptions.length} varianti accorpate</span>
-                              </div>
-                            )}
+                            <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                              {hasMultipleVariants && (
+                                <div className="text-[10px] text-sky-400 font-sans flex items-center gap-1">
+                                  <Layers className="h-3 w-3" />
+                                  <span>{g.originalDescriptions.length} varianti accorpate</span>
+                                </div>
+                              )}
+                              {isAllClients && g.clientsBreakdown.length > 0 && (
+                                <div className="text-[10px] text-emerald-400 font-sans flex items-center gap-1">
+                                  <Users className="h-3 w-3" />
+                                  <span>
+                                    {g.clientsBreakdown.length}{" "}
+                                    {g.clientsBreakdown.length === 1 ? "cliente acquirente" : "clienti acquirenti"}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -672,23 +786,114 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
                       </td>
                     </tr>
 
-                    {/* Riga dettagli espandibile con le varianti originali grezze */}
-                    {isExpanded && hasMultipleVariants && (
+                    {/* Riga dettagli espandibile con varianti e/o clienti */}
+                    {isExpanded && canExpand && (
                       <tr className="bg-[var(--background)]/30">
-                        <td colSpan={9} className="px-6 py-2 border-l-2 border-sky-500/60 font-sans text-xs">
-                          <div className="text-[11px] font-semibold text-[var(--muted-foreground)] mb-1">
-                            Descrizioni originali presenti nei DDT per questa voce:
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {g.originalDescriptions.map((desc, i) => (
-                              <span
-                                key={i}
-                                className="rounded bg-[var(--card)] border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--foreground)] font-medium"
-                              >
-                                {desc}
-                              </span>
-                            ))}
-                          </div>
+                        <td colSpan={9} className="px-6 py-3 border-l-2 border-sky-500/60 font-sans text-xs space-y-3">
+                          {/* Varianti originali grezze */}
+                          {hasMultipleVariants && (
+                            <div>
+                              <div className="text-[11px] font-semibold text-[var(--muted-foreground)] mb-1">
+                                Descrizioni originali presenti nei DDT per questa voce:
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {g.originalDescriptions.map((desc, i) => (
+                                  <span
+                                    key={i}
+                                    className="rounded bg-[var(--card)] border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--foreground)] font-medium"
+                                  >
+                                    {desc}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Suddivisione clienti per questo articolo (quando in Tutti i Clienti) */}
+                          {hasClientBreakdown && (
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
+                                  <Users className="h-3.5 w-3.5" />
+                                  Clienti acquirenti di questo articolo ({g.clientsBreakdown.length})
+                                </span>
+                                <span className="text-[11px] text-[var(--muted-foreground)]">
+                                  Ordinati per spesa decrescente
+                                </span>
+                              </div>
+
+                              <div className="rounded-lg border border-[var(--border)] overflow-hidden bg-[var(--card)]">
+                                <table className="w-full text-xs">
+                                  <thead className="bg-[var(--background)]/90 text-[10.5px] font-semibold text-[var(--muted-foreground)] border-b border-[var(--border)]">
+                                    <tr>
+                                      <th className="px-3 py-1.5 text-left">Cliente</th>
+                                      <th className="px-3 py-1.5 text-right w-28">Quantità</th>
+                                      <th className="px-2 py-1.5 text-center w-20">% Quota Q.tà</th>
+                                      <th className="px-2 py-1.5 text-center w-16">N° DDT</th>
+                                      <th className="px-3 py-1.5 text-right w-36">Netto Medio (Range)</th>
+                                      <th className="px-3 py-1.5 text-right w-36">Ultimo Netto (Data)</th>
+                                      <th className="px-2 py-1.5 text-right w-20">Ric. %</th>
+                                      <th className="px-3 py-1.5 text-right w-24">Margine €</th>
+                                      <th className="px-3 py-1.5 text-right w-28">Fatturato</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
+                                    {g.clientsBreakdown.map((cb, cIdx) => (
+                                      <tr key={cIdx} className="hover:bg-[var(--background)]/50 transition-colors">
+                                        <td className="px-3 py-1.5 font-sans font-semibold text-[var(--foreground)]">
+                                          {cb.clientName}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-right font-bold text-sky-400">
+                                          {cb.quantity.toLocaleString("it-IT", { maximumFractionDigits: 1 })} {cb.unit}
+                                        </td>
+                                        <td className="px-2 py-1.5 text-center font-sans font-semibold text-zinc-300">
+                                          {cb.percentageOfArticleQty.toFixed(1)}%
+                                        </td>
+                                        <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">
+                                          {cb.docCount}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-right">
+                                          <span className="font-semibold text-zinc-200">
+                                            {formatDdtMoney(Math.round(cb.netPriceAvg))}
+                                          </span>
+                                          {cb.netPriceMin !== cb.netPriceMax && (
+                                            <span className="text-[10px] text-[var(--muted-foreground)] font-sans ml-1">
+                                              ({formatDdtMoney(Math.round(cb.netPriceMin))}~{formatDdtMoney(Math.round(cb.netPriceMax))})
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-right">
+                                          <span className="font-semibold text-[var(--foreground)]">
+                                            {formatDdtMoney(Math.round(cb.lastNetPrice))}
+                                          </span>
+                                          <span className="text-[10px] text-[var(--muted-foreground)] font-sans ml-1">
+                                            ({formatDdtViewDate(cb.lastDate)})
+                                          </span>
+                                        </td>
+                                        <td
+                                          className={`px-2 py-1.5 text-right font-semibold ${
+                                            cb.totalRevenue >= 0 ? "text-emerald-400" : "text-rose-400"
+                                          }`}
+                                        >
+                                          {formatDdtPercent(cb.markupAvgPercent)}
+                                        </td>
+                                        <td
+                                          className={`px-3 py-1.5 text-right font-semibold ${
+                                            cb.totalRevenue >= 0 ? "text-emerald-400" : "text-rose-400"
+                                          }`}
+                                        >
+                                          {formatDdtMoney(cb.totalRevenue)}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-right font-bold text-[var(--foreground)]">
+                                          {formatDdtMoney(cb.totalNetAmount)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}

@@ -18,6 +18,9 @@ import { getClientArticleHistory, getDdtClientNames, type ClientArticleHistoryRo
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
 import { useAppSettingsStore } from "@/shared/stores/useAppSettingsStore";
 import { DDTArticleResocontoView } from "./DDTArticleResocontoView";
+import { DDTClientResocontoView } from "./DDTClientResocontoView";
+
+export type HistoryViewMode = "movements" | "articleResoconto" | "clientResoconto";
 
 export interface DDTClientArticleHistoryModalProps {
   isOpen: boolean;
@@ -71,8 +74,16 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   const [searchTerm, setSearchTerm] = useState(articleDescription);
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [selectedYear, setSelectedYear] = useState<string>("all");
-  const [viewMode, setViewMode] = useState<"movements" | "resoconto">("movements");
+  const [viewMode, setViewMode] = useState<HistoryViewMode>("movements");
   const [mergeVariants, setMergeVariants] = useState<boolean>(true);
+
+  // Se l'utente torna a visualizzare un singolo cliente mentre era in Resoconto Clienti, reimposta a Resoconto Articoli
+  useEffect(() => {
+    if (!isAllClients && viewMode === "clientResoconto") {
+      setViewMode("articleResoconto");
+    }
+  }, [isAllClients, viewMode]);
+
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     field: "date",
     direction: "desc",
@@ -389,7 +400,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* Switch Modalità: Movimenti / Resoconto */}
+            {/* Switch Modalità: Movimenti / Resoconto Articoli / Resoconto Clienti */}
             <div className="flex items-center rounded-lg border border-[var(--border)] bg-[var(--card)] p-0.5 text-xs mr-1 shadow-sm">
               <button
                 type="button"
@@ -406,9 +417,9 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode("resoconto")}
+                onClick={() => setViewMode("articleResoconto")}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors cursor-pointer ${
-                  viewMode === "resoconto"
+                  viewMode === "articleResoconto"
                     ? "bg-[var(--primary)] text-white shadow-sm"
                     : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                 }`}
@@ -417,6 +428,21 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                 <BarChart3 className="h-3.5 w-3.5" />
                 <span>Resoconto Articoli</span>
               </button>
+              {isAllClients && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode("clientResoconto")}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors cursor-pointer ${
+                    viewMode === "clientResoconto"
+                      ? "bg-[var(--primary)] text-white shadow-sm"
+                      : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                  }`}
+                  title="Visualizza il resoconto aggregato per clienti con ranking e dettaglio articoli"
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  <span>Resoconto Clienti</span>
+                </button>
+              )}
             </div>
 
             {/* Toggle Filtro Cliente */}
@@ -593,7 +619,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           )}
         </div>
 
-        {/* Contenuto Principale: Resoconto o Tabella Movimenti */}
+        {/* Contenuto Principale: Resoconto Clienti, Resoconto Articoli o Tabella Movimenti */}
         {isLoading ? (
           <div className="flex flex-1 min-h-0 items-center justify-center gap-2 text-sm text-[var(--muted-foreground)] bg-[var(--card)]">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" />
@@ -601,7 +627,20 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           </div>
         ) : error ? (
           <div className="flex-1 min-h-0 p-8 text-center text-sm text-red-400 bg-[var(--card)]">{error}</div>
-        ) : viewMode === "resoconto" ? (
+        ) : viewMode === "clientResoconto" && isAllClients ? (
+          <DDTClientResocontoView
+            rows={filteredRows}
+            selectedYear={selectedYear}
+            searchTerm={searchTerm}
+            mergeVariants={mergeVariants}
+            onToggleMergeVariants={() => setMergeVariants((prev) => !prev)}
+            onSelectClient={(targetClient) => {
+              setSelectedClient(targetClient);
+              setIsAllClients(false);
+              setViewMode("articleResoconto");
+            }}
+          />
+        ) : viewMode === "articleResoconto" ? (
           <DDTArticleResocontoView
             rows={filteredRows}
             clientName={selectedClient || clientName}
@@ -929,9 +968,14 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
         <div className="flex shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--background)] px-5 py-2 text-xs text-[var(--muted-foreground)]">
           <span className="flex items-center gap-1.5">
             <span>
-              {viewMode === "resoconto" ? (
+              {viewMode === "clientResoconto" ? (
                 <>
-                  Modalità Resoconto attiva
+                  Modalità Resoconto Clienti attiva
+                  {mergeVariants && <span className="text-sky-400 font-semibold ml-1">(Varianti accorpate attive)</span>}
+                </>
+              ) : viewMode === "articleResoconto" ? (
+                <>
+                  Modalità Resoconto Articoli attiva
                   {mergeVariants && <span className="text-sky-400 font-semibold ml-1">(Varianti accorpate attive)</span>}
                 </>
               ) : (
