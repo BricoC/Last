@@ -124,7 +124,8 @@ button, a, [role="button"], .cursor-pointer {
     display: none !important;
   }
   /* Mostra SOLO il portale di stampa A4 dedicato */
-  #ddt-print-portal {
+  #ddt-print-portal,
+  #resoconto-print-portal {
     display: block !important;
     position: absolute !important;
     left: 0 !important;
@@ -137,7 +138,8 @@ button, a, [role="button"], .cursor-pointer {
     visibility: visible !important;
     z-index: 999999 !important;
   }
-  #ddt-print-portal * {
+  #ddt-print-portal *,
+  #resoconto-print-portal * {
     visibility: visible !important;
   }
   #ddt-pro-print-wrapper {
@@ -145,7 +147,8 @@ button, a, [role="button"], .cursor-pointer {
     padding: 0 !important;
     gap: 0 !important;
   }
-  .ddt-a4-page {
+  .ddt-a4-page,
+  .resoconto-a4-page {
     width: 210mm !important;
     min-height: 297mm !important;
     height: 297mm !important;
@@ -159,7 +162,8 @@ button, a, [role="button"], .cursor-pointer {
     box-shadow: none !important;
     border: none !important;
   }
-  .ddt-a4-page:last-child {
+  .ddt-a4-page:last-child,
+  .resoconto-a4-page:last-child {
     page-break-after: auto !important;
     break-after: auto !important;
   }

@@ -219,3 +219,16 @@ export async function getClientArticleHistory(options: {
   });
 }
 
+export async function getDdtClientNames(): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.select<{ client_name: string }[]>(
+    `SELECT DISTINCT client_name 
+     FROM ddt_documents 
+     WHERE deleted_at IS NULL 
+       AND client_name IS NOT NULL 
+       AND TRIM(client_name) <> '' 
+     ORDER BY client_name ASC`
+  );
+  return rows.map((r) => (r.client_name || "").trim()).filter(Boolean);
+}
+

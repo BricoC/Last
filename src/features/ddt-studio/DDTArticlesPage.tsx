@@ -58,6 +58,17 @@ export function DDTArticlesPage() {
 
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
 
+  const availableClients = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      if (r.client) {
+        const trimmed = r.client.trim();
+        if (trimmed) set.add(trimmed);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
+  }, [rows]);
+
   const filtered = useMemo(() => {
     if (!searchTokens.length) return indexedRows;
     return indexedRows.filter((row) => {
@@ -283,6 +294,7 @@ export function DDTArticlesPage() {
           onClose={() => setSelectedArticleForHistory(null)}
           clientName={selectedArticleForHistory.client}
           articleDescription={selectedArticleForHistory.description}
+          availableClients={availableClients}
           onSelectDdt={(otherDdtId) => {
             setSelectedArticleForHistory(null);
             setSelectedDdtId(otherDdtId);

@@ -1,8 +1,23 @@
 import React, { useEffect, useMemo, useState, useDeferredValue, useRef } from "react";
-import { X, Search, History, User, Building2, FileText, ArrowUp, ArrowDown, ArrowUpDown, Calendar } from "lucide-react";
-import { getClientArticleHistory, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
+import { 
+  X, 
+  Search, 
+  History, 
+  User, 
+  Building2, 
+  Users, 
+  FileText, 
+  ArrowUp, 
+  ArrowDown, 
+  ArrowUpDown, 
+  Calendar,
+  ListFilter,
+  BarChart3
+} from "lucide-react";
+import { getClientArticleHistory, getDdtClientNames, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
 import { useAppSettingsStore } from "@/shared/stores/useAppSettingsStore";
+import { DDTArticleResocontoView } from "./DDTArticleResocontoView";
 
 export interface DDTClientArticleHistoryModalProps {
   isOpen: boolean;
@@ -10,6 +25,7 @@ export interface DDTClientArticleHistoryModalProps {
   clientName: string;
   articleDescription: string;
   articleCode?: string;
+  availableClients?: string[];
   onSelectDdt?: (ddtId: string) => void;
 }
 
@@ -21,6 +37,7 @@ type SortField =
   | "client"
   | "destination"
   | "quantity"
+  | "description"
   | "unitPrice"
   | "discount"
   | "netPrice"
@@ -42,15 +59,20 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   clientName,
   articleDescription,
   articleCode,
+  availableClients,
   onSelectDdt,
 }) => {
   const [rows, setRows] = useState<ClientArticleHistoryRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [onlyThisClient, setOnlyThisClient] = useState(true);
+  const [selectedClient, setSelectedClient] = useState<string>(clientName);
+  const [isAllClients, setIsAllClients] = useState<boolean>(false);
+  const [dbClients, setDbClients] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState(articleDescription);
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [selectedYear, setSelectedYear] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"movements" | "resoconto">("movements");
+  const [mergeVariants, setMergeVariants] = useState<boolean>(true);
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     field: "date",
     direction: "desc",
@@ -59,16 +81,40 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const { historyModalLimit } = useAppSettingsStore();
 
-  // Inizializza o aggiorna il testo di ricerca quando si apre il modal per un nuovo articolo
+  // Inizializza o aggiorna lo stato quando si apre il modal per un nuovo articolo o cliente
   useEffect(() => {
     if (isOpen) {
+      setSelectedClient(clientName);
+      setIsAllClients(false);
       setSearchTerm(articleDescription);
       setSelectedYear("all");
       setSortConfig({ field: "date", direction: "desc" });
     }
-  }, [isOpen, articleDescription]);
+  }, [isOpen, clientName, articleDescription]);
 
-  // Carica i dati quando cambia deferredSearchTerm, il cliente o il toggle onlyThisClient
+  // Carica i clienti dal DB se non forniti tramite props
+  useEffect(() => {
+    if (availableClients && availableClients.length > 0) return;
+    let isMounted = true;
+    void getDdtClientNames().then((names) => {
+      if (isMounted) setDbClients(names);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [availableClients]);
+
+  // Lista consolidata e ordinata di tutti i clienti
+  const allClients = useMemo(() => {
+    const base = availableClients && availableClients.length > 0 ? availableClients : dbClients;
+    const set = new Set<string>(base);
+    if (clientName && clientName.trim()) {
+      set.add(clientName.trim());
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
+  }, [availableClients, dbClients, clientName]);
+
+  // Carica i dati quando cambia deferredSearchTerm, il cliente selezionato o la modalità tutti i clienti
   useEffect(() => {
     if (!isOpen) return;
 
@@ -77,11 +123,12 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
       setIsLoading(true);
       setError(null);
       try {
+        const effectiveClient = isAllClients ? "" : selectedClient.trim();
         const data = await getClientArticleHistory({
-          clientName,
+          clientName: effectiveClient,
           description: deferredSearchTerm,
           code: deferredSearchTerm.trim() === articleDescription.trim() ? articleCode : undefined,
-          onlyThisClient,
+          onlyThisClient: !isAllClients && Boolean(effectiveClient),
           limit: historyModalLimit === "tutti" ? null : historyModalLimit,
         });
         if (isMounted) setRows(data);
@@ -98,7 +145,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     return () => {
       isMounted = false;
     };
-  }, [isOpen, clientName, deferredSearchTerm, articleDescription, articleCode, onlyThisClient, historyModalLimit]);
+  }, [isOpen, selectedClient, isAllClients, deferredSearchTerm, articleDescription, articleCode, historyModalLimit]);
 
   // Anni disponibili ricavati dai dati estratti
   const availableYears = useMemo(() => {
@@ -166,6 +213,9 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           comparison = qa - qb;
           break;
         }
+        case "description":
+          comparison = (a.description || "").localeCompare(b.description || "");
+          break;
         case "unitPrice":
           comparison = a.unitPriceSubunits - b.unitPriceSubunits;
           break;
@@ -209,7 +259,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     if (tableContainerRef.current) {
       tableContainerRef.current.scrollTop = 0;
     }
-  }, [deferredSearchTerm, onlyThisClient, selectedYear, sortConfig]);
+  }, [deferredSearchTerm, selectedClient, isAllClients, selectedYear, sortConfig]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -230,7 +280,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
       }
       return {
         field,
-        direction: field === "client" || field === "destination" ? "asc" : "desc",
+        direction: field === "client" || field === "destination" || field === "description" ? "asc" : "desc",
       };
     });
   };
@@ -331,34 +381,67 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                 )}
               </div>
               <p className="text-xs text-[var(--muted-foreground)] line-clamp-1 max-w-2xl font-medium">
-                {onlyThisClient
-                  ? `Storico vendite per ${clientName || "cliente"}`
+                {!isAllClients
+                  ? `Storico vendite per ${selectedClient || clientName || "cliente"}`
                   : "Storico vendite su tutti i clienti"}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Switch Modalità: Movimenti / Resoconto */}
+            <div className="flex items-center rounded-lg border border-[var(--border)] bg-[var(--card)] p-0.5 text-xs mr-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setViewMode("movements")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors cursor-pointer ${
+                  viewMode === "movements"
+                    ? "bg-[var(--primary)] text-white shadow-sm"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                }`}
+                title="Visualizza i singoli movimenti DDT riga per riga"
+              >
+                <ListFilter className="h-3.5 w-3.5" />
+                <span>Movimenti ({filteredRows.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("resoconto")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors cursor-pointer ${
+                  viewMode === "resoconto"
+                    ? "bg-[var(--primary)] text-white shadow-sm"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                }`}
+                title="Visualizza il resoconto con aggregazione articoli, medie, min/max e stampa PDF"
+              >
+                <BarChart3 className="h-3.5 w-3.5" />
+                <span>Resoconto Articoli</span>
+              </button>
+            </div>
+
             {/* Toggle Filtro Cliente */}
             <div className="flex items-center rounded-lg border border-[var(--border)] bg-[var(--card)] p-0.5 text-xs">
               <button
                 type="button"
-                onClick={() => setOnlyThisClient(true)}
+                onClick={() => {
+                  setSelectedClient(clientName);
+                  setIsAllClients(false);
+                }}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors cursor-pointer ${
-                  onlyThisClient
+                  !isAllClients && selectedClient === clientName
                     ? "bg-[var(--primary)] text-white shadow-sm"
                     : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                 }`}
                 title={`Visualizza solo per ${clientName}`}
               >
                 <User className="h-3.5 w-3.5" />
-                <span className="max-w-[150px] truncate">{clientName || "Questo Cliente"}</span>
+                <span className="max-w-[130px] truncate">{clientName || "Questo Cliente"}</span>
               </button>
               <button
                 type="button"
-                onClick={() => setOnlyThisClient(false)}
+                onClick={() => setIsAllClients(true)}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors cursor-pointer ${
-                  !onlyThisClient
+                  isAllClients
                     ? "bg-[var(--primary)] text-white shadow-sm"
                     : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                 }`}
@@ -369,10 +452,46 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
               </button>
             </div>
 
+            {/* Menù Scelta Cliente */}
+            <div className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs shadow-sm">
+              <Users className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
+              <select
+                aria-label="Scegli cliente"
+                value={isAllClients ? "all" : selectedClient}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "all") {
+                    setIsAllClients(true);
+                  } else if (val) {
+                    setSelectedClient(val);
+                    setIsAllClients(false);
+                  }
+                }}
+                className="bg-transparent outline-none font-medium text-[var(--foreground)] cursor-pointer max-w-[200px] truncate"
+              >
+                <option value="all" className="bg-[var(--card)] text-[var(--foreground)]">
+                  Tutti i Clienti
+                </option>
+                {clientName && (
+                  <option value={clientName} className="bg-[var(--card)] text-[var(--foreground)] font-semibold">
+                    {clientName} (Corrente)
+                  </option>
+                )}
+                {allClients.map((client) => {
+                  if (client === clientName) return null;
+                  return (
+                    <option key={client} value={client} className="bg-[var(--card)] text-[var(--foreground)]">
+                      {client}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors cursor-pointer"
+              className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors cursor-pointer ml-1"
               title="Chiudi (Esc)"
             >
               <X className="h-5 w-5" />
@@ -427,8 +546,8 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
             </div>
           </div>
 
-          {/* KPI metrics */}
-          {stats && (
+          {/* KPI metrics (solo in modalità movimenti) */}
+          {viewMode === "movements" && stats && (
             <div className="flex items-center gap-3 text-xs font-medium">
               <div className="flex items-center gap-1.5 rounded bg-[var(--card)] border border-[var(--border)] px-2.5 py-1">
                 <span className="text-[var(--muted-foreground)]">Quantità:</span>
@@ -474,20 +593,31 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           )}
         </div>
 
-        {/* Tabella Storico */}
-        <div
-          ref={tableContainerRef}
-          onScroll={handleScroll}
-          className="flex-1 min-h-0 overflow-auto bg-[var(--card)]"
-        >
-          {isLoading ? (
-            <div className="flex h-full items-center justify-center gap-2 text-sm text-[var(--muted-foreground)]">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" />
-              Caricamento storico vendite…
-            </div>
-          ) : error ? (
-            <div className="p-8 text-center text-sm text-red-400">{error}</div>
-          ) : filteredRows.length === 0 ? (
+        {/* Contenuto Principale: Resoconto o Tabella Movimenti */}
+        {isLoading ? (
+          <div className="flex flex-1 min-h-0 items-center justify-center gap-2 text-sm text-[var(--muted-foreground)] bg-[var(--card)]">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" />
+            Caricamento storico vendite…
+          </div>
+        ) : error ? (
+          <div className="flex-1 min-h-0 p-8 text-center text-sm text-red-400 bg-[var(--card)]">{error}</div>
+        ) : viewMode === "resoconto" ? (
+          <DDTArticleResocontoView
+            rows={filteredRows}
+            clientName={selectedClient || clientName}
+            isAllClients={isAllClients}
+            selectedYear={selectedYear}
+            searchTerm={searchTerm}
+            mergeVariants={mergeVariants}
+            onToggleMergeVariants={() => setMergeVariants((prev) => !prev)}
+          />
+        ) : (
+          <div
+            ref={tableContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 min-h-0 overflow-auto bg-[var(--card)]"
+          >
+            {filteredRows.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center p-8 text-center text-sm text-[var(--muted-foreground)]">
               <History className="h-10 w-10 opacity-30 mb-2" />
               <p className="font-medium">
@@ -498,14 +628,14 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   : "Nessun acquisto registrato."}
               </p>
               <p className="text-xs opacity-70 mt-1">
-                {onlyThisClient
-                  ? `Il cliente ${clientName} non ha DDT corrispondenti ai filtri impostati.`
+                {!isAllClients
+                  ? `Il cliente ${selectedClient || clientName} non ha DDT corrispondenti ai filtri impostati.`
                   : "Nessun DDT trovato nel database corrispondente ai filtri impostati."}
               </p>
-              {onlyThisClient && (
+              {!isAllClients && (
                 <button
                   type="button"
-                  onClick={() => setOnlyThisClient(false)}
+                  onClick={() => setIsAllClients(true)}
                   className="mt-3 text-xs text-[var(--primary)] hover:underline cursor-pointer font-semibold"
                 >
                   Cerca tra tutti i clienti ↗
@@ -519,7 +649,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* DATA */}
                   <th
                     onClick={() => handleSort("date")}
-                    className="px-4 py-2.5 text-left w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-left w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Data"
                   >
                     <div className="inline-flex items-center gap-1">
@@ -531,7 +661,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* DDT */}
                   <th
                     onClick={() => handleSort("docNumber")}
-                    className="px-4 py-2.5 text-left w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-left w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Numero DDT"
                   >
                     <div className="inline-flex items-center gap-1">
@@ -541,10 +671,10 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   </th>
 
                   {/* CLIENTE */}
-                  {!onlyThisClient && (
+                  {isAllClients && (
                     <th
                       onClick={() => handleSort("client")}
-                      className="px-4 py-2.5 text-left w-64 max-w-[240px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                      className="px-3 py-2.5 text-left w-52 max-w-[200px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                       title="Clicca per ordinare per Cliente"
                     >
                       <div className="inline-flex items-center gap-1">
@@ -554,10 +684,10 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                     </th>
                   )}
 
-                  {/* DESTINAZIONE - Ridotta del 50% con larghezza controllata */}
+                  {/* DESTINAZIONE - Larghezza ridotta */}
                   <th
                     onClick={() => handleSort("destination")}
-                    className="px-3 py-2.5 text-left w-44 max-w-[180px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-2.5 py-2.5 text-left w-28 max-w-[120px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Destinazione"
                   >
                     <div className="inline-flex items-center gap-1">
@@ -569,7 +699,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* QUANTITÀ */}
                   <th
                     onClick={() => handleSort("quantity")}
-                    className="px-4 py-2.5 text-right w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-right w-24 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Quantità"
                   >
                     <div className="inline-flex items-center justify-end gap-1 w-full">
@@ -578,10 +708,22 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                     </div>
                   </th>
 
+                  {/* DESCRIZIONE - Tra quantità e prezzo list */}
+                  <th
+                    onClick={() => handleSort("description")}
+                    className="px-3 py-2.5 text-left min-w-[180px] max-w-[300px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Descrizione"
+                  >
+                    <div className="inline-flex items-center gap-1">
+                      <span>DESCRIZIONE</span>
+                      {renderSortIndicator("description")}
+                    </div>
+                  </th>
+
                   {/* PREZZO LIST. */}
                   <th
                     onClick={() => handleSort("unitPrice")}
-                    className="px-4 py-2.5 text-right w-36 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Prezzo Listino"
                   >
                     <div className="inline-flex items-center justify-end gap-1 w-full">
@@ -593,7 +735,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* SCONTO */}
                   <th
                     onClick={() => handleSort("discount")}
-                    className="px-3 py-2.5 text-center w-24 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-2 py-2.5 text-center w-20 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Sconto"
                   >
                     <div className="inline-flex items-center justify-center gap-1 w-full">
@@ -605,7 +747,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* PREZZO NETTO */}
                   <th
                     onClick={() => handleSort("netPrice")}
-                    className="px-4 py-2.5 text-right w-36 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Prezzo Netto"
                   >
                     <div className="inline-flex items-center justify-end gap-1 w-full">
@@ -617,7 +759,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* TOT. NETTO */}
                   <th
                     onClick={() => handleSort("netAmount")}
-                    className="px-4 py-2.5 text-right w-36 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Totale Netto"
                   >
                     <div className="inline-flex items-center justify-end gap-1 w-full">
@@ -629,7 +771,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* COSTO ACQ. */}
                   <th
                     onClick={() => handleSort("purchasePrice")}
-                    className="px-4 py-2.5 text-right w-36 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Costo Acquisto"
                   >
                     <div className="inline-flex items-center justify-end gap-1 w-full">
@@ -641,7 +783,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* MARGINE € */}
                   <th
                     onClick={() => handleSort("revenue")}
-                    className="px-4 py-2.5 text-right w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-right w-28 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Margine"
                   >
                     <div className="inline-flex items-center justify-end gap-1 w-full">
@@ -653,7 +795,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   {/* RICARICO % */}
                   <th
                     onClick={() => handleSort("markup")}
-                    className="px-4 py-2.5 text-right w-32 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    className="px-3 py-2.5 text-right w-24 cursor-pointer group hover:text-[var(--foreground)] transition-colors"
                     title="Clicca per ordinare per Ricarico %"
                   >
                     <div className="inline-flex items-center justify-end gap-1 w-full">
@@ -676,12 +818,12 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                       className="hover:bg-[var(--background)]/60 transition-colors"
                     >
                       {/* Data */}
-                      <td className="px-4 py-2.5 font-sans font-medium text-[var(--foreground)]">
+                      <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap">
                         {formatDdtViewDate(row.date)}
                       </td>
 
                       {/* DDT */}
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2 whitespace-nowrap">
                         {onSelectDdt ? (
                           <button
                             type="button"
@@ -700,53 +842,61 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                       </td>
 
                       {/* Cliente (se tutti) */}
-                      {!onlyThisClient && (
-                        <td className="px-4 py-2.5 font-sans font-medium text-[var(--foreground)] truncate max-w-[240px]">
+                      {isAllClients && (
+                        <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[200px]" title={row.client}>
                           {row.client}
                         </td>
                       )}
 
                       {/* Destinazione - rimpicciolita con max-width e tooltip */}
                       <td
-                        className="px-3 py-2.5 font-sans text-[var(--muted-foreground)] truncate max-w-[180px]"
+                        className="px-2.5 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[120px]"
                         title={row.destination || "—"}
                       >
                         {row.destination || "—"}
                       </td>
 
                       {/* Quantità */}
-                      <td className="px-4 py-2.5 text-right font-bold text-[var(--foreground)]">
+                      <td className="px-3 py-2 text-right font-bold text-[var(--foreground)] whitespace-nowrap">
                         {row.quantity} {row.unit && <span className="text-[10px] text-[var(--muted-foreground)] font-normal">{row.unit}</span>}
                       </td>
 
+                      {/* Descrizione (tra Quantità e Prezzo Listino) */}
+                      <td
+                        className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[300px]"
+                        title={row.description || ""}
+                      >
+                        {row.description}
+                      </td>
+
                       {/* Prezzo Listino */}
-                      <td className="px-4 py-2.5 text-right text-[var(--muted-foreground)]">
+                      <td className="px-3 py-2 text-right text-[var(--muted-foreground)] whitespace-nowrap">
                         {formatDdtMoney(row.unitPriceSubunits)}
                       </td>
 
                       {/* Sconto */}
-                      <td className="px-3 py-2.5 text-center text-amber-400">
+                      <td className="px-2 py-2 text-center text-amber-400 whitespace-nowrap">
                         {row.discountPercent ? `${row.discountPercent}%` : "—"}
                       </td>
 
                       {/* Prezzo Netto Unitario */}
-                      <td className="px-4 py-2.5 text-right font-bold text-sky-400">
+                      <td className="px-3 py-2 text-right font-bold text-sky-400 whitespace-nowrap">
                         {formatDdtMoney(Math.round(unitNet))}
                       </td>
 
                       {/* Totale Netto */}
-                      <td className="px-4 py-2.5 text-right font-semibold text-[var(--foreground)]">
+                      <td className="px-3 py-2 text-right font-semibold text-[var(--foreground)] whitespace-nowrap">
                         {formatDdtMoney(row.netAmountSubunits)}
                       </td>
 
                       {/* Costo Acquisto */}
-                      <td className="px-4 py-2.5 text-right text-[var(--muted-foreground)]">
+                      <td className="px-3 py-2 text-right text-[var(--muted-foreground)] whitespace-nowrap">
                         {row.purchasePriceSubunits > 0 ? formatDdtMoney(row.purchasePriceSubunits) : "—"}
                       </td>
 
                       {/* Margine € */}
                       <td
-                        className={`px-4 py-2.5 text-right font-semibold ${
+                        className={`px-3 py-2 text-right font-semibold whitespace-nowrap ${
                           isPositiveRev ? "text-emerald-400" : isNegativeRev ? "text-rose-400" : "text-[var(--muted-foreground)]"
                         }`}
                       >
@@ -755,7 +905,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
                       {/* Ricarico % */}
                       <td
-                        className={`px-4 py-2.5 text-right font-medium ${
+                        className={`px-3 py-2 text-right font-medium whitespace-nowrap ${
                           isPositiveRev ? "text-emerald-400" : isNegativeRev ? "text-rose-400" : "text-[var(--muted-foreground)]"
                         }`}
                       >
@@ -773,13 +923,23 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
             </div>
           )}
         </div>
+        )}
 
         {/* Footer info tastiera */}
         <div className="flex shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--background)] px-5 py-2 text-xs text-[var(--muted-foreground)]">
           <span className="flex items-center gap-1.5">
             <span>
-              {filteredRows.length} movimenti trovati
-              {selectedYear !== "all" && <span className="font-semibold text-[var(--primary)] ml-1">(Anno {selectedYear})</span>}
+              {viewMode === "resoconto" ? (
+                <>
+                  Modalità Resoconto attiva
+                  {mergeVariants && <span className="text-sky-400 font-semibold ml-1">(Varianti accorpate attive)</span>}
+                </>
+              ) : (
+                <>
+                  {filteredRows.length} movimenti trovati
+                  {selectedYear !== "all" && <span className="font-semibold text-[var(--primary)] ml-1">(Anno {selectedYear})</span>}
+                </>
+              )}
             </span>
             {historyModalLimit !== "tutti" && rows.length >= historyModalLimit && (
               <span className="rounded bg-[var(--card)] px-1.5 py-0.5 text-[10px] text-amber-400 border border-amber-500/30">
