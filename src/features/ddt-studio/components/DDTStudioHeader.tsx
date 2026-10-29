@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { DdtDocument } from "../models/ddt";
 import { cn } from "@/shared/utils/cn";
+import { DDTMonthlyReportModal } from "./DDTMonthlyReportModal";
 
 export interface DDTStudioHeaderProps {
   ddt: Partial<DdtDocument>;
@@ -22,6 +23,7 @@ export interface DDTStudioHeaderProps {
   setSidebarOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   activeView: "editor" | "a4";
   setActiveView: (view: "editor" | "a4") => void;
+  selectedYear?: number;
   onNewDdt: () => void;
   onSaveDraft: () => void;
   onEmitDdt: () => void;
@@ -41,6 +43,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   setSidebarOpen,
   activeView,
   setActiveView,
+  selectedYear,
   onNewDdt,
   onSaveDraft,
   onEmitDdt,
@@ -54,7 +57,10 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   isPrinting = false,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const currentYear = selectedYear || ddt.year || new Date().getFullYear();
 
   // Premendo ESC ritorna sempre alla vista Editor
   useEffect(() => {
@@ -208,7 +214,21 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
           </button>
 
           {dropdownOpen && (
-            <div className="absolute right-0 mt-1 w-44 rounded-md shadow-lg bg-[var(--card)] border border-[var(--border)] py-1 z-50">
+            <div className="absolute right-0 mt-1 w-52 rounded-md shadow-lg bg-[var(--card)] border border-[var(--border)] py-1 z-50">
+              <button
+                type="button"
+                onClick={() => {
+                  setDropdownOpen(false);
+                  setIsReportModalOpen(true);
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-500/10 flex items-center space-x-2 transition-colors"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Report Excel Mesi ({currentYear})</span>
+              </button>
+
+              <div className="my-1 border-t border-[var(--border)]" />
+
               {onGenerateTest48 && (
                 <button
                   type="button"
@@ -250,6 +270,13 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
           )}
         </div>
       </div>
+
+      {/* Modale Report Excel Mesi */}
+      <DDTMonthlyReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        year={currentYear}
+      />
     </div>
   );
 };
