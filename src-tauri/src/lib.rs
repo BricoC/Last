@@ -71,50 +71,43 @@ Add-Type -AssemblyName System.Drawing
 $imagePaths = @({paths_formatted})
 $copies = {actual_copies}
 
-$doc = New-Object System.Drawing.Printing.PrintDocument
-$doc.PrintController = New-Object System.Drawing.Printing.StandardPrintController
-$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
-$doc.OriginAtMargins = $false
-$doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::Simplex
+for ($copyIdx = 1; $copyIdx -le $copies; $copyIdx++) {{
+    $doc = New-Object System.Drawing.Printing.PrintDocument
+    $doc.PrintController = New-Object System.Drawing.Printing.StandardPrintController
+    $doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+    $doc.OriginAtMargins = $false
+    $doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::Simplex
 
-foreach ($ps in $doc.PrinterSettings.PaperSizes) {{
-    if ($ps.PaperName -like '*A4*') {{
-        $doc.DefaultPageSettings.PaperSize = $ps
-        break
-    }}
-}}
-
-$script:pageIndex = 0
-$doc.add_PrintPage({{
-    param($sender, $e)
-    if ($script:pageIndex -lt $imagePaths.Count) {{
-        $imgPath = $imagePaths[$script:pageIndex]
-        if (Test-Path $imgPath) {{
-            $img = [System.Drawing.Image]::FromFile($imgPath)
-            $hX = $e.PageSettings.HardMarginX
-            $hY = $e.PageSettings.HardMarginY
-            $e.Graphics.TranslateTransform(-$hX, -$hY)
-            $e.Graphics.DrawImage($img, 0, 0, $e.PageBounds.Width, $e.PageBounds.Height)
-            $img.Dispose()
+    foreach ($ps in $doc.PrinterSettings.PaperSizes) {{
+        if ($ps.PaperName -like '*A4*') {{
+            $doc.DefaultPageSettings.PaperSize = $ps
+            break
         }}
-        $script:pageIndex++
-        $e.HasMorePages = ($script:pageIndex -lt $imagePaths.Count)
-    }} else {{
-        $e.HasMorePages = $false
     }}
-}})
 
-if ($doc.PrinterSettings.MaximumCopies -ge $copies) {{
-    $doc.PrinterSettings.Copies = [short]$copies
+    $script:pageIndex = 0
+    $doc.add_PrintPage({{
+        param($sender, $e)
+        if ($script:pageIndex -lt $imagePaths.Count) {{
+            $imgPath = $imagePaths[$script:pageIndex]
+            if (Test-Path $imgPath) {{
+                $img = [System.Drawing.Image]::FromFile($imgPath)
+                $hX = $e.PageSettings.HardMarginX
+                $hY = $e.PageSettings.HardMarginY
+                $e.Graphics.TranslateTransform(-$hX, -$hY)
+                $e.Graphics.DrawImage($img, 0, 0, $e.PageBounds.Width, $e.PageBounds.Height)
+                $img.Dispose()
+            }}
+            $script:pageIndex++
+            $e.HasMorePages = ($script:pageIndex -lt $imagePaths.Count)
+        }} else {{
+            $e.HasMorePages = $false
+        }}
+    }})
+
     $doc.Print()
-}} else {{
-    for ($c = 0; $c -lt $copies; $c++) {{
-        $script:pageIndex = 0
-        $doc.Print()
-    }}
+    $doc.Dispose()
 }}
-
-$doc.Dispose()
 
 foreach ($p in $imagePaths) {{
     Remove-Item $p -Force -ErrorAction SilentlyContinue

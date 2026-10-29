@@ -68,7 +68,7 @@ export function makeEmptyDdt(): Partial<DdtDocument> {
 export function makeEmptyItems(): DdtItem[] {
   const now = new Date().toISOString();
   return Array.from({ length: TOTAL_PRESET_ROWS }, (_, i) => ({
-    id: `empty-row-${i + 1}`,
+    id: crypto.randomUUID(),
     created_at: now,
     updated_at: now,
     updated_by: "system",
