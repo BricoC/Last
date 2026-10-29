@@ -11,6 +11,7 @@ import { DDTListPage } from "@/features/ddt-studio/DDTListPage";
 import { DDTArticlesPage } from "@/features/ddt-studio/DDTArticlesPage";
 import { ClientListPage } from "@/features/clients/ClientListPage";
 import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
+import { ElectronicInvoicesPage } from "@/features/invoices/ElectronicInvoicesPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
@@ -71,6 +72,8 @@ export function App() {
         return <ClientListPage />;
       case "quotes":
         return <QuoteStudioPage windowId={windowId} />;
+      case "invoices":
+        return <ElectronicInvoicesPage />;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">

@@ -90,12 +90,30 @@ interface ThemeState {
   applyToDom: () => void;
 }
 
+const STORAGE_KEY = "last_theme_tokens";
+
+function getInitialTheme(): ThemeTokens {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.preset && parsed.backgroundColor) {
+        return parsed;
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return THEME_GRIGIO_L4;
+}
+
 export const useThemeStore = create<ThemeState>((set, get) => ({
-  theme: THEME_GRIGIO_L4,
+  theme: getInitialTheme(),
 
   setTheme: (updates) => {
     const updated = { ...get().theme, ...updates };
     set({ theme: updated });
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); } catch {}
     get().applyToDom();
   },
 
@@ -149,6 +167,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     }
 
     set({ theme: newTheme });
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(newTheme)); } catch {}
     get().applyToDom();
   },
 
@@ -164,20 +183,22 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
       updatedTones = getGrigioTones(level);
     }
 
-    set({
-      theme: {
-        ...get().theme,
-        brightnessLevel: level,
-        backgroundColor: updatedTones.bg,
-        cardColor: updatedTones.card,
-        borderColor: updatedTones.border,
-      },
-    });
+    const updatedTheme = {
+      ...get().theme,
+      brightnessLevel: level,
+      backgroundColor: updatedTones.bg,
+      cardColor: updatedTones.card,
+      borderColor: updatedTones.border,
+    };
+
+    set({ theme: updatedTheme });
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedTheme)); } catch {}
     get().applyToDom();
   },
 
   resetTheme: () => {
     set({ theme: THEME_GRIGIO_L4 });
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(THEME_GRIGIO_L4)); } catch {}
     get().applyToDom();
   },
 
