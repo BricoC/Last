@@ -240,8 +240,9 @@ export class DdtRepository {
       const qNum = parseFloat(String(q).replace(",", ".")) || 1;
       const net = p.times(qNum).applyDiscount(parseFloat(String(disc).replace(",", ".")) || 0);
       const vatA = vatR > 0 ? net.calculateVat(vatR) : money(0);
+      const hasInvalidId = !it.id || it.id.startsWith("empty-row-") || it.id.startsWith("row-");
       return {
-        id: it.id || crypto.randomUUID(),
+        id: hasInvalidId ? crypto.randomUUID() : it.id,
         row_index: it.row_index && it.row_index > 0 ? it.row_index : index + 1,
         row_kind: isNote ? "note" : "item",
         product_id: it.product_id || null,
