@@ -265,8 +265,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     tableRef.current?.clearFocusedCell();
   }, []);
 
-  // Pannello ricerca articoli F3 (docked a lato della tabella, attivo di default)
-  const [isSearchModalOpen, setIsSearchModalOpen] = useState(true);
+  // Pannello ricerca articoli F4 / F3 (docked a lato della tabella, chiuso di default)
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
   // Sincronizzazione testo digitato nella cella Descrizione con il box di ricerca articoli
   const [searchQuery, setSearchQuery] = useState("");
