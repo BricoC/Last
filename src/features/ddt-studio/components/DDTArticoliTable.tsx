@@ -10,6 +10,19 @@ import DDTTextEditor from "./DDTTextEditor";
 
 export interface DDTArticoliTableHandle {
   clearFocusedCell: () => void;
+  focusCell: (rowIndex: number, colId: string, startEdit?: boolean) => void;
+}
+
+export function isTextOnlyRow(item?: Partial<DdtItem> | null): boolean {
+  if (!item) return false;
+  if (item.row_kind === "note") return true;
+  const hasDesc = Boolean(item.description && String(item.description).trim().length > 0);
+  const hasPrice = isPositivePrice(item.unit_price);
+  const hasCost = isPositivePrice(item.purchase_price);
+  const hasCode = Boolean(item.code && String(item.code).trim().length > 0);
+  const rawQ = item.quantity ? String(item.quantity).trim().replace(",", ".") : "";
+  const hasQta = Boolean(rawQ && parseFloat(rawQ) > 0);
+  return hasDesc && !hasPrice && !hasCost && !hasCode && !hasQta;
 }
 
 export interface DDTArticoliTableProps {
@@ -19,6 +32,10 @@ export interface DDTArticoliTableProps {
   globalDiscount?: string;
   globalMarkup?: string;
   onOpenSearchModal: () => void;
+  onDescriptionTyping?: (val: string) => void;
+  onDescriptionEditingStopped?: () => void;
+  onActiveRowChange?: (rowIndex: number | null) => void;
+  onActiveCellChange?: (rowIndex: number, colId: string) => void;
 }
 
 export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTableProps>(({
@@ -28,6 +45,10 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
   globalDiscount = "",
   globalMarkup = "",
   onOpenSearchModal,
+  onDescriptionTyping,
+  onDescriptionEditingStopped,
+  onActiveRowChange,
+  onActiveCellChange,
 }, ref) => {
   const gridRef = useRef<AgGridReact<DdtItem>>(null);
 
@@ -36,6 +57,17 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       if (gridRef.current?.api) {
         gridRef.current.api.stopEditing(false);
         gridRef.current.api.clearFocusedCell();
+      }
+    },
+    focusCell: (rowIndex: number, colId: string, startEdit: boolean = true) => {
+      if (gridRef.current?.api) {
+        gridRef.current.api.ensureIndexVisible(rowIndex, null);
+        gridRef.current.api.setFocusedCell(rowIndex, colId);
+        if (startEdit) {
+          setTimeout(() => {
+            gridRef.current?.api.startEditingCell({ rowIndex, colKey: colId });
+          }, 30);
+        }
       }
     },
   }));
@@ -72,6 +104,21 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       }
       if (colId === "description" && updatedData.description) {
         updatedData.description = String(updatedData.description).toUpperCase();
+      }
+
+      // Se la riga ha solo testo nella descrizione (nessun prezzo, importo o costo), è una nota informativa
+      if (isTextOnlyRow(updatedData)) {
+        updatedData.row_kind = "note";
+        updatedData.unit = "";
+        updatedData.quantity = "";
+        updatedData.vat_rate = "";
+        updatedData.discount_pct = "";
+        updatedData.unit_price = money(0);
+        updatedData.purchase_price = money(0);
+        updatedData.net_amount = money(0);
+        updatedData.vat_amount = money(0);
+      } else if (colId !== "description" && (isPositivePrice(updatedData.unit_price) || isPositivePrice(updatedData.purchase_price) || (updatedData.quantity && updatedData.quantity !== ""))) {
+        updatedData.row_kind = "item";
       }
 
       if (colId === "unit_price") {
@@ -368,7 +415,10 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => (p.newValue ? String(p.newValue).trim().toUpperCase() : ""),
-        valueFormatter: (p: any) => (p.value ? String(p.value).trim().toUpperCase() : ""),
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          return p.value ? String(p.value).trim().toUpperCase() : "";
+        },
         cellStyle: {
           textAlign: "center",
           fontWeight: 700,
@@ -385,6 +435,10 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         editable: true,
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => (p.newValue === "" ? "" : p.newValue),
+        valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
+          return p.value !== "" && p.value !== null && p.value !== undefined ? String(p.value).trim() : "";
+        },
         cellStyle: {
           textAlign: "center",
           fontWeight: 700,
@@ -399,6 +453,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         minWidth: 260,
         editable: true,
         cellEditor: DDTTextEditor,
+        cellEditorParams: {
+          onDescriptionTyping,
+        },
         valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase().slice(0, 55) : ""),
         valueFormatter: (p: any) => (p.value ? String(p.value).toUpperCase() : ""),
         cellStyle: {
@@ -421,6 +478,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           fontSize: "12px",
         },
         valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
           if (!p.value) return "";
           const m = safeMoney(p.value);
           return m.isZero() ? "" : m.formatIT(false);
@@ -440,12 +498,12 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           fontSize: "11px",
         },
         valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
           const hasRowContent = Boolean(
-            (p.data?.description && String(p.data?.description).trim().length > 0) ||
             isPositivePrice(p.data?.unit_price) ||
             (p.data?.quantity && String(p.data?.quantity).trim().length > 0)
           );
-          if (!hasRowContent && !p.data?.unit_price?.toNumber()) {
+          if (!hasRowContent) {
             return "";
           }
           return formatCascadeDiscountDisplay(p.value);
@@ -466,6 +524,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           color: "#059669",
         },
         valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
           if (!p.value) return "";
           const m = safeMoney(p.value);
           return m.isZero() ? "" : `€ ${m.formatIT(false)}`;
@@ -490,6 +549,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           fontSize: "11px",
         },
         valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
           if (p.value !== "" && p.value !== null && p.value !== undefined) {
             return `${p.value}%`;
           }
@@ -518,6 +578,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           backgroundColor: "var(--grid-sheet-acquisition)",
         },
         valueFormatter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return "";
           if (!p.value) return "";
           const m = safeMoney(p.value);
           return m.isZero() ? "" : m.formatIT(false);
@@ -534,6 +595,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         headerClass: "ddt-col-ric-header",
         cellClass: "ddt-col-ric-cell",
         valueGetter: (p: any) => {
+          if (isTextOnlyRow(p.data)) return null;
           const up = isPositivePrice(p.data?.unit_price) ? safeMoney(p.data?.unit_price).toNumber() : 0;
           const pp = isPositivePrice(p.data?.purchase_price) ? safeMoney(p.data?.purchase_price).toNumber() : 0;
           if (pp > 0 && up > 0) {
@@ -618,7 +680,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
     });
 
     return cols;
-  }, [showMargini, handleDeleteRow]);
+  }, [showMargini, handleDeleteRow, onDescriptionTyping]);
 
   return (
     <div className="ddt-items-grid ag-theme-alpine w-full h-full flex-1 min-h-0 overflow-hidden relative border border-zinc-300">
@@ -685,13 +747,32 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         onCellKeyDown={handleCellKeyDown}
         tabToNextCell={tabToNextCell}
         navigateToNextCell={navigateToNextCell}
-        onCellEditingStarted={() => {
-          window.__isDDTCellEditing = true;
+        onCellFocused={(p) => {
+          if (p.rowIndex !== null && p.rowIndex !== undefined) {
+            onActiveRowChange?.(p.rowIndex);
+            if (p.column) {
+              const colId = typeof p.column === "string" ? p.column : p.column?.getColId?.() || "description";
+              onActiveCellChange?.(p.rowIndex, colId);
+            }
+          }
         }}
-        onCellEditingStopped={() => {
+        onCellEditingStarted={(p) => {
+          window.__isDDTCellEditing = true;
+          if (p.rowIndex !== null && p.rowIndex !== undefined) {
+            onActiveRowChange?.(p.rowIndex);
+            if (p.column) {
+              const colId = typeof p.column === "string" ? p.column : p.column?.getColId?.() || "description";
+              onActiveCellChange?.(p.rowIndex, colId);
+            }
+          }
+        }}
+        onCellEditingStopped={(p) => {
           setTimeout(() => {
             window.__isDDTCellEditing = false;
           }, 200);
+          if (p.column?.getColId() === "description" || p.column?.getColId() === "descrizione") {
+            onDescriptionEditingStopped?.();
+          }
         }}
         stopEditingWhenCellsLoseFocus={true}
         enterNavigatesVertically={true}

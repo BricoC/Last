@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { LoaderCircle } from "lucide-react";
 import { DdtArchiveEntry, DdtDocument, DdtItem } from "./models/ddt";
@@ -267,6 +267,34 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   // Pannello ricerca articoli F3 (docked a lato della tabella, attivo di default)
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(true);
+
+  // Sincronizzazione testo digitato nella cella Descrizione con il box di ricerca articoli
+  const [searchQuery, setSearchQuery] = useState("");
+  const [f3FocusTrigger, setF3FocusTrigger] = useState(0);
+  const activeRowIndexRef = React.useRef<number | null>(null);
+  const lastActiveCellRef = React.useRef<{ rowIndex: number; colId: string }>({ rowIndex: 0, colId: "description" });
+  const isF3NavigatingRef = React.useRef(false);
+
+  const handleActiveRowChange = useCallback((idx: number | null) => {
+    activeRowIndexRef.current = idx;
+  }, []);
+
+  const handleActiveCellChange = useCallback((rowIndex: number, colId: string) => {
+    lastActiveCellRef.current = { rowIndex, colId };
+  }, []);
+
+  const handleReturnToTable = useCallback(() => {
+    const { rowIndex, colId } = lastActiveCellRef.current;
+    tableRef.current?.focusCell(rowIndex, colId, true);
+  }, []);
+
+  const handleDescriptionEditingStopped = useCallback(() => {
+    // Se la cella descrizione si chiude normalmente (Enter, Tab, click fuori), resetta il testo di ricerca
+    if (!isF3NavigatingRef.current) {
+      setSearchQuery("");
+    }
+  }, []);
+
   const [searchPanelWidth, setSearchPanelWidth] = useState<number>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("ddt_search_panel_width");
@@ -309,18 +337,47 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   // Modale Alex (Ricerca Multi-Listino 4 finestre)
   const [isAlexModalOpen, setIsAlexModalOpen] = useState(false);
+  const isQuantityModalOpenRef = useRef(false);
 
-  // Scorciatoia globale F3 per mostrare/nascondere il pannello rapido articoli
+  // Scorciatoie tastiera: F4 apre/chiude il pannello, F3 apre e sposta il focus direttamente sulla prima voce del listino
   useEffect(() => {
-    const handleGlobalF3 = (e: KeyboardEvent) => {
-      if (e.key === "F3") {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      // Se è aperto il popup quantità "INSERIMENTO ARTICOLO", disabilita completamente F3 e F4 per evitare chiusure/conflitti
+      if (isQuantityModalOpenRef.current && (e.key === "F3" || e.key === "F4")) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      if (e.key === "F4") {
         e.preventDefault();
         e.stopPropagation();
         setIsSearchModalOpen((prev) => !prev);
+      } else if (e.key === "F3") {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Se il focus è già nel pannello ricerca articoli, F3 torna alla posizione precedente nella tabella DDT!
+        const searchEl = document.getElementById("ddt-search-modal-container");
+        const isInsideSearch = searchEl && (searchEl === document.activeElement || searchEl.contains(document.activeElement));
+        if (isInsideSearch) {
+          handleReturnToTable();
+          return;
+        }
+
+        isF3NavigatingRef.current = true;
+        if (tableRef.current?.clearFocusedCell) {
+          tableRef.current.clearFocusedCell();
+        }
+        setIsSearchModalOpen(true);
+        setF3FocusTrigger((prev) => prev + 1);
+        setTimeout(() => {
+          isF3NavigatingRef.current = false;
+        }, 400);
       }
     };
-    window.addEventListener("keydown", handleGlobalF3, true);
-    return () => window.removeEventListener("keydown", handleGlobalF3, true);
+    window.addEventListener("keydown", handleGlobalShortcuts, true);
+    return () => window.removeEventListener("keydown", handleGlobalShortcuts, true);
   }, []);
 
   // Toast feedback
@@ -346,6 +403,15 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   useEffect(() => {
     loadRecentDdts();
+  }, [loadRecentDdts]);
+
+  // Aggiornamento reattivo quando la sincronizzazione in background scarica nuovi DDT
+  useEffect(() => {
+    const handleSyncUpdate = () => {
+      void loadRecentDdts();
+    };
+    window.addEventListener("ddt-data-updated", handleSyncUpdate);
+    return () => window.removeEventListener("ddt-data-updated", handleSyncUpdate);
   }, [loadRecentDdts]);
 
   useEffect(() => {
@@ -383,37 +449,62 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       // Keep the archive sidebar on the same year as a DDT opened from List or Articles.
       setSelectedYear((prev) => (prev === fullDoc.year ? prev : fullDoc.year));
 
-      // Riempi sempre fino a 500 righe esatte
-      const existing: DdtItem[] = (fullDoc.items || []).map((it) => ({
-        ...it,
-        base_price: it.base_price && isPositivePrice(it.base_price) ? it.base_price : it.unit_price,
-        base_discount_pct: it.base_discount_pct !== undefined ? it.base_discount_pct : it.discount_pct,
-      }));
-      const padded: DdtItem[] = [...existing];
-      const blankRowTimestamp = new Date().toISOString();
+      // Inizializza esattamente 500 righe per la griglia
       const docId = fullDoc.id;
-      while (padded.length < TOTAL_PRESET_ROWS) {
-        padded.push({
-          id: `${docId}-blank-${padded.length + 1}`,
-          created_at: blankRowTimestamp,
-          updated_at: blankRowTimestamp,
-          updated_by: "system",
-          deleted_at: null,
-          sync_status: "pending",
-          ddt_id: docId,
-          row_index: padded.length + 1,
-          code: "",
-          description: "",
-          unit: "",
-          quantity: "",
-          unit_price: money(0),
-          base_price: money(0),
-          discount_pct: "",
-          net_amount: money(0),
-          vat_rate: "",
-          vat_amount: money(0),
-          purchase_price: money(0),
-        });
+      const blankRowTimestamp = new Date().toISOString();
+      const padded: DdtItem[] = Array.from({ length: TOTAL_PRESET_ROWS }, (_, i) => ({
+        id: `${docId}-blank-${i + 1}`,
+        created_at: blankRowTimestamp,
+        updated_at: blankRowTimestamp,
+        updated_by: "system",
+        deleted_at: null,
+        sync_status: "pending",
+        ddt_id: docId,
+        row_index: i + 1,
+        code: "",
+        description: "",
+        unit: "",
+        quantity: "",
+        unit_price: money(0),
+        base_price: money(0),
+        discount_pct: "",
+        net_amount: money(0),
+        vat_rate: "",
+        vat_amount: money(0),
+        purchase_price: money(0),
+      }));
+
+      // Inserisci ogni riga memorizzata esattamente al suo row_index originale (1-indexed)
+      // preservando fedelmente le righe vuote e la posizione voluta dall'utente (es. PAGATO alla riga 5)
+      for (const it of fullDoc.items || []) {
+        const itemWithDefaults: DdtItem = {
+          ...it,
+          base_price: it.base_price && isPositivePrice(it.base_price) ? it.base_price : it.unit_price,
+          base_discount_pct: it.base_discount_pct !== undefined ? it.base_discount_pct : it.discount_pct,
+        };
+        const targetIdx = it.row_index && it.row_index >= 1 && it.row_index <= TOTAL_PRESET_ROWS
+          ? it.row_index - 1
+          : -1;
+
+        if (targetIdx >= 0 && (!padded[targetIdx].description?.trim() && !isPositivePrice(padded[targetIdx].unit_price))) {
+          padded[targetIdx] = { ...itemWithDefaults, row_index: targetIdx + 1 };
+        } else {
+          // Se la riga indicata è occupata o non valida, trova il primo slot libero a partire da targetIdx
+          const startSearch = targetIdx >= 0 ? targetIdx : 0;
+          let freeIdx = -1;
+          for (let i = startSearch; i < TOTAL_PRESET_ROWS; i++) {
+            if (!padded[i].description?.trim() && !isPositivePrice(padded[i].unit_price)) {
+              freeIdx = i;
+              break;
+            }
+          }
+          if (freeIdx === -1) {
+            freeIdx = padded.findIndex((slot) => !slot.description?.trim() && !isPositivePrice(slot.unit_price));
+          }
+          if (freeIdx >= 0) {
+            padded[freeIdx] = { ...itemWithDefaults, row_index: freeIdx + 1 };
+          }
+        }
       }
       setGlobalDiscount("");
       setGlobalMarkup("");
@@ -616,9 +707,13 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   }) => {
     setItems((prev) => {
       const copy = [...prev];
-      let targetIdx = copy.findIndex(
-        (it) => !it.description?.trim().length && !isPositivePrice(it.unit_price)
-      );
+      const activeIdx = activeRowIndexRef.current;
+      let targetIdx = activeIdx !== null && activeIdx >= 0 && activeIdx < copy.length ? activeIdx : -1;
+      if (targetIdx === -1) {
+        targetIdx = copy.findIndex(
+          (it) => !it.description?.trim().length && !isPositivePrice(it.unit_price)
+        );
+      }
       if (targetIdx === -1) targetIdx = 0;
 
       const price = money(article.unit_price || 0);
@@ -632,7 +727,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         effectivePrice = price.times(1 + markupNum / 100);
       }
       const disc = globalDiscount.trim();
-      const vat = article.vat_rate != null ? article.vat_rate : 22;
+      const vat = article.vat_rate !== undefined && article.vat_rate !== null && String(article.vat_rate).trim() !== "" ? article.vat_rate : "";
       const { netAmount, vatAmount } = calculateRowAmounts(q, effectivePrice, disc, vat);
 
       copy[targetIdx] = {
@@ -654,6 +749,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       return copy;
     });
 
+    setSearchQuery("");
     showToast(`Inserito: ${article.description}`);
   };
 
@@ -942,6 +1038,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                     globalDiscount={globalDiscount}
                     globalMarkup={globalMarkup}
                     onOpenSearchModal={() => setIsSearchModalOpen((p) => !p)}
+                    onDescriptionTyping={setSearchQuery}
+                    onDescriptionEditingStopped={handleDescriptionEditingStopped}
+                    onActiveRowChange={handleActiveRowChange}
+                    onActiveCellChange={handleActiveCellChange}
                   />
                 </div>
 
@@ -962,9 +1062,19 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                     >
                       <DDTArticoliSearchModal
                         isOpen={isSearchModalOpen}
-                        onClose={() => setIsSearchModalOpen(false)}
+                        onClose={() => {
+                          setIsSearchModalOpen(false);
+                          setSearchQuery("");
+                        }}
                         clientName={ddt.client_name}
                         onSelectArticle={handleInsertArticle}
+                        searchQuery={searchQuery}
+                        onSearchQueryChange={setSearchQuery}
+                        f3FocusTrigger={f3FocusTrigger}
+                        onReturnToTable={handleReturnToTable}
+                        onPendingInsertChange={(isOpen) => {
+                          isQuantityModalOpenRef.current = isOpen;
+                        }}
                       />
                     </div>
                   </>

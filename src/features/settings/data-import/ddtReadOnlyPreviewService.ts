@@ -12,7 +12,7 @@ interface LocalDdtKey {
 
 interface LocalDdtSnapshot { documents: LocalDdtKey[]; itemIds: string[]; }
 
-interface CloudHeader {
+export interface CloudHeader {
   id: string; anno: number; numero: number; stato: string; data: string | null; cliente: string | null;
   indirizzo: string | null; citta: string | null; pagamento: string | null; destinazione: string | null;
   citta_dest: string | null; nr_vs_ordine: string | null; causale: string | null; porto: string | null;
@@ -22,7 +22,7 @@ interface CloudHeader {
   totale_imponibile: number | null; totale_iva: number | null; totale_documento: number | null;
 }
 
-interface CloudLine {
+export interface CloudLine {
   id: string; ddt_id: string | null; riga_nr: number | null; anno: number | null; numero_ddt: number | null;
   descrizione: string | null;
   prezzo: number | null; sconto_pct: number | null; importo: number | null; iva_pct: number | null;
@@ -30,7 +30,7 @@ interface CloudLine {
   um: string | null; ricavo: number | null;
 }
 
-interface LocalImportHeader {
+export interface LocalImportHeader {
   id: string; docNumber: number; year: number; series: string; docDate: string; status: string;
   clientName: string; clientAddress: string | null; clientCity: string | null; clientVat: string | null;
   clientFiscalCode: string | null; clientSdi: string | null; clientPhonesJson: string;
@@ -42,7 +42,7 @@ interface LocalImportHeader {
   createdAt: string; updatedAt: string;
 }
 
-interface LocalImportLine {
+export interface LocalImportLine {
   id: string; cloudHeaderId: string | null; rowIndex: number; description: string; rowKind: string;
   unit: string; quantity: string; unitPriceSubunits: number; discountPct: string; netAmountSubunits: number;
   vatRate: number; vatAmountSubunits: number; purchasePriceSubunits: number; createdAt: string; updatedAt: string;
@@ -61,8 +61,8 @@ export interface DdtPreview {
   taxableDiscrepancies: number; maxTaxableDifference: number;
 }
 
-const HEADER_FIELDS = "id,anno,numero,stato,data,cliente,indirizzo,citta,pagamento,destinazione,citta_dest,nr_vs_ordine,causale,porto,aspetto,colli,peso_kg,vettore,operatore,note,piva,cod_fiscale,sdi,telefoni,created_at,ultima_modifica,totale_imponibile,totale_iva,totale_documento";
-const LINE_FIELDS = "id,ddt_id,riga_nr,anno,numero_ddt,um,quantita,descrizione,prezzo,sconto_pct,importo,iva_pct,prezzo_acquisto,prezzo_scontato,ricavo";
+export const HEADER_FIELDS = "id,anno,numero,stato,data,cliente,indirizzo,citta,pagamento,destinazione,citta_dest,nr_vs_ordine,causale,porto,aspetto,colli,peso_kg,vettore,operatore,note,piva,cod_fiscale,sdi,telefoni,created_at,ultima_modifica,totale_imponibile,totale_iva,totale_documento";
+export const LINE_FIELDS = "id,ddt_id,riga_nr,anno,numero_ddt,um,quantita,descrizione,prezzo,sconto_pct,importo,iva_pct,prezzo_acquisto,prezzo_scontato,ricavo";
 const PAGE_SIZE = 1000;
 
 async function readPage<T>(url: URL, table: string, fields: string, anonKey: string, offset: number): Promise<{ rows: T[]; total: number }> {
@@ -101,7 +101,7 @@ const documentKey = (year: number, number: number) => `${year}:${number}`;
 const validAmount = (value: number | null | undefined): number => Number(value ?? 0);
 const subunits = (value: number | string | null | undefined) => MonetaryValue.parse(value == null ? 0 : String(value)).toSubunits();
 
-function mapHeaderForLocal(header: CloudHeader): LocalImportHeader {
+export function mapHeaderForLocal(header: CloudHeader): LocalImportHeader {
   const now = new Date().toISOString();
   const sourcePhones = Array.isArray(header.telefoni) ? header.telefoni : [];
   const clientPhones = sourcePhones.map((entry, index) => {
@@ -126,13 +126,12 @@ function mapHeaderForLocal(header: CloudHeader): LocalImportHeader {
   };
 }
 
-function mapLineForLocal(line: CloudLine, cloudHeaderId: string | null, fallbackRowIndex: number): LocalImportLine {
+export function mapLineForLocal(line: CloudLine, cloudHeaderId: string | null, fallbackRowIndex: number): LocalImportLine {
   const price = validAmount(line.prezzo);
   const amount = validAmount(line.importo);
   const quantity = line.quantita === null ? "" : String(line.quantita);
   const isNote = Boolean(line.descrizione?.trim()) && price === 0 && amount === 0
-    && validAmount(line.prezzo_acquisto) === 0 && validAmount(line.iva_pct) === 0
-    && validAmount(line.sconto_pct) === 0 && !quantity.trim() && !line.um?.trim();
+    && validAmount(line.prezzo_acquisto) === 0;
   const createdAt = new Date().toISOString();
   const vatRate = isNote ? 0 : validAmount(line.iva_pct);
   const netAmountSubunits = isNote ? 0 : subunits(line.importo);

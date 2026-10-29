@@ -29,21 +29,28 @@ export class DdtRepository {
       query += ` AND (${searchFields.map((field) => `${field} LIKE $${pIdx}`).join(" OR ")})`;
     }
 
-    query += " ORDER BY year DESC, series ASC, CASE WHEN doc_number IS NULL THEN 0 ELSE 1 END DESC, doc_number DESC, doc_date DESC LIMIT 150";
+    query += " ORDER BY year DESC, series ASC, CASE WHEN doc_number IS NULL THEN 0 ELSE 1 END DESC, doc_number DESC, doc_date DESC";
 
     const rows = await db.select<any[]>(query, params);
     if (rows.length === 0) return [];
 
-    const ids = rows.map((row) => String(row.id));
-    const placeholders = ids.map((_, index) => `$${index + 1}`).join(", ");
+    let summaryQuery = `
+      SELECT ddt_id,
+             COUNT(CASE WHEN unit_price_subunits > 0 THEN 1 END) AS billed_rows,
+             MIN(CASE WHEN unit_price_subunits > 0 THEN (purchase_price_subunits > 0) ELSE 1 END) AS all_have_cost
+      FROM ddt_items
+      WHERE deleted_at IS NULL
+    `;
+    const summaryParams: any[] = [];
+    if (year) {
+      summaryQuery += ` AND ddt_id IN (SELECT id FROM ddt_documents WHERE deleted_at IS NULL AND year = $1)`;
+      summaryParams.push(year);
+    }
+    summaryQuery += ` GROUP BY ddt_id`;
+
     const summaryRows = await db.select<Array<{ ddt_id: string; billed_rows: number; all_have_cost: number }>>(
-      `SELECT ddt_id,
-              COUNT(CASE WHEN unit_price_subunits > 0 THEN 1 END) AS billed_rows,
-              MIN(CASE WHEN unit_price_subunits > 0 THEN (purchase_price_subunits > 0) ELSE 1 END) AS all_have_cost
-       FROM ddt_items
-       WHERE deleted_at IS NULL AND ddt_id IN (${placeholders})
-       GROUP BY ddt_id`,
-      ids
+      summaryQuery,
+      summaryParams
     );
     const marginState = new Map<string, { billedRows: number; allHaveCost: boolean }>();
     for (const item of summaryRows) {
@@ -216,7 +223,13 @@ export class DdtRepository {
       (it) => it.description?.trim().length || isPositivePrice(it.unit_price)
     );
     const itemPayloads = validItems.map((it, index) => {
-      const isNote = it.row_kind === "note";
+      const isNote = it.row_kind === "note" || (
+        Boolean(it.description?.trim()) &&
+        !isPositivePrice(it.unit_price) &&
+        (!it.purchase_price || !isPositivePrice(it.purchase_price)) &&
+        (!it.code || !it.code.trim()) &&
+        (!it.quantity || !parseFloat(String(it.quantity).replace(",", ".")))
+      );
       const p = isNote ? money(0) : safeMoney(it.unit_price);
       const q = isNote ? "" : it.quantity || "1";
       const disc = isNote ? "" : it.discount_pct || "0";
@@ -229,7 +242,7 @@ export class DdtRepository {
       const vatA = vatR > 0 ? net.calculateVat(vatR) : money(0);
       return {
         id: it.id || crypto.randomUUID(),
-        row_index: index + 1,
+        row_index: it.row_index && it.row_index > 0 ? it.row_index : index + 1,
         row_kind: isNote ? "note" : "item",
         product_id: it.product_id || null,
         code: it.code || null,
@@ -344,6 +357,13 @@ export class DdtRepository {
   }
 
   private mapRowToItem(row: any): DdtItem {
+    const isNote = row.row_kind === "note" || (
+      Boolean(row.description?.trim()) &&
+      (row.unit_price_subunits ?? 0) === 0 &&
+      (row.net_amount_subunits ?? 0) === 0 &&
+      (!row.purchase_price_subunits || row.purchase_price_subunits === 0) &&
+      (!row.code || !String(row.code).trim())
+    );
     return {
       id: row.id,
       created_at: row.created_at,
@@ -356,13 +376,13 @@ export class DdtRepository {
       product_id: row.product_id || undefined,
       code: row.code || undefined,
       description: row.description,
-      row_kind: row.row_kind === "note" ? "note" : "item",
-      unit: row.row_kind === "note" ? "" : row.unit || "NR",
-      quantity: row.row_kind === "note" ? "" : String(row.quantity ?? "1"),
+      row_kind: isNote ? "note" : "item",
+      unit: isNote ? "" : row.unit || "NR",
+      quantity: isNote ? "" : String(row.quantity ?? "1"),
       unit_price: MonetaryValue.fromSubunits(row.unit_price_subunits || 0),
-      discount_pct: row.row_kind === "note" ? "" : String(row.discount_pct ?? "0"),
+      discount_pct: isNote ? "" : String(row.discount_pct ?? "0"),
       net_amount: MonetaryValue.fromSubunits(row.net_amount_subunits || 0),
-      vat_rate: row.row_kind === "note" ? "" : row.vat_rate !== null && row.vat_rate !== undefined ? row.vat_rate : "",
+      vat_rate: isNote ? "" : row.vat_rate !== null && row.vat_rate !== undefined ? row.vat_rate : "",
       vat_amount: MonetaryValue.fromSubunits(row.vat_amount_subunits || 0),
       purchase_price: row.purchase_price_subunits
         ? MonetaryValue.fromSubunits(row.purchase_price_subunits)

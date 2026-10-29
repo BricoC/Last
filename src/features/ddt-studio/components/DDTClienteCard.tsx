@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Building2, MapPin, X, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
+import { Building2, MapPin, X, ChevronDown, ChevronUp, SlidersHorizontal, Plus, Check } from "lucide-react";
 import { DdtDocument, DdtAccountOrBalance } from "../models/ddt";
-import { Client } from "@/features/clients/models/client";
+import { Client, ClientDestination } from "@/features/clients/models/client";
 import { clientRepository } from "@/features/clients/services/clientRepository";
+import { deduplicateDestinations } from "@/features/clients/utils/destinationUtils";
 
 export interface DDTClienteCardProps {
   ddt: Partial<DdtDocument>;
@@ -30,6 +31,23 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Modal Nuova Destinazione
+  const [isNewDestModalOpen, setIsNewDestModalOpen] = useState(false);
+  const [newDestAddress, setNewDestAddress] = useState("");
+  const [newDestCity, setNewDestCity] = useState("");
+  const [newDestName, setNewDestName] = useState("");
+  const [saveToClient, setSaveToClient] = useState(true);
+  const newDestInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isNewDestModalOpen) {
+      setTimeout(() => {
+        newDestInputRef.current?.focus();
+        newDestInputRef.current?.select();
+      }, 50);
+    }
+  }, [isNewDestModalOpen]);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -265,20 +283,60 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
 
   // Destinazione attiva selezionata per il menu a tendina
   const currentActiveDestValue = (() => {
-    if (!selectedClient?.destinations || selectedClient.destinations.length === 0) return "";
     const addr = (ddt.destination_address || "").trim().toUpperCase();
     const city = (ddt.destination_city || "").trim().toUpperCase();
-    const matched = selectedClient.destinations.find(
-      (d) =>
-        (d.citta && (d.citta.trim().toUpperCase() === addr || d.citta.trim().toUpperCase() === city)) ||
-        (String(d.id) === addr)
-    );
-    if (matched) return String(matched.id || matched.citta);
-    return String(selectedClient.destinations[0]?.id || selectedClient.destinations[0]?.citta || "");
+    const clientAddr = (selectedClient?.address || ddt.client_address || "").trim().toUpperCase();
+
+    // Se è vuoto o corrisponde alla sede legale
+    if (
+      (!addr && !city) ||
+      (clientAddr && addr === clientAddr) ||
+      (addr === "SEDE LEGALE" && !city)
+    ) {
+      return "__SEDE_LEGALE__";
+    }
+
+    if (selectedClient?.destinations && selectedClient.destinations.length > 0) {
+      const matched = selectedClient.destinations.find(
+        (d) =>
+          (d.citta && (d.citta.trim().toUpperCase() === addr || d.citta.trim().toUpperCase() === city)) ||
+          String(d.id) === addr ||
+          (d.luogo && d.luogo.trim().toUpperCase() === addr)
+      );
+      if (matched) return String(matched.id || matched.citta);
+    }
+
+    // Se c'è un valore impostato ed è una destinazione personalizzata
+    if (addr || city) {
+      return "__CUSTOM__";
+    }
+
+    return "__SEDE_LEGALE__";
   })();
+
+  const handleOpenNewDestModal = () => {
+    setNewDestAddress("");
+    setNewDestCity("");
+    setNewDestName(selectedClient?.business_name || ddt.client_name || "");
+    setSaveToClient(Boolean(selectedClient?.id));
+    setIsNewDestModalOpen(true);
+  };
 
   const handleDestinationChange = (val: string) => {
     if (!val) return;
+    if (val === "__NEW__") {
+      handleOpenNewDestModal();
+      return;
+    }
+    if (val === "__SEDE_LEGALE__") {
+      setDdt((prev) => ({
+        ...prev,
+        destination_name: selectedClient?.business_name || prev.client_name || "",
+        destination_address: selectedClient?.address || prev.client_address || "",
+        destination_city: selectedClient?.city || prev.client_city || "",
+      }));
+      return;
+    }
     const d = selectedClient?.destinations?.find((item) => String(item.id || item.citta) === val || item.citta === val);
     if (d) {
       setDdt((prev) => ({
@@ -288,6 +346,50 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
         destination_city: "",
       }));
     }
+  };
+
+  const handleSaveNewDestination = async () => {
+    const cleanAddr = newDestAddress.trim();
+    const cleanCity = newDestCity.trim();
+    const cleanName = newDestName.trim() || selectedClient?.business_name || ddt.client_name || "";
+
+    if (!cleanAddr && !cleanCity) return;
+
+    // 1. Applica subito al DDT corrente
+    setDdt((prev) => ({
+      ...prev,
+      destination_name: cleanName,
+      destination_address: cleanAddr || cleanCity,
+      destination_city: cleanAddr ? cleanCity : "",
+    }));
+
+    // 2. Se richiesto e il cliente esiste, salva anche nell'anagrafica cliente
+    if (saveToClient && selectedClient?.id) {
+      try {
+        const newDestEntry: ClientDestination = {
+          id: crypto.randomUUID(),
+          citta: cleanAddr || cleanCity,
+          luogo: cleanCity && cleanAddr ? `${cleanName} · ${cleanCity}` : cleanName,
+          note: "",
+        };
+
+        const updatedDestinations = deduplicateDestinations([
+          ...(selectedClient.destinations || []),
+          newDestEntry,
+        ]);
+
+        const updatedClient = await clientRepository.createOrUpdateClient({
+          ...selectedClient,
+          destinations: updatedDestinations,
+        });
+
+        setSelectedClient(updatedClient);
+      } catch (err) {
+        console.error("Errore salvataggio nuova destinazione nel cliente:", err);
+      }
+    }
+
+    setIsNewDestModalOpen(false);
   };
 
   const handleAccountOrBalanceChange = (target: "in_conto" | "a_saldo") => {
@@ -397,40 +499,59 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
 
           <div className="h-4 w-px bg-[var(--border)] shrink-0" />
 
-          {/* Destinazione Merce con Menù a Tendina Compatto */}
+          {/* Destinazione Merce con Menù a Tendina e Tasto + Nuova Destinazione */}
           <div className="flex items-center gap-1.5 shrink-0">
             <MapPin className="w-3.5 h-3.5 text-sky-400 shrink-0" />
             <span className="text-[var(--muted-foreground)] text-[11px] font-semibold">Dest:</span>
 
-            {selectedClient?.destinations && selectedClient.destinations.length > 0 ? (
-              <div className="relative flex items-center">
-                <select
-                  value={currentActiveDestValue}
-                  onChange={(e) => handleDestinationChange(e.target.value)}
-                  className="h-6 pl-2 pr-6 text-xs font-bold text-sky-300 bg-[var(--background)] border border-sky-500/40 hover:border-sky-400 rounded focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer appearance-none transition-colors max-w-[240px] truncate"
-                  title="Seleziona la destinazione merci o sede di consegna"
-                >
-                  {selectedClient.destinations.map((d, dIdx) => (
-                    <option
-                      key={d.id || dIdx}
-                      value={String(d.id || d.citta)}
-                      className="bg-[var(--card)] text-[var(--foreground)] font-semibold"
-                    >
-                      {d.citta || d.luogo || `Sede ${dIdx + 1}`}
-                      {d.luogo && d.citta ? ` · ${d.luogo}` : ""}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-sky-400 absolute right-1.5 pointer-events-none opacity-80" />
-              </div>
-            ) : (
-              <span
-                className="font-semibold text-sky-300 text-xs truncate max-w-[150px]"
-                title={ddt.destination_address || ddt.destination_city || ddt.destination_name || "Sede Legale"}
+            <div className="relative flex items-center">
+              <select
+                value={currentActiveDestValue}
+                onChange={(e) => handleDestinationChange(e.target.value)}
+                className="h-6 pl-2 pr-6 text-xs font-bold text-sky-300 bg-[var(--background)] border border-sky-500/40 hover:border-sky-400 rounded focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer appearance-none transition-colors max-w-[240px] truncate"
+                title="Seleziona la destinazione merci o sede di consegna"
               >
-                {ddt.destination_address || ddt.destination_city || ddt.destination_name || "Sede Legale"}
-              </span>
-            )}
+                <option value="__SEDE_LEGALE__" className="bg-[var(--card)] text-[var(--foreground)] font-semibold">
+                  Sede Legale {selectedClient?.city ? `(${selectedClient.city})` : ""}
+                </option>
+
+                {selectedClient?.destinations && selectedClient.destinations.map((d, dIdx) => (
+                  <option
+                    key={d.id || dIdx}
+                    value={String(d.id || d.citta)}
+                    className="bg-[var(--card)] text-[var(--foreground)] font-semibold"
+                  >
+                    {d.citta || d.luogo || `Sede ${dIdx + 1}`}
+                    {d.luogo && d.citta ? ` · ${d.luogo}` : ""}
+                  </option>
+                ))}
+
+                {currentActiveDestValue === "__CUSTOM__" && (
+                  <option value="__CUSTOM__" className="bg-[var(--card)] text-sky-400 font-semibold">
+                    📍 {ddt.destination_address || ddt.destination_city || "Altra destinazione"}
+                    {ddt.destination_city && ddt.destination_address ? ` (${ddt.destination_city})` : ""}
+                  </option>
+                )}
+
+                <option disabled className="bg-[var(--card)] text-[var(--muted-foreground)]">
+                  ──────────────
+                </option>
+                <option value="__NEW__" className="bg-[var(--card)] text-emerald-400 font-bold">
+                  ➕ + Nuova / Altra destinazione...
+                </option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-sky-400 absolute right-1.5 pointer-events-none opacity-80" />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenNewDestModal}
+              className="h-6 px-1.5 flex items-center gap-1 rounded bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 hover:text-white border border-sky-500/40 hover:border-sky-400 transition-all shrink-0 text-[11px] font-bold cursor-pointer"
+              title="Aggiungi una nuova destinazione merci"
+            >
+              <Plus className="w-3 h-3 text-sky-400" />
+              <span>Nuova</span>
+            </button>
           </div>
 
           <div className="h-4 w-px bg-[var(--border)] shrink-0" />
@@ -740,6 +861,138 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
                   Chiudi Tendina (Esc)
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL NUOVA / ALTRA DESTINAZIONE */}
+      {isNewDestModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-100"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setIsNewDestModalOpen(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-md bg-[#0f172a] border border-sky-500/40 rounded-xl shadow-2xl p-5 flex flex-col space-y-4 text-white">
+            <div className="flex items-center justify-between border-b border-sky-500/30 pb-2.5">
+              <div className="flex items-center space-x-2 text-sky-400">
+                <MapPin className="w-5 h-5 text-sky-400" />
+                <span className="font-black text-sm tracking-wide uppercase text-white">
+                  Nuova Destinazione Merci
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsNewDestModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-white rounded cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {selectedClient && (
+              <div className="px-3 py-2 rounded-lg bg-sky-950/40 border border-sky-500/30 text-xs">
+                <span className="text-slate-400">Cliente: </span>
+                <span className="font-bold text-sky-300">{selectedClient.business_name}</span>
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold text-slate-300 block mb-1">
+                  Destinazione / Indirizzo Consegna / Sigla Cantiere <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  ref={newDestInputRef}
+                  type="text"
+                  value={newDestAddress}
+                  onChange={(e) => setNewDestAddress(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleSaveNewDestination();
+                    }
+                  }}
+                  placeholder="Es. CV8 - CARTIERE CARRARA, Via Roma 12, Cantiere Sud"
+                  className="w-full px-3 py-2 bg-[#1e293b] border border-sky-500/50 rounded-lg text-white font-medium outline-none focus:ring-2 focus:ring-sky-400 placeholder:text-slate-500 text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-bold text-slate-300 block mb-1">
+                    Città / Località
+                  </label>
+                  <input
+                    type="text"
+                    value={newDestCity}
+                    onChange={(e) => setNewDestCity(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleSaveNewDestination();
+                      }
+                    }}
+                    placeholder="Es. Capannori"
+                    className="w-full px-3 py-2 bg-[#1e293b] border border-slate-700 focus:border-sky-500 rounded-lg text-white font-medium outline-none focus:ring-1 focus:ring-sky-400 placeholder:text-slate-500 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-300 block mb-1">
+                    Rag. Soc. Destinazione
+                  </label>
+                  <input
+                    type="text"
+                    value={newDestName}
+                    onChange={(e) => setNewDestName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleSaveNewDestination();
+                      }
+                    }}
+                    placeholder={selectedClient?.business_name || "Nome destinatario"}
+                    className="w-full px-3 py-2 bg-[#1e293b] border border-slate-700 focus:border-sky-500 rounded-lg text-white font-medium outline-none focus:ring-1 focus:ring-sky-400 placeholder:text-slate-500 text-xs"
+                  />
+                </div>
+              </div>
+
+              {selectedClient?.id && (
+                <label className="flex items-center gap-2 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={saveToClient}
+                    onChange={(e) => setSaveToClient(e.target.checked)}
+                    className="rounded border-slate-700 text-sky-500 focus:ring-0 h-4 w-4 accent-sky-500 cursor-pointer"
+                  />
+                  <span className="text-slate-300 text-xs font-semibold">
+                    Salva permanentemente nell'anagrafica cliente per i prossimi DDT
+                  </span>
+                </label>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end space-x-2.5 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsNewDestModalOpen(false)}
+                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                disabled={!newDestAddress.trim() && !newDestCity.trim()}
+                onClick={() => void handleSaveNewDestination()}
+                className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-black text-xs shadow-lg shadow-sky-500/20 transition-all flex items-center space-x-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Applica al DDT</span>
+              </button>
             </div>
           </div>
         </div>

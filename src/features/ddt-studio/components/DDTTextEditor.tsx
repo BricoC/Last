@@ -18,6 +18,9 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
 
   const colId = props.column?.getColId();
   const isUppercaseCol = colId === "unit" || colId === "um" || colId === "description" || colId === "descrizione" || colId === "code" || colId === "quantity" || colId === "quantita";
+  const isDescCol = colId === "description" || colId === "descrizione";
+  const cellParams = props.colDef?.cellEditorParams || {};
+  const onDescriptionTyping: ((val: string) => void) | undefined = (props as any).onDescriptionTyping ?? cellParams.onDescriptionTyping;
 
   let startValue = "";
   if (props.value !== null && props.value !== undefined) {
@@ -167,7 +170,11 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     lastTypedLengthRef.current = nextVal.length;
     isBackspaceOrDeleteRef.current = false;
 
-    if (isForwardTyping && nextVal.trim().length >= 1) {
+    if (isDescCol && onDescriptionTyping) {
+      onDescriptionTyping(nextVal);
+    }
+
+    if (!isDescCol && isForwardTyping && nextVal.trim().length >= 1) {
       const query = nextVal.toUpperCase();
       const bestMatch = candidates.find((c) => c.toUpperCase().startsWith(query));
 
@@ -186,7 +193,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     }
 
     setValue(nextVal);
-    setShowSuggestions(nextVal.trim().length >= 1 && matchedSuggestions.length > 0);
+    setShowSuggestions(!isDescCol && nextVal.trim().length >= 1 && matchedSuggestions.length > 0);
     setSelectedSuggestionIdx(-1);
   };
 

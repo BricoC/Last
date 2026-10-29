@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Search, Calendar, Plus, PanelLeftClose, ChevronRight, Trash2, LoaderCircle } from "lucide-react";
 import { DdtArchiveEntry } from "../models/ddt";
 import { toDateIT } from "../utils/ddtCalculations";
 import { cn } from "@/shared/utils/cn";
 
 type ArchiveTab = "ddt" | "drafts";
+
+const SIDEBAR_BATCH_SIZE = 150;
 
 export interface DDTStudioSidebarProps {
   sidebarOpen: boolean;
@@ -43,6 +45,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(false);
   const [searchTerm, setSearchTerm] = useState(search);
+  const [visibleCount, setVisibleCount] = useState(SIDEBAR_BATCH_SIZE);
 
   // Sincronizza stato di ricerca locale quando cambia la prop
   useEffect(() => {
@@ -67,6 +70,22 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   const filteredDdtList = tabDocuments.filter((doc) =>
     marginFilter === "all" || (marginFilter === "with_margins" ? doc.has_complete_margins : !doc.has_complete_margins)
   );
+
+  // Resetta il conteggio visibile quando cambiano filtri o ricerca
+  useEffect(() => {
+    setVisibleCount(SIDEBAR_BATCH_SIZE);
+  }, [searchTerm, selectedYear, marginFilter, archiveTab]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollTop + clientHeight >= scrollHeight - 200) {
+      setVisibleCount((prev) => Math.min(prev + SIDEBAR_BATCH_SIZE, filteredDdtList.length));
+    }
+  };
+
+  const displayedDdtList = useMemo(() => {
+    return filteredDdtList.slice(0, visibleCount);
+  }, [filteredDdtList, visibleCount]);
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
@@ -103,8 +122,8 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
         </div>
 
         {/* Lista verticale compatta dei numeri DDT */}
-        <div className="flex-1 overflow-y-auto no-scrollbar py-1.5 space-y-1 w-full px-1 flex flex-col items-center">
-          {filteredDdtList.map((doc) => {
+        <div onScroll={handleScroll} className="flex-1 overflow-y-auto no-scrollbar py-1.5 space-y-1 w-full px-1 flex flex-col items-center">
+          {displayedDdtList.map((doc) => {
             const isSelected = currentDdtId === doc.id || loadingDdtId === doc.id;
             const isConfirmed = doc.has_complete_margins;
             const numberLabel = doc.doc_number === null
@@ -246,7 +265,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
       </div>
 
       {/* Lista Documenti DDT */}
-      <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]/50">
+      <div onScroll={handleScroll} className="flex-1 overflow-y-auto divide-y divide-[var(--border)]/50">
         {filteredDdtList.length === 0 ? (
           <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
             {isLoading ? (
@@ -261,7 +280,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
             )}
           </div>
         ) : (
-          filteredDdtList.map((doc) => {
+          displayedDdtList.map((doc) => {
             const isSelected = currentDdtId === doc.id || loadingDdtId === doc.id;
             const isLoadingCurrent = loadingDdtId === doc.id;
             const isDraft = doc.status === "bozza" || doc.doc_number === null;

@@ -16,6 +16,8 @@ import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
 import { ShieldAlert } from "lucide-react";
 
+import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
+
 export function App() {
   const { applyToDom } = useThemeStore();
   const { currentUser } = useUserStore();
@@ -24,6 +26,13 @@ export function App() {
     // Applica le variabili CSS del tema Grigio L4 all'avvio dell'applicazione
     applyToDom();
   }, [applyToDom]);
+
+  useEffect(() => {
+    // Sincronizzazione incrementale automatica all'avvio da Supabase (scarica SOLO i nuovi DDT)
+    void ddtIncrementalSyncService.syncNewDdtsFromSupabase().catch((err) => {
+      console.warn("[App] Sync incrementale all'avvio non riuscita:", err);
+    });
+  }, []);
 
   // Renderer del contenuto delle finestre desktop in base al componentId
   const renderWindowContent = (componentId: string, windowId: string) => {

@@ -175,7 +175,7 @@ export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
 
       {/* DESTRA: Cerca Articoli (F3), Visualizza Margini, Operatore & Stato */}
       <div className="flex items-center space-x-3">
-        {/* Cerca Articoli F3 */}
+        {/* Cerca Articoli F4 */}
         <div className="flex flex-col items-start">
           <label className="text-[9.5px] font-bold uppercase text-zinc-400 mb-0.5">
             Listino / Storico
@@ -184,9 +184,10 @@ export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
             type="button"
             onClick={onOpenSearchModal}
             className="flex items-center space-x-1.5 text-xs px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold shadow-sm transition-colors cursor-default"
+            title="Mostra / Nascondi pannello cerca articoli (F4)"
           >
             <Search className="w-3.5 h-3.5" />
-            <span>Cerca Articoli (F3)</span>
+            <span>Cerca Articoli (F4)</span>
           </button>
         </div>
 

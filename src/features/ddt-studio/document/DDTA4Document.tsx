@@ -655,7 +655,8 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                     const hasPrice = isPositivePrice(r.unit_price);
                     const hasDiscount = Boolean(r.discount_pct && formatCascadeDiscountDisplay(r.discount_pct));
                     const hasNet = isPositivePrice(r.net_amount);
-                    const hasVat = r.vat_rate !== undefined && r.vat_rate !== null && String(r.vat_rate).trim() !== "";
+                    const isNoteRow = r.row_kind === "note" || (!hasPrice && !hasNet && Boolean(r.description?.trim()) && !r.code?.trim());
+                    const hasVat = !isNoteRow && r.vat_rate !== undefined && r.vat_rate !== null && String(r.vat_rate).trim() !== "" && String(r.vat_rate) !== "0";
                     const hasContent = Boolean(
                       (r.description && r.description.trim().length > 0) ||
                       hasPrice ||
@@ -684,7 +685,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             boxSizing: "border-box",
                           }}
                         >
-                          {r.unit || ""}
+                          {!isNoteRow ? (r.unit || "") : ""}
                         </td>
                         <td
                           style={{
@@ -697,7 +698,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             boxSizing: "border-box",
                           }}
                         >
-                          {r.quantity !== "" && r.quantity !== null && r.quantity !== undefined ? r.quantity : ""}
+                          {!isNoteRow && r.quantity !== "" && r.quantity !== null && r.quantity !== undefined ? r.quantity : ""}
                         </td>
                         <td
                           style={{
@@ -731,7 +732,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             boxSizing: "border-box",
                           }}
                         >
-                          {hasPrice ? safeMoney(r.unit_price).formatIT(false) : ""}
+                          {!isNoteRow && hasPrice ? safeMoney(r.unit_price).formatIT(false) : ""}
                         </td>
                         <td
                           style={{
@@ -744,7 +745,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             boxSizing: "border-box",
                           }}
                         >
-                          {hasContent && hasDiscount ? formatCascadeDiscountDisplay(r.discount_pct) : ""}
+                          {!isNoteRow && hasContent && hasDiscount ? formatCascadeDiscountDisplay(r.discount_pct) : ""}
                         </td>
                         <td
                           style={{
@@ -758,7 +759,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             boxSizing: "border-box",
                           }}
                         >
-                          {hasNet ? safeMoney(r.net_amount).formatIT(false) : ""}
+                          {!isNoteRow && hasNet ? safeMoney(r.net_amount).formatIT(false) : ""}
                         </td>
                         <td
                           style={{
@@ -770,7 +771,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             boxSizing: "border-box",
                           }}
                         >
-                          {hasContent && hasVat ? `${r.vat_rate}` : ""}
+                          {!isNoteRow && hasContent && hasVat ? `${r.vat_rate}` : ""}
                         </td>
                       </tr>
                     );

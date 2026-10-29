@@ -19,6 +19,11 @@ export interface DDTArticoliSearchModalProps {
     purchase_price?: number;
     vat_rate?: number;
   }) => void;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
+  f3FocusTrigger?: number;
+  onReturnToTable?: () => void;
+  onPendingInsertChange?: (isOpen: boolean) => void;
 }
 
 interface PendingArticleInsert {
@@ -38,10 +43,20 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
   onClose,
   clientName,
   onSelectArticle,
+  searchQuery,
+  onSearchQueryChange,
+  f3FocusTrigger,
+  onReturnToTable,
+  onPendingInsertChange,
 }) => {
   const [sourceTab, setSourceTab] = useState<"generale" | "cliente">("generale");
-  const [prezziIvaEnabled, setPrezziIvaEnabled] = useState(true);
-  const [search, setSearch] = useState("");
+  const [prezziIvaEnabled, setPrezziIvaEnabled] = useState(false);
+  const [internalSearch, setInternalSearch] = useState("");
+  const search = searchQuery !== undefined ? searchQuery : internalSearch;
+  const setSearch = (val: string) => {
+    setInternalSearch(val);
+    onSearchQueryChange?.(val);
+  };
   const deferredSearch = useDeferredValue(search);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,6 +78,65 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
 
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const historyContainerRef = useRef<HTMLDivElement>(null);
+
+  // Quando viene premuto F3, sposta il focus immediatamente sulla prima voce della tabella in alto
+  useEffect(() => {
+    if (!isOpen || pendingInsert) return;
+
+    // Se il listino cliente non ha risultati ma il listino generale sì, passa a Generale
+    if (sourceTab === "cliente" && filteredClientItems.length === 0 && filteredGeneralItems.length > 0) {
+      setSourceTab("generale");
+    }
+
+    setActivePane("list");
+    setSelectedListIdx(0);
+    inputRef.current?.blur();
+
+    const doFocus = () => {
+      if (listContainerRef.current) {
+        listContainerRef.current.focus();
+      } else if (containerRef.current) {
+        containerRef.current.focus();
+      }
+    };
+
+    doFocus();
+    const t1 = setTimeout(doFocus, 30);
+    const t2 = setTimeout(doFocus, 100);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [f3FocusTrigger, isOpen, pendingInsert]);
+
+  // Notifica lo stato di apertura/chiusura del popup quantità al genitore per bloccare shortcut F3/F4
+  useEffect(() => {
+    onPendingInsertChange?.(Boolean(pendingInsert));
+    return () => {
+      onPendingInsertChange?.(false);
+    };
+  }, [pendingInsert, onPendingInsertChange]);
+
+  // Auto-scroll automatico della visuale quando si naviga tra i record con le frecce
+  useEffect(() => {
+    if (activePane === "list") {
+      const activeEl = listContainerRef.current?.querySelector(`[data-active="true"]`) as HTMLElement;
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [selectedListIdx, activePane]);
+
+  useEffect(() => {
+    if (activePane === "history") {
+      const activeEl = historyContainerRef.current?.querySelector(`[data-active="true"]`) as HTMLElement;
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [selectedHistIdx, activePane]);
 
   // Focus automatico sul popup quantità
   useEffect(() => {
@@ -84,7 +158,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
       if (!cachedGeneralList) {
         setIsLoading(true);
         try {
-          const genRows = await priceListRepository.searchGeneral("", 8000);
+          const genRows = await priceListRepository.searchGeneral("", 50000);
           if (active) {
             cachedGeneralList = genRows;
             setGeneralItems(genRows);
@@ -186,44 +260,76 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
 
   // Gestione tastiera fluida tra tabella sopra e tabella sotto
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (pendingInsert) return;
+    if (pendingInsert) {
+      if (e.key === "F3" || e.key === "F4") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
 
+    // Se si preme di nuovo F3 dentro la ricerca, torna immediatamente alla tabella DDT
+    if (e.key === "F3") {
+      e.preventDefault();
+      e.stopPropagation();
+      onReturnToTable?.();
+      return;
+    }
+
+    // Tasto TAB: passa istantaneamente da tabella listino (sopra) a storico (sotto) e viceversa
+    if (e.key === "Tab") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (activePane === "list") {
+        setActivePane("history");
+        setSelectedHistIdx(0);
+        setTimeout(() => historyContainerRef.current?.focus(), 10);
+      } else {
+        setActivePane("list");
+        setSelectedListIdx(0);
+        setTimeout(() => listContainerRef.current?.focus(), 10);
+      }
+      return;
+    }
+
+    // Frecce Su e Giù: spostamento rigoroso di 1 solo record alla volta
     if (e.key === "ArrowDown") {
       e.preventDefault();
+      e.stopPropagation();
       if (activePane === "list") {
-        if (selectedListIdx >= visibleListItems.length - 1 && visibleHistoryItems.length > 0) {
-          setActivePane("history");
-          setSelectedHistIdx(0);
-        } else {
-          setSelectedListIdx((prev) => Math.min(prev + 1, Math.max(0, visibleListItems.length - 1)));
-        }
+        setSelectedListIdx((prev) => Math.min(prev + 1, Math.max(0, visibleListItems.length - 1)));
       } else {
         setSelectedHistIdx((prev) => Math.min(prev + 1, Math.max(0, visibleHistoryItems.length - 1)));
       }
+      return;
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
+      e.stopPropagation();
       if (activePane === "history") {
-        if (selectedHistIdx <= 0 && visibleListItems.length > 0) {
-          setActivePane("list");
-          setSelectedListIdx(visibleListItems.length - 1);
-        } else {
-          setSelectedHistIdx((prev) => Math.max(prev - 1, 0));
-        }
+        setSelectedHistIdx((prev) => Math.max(prev - 1, 0));
       } else {
         setSelectedListIdx((prev) => Math.max(prev - 1, 0));
       }
+      return;
     } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      e.stopPropagation();
       if (activePane === "list" && visibleHistoryItems.length > 0) {
         setActivePane("history");
       } else {
         setActivePane("list");
       }
+      return;
     } else if (e.key === "Enter") {
       e.preventDefault();
+      e.stopPropagation();
       handleOpenQuantityModal();
+      return;
     } else if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       onClose();
+      return;
     }
   };
 
@@ -239,9 +345,9 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
           code: item.codice_articolo || undefined,
           description: item.descrizione,
           unit: item.um || "NR.",
-          unit_price: prezziIvaEnabled ? (item.prezzo_fattura || item.prezzo_pubblico || 0) : 0,
+          unit_price: prezziIvaEnabled ? (item.prezzo_fattura || 0) : 0,
           purchase_price: item.prezzo_acquisto || 0,
-          vat_rate: prezziIvaEnabled ? Math.round((item.perc_iva || 0.22) * 100) : 22,
+          vat_rate: prezziIvaEnabled && item.perc_iva ? Math.round(item.perc_iva * 100) : undefined,
         });
       } else {
         const item = selected as ListinoClienteRow;
@@ -251,7 +357,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
           unit: "NR.",
           unit_price: prezziIvaEnabled ? (item.prezzo_fattura || 0) : 0,
           purchase_price: item.prezzo_acquisto || 0,
-          vat_rate: 22,
+          vat_rate: undefined,
         });
       }
       setInsertQuantity("1");
@@ -264,7 +370,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
         unit: hist.unit || "NR.",
         unit_price: prezziIvaEnabled ? hist.unitPriceSubunits / 100000 : 0,
         purchase_price: hist.purchasePriceSubunits ? hist.purchasePriceSubunits / 100000 : 0,
-        vat_rate: hist.vatRate || 22,
+        vat_rate: prezziIvaEnabled && hist.vatRate ? hist.vatRate : undefined,
       });
       setInsertQuantity(hist.quantity || "1");
     }
@@ -298,9 +404,11 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
 
   return (
     <div
+      id="ddt-search-modal-container"
       ref={containerRef}
+      tabIndex={0}
       onKeyDown={handleKeyDown}
-      className="w-full h-full flex flex-col bg-[var(--card)] select-none overflow-hidden"
+      className="w-full h-full flex flex-col bg-[var(--card)] select-none overflow-hidden outline-none"
     >
       {/* 1. Header Pannello: Titolo Ricerca Articoli - CLIENTE + Tasti Listino e Chiusura */}
       <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between bg-[var(--background)] shrink-0 gap-2">
@@ -336,7 +444,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
           >
             <span>Cliente</span>
             <span className="px-1 py-0.1 rounded-full text-[9px] bg-black/20 font-bold">
-              {clientItems.length}
+              {search.trim() ? filteredClientItems.length : clientItems.length}
             </span>
           </button>
 
@@ -356,7 +464,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
           >
             <span>Generale</span>
             <span className="px-1 py-0.1 rounded-full text-[9px] bg-white/20 font-bold">
-              {generalItems.length}
+              {search.trim() ? filteredGeneralItems.length : generalItems.length}
             </span>
           </button>
 
@@ -378,7 +486,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
             type="button"
             onClick={onClose}
             className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--border)] transition-colors ml-1"
-            title="Nascondi pannello cerca articoli (F3)"
+            title="Nascondi pannello cerca articoli (F4)"
           >
             <X className="w-4 h-4" />
           </button>
@@ -396,6 +504,26 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
               setSearch(e.target.value);
               setSelectedListIdx(0);
               setSelectedHistIdx(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Tab") {
+                e.preventDefault();
+                e.stopPropagation();
+                setActivePane("list");
+                setSelectedListIdx(0);
+                containerRef.current?.focus();
+              } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActivePane("list");
+                setSelectedListIdx(0);
+                containerRef.current?.focus();
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                handleOpenQuantityModal();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+              }
             }}
             placeholder="Cerca per descrizione, codice o parole chiave..."
             className="w-full pl-8 pr-7 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]"
@@ -421,9 +549,14 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
         {/* TABELLA 1: LISTINO GENERALE O CLIENTE (50% altezza) */}
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden border-b border-[var(--border)]">
           <div className="px-3 py-1 bg-[var(--background)]/80 text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] flex justify-between items-center shrink-0">
-            <span>
-              {sourceTab === "generale" ? "Listino Generale Articoli" : `Listino Cliente (${displayClientName})`}
-            </span>
+            <div className="flex items-center space-x-2">
+              <span>{sourceTab === "generale" ? "Listino Generale Articoli" : `Listino Cliente (${displayClientName})`}</span>
+              {activePane === "list" && (
+                <span className="px-1.5 py-0.2 rounded text-[9px] bg-blue-500/20 text-blue-300 font-bold border border-blue-500/30">
+                  ATTIVO ↑↓
+                </span>
+              )}
+            </div>
             <span className="font-mono text-[10px]">
               {visibleListItems.length < filteredListItems.length
                 ? `Mostrati ${visibleListItems.length} di ${filteredListItems.length}`
@@ -431,21 +564,40 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div
+            ref={listContainerRef}
+            tabIndex={0}
+            className={`flex-1 overflow-y-auto overflow-x-hidden outline-none ${activePane === "list" ? "ring-1 ring-blue-500/40" : ""}`}
+          >
             {isLoading ? (
               <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
                 Caricamento listini in corso...
               </div>
             ) : visibleListItems.length === 0 ? (
               <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
-                Nessun articolo trovato con i criteri di ricerca.
+                Nessun articolo trovato {sourceTab === "cliente" ? "nel listino cliente" : "nel listino generale"}.
+                {sourceTab === "cliente" && filteredGeneralItems.length > 0 && (
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSourceTab("generale");
+                        setActivePane("list");
+                        setSelectedListIdx(0);
+                      }}
+                      className="inline-flex items-center space-x-1 px-2.5 py-1 rounded bg-[var(--primary)] text-white font-bold text-xs hover:opacity-90 shadow-sm transition-all"
+                    >
+                      <span>Mostra {filteredGeneralItems.length} nel Listino Generale →</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <table className="w-full text-left border-collapse">
                 <thead className="sticky top-0 bg-[var(--card)] z-10 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-semibold">
                   <tr>
                     <th className="px-2 py-1 text-left">Descrizione</th>
-                    <th className="px-2.5 py-1 text-right w-24">Prezzo (€)</th>
+                    <th className="px-2.5 py-1 text-right w-28 whitespace-nowrap">Prezzo Fattura (€)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11px]">
@@ -453,12 +605,13 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
                     const isSelected = activePane === "list" && selectedListIdx === idx;
                     const priceVal =
                       sourceTab === "generale"
-                        ? (item as ListinoGeneraleRow).prezzo_fattura || (item as ListinoGeneraleRow).prezzo_pubblico || 0
+                        ? (item as ListinoGeneraleRow).prezzo_fattura || 0
                         : (item as ListinoClienteRow).prezzo_fattura || 0;
 
                     return (
                       <tr
                         key={`${item.id}_${idx}`}
+                        data-active={isSelected ? "true" : undefined}
                         onClick={() => {
                           setActivePane("list");
                           setSelectedListIdx(idx);
@@ -472,11 +625,6 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
                       >
                         <td className="px-2 py-1 font-sans truncate max-w-[280px]" title={item.descrizione}>
                           <span className="text-[var(--foreground)]">{item.descrizione}</span>
-                          {item.codice_articolo && (
-                            <span className={`text-[10px] font-mono ml-2 ${isSelected ? "text-white/80" : "text-[var(--muted-foreground)]"}`}>
-                              [{item.codice_articolo}]
-                            </span>
-                          )}
                         </td>
                         <td
                           className={`px-2.5 py-1 text-right font-bold whitespace-nowrap ${
@@ -497,9 +645,16 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
         {/* TABELLA 2: STORICO PREZZI PRATICATI AL CLIENTE (50% altezza) */}
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-[var(--background)]/40">
           <div className="px-3 py-1 bg-[var(--background)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] flex justify-between items-center shrink-0">
-            <span className="text-emerald-400 font-bold">
-              Storico Prezzi Praticati {displayClientName && `a ${displayClientName}`}
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="text-emerald-400 font-bold">
+                Storico Prezzi Praticati {displayClientName && `a ${displayClientName}`}
+              </span>
+              {activePane === "history" && (
+                <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                  ATTIVO ↑↓
+                </span>
+              )}
+            </div>
             <span className="font-mono text-[10px]">
               {visibleHistoryItems.length < historyItems.length
                 ? `Mostrati ${visibleHistoryItems.length} di ${historyItems.length}`
@@ -507,7 +662,11 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div
+            ref={historyContainerRef}
+            tabIndex={0}
+            className={`flex-1 overflow-y-auto overflow-x-hidden outline-none ${activePane === "history" ? "ring-1 ring-emerald-500/40" : ""}`}
+          >
             {visibleHistoryItems.length === 0 ? (
               <div className="p-3 text-center text-xs text-[var(--muted-foreground)]">
                 Nessun prezzo storico trovato nei DDT precedenti per questo cliente.
@@ -529,6 +688,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
                     return (
                       <tr
                         key={`${h.ddtId}_${idx}`}
+                        data-active={isSelected ? "true" : undefined}
                         onClick={() => {
                           setActivePane("history");
                           setSelectedHistIdx(idx);
@@ -576,7 +736,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
             onClick={onClose}
             className="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--background)] text-[var(--foreground)] font-medium text-xs transition-colors"
           >
-            Chiudi (F3/Esc)
+            Chiudi (F4/Esc)
           </button>
 
           <button
@@ -592,7 +752,15 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
 
       {/* POPUP "INSERIMENTO ARTICOLO" CON QUANTITA' */}
       {pendingInsert && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-100">
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-100"
+          onKeyDown={(e) => {
+            if (e.key === "F3" || e.key === "F4") {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
+        >
           <div className="w-full max-w-lg bg-[#0f172a] border border-blue-500/40 rounded-xl shadow-2xl p-5 flex flex-col space-y-4">
             <div className="flex items-center justify-between border-b border-blue-500/30 pb-2.5">
               <div className="flex items-center space-x-2 text-blue-400">
@@ -634,6 +802,11 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
                 value={insertQuantity}
                 onChange={(e) => setInsertQuantity(e.target.value)}
                 onKeyDown={(e) => {
+                  if (e.key === "F3" || e.key === "F4") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                  }
                   if (e.key === "Enter") {
                     e.preventDefault();
                     handleConfirmInsert();

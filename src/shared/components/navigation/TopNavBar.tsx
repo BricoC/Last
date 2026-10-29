@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import {
@@ -20,8 +20,11 @@ import {
   Layers,
   Minimize2,
   User,
+  Cloud,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
+import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 
 export interface NavModule {
   id: string;
@@ -43,6 +46,33 @@ export const TopNavBar: React.FC = () => {
   } = useWindowStore();
 
   const { users, currentUser, loadUsers, switchUser } = useUserStore();
+
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  });
+
+  const handleManualSync = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      await ddtIncrementalSyncService.syncNewDdtsFromSupabase();
+      const now = new Date();
+      setLastSyncTime(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    const onDdtUpdated = () => {
+      const now = new Date();
+      setLastSyncTime(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
+    };
+    window.addEventListener("ddt-data-updated", onDdtUpdated);
+    return () => window.removeEventListener("ddt-data-updated", onDdtUpdated);
+  }, []);
 
   useEffect(() => {
     void loadUsers();
@@ -151,6 +181,29 @@ export const TopNavBar: React.FC = () => {
             <Minimize2 className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {/* Indicatore e Pulsante Cloud Sync Supabase */}
+        <button
+          type="button"
+          onClick={handleManualSync}
+          disabled={isSyncing}
+          className={cn(
+            "flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all cursor-pointer",
+            isSyncing
+              ? "bg-amber-500/15 border-amber-500/40 text-amber-300 animate-pulse"
+              : lastSyncTime
+              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
+              : "bg-[var(--background)] border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+          )}
+          title="Sincronizzazione Cloud Supabase (Clicca per verificare nuovi DDT ora)"
+        >
+          {isSyncing ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+          ) : (
+            <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+          )}
+          <span>{isSyncing ? "Sync in corso..." : lastSyncTime ? `Cloud: ${lastSyncTime}` : "Cloud Sync"}</span>
+        </button>
 
         {/* Indicatore e Selettore Rapido Utente / Postazione PC */}
         <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md bg-[var(--background)] border border-[var(--border)] text-xs">

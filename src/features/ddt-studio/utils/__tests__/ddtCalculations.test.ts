@@ -12,6 +12,7 @@ import {
 } from "../ddtCalculations";
 import { DdtItem } from "../../models/ddt";
 import { formatDdtImageFilename, formatDdtPdfFilename } from "../ddtExportManager";
+import { isTextOnlyRow } from "../../components/DDTArticoliTable";
 
 describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
   it("calcola le tre righe del PDF con precisione a 5 decimali", () => {
@@ -191,6 +192,19 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
       expect(res.nome).toBe("ACME S.P.A.");
       expect(res.indirizzo).toBe("VIA ROMA 1");
       expect(res.citta).toBe("LUCCA LU");
+    });
+  });
+
+  describe("isTextOnlyRow (Righe descrittive / note informative)", () => {
+    it("identifica correttamente le righe che contengono solo descrizione (es. PAGATO)", () => {
+      expect(isTextOnlyRow({ description: "PAGATO", unit_price: money(0), quantity: "" })).toBe(true);
+      expect(isTextOnlyRow({ description: "PAGATO", unit_price: money(0), quantity: "0" })).toBe(true);
+      expect(isTextOnlyRow({ row_kind: "note", description: "PAGATO" })).toBe(true);
+
+      // Una riga con prezzo o codice o quantità > 0 non è solo testo
+      expect(isTextOnlyRow({ description: "STUCCO", unit_price: money("4.10"), quantity: "1" })).toBe(false);
+      expect(isTextOnlyRow({ description: "VITE", code: "VTE430" })).toBe(false);
+      expect(isTextOnlyRow({ description: "", unit_price: money(0), quantity: "" })).toBe(false);
     });
   });
 });

@@ -32,6 +32,15 @@ export function DDTListPage() {
   };
   useEffect(() => { void load(); }, []);
 
+  // Aggiornamento reattivo quando la sincronizzazione in background scarica nuovi DDT
+  useEffect(() => {
+    const handleSyncUpdate = () => {
+      void load();
+    };
+    window.addEventListener("ddt-data-updated", handleSyncUpdate);
+    return () => window.removeEventListener("ddt-data-updated", handleSyncUpdate);
+  }, []);
+
   // Scorciatoia F4 per focalizzare la ricerca rapida come in noManV1
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

@@ -17,7 +17,7 @@ export class PriceListRepository {
    * Ricerca full-text tokenizzata su Listino Generale.
    * Divide la stringa di ricerca in token e ricerca su descrizione, codice_articolo, fornitore e categoria.
    */
-  async searchGeneral(query: string, limit: number = 2000): Promise<ListinoGeneraleRow[]> {
+  async searchGeneral(query: string, limit: number = 50000): Promise<ListinoGeneraleRow[]> {
     const db = await getDatabase();
     const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 
