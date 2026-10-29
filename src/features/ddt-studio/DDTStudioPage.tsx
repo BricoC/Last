@@ -638,6 +638,63 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     }
   };
 
+  // The One: Salva DDT con numero progressivo e stampa immediatamente 3 copie
+  const handleTheOne = async () => {
+    if (isSaving || isPrinting) return;
+    if (ddt.status === "confermato" && ddt.doc_number !== null) {
+      showToast("Questo DDT è già stato emesso e salvato con numero definitivo.");
+      return;
+    }
+    if (!ddt.client_name?.trim()) {
+      showToast("Attenzione: Inserisci il nome del cliente prima di salvare il DDT!");
+      return;
+    }
+
+    setIsSaving(true);
+    showToast("The One: Salvataggio DDT con numero progressivo...");
+    try {
+      // 1. Salva con numero progressivo
+      const saved = await ddtRepository.emitDdt(ddt, items);
+      setDdt(saved);
+      savedSignature.current = signature(saved, items, globalDiscount, globalMarkup);
+      await loadRecentDdts();
+
+      // Auto-salvataggio cliente in anagrafica
+      if (saved.client_name?.trim()) {
+        void clientRepository.createOrUpdateClient({
+          business_name: saved.client_name.trim(),
+          address: saved.client_address || undefined,
+          city: saved.client_city || undefined,
+          vat_number: saved.client_vat || undefined,
+          fiscal_code: saved.client_fiscal_code || undefined,
+          sdi_code: saved.client_sdi || undefined,
+          payment_method: saved.payment_method || undefined,
+          destination_name: saved.destination_name || undefined,
+          destination_address: saved.destination_address || undefined,
+          destination_city: saved.destination_city || undefined,
+          phones: saved.client_phones || [],
+        }).catch((e) => console.warn("Auto-salvataggio cliente The One:", e));
+      }
+
+      setIsSaving(false);
+
+      const identifier = `${saved.series ? `${saved.series}/` : ""}${saved.doc_number}`;
+      showToast(`DDT #${identifier} salvato! Invio stampa di 3 copie immediate...`);
+
+      // 2. Stampa 3 copie immediate senza preview
+      setIsPrinting(true);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await executeDdtPrint(3);
+      showToast(`The One completato: DDT #${identifier} emesso e 3 copie inviate alla stampante!`);
+    } catch (e: any) {
+      console.error("Errore The One:", e);
+      showToast(`Errore The One: ${e?.message || e}`);
+    } finally {
+      setIsSaving(false);
+      setIsPrinting(false);
+    }
+  };
+
   useEffect(() => registerWindowCloseGuard(windowId, async () => {
     if (!isDirty) return true;
     const choice = await new Promise<DdtCloseChoice>((resolve) => setClosePrompt(() => resolve));
@@ -980,6 +1037,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         onNewDdt={handleNewDdt}
         onSaveDraft={handleSaveDraft}
         onEmitDdt={handleEmitDdt}
+        onTheOne={handleTheOne}
         onOpenPrintModal={() => setIsPrintCopiesModalOpen(true)}
         onExportPdf={handleExportPdf}
         onGenerateTest48={handleGenerateTest48}

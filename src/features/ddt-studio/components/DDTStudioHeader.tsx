@@ -27,6 +27,7 @@ export interface DDTStudioHeaderProps {
   onNewDdt: () => void;
   onSaveDraft: () => void;
   onEmitDdt: () => void;
+  onTheOne: () => void;
   onOpenPrintModal: () => void;
   onExportPdf: () => void;
   onGenerateTest48?: () => void;
@@ -47,6 +48,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   onNewDdt,
   onSaveDraft,
   onEmitDdt,
+  onTheOne,
   onOpenPrintModal,
   onExportPdf,
   onGenerateTest48,
@@ -147,13 +149,24 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
 
       {/* Destra: Azioni The One, Salva, Draft, Stampa, Altro */}
       <div className="flex items-center space-x-2">
-        {/* The One */}
+        {/* The One (Emissione con progressivo + Stampa 3 copie immediata) */}
         <button
           type="button"
-          className="h-7 px-2.5 rounded text-xs font-bold bg-purple-600/15 border border-purple-500/30 text-purple-300 hover:bg-purple-600/25 flex items-center space-x-1 transition-colors cursor-default"
-          title="Modalità The One (Compilazione guidata intelligente)"
+          disabled={isConfirmed || isSaving || isPrinting}
+          onClick={onTheOne}
+          className={cn(
+            "h-7 px-2.5 rounded text-xs font-bold flex items-center space-x-1.5 transition-all shadow-sm select-none",
+            isConfirmed || isSaving || isPrinting
+              ? "bg-purple-950/20 text-purple-400/30 border border-purple-900/20 opacity-40 cursor-not-allowed"
+              : "bg-purple-600 hover:bg-purple-500 text-white border border-purple-400/50 shadow-purple-900/20 cursor-default active:scale-95"
+          )}
+          title={
+            isConfirmed
+              ? "The One è disabilitato perché questo DDT è già stato salvato con numero definitivo"
+              : "The One: Salva DDT con numero progressivo e stampa immediatamente 3 copie"
+          }
         >
-          <Sparkles className="w-3.5 h-3.5" />
+          <Sparkles className={cn("w-3.5 h-3.5", !isConfirmed && "text-purple-200 animate-pulse")} />
           <span>The One</span>
         </button>
 
