@@ -1,0 +1,1106 @@
+<?xml version="1.0" encoding="UTF-8"?><ns3:FatturaElettronica versione="FPR12" xmlns:ns2="http://www.w3.org/2000/09/xmldsig#" xmlns:ns3="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+    <FatturaElettronicaHeader>
+        <DatiTrasmissione>
+            <IdTrasmittente>
+                <IdPaese>IT</IdPaese>
+                <IdCodice>02031380500</IdCodice>
+            </IdTrasmittente>
+            <ProgressivoInvio>01M50</ProgressivoInvio>
+            <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+            <CodiceDestinatario>0000000</CodiceDestinatario>
+            <PECDestinatario>BRICOCLASS.SAS@LEGALMAIL.IT</PECDestinatario>
+        </DatiTrasmissione>
+        <CedentePrestatore>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>02031380500</IdCodice>
+                </IdFiscaleIVA>
+                <CodiceFiscale>02031380500</CodiceFiscale>
+                <Anagrafica>
+                    <Denominazione>RETIAMBIENTE S.P.A.</Denominazione>
+                </Anagrafica>
+                <RegimeFiscale>RF01</RegimeFiscale>
+            </DatiAnagrafici>
+            <Sede>
+                <Indirizzo>PIAZZA VITTORIO EMANUELE II, 2</Indirizzo>
+                <CAP>56100</CAP>
+                <Comune>PISA</Comune>
+                <Provincia>PI</Provincia>
+                <Nazione>IT</Nazione>
+            </Sede>
+        </CedentePrestatore>
+        <CessionarioCommittente>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>01601690462</IdCodice>
+                </IdFiscaleIVA>
+                <CodiceFiscale>01601690462</CodiceFiscale>
+                <Anagrafica>
+                    <Denominazione>FERRAMENTA BRICO CLASS SAS DIALESSANDRO FARNOCCHIA E C.</Denominazione>
+                </Anagrafica>
+            </DatiAnagrafici>
+            <Sede>
+                <Indirizzo>VIA DI CARRAIA 218</Indirizzo>
+                <CAP>55061</CAP>
+                <Comune>CAPANNORI</Comune>
+                <Provincia>LU</Provincia>
+                <Nazione>IT</Nazione>
+            </Sede>
+        </CessionarioCommittente>
+    </FatturaElettronicaHeader>
+    <FatturaElettronicaBody>
+        <DatiGenerali>
+            <DatiGeneraliDocumento>
+                <TipoDocumento>TD01</TipoDocumento>
+                <Divisa>EUR</Divisa>
+                <Data>2026-05-21</Data>
+                <Numero>21188/CAPAN</Numero>
+                <ImportoTotaleDocumento>0.00</ImportoTotaleDocumento>
+                <Causale>2° SEMESTRE 2025</Causale>
+            </DatiGeneraliDocumento>
+        </DatiGenerali>
+        <DatiBeniServizi>
+            <DettaglioLinee>
+                <NumeroLinea>4</NumeroLinea>
+                <Descrizione>TARIFFA PARTE FISSA - 03 - AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>61.14</PrezzoUnitario>
+                <PrezzoTotale>61.14</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>SUPERFICIE</TipoDato>
+                    <RiferimentoNumero>77.00</RiferimentoNumero>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>6</NumeroLinea>
+                <Descrizione>TARIFFA PARTE VARIABILE VOLUME MINIMO</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>1768.80</PrezzoUnitario>
+                <PrezzoTotale>1768.80</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>8</NumeroLinea>
+                <Descrizione>TARIFFA PARTE VARIBILE VOLUME ECCEDENTE</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>4422.00</PrezzoUnitario>
+                <PrezzoTotale>4422.00</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>10</NumeroLinea>
+                <Descrizione>Importo componente perequativa UR1</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>0.10</PrezzoUnitario>
+                <PrezzoTotale>0.10</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>11</NumeroLinea>
+                <Descrizione>Importo componente perequativa UR2</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>1.50</PrezzoUnitario>
+                <PrezzoTotale>1.50</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>12</NumeroLinea>
+                <Descrizione>Importo componente perequativa UR3</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>6.00</PrezzoUnitario>
+                <PrezzoTotale>6.00</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>13</NumeroLinea>
+                <Descrizione>Addizionale Provinciale TEFA dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>312.60</PrezzoUnitario>
+                <PrezzoTotale>312.60</PrezzoTotale>
+                <AliquotaIVA>0.00</AliquotaIVA>
+                <Natura>N2.2</Natura>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>14</NumeroLinea>
+                <Descrizione>STORNO Tariffa Parte Fissa RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-61.14</PrezzoUnitario>
+                <PrezzoTotale>-61.14</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>SUPERFICIE</TipoDato>
+                    <RiferimentoNumero>77.00</RiferimentoNumero>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>15</NumeroLinea>
+                <Descrizione>STORNO Tariffa Parte Fissa RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-30.32</PrezzoUnitario>
+                <PrezzoTotale>-30.32</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>SUPERFICIE</TipoDato>
+                    <RiferimentoNumero>77.00</RiferimentoNumero>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>16</NumeroLinea>
+                <Descrizione>STORNO Tariffa Parte Fissa RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>30.32</PrezzoUnitario>
+                <PrezzoTotale>30.32</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>SUPERFICIE</TipoDato>
+                    <RiferimentoNumero>77.00</RiferimentoNumero>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>17</NumeroLinea>
+                <Descrizione>STORNO Tariffa Parte Variabile RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>877.16</PrezzoUnitario>
+                <PrezzoTotale>877.16</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>18</NumeroLinea>
+                <Descrizione>STORNO Tariffa Parte Variabile RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-1768.80</PrezzoUnitario>
+                <PrezzoTotale>-1768.80</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>19</NumeroLinea>
+                <Descrizione>STORNO Tariffa Parte Variabile RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-877.16</PrezzoUnitario>
+                <PrezzoTotale>-877.16</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>20</NumeroLinea>
+                <Descrizione>STORNO Quantita' Operazioni RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-4422.00</PrezzoUnitario>
+                <PrezzoTotale>-4422.00</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>21</NumeroLinea>
+                <Descrizione>STORNO Quantita' Operazioni RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>2660.44</PrezzoUnitario>
+                <PrezzoTotale>2660.44</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>22</NumeroLinea>
+                <Descrizione>STORNO Quantita' Operazioni RSU Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-2660.44</PrezzoUnitario>
+                <PrezzoTotale>-2660.44</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>CODPOS</TipoDato>
+                    <RiferimentoTesto>1</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>CATEGORIA</TipoDato>
+                    <RiferimentoTesto>10 (ND) AUTORIMESSE E MAGAZZINI SENZA ALCUNA VENDITA DIRETTA</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>23</NumeroLinea>
+                <Descrizione>STORNO Componente Perequativa UR1 Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-0.10</PrezzoUnitario>
+                <PrezzoTotale>-0.10</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>24</NumeroLinea>
+                <Descrizione>STORNO Componente Perequativa UR2 Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-1.50</PrezzoUnitario>
+                <PrezzoTotale>-1.50</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>25</NumeroLinea>
+                <Descrizione>STORNO Componente Perequativa UR3 Non Domestico dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-6.00</PrezzoUnitario>
+                <PrezzoTotale>-6.00</PrezzoTotale>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>26</NumeroLinea>
+                <Descrizione>STORNO Addizionale Provinciale Non Domestico (TEFA) dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>178.40</PrezzoUnitario>
+                <PrezzoTotale>178.40</PrezzoTotale>
+                <AliquotaIVA>0.00</AliquotaIVA>
+                <Natura>N2.2</Natura>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>27</NumeroLinea>
+                <Descrizione>STORNO Addizionale Provinciale Non Domestico (TEFA) dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-178.40</PrezzoUnitario>
+                <PrezzoTotale>-178.40</PrezzoTotale>
+                <AliquotaIVA>0.00</AliquotaIVA>
+                <Natura>N2.2</Natura>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>28</NumeroLinea>
+                <Descrizione>STORNO Addizionale Provinciale Non Domestico (TEFA) dal 01/01/2025 al 31/12/2025</Descrizione>
+                <DataInizioPeriodo>2025-01-01</DataInizioPeriodo>
+                <DataFinePeriodo>2025-12-31</DataFinePeriodo>
+                <PrezzoUnitario>-312.60</PrezzoUnitario>
+                <PrezzoTotale>-312.60</PrezzoTotale>
+                <AliquotaIVA>0.00</AliquotaIVA>
+                <Natura>N2.2</Natura>
+                <AltriDatiGestionali>
+                    <TipoDato>UTENZA</TipoDato>
+                    <RiferimentoTesto>22290 - VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>INDIRIZZO</TipoDato>
+                    <RiferimentoTesto>VIA DI CARRAIA, 218</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>COMUNEUTE</TipoDato>
+                    <RiferimentoTesto>CAPANNORI (55012) - LU</RiferimentoTesto>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINISTTP</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINSTTP</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTINICALC</TipoDato>
+                    <RiferimentoData>2025-01-01</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DTFINCALC</TipoDato>
+                    <RiferimentoData>2025-12-31</RiferimentoData>
+                </AltriDatiGestionali>
+                <AltriDatiGestionali>
+                    <TipoDato>DESCALC</TipoDato>
+                    <RiferimentoTesto>TARI 2025</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DatiRiepilogo>
+                <AliquotaIVA>0.00</AliquotaIVA>
+                <Natura>N2.2</Natura>
+                <ImponibileImporto>0.00</ImponibileImporto>
+                <Imposta>0.00</Imposta>
+                <EsigibilitaIVA>I</EsigibilitaIVA>
+            </DatiRiepilogo>
+            <DatiRiepilogo>
+                <AliquotaIVA>10.00</AliquotaIVA>
+                <ImponibileImporto>0.00</ImponibileImporto>
+                <Imposta>0.00</Imposta>
+                <EsigibilitaIVA>I</EsigibilitaIVA>
+            </DatiRiepilogo>
+        </DatiBeniServizi>
+        <DatiPagamento>
+            <CondizioniPagamento>TP02</CondizioniPagamento>
+            <DettaglioPagamento>
+                <ModalitaPagamento>MP19</ModalitaPagamento>
+                <DataScadenzaPagamento>2026-06-25</DataScadenzaPagamento>
+                <ImportoPagamento>0.00</ImportoPagamento>
+            </DettaglioPagamento>
+        </DatiPagamento>
+    </FatturaElettronicaBody>
+</ns3:FatturaElettronica>

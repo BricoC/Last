@@ -9,6 +9,7 @@ import { migrateQuoteSchemaV6 } from "./migrations/quoteSchema";
 import { migrateCompanySettingsSchemaV7 } from "./migrations/companySettingsSchema";
 import { migratePriceListsSchemaV11 } from "./migrations/priceListSchema";
 import { migratePriceListLogSchemaV12 } from "./migrations/priceListLogSchema";
+import { migrateElectronicInvoicesSchemaV15 } from "./migrations/electronicInvoicesSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -299,6 +300,13 @@ const MIGRATIONS: Migration[] = [
           AND client_name IS NOT NULL
           AND EXISTS (SELECT 1 FROM clients c WHERE LOWER(TRIM(c.business_name)) = LOWER(TRIM(ddt_documents.client_name)) AND c.deleted_at IS NULL);
       `);
+    },
+  },
+  {
+    version: 15,
+    name: "create_supplier_invoices_and_items",
+    up: async (db: Database) => {
+      await migrateElectronicInvoicesSchemaV15(db);
     },
   },
 ];

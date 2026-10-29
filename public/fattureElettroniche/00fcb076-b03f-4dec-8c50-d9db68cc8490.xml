@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?><ns3:FatturaElettronica versione="FPR12" xmlns:ns2="http://www.w3.org/2000/09/xmldsig#" xmlns:ns3="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+    <FatturaElettronicaHeader>
+        <DatiTrasmissione>
+            <IdTrasmittente>
+                <IdPaese>IT</IdPaese>
+                <IdCodice>02072530344</IdCodice>
+            </IdTrasmittente>
+            <ProgressivoInvio>HTIT-83278</ProgressivoInvio>
+            <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+            <CodiceDestinatario>0000000</CodiceDestinatario>
+            <ContattiTrasmittente>
+                <Telefono>0444548111</Telefono>
+                <Email>info@hikoki-powertools.it</Email>
+            </ContattiTrasmittente>
+        </DatiTrasmissione>
+        <CedentePrestatore>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>02948190240</IdCodice>
+                </IdFiscaleIVA>
+                <CodiceFiscale>02072530344</CodiceFiscale>
+                <Anagrafica>
+                    <Denominazione>HIKOKI POWER TOOLS ITALIA SPA</Denominazione>
+                </Anagrafica>
+                <RegimeFiscale>RF01</RegimeFiscale>
+            </DatiAnagrafici>
+            <Sede>
+                <Indirizzo>VIA PIAVE 35, </Indirizzo>
+                <CAP>36077</CAP>
+                <Comune>ALTAVILLA VICENTINA</Comune>
+                <Provincia>VI</Provincia>
+                <Nazione>IT</Nazione>
+            </Sede>
+            <Contatti>
+                <Telefono>0444548111</Telefono>
+                <Email>info@hikoki-powertools.it</Email>
+            </Contatti>
+        </CedentePrestatore>
+        <CessionarioCommittente>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>01601690462</IdCodice>
+                </IdFiscaleIVA>
+                <CodiceFiscale>01601690462</CodiceFiscale>
+                <Anagrafica>
+                    <Denominazione>FERRAMENTA BRICO CLASS</Denominazione>
+                </Anagrafica>
+            </DatiAnagrafici>
+            <Sede>
+                <Indirizzo>VIA DI CARRAIA, 218, </Indirizzo>
+                <CAP>55012</CAP>
+                <Comune>CAPANNORI</Comune>
+                <Provincia>LU</Provincia>
+                <Nazione>IT</Nazione>
+            </Sede>
+        </CessionarioCommittente>
+    </FatturaElettronicaHeader>
+    <FatturaElettronicaBody>
+        <DatiGenerali>
+            <DatiGeneraliDocumento>
+                <TipoDocumento>TD24</TipoDocumento>
+                <Divisa>EUR</Divisa>
+                <Data>2026-06-29</Data>
+                <Numero>VI00078916</Numero>
+                <ImportoTotaleDocumento>48.06</ImportoTotaleDocumento>
+            </DatiGeneraliDocumento>
+            <DatiDDT>
+                <NumeroDDT>SPS0123310</NumeroDDT>
+                <DataDDT>2026-06-29</DataDDT>
+            </DatiDDT>
+        </DatiGenerali>
+        <DatiBeniServizi>
+            <DettaglioLinee>
+                <NumeroLinea>1</NumeroLinea>
+                <CodiceArticolo>
+                    <CodiceTipo>Codice articolo</CodiceTipo>
+                    <CodiceValore>781833</CodiceValore>
+                </CodiceArticolo>
+                <Descrizione>PUNTA PER TRAVI LEGNO 10X320MM</Descrizione>
+                <Quantita>3.00</Quantita>
+                <UnitaMisura>pcs</UnitaMisura>
+                <PrezzoUnitario>12.30</PrezzoUnitario>
+                <ScontoMaggiorazione>
+                    <Tipo>SC</Tipo>
+                    <Percentuale>50.00</Percentuale>
+                    <Importo>6.150000</Importo>
+                </ScontoMaggiorazione>
+                <PrezzoTotale>18.45</PrezzoTotale>
+                <AliquotaIVA>22.00</AliquotaIVA>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>2</NumeroLinea>
+                <CodiceArticolo>
+                    <CodiceTipo>Codice articolo</CodiceTipo>
+                    <CodiceValore>781835</CodiceValore>
+                </CodiceArticolo>
+                <Descrizione>PUNTA PER TRAVI LEGNO 12X320MM</Descrizione>
+                <Quantita>3.00</Quantita>
+                <UnitaMisura>pcs</UnitaMisura>
+                <PrezzoUnitario>13.70</PrezzoUnitario>
+                <ScontoMaggiorazione>
+                    <Tipo>SC</Tipo>
+                    <Percentuale>50.00</Percentuale>
+                    <Importo>6.850000</Importo>
+                </ScontoMaggiorazione>
+                <PrezzoTotale>20.55</PrezzoTotale>
+                <AliquotaIVA>22.00</AliquotaIVA>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>3</NumeroLinea>
+                <TipoCessionePrestazione>AC</TipoCessionePrestazione>
+                <Descrizione>Transport Cost</Descrizione>
+                <Quantita>1.00</Quantita>
+                <PrezzoUnitario>0.39</PrezzoUnitario>
+                <PrezzoTotale>0.39</PrezzoTotale>
+                <AliquotaIVA>22.00</AliquotaIVA>
+            </DettaglioLinee>
+            <DatiRiepilogo>
+                <AliquotaIVA>22.00</AliquotaIVA>
+                <SpeseAccessorie>0.39</SpeseAccessorie>
+                <ImponibileImporto>39.39</ImponibileImporto>
+                <Imposta>8.67</Imposta>
+                <EsigibilitaIVA>I</EsigibilitaIVA>
+            </DatiRiepilogo>
+        </DatiBeniServizi>
+        <DatiPagamento>
+            <CondizioniPagamento>TP02</CondizioniPagamento>
+            <DettaglioPagamento>
+                <ModalitaPagamento>MP12</ModalitaPagamento>
+                <DataScadenzaPagamento>2026-08-31</DataScadenzaPagamento>
+                <ImportoPagamento>48.06</ImportoPagamento>
+                <IstitutoFinanziario>UniCredit SpA</IstitutoFinanziario>
+                <IBAN>IT86O0200805364000019356471</IBAN>
+                <BIC>UNCRITMMORR</BIC>
+            </DettaglioPagamento>
+        </DatiPagamento>
+    </FatturaElettronicaBody>
+</ns3:FatturaElettronica>

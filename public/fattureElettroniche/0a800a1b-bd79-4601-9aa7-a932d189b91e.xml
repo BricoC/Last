@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?><ns3:FatturaElettronica versione="FPR12" xmlns:ns2="http://www.w3.org/2000/09/xmldsig#" xmlns:ns3="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+    <FatturaElettronicaHeader>
+        <DatiTrasmissione>
+            <IdTrasmittente>
+                <IdPaese>IT</IdPaese>
+                <IdCodice>00488410010</IdCodice>
+            </IdTrasmittente>
+            <ProgressivoInvio>rUmNY</ProgressivoInvio>
+            <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+            <CodiceDestinatario>0000000</CodiceDestinatario>
+        </DatiTrasmissione>
+        <CedentePrestatore>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>00488410010</IdCodice>
+                </IdFiscaleIVA>
+                <CodiceFiscale>00488410010</CodiceFiscale>
+                <Anagrafica>
+                    <Denominazione>TIM  S.p.A.</Denominazione>
+                </Anagrafica>
+                <RegimeFiscale>RF01</RegimeFiscale>
+            </DatiAnagrafici>
+            <Sede>
+                <Indirizzo>Via Gaetano Negri</Indirizzo>
+                <NumeroCivico>1</NumeroCivico>
+                <CAP>20123</CAP>
+                <Comune>MILANO</Comune>
+                <Provincia>MI</Provincia>
+                <Nazione>IT</Nazione>
+            </Sede>
+            <IscrizioneREA>
+                <Ufficio>MI</Ufficio>
+                <NumeroREA>1580695</NumeroREA>
+                <CapitaleSociale>11677002855.10</CapitaleSociale>
+                <SocioUnico>SM</SocioUnico>
+                <StatoLiquidazione>LN</StatoLiquidazione>
+            </IscrizioneREA>
+        </CedentePrestatore>
+        <CessionarioCommittente>
+            <DatiAnagrafici>
+                <IdFiscaleIVA>
+                    <IdPaese>IT</IdPaese>
+                    <IdCodice>01601690462</IdCodice>
+                </IdFiscaleIVA>
+                <CodiceFiscale>01601690462</CodiceFiscale>
+                <Anagrafica>
+                    <Denominazione>FERRAMENTA BRICO CLASS DI ALESSANDRO FARNOCCHIA &amp; C. SAS</Denominazione>
+                </Anagrafica>
+            </DatiAnagrafici>
+            <Sede>
+                <Indirizzo>VIA COMUNALE 216 FR. CARRAIA</Indirizzo>
+                <CAP>55061</CAP>
+                <Comune>CAPANNORI</Comune>
+                <Provincia>LU</Provincia>
+                <Nazione>IT</Nazione>
+            </Sede>
+        </CessionarioCommittente>
+    </FatturaElettronicaHeader>
+    <FatturaElettronicaBody>
+        <DatiGenerali>
+            <DatiGeneraliDocumento>
+                <TipoDocumento>TD01</TipoDocumento>
+                <Divisa>EUR</Divisa>
+                <Data>2026-02-11</Data>
+                <Numero>7X00761105</Numero>
+                <ImportoTotaleDocumento>87.71</ImportoTotaleDocumento>
+                <Causale>Fattura Febbraio 26: Periodo 1/01/26 - 31/01/26</Causale>
+            </DatiGeneraliDocumento>
+            <DatiContratto>
+                <IdDocumento>888010279555</IdDocumento>
+                <CodiceCommessaConvenzione>UTTT4</CodiceCommessaConvenzione>
+            </DatiContratto>
+        </DatiGenerali>
+        <DatiBeniServizi>
+            <DettaglioLinee>
+                <NumeroLinea>1</NumeroLinea>
+                <Descrizione>Contributo Promo Unlimited+1 GB 01/01/26 - 31/01/26</Descrizione>
+                <PrezzoUnitario>11.60</PrezzoUnitario>
+                <PrezzoTotale>11.60</PrezzoTotale>
+                <AliquotaIVA>22.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>RIC.TELEF.</TipoDato>
+                    <RiferimentoTesto>Op. ex art.74 DPR633/72-fatt.rich. cliente art.4 DM366/2000</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>2</NumeroLinea>
+                <Descrizione>Contributo Tim Tutto Medium EU 01/01/26 - 31/01/26</Descrizione>
+                <PrezzoUnitario>66.20</PrezzoUnitario>
+                <PrezzoTotale>66.20</PrezzoTotale>
+                <AliquotaIVA>22.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>RIC.TELEF.</TipoDato>
+                    <RiferimentoTesto>Op. ex art.74 DPR633/72-fatt.rich. cliente art.4 DM366/2000</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>3</NumeroLinea>
+                <Descrizione>Sconto TIM Plus </Descrizione>
+                <PrezzoUnitario>-9.80</PrezzoUnitario>
+                <PrezzoTotale>-9.80</PrezzoTotale>
+                <AliquotaIVA>22.00</AliquotaIVA>
+                <AltriDatiGestionali>
+                    <TipoDato>RIC.TELEF.</TipoDato>
+                    <RiferimentoTesto>Op. ex art.74 DPR633/72-fatt.rich. cliente art.4 DM366/2000</RiferimentoTesto>
+                </AltriDatiGestionali>
+            </DettaglioLinee>
+            <DettaglioLinee>
+                <NumeroLinea>4</NumeroLinea>
+                <Descrizione>Servizio di produzione e invio fattura </Descrizione>
+                <PrezzoUnitario>3.90</PrezzoUnitario>
+                <PrezzoTotale>3.90</PrezzoTotale>
+                <AliquotaIVA>22.00</AliquotaIVA>
+            </DettaglioLinee>
+            <DatiRiepilogo>
+                <AliquotaIVA>22.00</AliquotaIVA>
+                <ImponibileImporto>81.70</ImponibileImporto>
+                <Imposta>17.97</Imposta>
+                <RiferimentoNormativo>22%</RiferimentoNormativo>
+            </DatiRiepilogo>
+            <DatiRiepilogo>
+                <AliquotaIVA>22.00</AliquotaIVA>
+                <ImponibileImporto>-9.80</ImponibileImporto>
+                <Imposta>-2.16</Imposta>
+                <RiferimentoNormativo>22%</RiferimentoNormativo>
+            </DatiRiepilogo>
+        </DatiBeniServizi>
+        <DatiPagamento>
+            <CondizioniPagamento>TP02</CondizioniPagamento>
+            <DettaglioPagamento>
+                <ModalitaPagamento>MP19</ModalitaPagamento>
+                <DataScadenzaPagamento>2026-03-16</DataScadenzaPagamento>
+                <ImportoPagamento>87.71</ImportoPagamento>
+                <CodicePagamento>316210880027955508</CodicePagamento>
+            </DettaglioPagamento>
+        </DatiPagamento>
+    </FatturaElettronicaBody>
+</ns3:FatturaElettronica>
