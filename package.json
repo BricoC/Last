@@ -20,6 +20,7 @@
     "ag-grid-react": "^31.3.4",
     "clsx": "^2.1.1",
     "decimal.js": "^10.6.0",
+    "exceljs": "^4.4.0",
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",

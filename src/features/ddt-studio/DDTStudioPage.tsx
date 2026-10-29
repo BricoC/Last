@@ -976,6 +976,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         setSidebarOpen={setSidebarOpen}
         activeView={activeView}
         setActiveView={setActiveView}
+        selectedYear={selectedYear}
         onNewDdt={handleNewDdt}
         onSaveDraft={handleSaveDraft}
         onEmitDdt={handleEmitDdt}
