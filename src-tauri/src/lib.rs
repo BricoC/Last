@@ -23,6 +23,9 @@ fn save_file_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, Stri
         .map_err(|_| "Impossibile trovare la cartella Desktop dell'utente".to_string())?;
 
     let file_path = desktop_dir.join(&filename);
+    if let Some(parent) = file_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Errore creazione cartella: {}", e))?;
+    }
     fs::write(&file_path, bytes).map_err(|e| format!("Errore nel salvataggio del file: {}", e))?;
 
     Ok(file_path.to_string_lossy().to_string())

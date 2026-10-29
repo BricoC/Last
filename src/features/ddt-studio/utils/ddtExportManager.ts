@@ -151,6 +151,29 @@ export async function exportDdtImageToDesktop(
 }
 
 /**
+ * Genera il buffer di byte del PDF a partire da un elenco di elementi pagina A4.
+ */
+export async function generatePdfBytesFromElements(pages: HTMLElement[]): Promise<Uint8Array> {
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const pdfW = pdf.internal.pageSize.getWidth();
+  const pdfH = pdf.internal.pageSize.getHeight();
+
+  for (let i = 0; i < pages.length; i++) {
+    if (i > 0) pdf.addPage();
+    const dataUrl = await capturePageToPng(pages[i]);
+    pdf.addImage(dataUrl, "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
+  }
+
+  const pdfArrayBuffer = pdf.output("arraybuffer");
+  return new Uint8Array(pdfArrayBuffer);
+}
+
+/**
  * Genera il PDF A4 multipagina ad altissima fedeltà:
  * incorpora le pagine PNG catturate nativamente (senza html2canvas),
  * garantendo un PDF multipagina perfetto al 100% rispetto all'anteprima video.
@@ -167,34 +190,18 @@ export async function exportDdtPdfToDesktop(
     throw new Error("Nessuna pagina A4 trovata nel documento.");
   }
 
-  const pdf = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
-  });
-
-  const pdfW = pdf.internal.pageSize.getWidth();
-  const pdfH = pdf.internal.pageSize.getHeight();
-
-  for (let i = 0; i < pages.length; i++) {
-    if (i > 0) pdf.addPage();
-    const dataUrl = await capturePageToPng(pages[i]);
-    pdf.addImage(dataUrl, "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
-  }
-
+  const bytes = await generatePdfBytesFromElements(pages);
   const filename = formatDdtPdfFilename(ddt);
-  const pdfArrayBuffer = pdf.output("arraybuffer");
-  const bytes = Array.from(new Uint8Array(pdfArrayBuffer));
 
   let savedPath = "";
   try {
-    savedPath = await invoke<string>("save_file_to_desktop", { filename, bytes });
+    savedPath = await invoke<string>("save_file_to_desktop", { filename, bytes: Array.from(bytes) });
   } catch {
     try {
-      savedPath = await invoke<string>("save_pdf_to_desktop", { filename, bytes });
+      savedPath = await invoke<string>("save_pdf_to_desktop", { filename, bytes: Array.from(bytes) });
     } catch (err) {
       console.warn("Tauri invoke non riuscito, fallback download browser:", err);
-      const blob = pdf.output("blob");
+      const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = filename;
