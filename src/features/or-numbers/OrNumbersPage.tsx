@@ -16,7 +16,7 @@ import { OrRow, getOrStatus } from "./types/orNumbers";
 import { OrNumbersRepository } from "./services/orNumbersRepository";
 import { OrTable } from "./components/OrTable";
 import { OrAssignModal } from "./components/OrAssignModal";
-import { DDTQuickViewModal } from "@/features/ddt-studio/components/DDTQuickViewModal";
+import { DDTMiniStudioModal } from "./components/DDTMiniStudioModal";
 import { ddtRepository } from "@/features/ddt-studio/services/ddtRepository";
 import { requestOpenDdt } from "@/features/ddt-studio/services/ddtNavigation";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
@@ -618,14 +618,14 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
         />
       </div>
 
-      {/* Popup Dati Completi DDT con chiusura rapida Esc (Mini DDT Studio) */}
-      <DDTQuickViewModal
+      {/* Popup Mini DDT Studio Editabile con chiusura rapida Esc */}
+      <DDTMiniStudioModal
         isOpen={quickViewDdtId !== null}
         onClose={() => setQuickViewDdtId(null)}
         ddtId={quickViewDdtId}
-        onOpenInStudio={(id) => {
-          setQuickViewDdtId(null);
-          handleOpenDdtInStudio(id);
+        onSaved={async () => {
+          showToast("Modifiche al DDT salvate con successo!", "success");
+          await loadData();
         }}
       />
 
