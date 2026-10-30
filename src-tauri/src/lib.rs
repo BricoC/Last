@@ -141,6 +141,51 @@ foreach ($p in $imagePaths) {{
     Ok(())
 }
 
+#[tauri::command]
+fn send_order_email(to: String, subject: String, body: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use base64::{engine::general_purpose, Engine as _};
+        let to_b64 = general_purpose::STANDARD.encode(&to);
+        let subj_b64 = general_purpose::STANDARD.encode(&subject);
+        let body_b64 = general_purpose::STANDARD.encode(&body);
+
+        let ps_script = format!(
+            r#"
+            function _d($s) {{ [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($s)) }}
+            $outlook = New-Object -ComObject Outlook.Application
+            $mail = $outlook.CreateItem(0)
+            $mail.To = _d '{}'
+            $mail.Subject = _d '{}'
+            $mail.HTMLBody = _d '{}'
+            $mail.Display()
+            "#,
+            to_b64, subj_b64, body_b64
+        );
+
+        let mut cmd = Command::new("powershell");
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &ps_script,
+        ]);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Errore esecuzione comando invio email: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Errore Outlook/PowerShell: {}", stderr));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -150,6 +195,7 @@ pub fn run() {
             save_file_to_desktop,
             save_pdf_to_desktop,
             print_ddt_silent,
+            send_order_email,
             ddt_commands::save_ddt_transaction,
             ddt_delete_command::soft_delete_ddt_transaction,
             supabase_config::load_supabase_config,
