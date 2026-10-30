@@ -10,6 +10,7 @@ import { migrateCompanySettingsSchemaV7 } from "./migrations/companySettingsSche
 import { migratePriceListsSchemaV11 } from "./migrations/priceListSchema";
 import { migratePriceListLogSchemaV12 } from "./migrations/priceListLogSchema";
 import { migrateElectronicInvoicesSchemaV15 } from "./migrations/electronicInvoicesSchema";
+import { migrateOrdersSchemaV16 } from "./migrations/ordersSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -307,6 +308,13 @@ const MIGRATIONS: Migration[] = [
     name: "create_supplier_invoices_and_items",
     up: async (db: Database) => {
       await migrateElectronicInvoicesSchemaV15(db);
+    },
+  },
+  {
+    version: 16,
+    name: "create_orders_suppliers_and_audit_tables",
+    up: async (db: Database) => {
+      await migrateOrdersSchemaV16(db);
     },
   },
 ];

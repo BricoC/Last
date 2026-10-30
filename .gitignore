@@ -29,3 +29,4 @@ dist-ssr
 !.env.example
 supabase.local.json
 supabase.local.json.tmp
+scratch/

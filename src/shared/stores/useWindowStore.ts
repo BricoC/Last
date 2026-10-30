@@ -214,9 +214,10 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   },
 
   focusWindow: (id) => {
-    const { windows, nextZIndex } = get();
+    const { windows, nextZIndex, activeWindowId } = get();
     const target = windows.find((w) => w.id === id);
     if (!target) return;
+    if (activeWindowId === id && !target.isMinimized) return;
 
     set({
       activeWindowId: id,

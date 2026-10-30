@@ -12,6 +12,7 @@ import { DDTArticlesPage } from "@/features/ddt-studio/DDTArticlesPage";
 import { ClientListPage } from "@/features/clients/ClientListPage";
 import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
 import { ElectronicInvoicesPage } from "@/features/invoices/ElectronicInvoicesPage";
+import { OrderManagerPage } from "@/features/orders/OrderManagerPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
@@ -40,6 +41,8 @@ export function App() {
     switch (componentId) {
       case "dashboard":
         return <DashboardPage />;
+      case "orders":
+        return <OrderManagerPage windowId={windowId} />;
       case "price-lists":
         return <ProductListPage />;
       case "settings":
