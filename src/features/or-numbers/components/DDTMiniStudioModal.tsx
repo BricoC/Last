@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { X, Plus, Trash2, Loader2, CheckCircle2 } from "lucide-react";
 import { DdtDocument, DdtItem } from "@/features/ddt-studio/models/ddt";
 import { ddtRepository } from "@/features/ddt-studio/services/ddtRepository";
@@ -231,6 +232,31 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
 
       // 3. Salva su SQLite e prepara sincronizzazione
       await ddtRepository.saveDraft(updatedDoc, updatedItems);
+
+      // 4. Sincronizzazione immediata verso Supabase Cloud
+      try {
+        const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
+        if (configRes?.config?.projectUrl && configRes?.config?.anonKey && updatedDoc.doc_number && updatedDoc.year) {
+          const url = new URL("/rest/v1/ddt", configRes.config.projectUrl.replace(/\/$/, ""));
+          url.searchParams.set("anno", `eq.${updatedDoc.year}`);
+          url.searchParams.set("numero", `eq.${updatedDoc.doc_number}`);
+          await fetch(url.toString(), {
+            method: "PATCH",
+            headers: {
+              apikey: configRes.config.anonKey,
+              Authorization: `Bearer ${configRes.config.anonKey}`,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({
+              nr_vs_ordine: (orderReference || "").trim() || null,
+              destinazione: (destinationName || "").trim() || null,
+            }),
+          });
+        }
+      } catch (sbErr) {
+        console.warn("Sync Supabase dopo modifica MiniStudio:", sbErr);
+      }
 
       onSaved();
       onClose();
