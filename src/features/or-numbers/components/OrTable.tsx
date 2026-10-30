@@ -11,6 +11,7 @@ interface OrTableProps {
   onToggleSelectRow: (id: string) => void;
   onToggleSelectAll: () => void;
   onOpenDdt: (id: string) => void;
+  onOpenInStudio?: (id: string) => void;
   onAssignOr: (row: OrRow) => void;
   onSendCarraraRed?: () => void;
   onSendCarraraYellow?: () => void;
@@ -28,6 +29,7 @@ export const OrTable: React.FC<OrTableProps> = ({
   onToggleSelectRow,
   onToggleSelectAll,
   onOpenDdt,
+  onOpenInStudio,
   onAssignOr,
   onSendCarraraRed,
   onSendCarraraYellow,
@@ -288,9 +290,9 @@ export const OrTable: React.FC<OrTableProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => onOpenDdt(row.id)}
+                          onClick={() => onOpenInStudio ? onOpenInStudio(row.id) : onOpenDdt(row.id)}
                           className="p-1 rounded text-[var(--muted-foreground)] hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
-                          title="Apri DDT in DDT Studio"
+                          title="Apri DDT completo in DDT Studio"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>

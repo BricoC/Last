@@ -44,3 +44,4 @@ describe("orNumbers getOrStatus", () => {
     expect(getOrStatus(row)).toBe("red");
   });
 });
+

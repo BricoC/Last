@@ -16,6 +16,7 @@ import { OrRow, getOrStatus } from "./types/orNumbers";
 import { OrNumbersRepository } from "./services/orNumbersRepository";
 import { OrTable } from "./components/OrTable";
 import { OrAssignModal } from "./components/OrAssignModal";
+import { DDTQuickViewModal } from "@/features/ddt-studio/components/DDTQuickViewModal";
 import { ddtRepository } from "@/features/ddt-studio/services/ddtRepository";
 import { requestOpenDdt } from "@/features/ddt-studio/services/ddtNavigation";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
@@ -62,6 +63,9 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   // Modale Assegnazione OR
   const [isAssignModalOpen, setIsAssignModalOpen] = useState<boolean>(false);
   const [assignModalRow, setAssignModalRow] = useState<OrRow | null>(null);
+
+  // Modale Quick View DDT (mini DDT Studio con Esc)
+  const [quickViewDdtId, setQuickViewDdtId] = useState<string | null>(null);
 
   // Motore generazione PDF & invio email
   const [isSendingEmail, setIsSendingEmail] = useState<boolean>(false);
@@ -586,7 +590,8 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
           selectedIds={selectedCarraraIds}
           onToggleSelectRow={handleToggleSelectRowCarrara}
           onToggleSelectAll={handleToggleSelectAllCarrara}
-          onOpenDdt={handleOpenDdtInStudio}
+          onOpenDdt={(id) => setQuickViewDdtId(id)}
+          onOpenInStudio={handleOpenDdtInStudio}
           onAssignOr={handleOpenAssign}
           onSendCarraraRed={handleSendCarraraRed}
           onSendCarraraYellow={handleSendCarraraYellow}
@@ -603,7 +608,8 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
           selectedIds={selectedWepaIds}
           onToggleSelectRow={handleToggleSelectRowWepa}
           onToggleSelectAll={handleToggleSelectAllWepa}
-          onOpenDdt={handleOpenDdtInStudio}
+          onOpenDdt={(id) => setQuickViewDdtId(id)}
+          onOpenInStudio={handleOpenDdtInStudio}
           onAssignOr={handleOpenAssign}
           onSendWepaMulti={handleSendWepaMulti}
           onSendSelected={handleSendWepaSelected}
@@ -611,6 +617,17 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
           isSendingEmail={isSendingEmail}
         />
       </div>
+
+      {/* Popup Dati Completi DDT con chiusura rapida Esc (Mini DDT Studio) */}
+      <DDTQuickViewModal
+        isOpen={quickViewDdtId !== null}
+        onClose={() => setQuickViewDdtId(null)}
+        ddtId={quickViewDdtId}
+        onOpenInStudio={(id) => {
+          setQuickViewDdtId(null);
+          handleOpenDdtInStudio(id);
+        }}
+      />
 
       {/* Modale Assegna Numero Ordine & Sconto */}
       <OrAssignModal
