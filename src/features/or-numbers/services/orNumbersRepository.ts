@@ -1,5 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
-import { OrRow } from "../types/orNumbers";
+import { OrRow, isActualOrderReference } from "../types/orNumbers";
 import { cleanDestinationName } from "@/features/ddt-studio/utils/destinationCleaner";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -191,6 +191,9 @@ export class OrNumbersRepository {
         }
       }
 
+      const rawOrderRef = (r.order_reference || "").trim();
+      const effectiveOrderRef = isActualOrderReference(rawOrderRef) ? rawOrderRef : "";
+
       return {
         id: r.id,
         docNumber: r.doc_number,
@@ -198,7 +201,7 @@ export class OrNumbersRepository {
         date: r.doc_date,
         client: r.client_name,
         destination: cleanDest || rawDest || "—",
-        orderReference: r.order_reference || "",
+        orderReference: effectiveOrderRef,
         statusLog: logStatus,
       };
     });
