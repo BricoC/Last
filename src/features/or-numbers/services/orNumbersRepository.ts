@@ -25,6 +25,35 @@ export class OrNumbersRepository {
 
   public static async getLogsMap(): Promise<Record<string, string>> {
     await this.ensureLogsTable();
+
+    // Sincronizzazione automatica da Supabase verso SQLite
+    try {
+      const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
+      if (configRes?.config?.projectUrl && configRes?.config?.anonKey) {
+        const url = new URL("/rest/v1/ddt_logs?select=id,status", configRes.config.projectUrl.replace(/\/$/, ""));
+        const res = await fetch(url.toString(), {
+          headers: {
+            apikey: configRes.config.anonKey,
+            Authorization: `Bearer ${configRes.config.anonKey}`,
+          },
+        });
+        if (res.ok) {
+          const remoteLogs = (await res.json()) as Array<{ id: string; status: string }>;
+          if (Array.isArray(remoteLogs) && remoteLogs.length > 0) {
+            const db = await getDatabase();
+            for (const r of remoteLogs) {
+              await db.execute(
+                `INSERT OR REPLACE INTO ddt_logs (id, status, updated_at) VALUES ($1, $2, datetime('now'))`,
+                [r.id, r.status]
+              );
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[OrNumbersRepository] Sync ddt_logs da Supabase:", err);
+    }
+
     try {
       const db = await getDatabase();
       const rows = await db.select<{ id: string; status: string }[]>(
