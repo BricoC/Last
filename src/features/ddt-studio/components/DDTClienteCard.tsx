@@ -4,6 +4,7 @@ import { DdtDocument, DdtAccountOrBalance } from "../models/ddt";
 import { Client, ClientDestination } from "@/features/clients/models/client";
 import { clientRepository } from "@/features/clients/services/clientRepository";
 import { deduplicateDestinations } from "@/features/clients/utils/destinationUtils";
+import { getDestinationInfo } from "../utils/destinationCleaner";
 
 export interface DDTClienteCardProps {
   ddt: Partial<DdtDocument>;
@@ -53,26 +54,40 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const itemsRef = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Ricerca autocompletamento clienti in tempo reale da SQLite
+  // Tendina scelta rapida destinazione merci
+  const [showDestDropdown, setShowDestDropdown] = useState(false);
+  const destDropdownRef = useRef<HTMLDivElement>(null);
+  const destInputRef = useRef<HTMLInputElement>(null);
+
+  // Caricamento lista clienti da SQLite (completa o filtrata)
   useEffect(() => {
     let active = true;
-    if (clientSearch.trim().length >= 2) {
-      clientRepository.getClients(clientSearch).then((results) => {
-        if (active) {
-          setMatchingClients(results);
-          setShowDropdown(results.length > 0);
+    const query = clientSearch.trim();
+    const isFull = !query || query.toLowerCase() === (ddt.client_name || "").trim().toLowerCase();
+    const termToFetch = isFull ? "" : query;
+
+    clientRepository
+      .getClients(termToFetch)
+      .then((results) => {
+        if (!active) return;
+        setMatchingClients(results);
+        if (isFull && ddt.client_name) {
+          const foundIdx = results.findIndex(
+            (c) => c.business_name.trim().toLowerCase() === ddt.client_name?.trim().toLowerCase()
+          );
+          setSelectedIndex(foundIdx >= 0 ? foundIdx : 0);
+        } else {
           setSelectedIndex(0);
         }
+      })
+      .catch((err) => {
+        console.error("Errore caricamento clienti:", err);
       });
-    } else {
-      setMatchingClients([]);
-      setShowDropdown(false);
-      setSelectedIndex(0);
-    }
+
     return () => {
       active = false;
     };
-  }, [clientSearch]);
+  }, [clientSearch, ddt.client_name]);
 
   // Se ddt ha client_id o client_name, recuperiamo l'anagrafica cliente e sincronizziamo
   // SEMPRE indirizzo sede, città, p.iva e destinazione se mancanti nel ddt
@@ -154,26 +169,41 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
     };
   }, [ddt.client_id, ddt.client_name]);
 
-  // Listener globale ESC per chiudere la tendina espansa
+  // Listener globale ESC per chiudere tendine o testata espansa
   useEffect(() => {
-    if (!isExpanded) return;
+    if (!isExpanded && !showDestDropdown && !showDropdown) return;
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsExpanded(false);
+        if (showDestDropdown) {
+          setShowDestDropdown(false);
+          return;
+        }
+        if (showDropdown) {
+          setShowDropdown(false);
+          setIsTyping(false);
+          return;
+        }
+        if (isExpanded) {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsExpanded(false);
+        }
       }
     };
     window.addEventListener("keydown", handleEsc, true);
     return () => window.removeEventListener("keydown", handleEsc, true);
-  }, [isExpanded]);
+  }, [isExpanded, showDestDropdown, showDropdown]);
 
-  // Chiusura dropdown clienti al click esterno
+  // Chiusura dropdown clienti e destinazioni al click esterno
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
         setShowDropdown(false);
         setIsTyping(false);
+      }
+      if (destDropdownRef.current && !destDropdownRef.current.contains(target)) {
+        setShowDestDropdown(false);
       }
     };
     document.addEventListener("mousedown", handleOutside);
@@ -197,8 +227,9 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
 
     if (c.destinations && c.destinations.length > 0) {
       const firstDest = c.destinations[0];
+      const destInfo = getDestinationInfo(firstDest, c.business_name);
       destName = firstDest.luogo || c.business_name;
-      destAddress = firstDest.citta || firstDest.note || "";
+      destAddress = destInfo.addressValue;
       destCity = "";
     } else if (c.destination_name || c.destination_city) {
       destName = c.destination_name || c.business_name;
@@ -262,6 +293,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
     setSelectedClient(null);
     setClientSearch("");
     setIsTyping(true);
+    setShowDropdown(true);
     setDdt((prev) => ({
       ...prev,
       client_id: undefined,
@@ -281,38 +313,6 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
     }, 50);
   };
 
-  // Destinazione attiva selezionata per il menu a tendina
-  const currentActiveDestValue = (() => {
-    const addr = (ddt.destination_address || "").trim().toUpperCase();
-    const city = (ddt.destination_city || "").trim().toUpperCase();
-    const clientAddr = (selectedClient?.address || ddt.client_address || "").trim().toUpperCase();
-
-    // Se è vuoto o corrisponde alla sede legale
-    if (
-      (!addr && !city) ||
-      (clientAddr && addr === clientAddr) ||
-      (addr === "SEDE LEGALE" && !city)
-    ) {
-      return "__SEDE_LEGALE__";
-    }
-
-    if (selectedClient?.destinations && selectedClient.destinations.length > 0) {
-      const matched = selectedClient.destinations.find(
-        (d) =>
-          (d.citta && (d.citta.trim().toUpperCase() === addr || d.citta.trim().toUpperCase() === city)) ||
-          String(d.id) === addr ||
-          (d.luogo && d.luogo.trim().toUpperCase() === addr)
-      );
-      if (matched) return String(matched.id || matched.citta);
-    }
-
-    // Se c'è un valore impostato ed è una destinazione personalizzata
-    if (addr || city) {
-      return "__CUSTOM__";
-    }
-
-    return "__SEDE_LEGALE__";
-  })();
 
   const handleOpenNewDestModal = () => {
     setNewDestAddress("");
@@ -322,31 +322,6 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
     setIsNewDestModalOpen(true);
   };
 
-  const handleDestinationChange = (val: string) => {
-    if (!val) return;
-    if (val === "__NEW__") {
-      handleOpenNewDestModal();
-      return;
-    }
-    if (val === "__SEDE_LEGALE__") {
-      setDdt((prev) => ({
-        ...prev,
-        destination_name: selectedClient?.business_name || prev.client_name || "",
-        destination_address: selectedClient?.address || prev.client_address || "",
-        destination_city: selectedClient?.city || prev.client_city || "",
-      }));
-      return;
-    }
-    const d = selectedClient?.destinations?.find((item) => String(item.id || item.citta) === val || item.citta === val);
-    if (d) {
-      setDdt((prev) => ({
-        ...prev,
-        destination_name: d.luogo || selectedClient?.business_name || prev.client_name || "",
-        destination_address: d.citta || d.note || "",
-        destination_city: "",
-      }));
-    }
-  };
 
   const handleSaveNewDestination = async () => {
     const cleanAddr = newDestAddress.trim();
@@ -430,10 +405,16 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
                   onChange={(e) => {
                     setIsTyping(true);
                     setClientSearch(e.target.value);
+                    setShowDropdown(true);
+                  }}
+                  onClick={() => {
+                    setShowDropdown(true);
                   }}
                   onFocus={() => {
                     setIsTyping(true);
                     setClientSearch(ddt.client_name || "");
+                    setShowDropdown(true);
+                    setTimeout(() => inputRef.current?.select(), 50);
                   }}
                   onBlur={() => {
                     setTimeout(() => {
@@ -447,7 +428,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
                   }}
                   onKeyDown={handleKeyDown}
                   placeholder="Seleziona o cerca cliente..."
-                  className="w-56 sm:w-64 px-2 py-0.5 pr-6 text-xs font-semibold bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/60 focus:border-[var(--primary)] outline-none"
+                  className="w-56 sm:w-64 px-2 py-0.5 pr-6 text-xs font-semibold bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/60 focus:border-[var(--primary)] outline-none cursor-pointer focus:cursor-text"
                 />
                 {ddt.client_name && (
                   <button
@@ -463,84 +444,201 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
             </div>
 
             {/* Menu a tendina dei clienti */}
-            {showDropdown && matchingClients.length > 0 && (
-              <div className="absolute left-0 top-full mt-1 w-80 max-h-64 overflow-y-auto bg-[var(--card)] border border-[var(--border)] rounded-md shadow-xl z-50 divide-y divide-[var(--border)]/50">
-                {matchingClients.map((c, idx) => (
-                  <div
-                    key={c.id}
-                    ref={(el) => { itemsRef.current[idx] = el; }}
-                    onClick={() => handleSelectClient(c)}
-                    className={`px-3 py-1.5 cursor-pointer text-xs transition-colors flex items-center justify-between ${
-                      idx === selectedIndex
-                        ? "bg-[var(--primary)] text-white"
-                        : "hover:bg-[var(--primary)]/10 text-[var(--foreground)]"
-                    }`}
-                  >
-                    <div className="truncate">
-                      <span className="font-bold">{c.business_name}</span>
-                      {c.city && (
-                        <span className={`text-[11px] ml-1.5 ${idx === selectedIndex ? "text-white/80" : "text-[var(--muted-foreground)]"}`}>
-                          ({c.city})
-                        </span>
-                      )}
-                    </div>
-                    {c.destinations && c.destinations.length > 1 && (
-                      <span className={`text-[10px] px-1 rounded font-mono ${
-                        idx === selectedIndex ? "bg-white/20 text-white" : "bg-[var(--border)] text-[var(--muted-foreground)]"
-                      }`}>
-                        {c.destinations.length} sedi
-                      </span>
-                    )}
+            {showDropdown && (
+              <div className="absolute left-0 top-full mt-1 w-80 sm:w-96 max-h-80 overflow-y-auto bg-[var(--card)] border border-[var(--border)] rounded-md shadow-2xl z-50 divide-y divide-[var(--border)]/50">
+                <div className="px-3 py-1 bg-[var(--muted)]/50 text-[10px] font-bold text-[var(--muted-foreground)] sticky top-0 z-10 backdrop-blur-xs flex items-center justify-between">
+                  <span>
+                    {clientSearch.trim() && clientSearch.trim().toLowerCase() !== (ddt.client_name || "").trim().toLowerCase()
+                      ? "CLIENTI FILTRATI"
+                      : "TUTTI I CLIENTI"}
+                  </span>
+                  <span className="font-mono">{matchingClients.length} clienti</span>
+                </div>
+                {matchingClients.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-center text-[var(--muted-foreground)] italic">
+                    Nessun cliente trovato {clientSearch.trim() ? `per "${clientSearch.trim()}"` : ""}
                   </div>
-                ))}
+                ) : (
+                  matchingClients.map((c, idx) => {
+                    const isSelected =
+                      selectedClient?.id === c.id ||
+                      (!selectedClient &&
+                        ddt.client_name?.trim().toUpperCase() === c.business_name.trim().toUpperCase());
+                    const isHighlighted = idx === selectedIndex;
+                    return (
+                      <div
+                        key={c.id}
+                        ref={(el) => {
+                          itemsRef.current[idx] = el;
+                        }}
+                        onClick={() => handleSelectClient(c)}
+                        className={`px-3 py-1.5 cursor-pointer text-xs transition-colors flex items-center justify-between ${
+                          isHighlighted
+                            ? "bg-[var(--primary)] text-white"
+                            : isSelected
+                            ? "bg-[var(--primary)]/15 text-[var(--foreground)] font-semibold"
+                            : "hover:bg-[var(--primary)]/10 text-[var(--foreground)]"
+                        }`}
+                      >
+                        <div className="truncate flex items-center gap-1.5 min-w-0">
+                          {isSelected && (
+                            <Check
+                              className={`w-3.5 h-3.5 shrink-0 ${
+                                isHighlighted ? "text-white" : "text-emerald-400"
+                              }`}
+                            />
+                          )}
+                          <span className="font-bold truncate">{c.business_name}</span>
+                          {c.city && (
+                            <span
+                              className={`text-[11px] shrink-0 ${
+                                isHighlighted ? "text-white/80" : "text-[var(--muted-foreground)]"
+                              }`}
+                            >
+                              ({c.city})
+                            </span>
+                          )}
+                        </div>
+                        {c.destinations && c.destinations.length > 1 && (
+                          <span
+                            className={`text-[10px] px-1 rounded font-mono shrink-0 ml-2 ${
+                              isHighlighted
+                                ? "bg-white/20 text-white"
+                                : "bg-[var(--border)] text-[var(--muted-foreground)]"
+                            }`}
+                          >
+                            {c.destinations.length} sedi
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
           </div>
 
           <div className="h-4 w-px bg-[var(--border)] shrink-0" />
 
-          {/* Destinazione Merce con Menù a Tendina e Tasto + Nuova Destinazione */}
+          {/* Destinazione Merce con Input Modificabile + Menù Scelta Rapida */}
           <div className="flex items-center gap-1.5 shrink-0">
             <MapPin className="w-3.5 h-3.5 text-sky-400 shrink-0" />
             <span className="text-[var(--muted-foreground)] text-[11px] font-semibold">Dest:</span>
 
-            <div className="relative flex items-center">
-              <select
-                value={currentActiveDestValue}
-                onChange={(e) => handleDestinationChange(e.target.value)}
-                className="h-6 pl-2 pr-6 text-xs font-bold text-sky-300 bg-[var(--background)] border border-sky-500/40 hover:border-sky-400 rounded focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer appearance-none transition-colors max-w-[240px] truncate"
-                title="Seleziona la destinazione merci o sede di consegna"
-              >
-                <option value="__SEDE_LEGALE__" className="bg-[var(--card)] text-[var(--foreground)] font-semibold">
-                  Sede Legale {selectedClient?.city ? `(${selectedClient.city})` : ""}
-                </option>
+            <div className="relative flex items-center" ref={destDropdownRef}>
+              <div className="relative flex items-center">
+                <input
+                  ref={destInputRef}
+                  type="text"
+                  value={ddt.destination_address || ""}
+                  onChange={(e) => {
+                    const nextVal = e.target.value;
+                    setDdt((prev) => ({
+                      ...prev,
+                      destination_address: nextVal,
+                      destination_name: prev.destination_name || selectedClient?.business_name || prev.client_name || "",
+                    }));
+                  }}
+                  placeholder="Sede Legale o indirizzo..."
+                  className="h-6 pl-2 pr-6 text-xs font-bold text-sky-300 bg-[var(--background)] border border-sky-500/40 hover:border-sky-400 focus:border-sky-400 rounded focus:outline-none w-44 sm:w-56 transition-colors placeholder:text-sky-500/40"
+                  title="Indirizzo di consegna merci (modificabile liberamente, es. CV7 7.6)"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowDestDropdown((prev) => !prev)}
+                  className="absolute right-1 text-sky-400 hover:text-sky-200 p-0.5 rounded transition-colors"
+                  title="Scegli tra le sedi di consegna salvate"
+                >
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showDestDropdown ? "rotate-180" : ""}`} />
+                </button>
+              </div>
 
-                {selectedClient?.destinations && selectedClient.destinations.map((d, dIdx) => (
-                  <option
-                    key={d.id || dIdx}
-                    value={String(d.id || d.citta)}
-                    className="bg-[var(--card)] text-[var(--foreground)] font-semibold"
+              {/* Menu a tendina delle destinazioni */}
+              {showDestDropdown && (
+                <div className="absolute left-0 top-full mt-1 w-64 max-h-72 overflow-y-auto bg-[var(--card)] border border-[var(--border)] rounded-md shadow-2xl z-50 divide-y divide-[var(--border)]/50">
+                  <div className="px-3 py-1 bg-[var(--muted)]/50 text-[10px] font-bold text-[var(--muted-foreground)] sticky top-0 z-10 backdrop-blur-xs flex items-center justify-between">
+                    <span>SEDI DI CONSEGNA</span>
+                    <span className="font-mono">{(selectedClient?.destinations?.length ?? 0) + 1} sedi</span>
+                  </div>
+
+                  {/* Sede Legale */}
+                  <div
+                    onClick={() => {
+                      setDdt((prev) => ({
+                        ...prev,
+                        destination_name: selectedClient?.business_name || prev.client_name || "",
+                        destination_address: selectedClient?.address || prev.client_address || "",
+                        destination_city: selectedClient?.city || prev.client_city || "",
+                      }));
+                      setShowDestDropdown(false);
+                      setTimeout(() => {
+                        destInputRef.current?.focus();
+                        destInputRef.current?.select();
+                      }, 50);
+                    }}
+                    className={`px-3 py-1.5 cursor-pointer text-xs transition-colors hover:bg-sky-500/15 flex items-center justify-between ${
+                      !ddt.destination_address || ddt.destination_address === selectedClient?.address
+                        ? "bg-sky-500/10 text-sky-300 font-bold"
+                        : "text-[var(--foreground)]"
+                    }`}
                   >
-                    {d.citta || d.luogo || `Sede ${dIdx + 1}`}
-                    {d.luogo && d.citta ? ` · ${d.luogo}` : ""}
-                  </option>
-                ))}
+                    <span className="truncate">
+                      Sede Legale {selectedClient?.city ? `(${selectedClient.city})` : ""}
+                    </span>
+                    {(!ddt.destination_address || ddt.destination_address === selectedClient?.address) && (
+                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    )}
+                  </div>
 
-                {currentActiveDestValue === "__CUSTOM__" && (
-                  <option value="__CUSTOM__" className="bg-[var(--card)] text-sky-400 font-semibold">
-                    📍 {ddt.destination_address || ddt.destination_city || "Altra destinazione"}
-                    {ddt.destination_city && ddt.destination_address ? ` (${ddt.destination_city})` : ""}
-                  </option>
-                )}
+                  {/* Destinazioni anagrafica (pulite dal nome del cliente) */}
+                  {selectedClient?.destinations && selectedClient.destinations.map((d, dIdx) => {
+                    const { label, addressValue } = getDestinationInfo(d, selectedClient.business_name);
+                    const isSelected =
+                      (ddt.destination_address || "").trim().toUpperCase() === addressValue.trim().toUpperCase() ||
+                      (ddt.destination_address || "").trim().toUpperCase().startsWith(addressValue.trim().toUpperCase());
 
-                <option disabled className="bg-[var(--card)] text-[var(--muted-foreground)]">
-                  ──────────────
-                </option>
-                <option value="__NEW__" className="bg-[var(--card)] text-emerald-400 font-bold">
-                  ➕ + Nuova / Altra destinazione...
-                </option>
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-sky-400 absolute right-1.5 pointer-events-none opacity-80" />
+                    return (
+                      <div
+                        key={d.id || dIdx}
+                        onClick={() => {
+                          setDdt((prev) => ({
+                            ...prev,
+                            destination_name: d.luogo || selectedClient.business_name || prev.client_name || "",
+                            destination_address: addressValue,
+                            destination_city: "",
+                          }));
+                          setShowDestDropdown(false);
+                          setTimeout(() => {
+                            if (destInputRef.current) {
+                              destInputRef.current.focus();
+                              const len = addressValue.length;
+                              destInputRef.current.setSelectionRange(len, len);
+                            }
+                          }, 50);
+                        }}
+                        className={`px-3 py-1.5 cursor-pointer text-xs transition-colors hover:bg-sky-500/15 flex items-center justify-between ${
+                          isSelected ? "bg-sky-500/10 text-sky-300 font-bold" : "text-[var(--foreground)]"
+                        }`}
+                      >
+                        <span className="truncate">{label}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                      </div>
+                    );
+                  })}
+
+                  {/* Pulsante Nuova destinazione permanente */}
+                  <div
+                    onClick={() => {
+                      setShowDestDropdown(false);
+                      handleOpenNewDestModal();
+                    }}
+                    className="px-3 py-2 cursor-pointer text-xs text-emerald-400 hover:bg-emerald-500/10 font-bold flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Nuova destinazione permanente...</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <button
