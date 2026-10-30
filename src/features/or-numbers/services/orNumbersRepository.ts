@@ -149,6 +149,51 @@ export class OrNumbersRepository {
     }
   }
 
+  public static async syncRemoteOrdersForMonth(
+    year: number,
+    startDate: string,
+    endDate: string
+  ): Promise<void> {
+    try {
+      const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
+      if (!configRes?.config?.projectUrl || !configRes?.config?.anonKey) return;
+
+      const url = new URL("/rest/v1/ddt", configRes.config.projectUrl.replace(/\/$/, ""));
+      url.searchParams.set("select", "numero,anno,nr_vs_ordine");
+      url.searchParams.set("anno", `eq.${year}`);
+      url.searchParams.append("data", `gte.${startDate}`);
+      url.searchParams.append("data", `lte.${endDate}`);
+      url.searchParams.set("nr_vs_ordine", "not.is.null");
+
+      const res = await fetch(url.toString(), {
+        headers: {
+          apikey: configRes.config.anonKey,
+          Authorization: `Bearer ${configRes.config.anonKey}`,
+        },
+      });
+
+      if (!res.ok) return;
+      const remoteDdts = (await res.json()) as Array<{ numero: number; anno: number; nr_vs_ordine: string }>;
+      if (!Array.isArray(remoteDdts) || remoteDdts.length === 0) return;
+
+      const db = await getDatabase();
+      for (const rd of remoteDdts) {
+        const orderVal = (rd.nr_vs_ordine || "").trim();
+        if (orderVal && isActualOrderReference(orderVal)) {
+          await db.execute(
+            `UPDATE ddt_documents 
+             SET order_reference = $1, 
+                 updated_at = datetime('now')
+             WHERE doc_number = $2 AND year = $3 AND (order_reference IS NULL OR order_reference != $1)`,
+            [orderVal, rd.numero, rd.anno]
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("[OrNumbersRepository] Sync nr_vs_ordine da Supabase:", err);
+    }
+  }
+
   public static async getOrRowsForMonth(
     year: number,
     month: number,
@@ -161,6 +206,12 @@ export class OrNumbersRepository {
     const startDate = `${year}-${mm}-01`;
     const lastDay = new Date(year, month, 0).getDate();
     const endDate = `${year}-${mm}-${String(lastDay).padStart(2, "0")}`;
+
+    // Sincronizzazione automatica da Supabase verso SQLite per ordini e date log
+    await Promise.allSettled([
+      this.syncRemoteOrdersForMonth(year, startDate, endDate),
+      this.getLogsMap(),
+    ]);
 
     let clientCondition = "";
     if (clientType === "CARRARA") {
@@ -266,18 +317,26 @@ export class OrNumbersRepository {
     try {
       const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
       if (configRes?.config?.projectUrl && configRes?.config?.anonKey) {
-        const url = new URL("/rest/v1/ddt", configRes.config.projectUrl.replace(/\/$/, ""));
-        url.searchParams.set("id", `eq.${ddtId}`);
-        await fetch(url.toString(), {
-          method: "PATCH",
-          headers: {
-            apikey: configRes.config.anonKey,
-            Authorization: `Bearer ${configRes.config.anonKey}`,
-            "Content-Type": "application/json",
-            Prefer: "return=minimal"
-          },
-          body: JSON.stringify({ nr_vs_ordine: orderRef.trim() })
-        });
+        const ddtRows = await db.select<Array<{ doc_number: number; year: number }>>(
+          "SELECT doc_number, year FROM ddt_documents WHERE id = $1",
+          [ddtId]
+        );
+        const doc = ddtRows[0];
+        if (doc?.doc_number && doc?.year) {
+          const url = new URL("/rest/v1/ddt", configRes.config.projectUrl.replace(/\/$/, ""));
+          url.searchParams.set("anno", `eq.${doc.year}`);
+          url.searchParams.set("numero", `eq.${doc.doc_number}`);
+          await fetch(url.toString(), {
+            method: "PATCH",
+            headers: {
+              apikey: configRes.config.anonKey,
+              Authorization: `Bearer ${configRes.config.anonKey}`,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal"
+            },
+            body: JSON.stringify({ nr_vs_ordine: orderRef.trim() })
+          });
+        }
       }
     } catch (err) {
       console.warn("[OrNumbersRepository] Supabase assign OR sync warning:", err);
