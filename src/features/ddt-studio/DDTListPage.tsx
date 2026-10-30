@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
-import { LoaderCircle, RefreshCw, Search, X, FileText } from "lucide-react";
+import { LoaderCircle, RefreshCw, Search, X, FileText, Mail } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { getDdtListViewRows, type DdtListViewRow } from "./services/ddtReadModelsRepository";
@@ -7,6 +7,7 @@ import { requestOpenDdt } from "./services/ddtNavigation";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "./services/ddtViewFormatting";
 import { normalizeSearch, tokenizeSearch, matchesSearchToken } from "@/shared/hooks/useFragmentSearch";
 import { DDTQuickViewModal } from "./components/DDTQuickViewModal";
+import { DDTEmailSendModal } from "./components/DDTEmailSendModal";
 
 type IndexedDdtRow = DdtListViewRow & { _searchIndex: string };
 
@@ -22,7 +23,30 @@ export function DDTListPage() {
   const [error, setError] = useState("");
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const [selectedDdtId, setSelectedDdtId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const openWindow = useWindowStore((state) => state.openWindow);
+
+  const handleToggleSelectAll = () => {
+    if (filtered.length === 0) return;
+    if (selectedIds.size >= filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((r) => r.id)));
+    }
+  };
+
+  const handleToggleRow = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const load = async () => {
     setLoading(true); setError("");
@@ -126,9 +150,34 @@ export function DDTListPage() {
           <span className="text-[var(--muted-foreground)] text-[11px] font-normal">
             ({rows.length.toLocaleString("it-IT")} totali)
           </span>
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-2 ml-2">
+              <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-bold text-[11px] border border-blue-500/30">
+                {selectedIds.size} selezionat{selectedIds.size === 1 ? "o" : "i"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="text-[11px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] underline cursor-pointer"
+              >
+                Deseleziona
+              </button>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-3">
-          <span>Visibili: {filtered.length.toLocaleString("it-IT")}</span>
+        <div className="flex items-center gap-2.5">
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsEmailModalOpen(true)}
+              className="h-6 px-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+              title="Allega ad email i DDT selezionati e apri Outlook"
+            >
+              <Mail className="h-3.5 w-3.5" />
+              <span>Allega ad email ({selectedIds.size})</span>
+            </button>
+          )}
+          <span className="text-[11px] text-[var(--muted-foreground)]">Visibili: {filtered.length.toLocaleString("it-IT")}</span>
           <Button type="button" size="sm" variant="secondary" className="h-6 px-2 cursor-pointer" onClick={() => void load()} disabled={loading}>
             {loading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
@@ -155,6 +204,15 @@ export function DDTListPage() {
           <table className="w-full border-collapse text-xs">
             <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">
               <tr>
+                <th className="px-2.5 py-2 text-center w-9">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && selectedIds.size >= filtered.length}
+                    onChange={handleToggleSelectAll}
+                    className="rounded border-[var(--border)] cursor-pointer accent-blue-500"
+                    title={selectedIds.size >= filtered.length ? "Deseleziona tutti" : "Seleziona tutti i DDT filtrati"}
+                  />
+                </th>
                 <th className="px-3 py-2 text-left w-36">DATA</th>
                 <th className="px-3 py-2 text-left w-28">DDT</th>
                 <th className="px-3 py-2 text-left w-48">CLIENTE</th>
@@ -174,12 +232,25 @@ export function DDTListPage() {
               {visibleRows.map((row) => {
                 const isPositiveRev = row.revenueSubunits > 0;
                 const isNegativeRev = row.revenueSubunits < 0;
+                const isSelected = selectedIds.has(row.id);
 
                 return (
                   <tr
                     key={row.id}
-                    className="hover:bg-[var(--background)]/60 transition-colors"
+                    className={`hover:bg-[var(--background)]/60 transition-colors ${
+                      isSelected ? "bg-blue-500/10" : ""
+                    }`}
                   >
+                    {/* CHECKBOX */}
+                    <td className="px-2.5 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleRow(row.id)}
+                        className="rounded border-[var(--border)] cursor-pointer accent-blue-500"
+                      />
+                    </td>
+
                     {/* DATA */}
                     <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap">
                       {formatDdtViewDate(row.date)}
@@ -305,6 +376,13 @@ export function DDTListPage() {
           requestOpenDdt(id);
           openWindow({ id: "ddt-studio", title: "DDT Studio (Pro)", componentId: "ddt-studio" });
         }}
+      />
+
+      {/* Modale invio email con DDT allegati */}
+      <DDTEmailSendModal
+        isOpen={isEmailModalOpen}
+        onClose={() => setIsEmailModalOpen(false)}
+        selectedDdtIds={Array.from(selectedIds)}
       />
     </div>
   );

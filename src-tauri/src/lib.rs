@@ -186,6 +186,81 @@ fn send_order_email(to: String, subject: String, body: String) -> Result<(), Str
     Ok(())
 }
 
+#[tauri::command]
+fn save_temp_file(filename: String, bytes: Vec<u8>) -> Result<String, String> {
+    let temp_dir = std::env::temp_dir().join("brico_ddt_email");
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("Errore creazione cartella temporanea: {}", e))?;
+    let file_path = temp_dir.join(&filename);
+    fs::write(&file_path, bytes).map_err(|e| format!("Errore scrittura file temporaneo: {}", e))?;
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn send_email_with_attachments(
+    to: String,
+    cc: Option<String>,
+    subject: String,
+    body: String,
+    attachments: Vec<String>,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use base64::{engine::general_purpose, Engine as _};
+        let to_b64 = general_purpose::STANDARD.encode(&to);
+        let cc_b64 = general_purpose::STANDARD.encode(&cc.unwrap_or_default());
+        let subj_b64 = general_purpose::STANDARD.encode(&subject);
+        let body_b64 = general_purpose::STANDARD.encode(&body);
+        let att_json = serde_json::to_string(&attachments).unwrap_or_default();
+        let att_b64 = general_purpose::STANDARD.encode(&att_json);
+
+        let ps_script = format!(
+            r#"
+            function _d($s) {{ [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($s)) }}
+            $outlook = New-Object -ComObject Outlook.Application
+            $mail = $outlook.CreateItem(0)
+            $to = _d '{}'
+            if ($to) {{ $mail.To = $to }}
+            $cc = _d '{}'
+            if ($cc) {{ $mail.CC = $cc }}
+            $mail.Subject = _d '{}'
+            $mail.HTMLBody = _d '{}'
+            $attJson = _d '{}'
+            if ($attJson) {{
+                $attList = ConvertFrom-Json $attJson
+                foreach ($p in $attList) {{
+                    if (Test-Path $p) {{
+                        $mail.Attachments.Add($p) | Out-Null
+                    }}
+                }}
+            }}
+            $mail.Display()
+            "#,
+            to_b64, cc_b64, subj_b64, body_b64, att_b64
+        );
+
+        let mut cmd = Command::new("powershell");
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &ps_script,
+        ]);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Errore esecuzione comando invio email: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Errore Outlook/PowerShell: {}", stderr));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -194,8 +269,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             save_file_to_desktop,
             save_pdf_to_desktop,
+            save_temp_file,
             print_ddt_silent,
             send_order_email,
+            send_email_with_attachments,
             ddt_commands::save_ddt_transaction,
             ddt_delete_command::soft_delete_ddt_transaction,
             supabase_config::load_supabase_config,
