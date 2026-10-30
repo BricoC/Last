@@ -181,7 +181,7 @@ export const OrAssignModal: React.FC<OrAssignModalProps> = ({
               <input
                 type="text"
                 autoFocus
-                placeholder="Es. 4500123456 del 14.10.2026"
+                placeholder=""
                 value={orderRef}
                 onChange={(e) => setOrderRef(e.target.value)}
                 className="w-full bg-[#1e293b] border border-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 font-medium outline-none transition-all"
