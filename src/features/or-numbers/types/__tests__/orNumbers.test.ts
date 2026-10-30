@@ -43,5 +43,33 @@ describe("orNumbers getOrStatus", () => {
     };
     expect(getOrStatus(row)).toBe("red");
   });
+
+  it("considera 'RDA' come assenza di ordine (restituisce 'red' se senza log)", () => {
+    const row: OrRow = {
+      id: "4",
+      docNumber: 103,
+      series: "A",
+      date: "2026-10-30",
+      client: "CARTIERE CARRARA",
+      destination: "CV7",
+      orderReference: "RDA 11822710",
+      statusLog: "",
+    };
+    expect(getOrStatus(row)).toBe("red");
+  });
+
+  it("considera 'rda' minuscolo con log come 'yellow'", () => {
+    const row: OrRow = {
+      id: "5",
+      docNumber: 104,
+      series: "A",
+      date: "2026-10-30",
+      client: "CARTIERE CARRARA",
+      destination: "CV7",
+      orderReference: "rda 11809631",
+      statusLog: "Email Multipla 30/10/2026",
+    };
+    expect(getOrStatus(row)).toBe("yellow");
+  });
 });
 
