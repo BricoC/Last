@@ -1,5 +1,6 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import { ListinoGeneraleRow, ListinoClienteRow, PriceListLogEntry } from "../models/priceList";
+import { resolveClientPriceLists } from "@/features/ddt-studio/utils/clientPriceListMatcher";
 
 export class PriceListRepository {
   /**
@@ -121,16 +122,26 @@ export class PriceListRepository {
     const params: any[] = [];
 
     if (clientFilter && clientFilter !== "TUTTI") {
-      const cleanFilter = clientFilter.trim().replace(/^LIST_/, "").toLowerCase();
-      params.push(cleanFilter);
-      const cIdx = `$${params.length}`;
-      conditions.push(`(
-        LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) = ${cIdx}
-        OR LOWER(cliente) = ${cIdx}
-        OR LOWER(cliente) = 'list_' || ${cIdx}
-        OR LOWER(cliente) LIKE '%' || ${cIdx} || '%'
-        OR ${cIdx} LIKE '%' || LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) || '%'
-      )`);
+      const resolved = await resolveClientPriceLists(clientFilter);
+      if (resolved.length > 0) {
+        const plConditions = resolved.map((pl) => {
+          params.push(pl.toLowerCase());
+          params.push(pl.replace(/^LIST_/, "").toLowerCase());
+          return `(LOWER(cliente) = $${params.length - 1} OR LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) = $${params.length})`;
+        });
+        conditions.push(`(${plConditions.join(" OR ")})`);
+      } else {
+        const cleanFilter = clientFilter.trim().replace(/^LIST_/, "").toLowerCase();
+        params.push(cleanFilter);
+        const cIdx = `$${params.length}`;
+        conditions.push(`(
+          LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) = ${cIdx}
+          OR LOWER(cliente) = ${cIdx}
+          OR LOWER(cliente) = 'list_' || ${cIdx}
+          OR LOWER(cliente) LIKE '%' || ${cIdx} || '%'
+          OR ${cIdx} LIKE '%' || LOWER(TRIM(REPLACE(cliente, 'LIST_', ''))) || '%'
+        )`);
+      }
     }
 
     tokens.forEach((t) => {

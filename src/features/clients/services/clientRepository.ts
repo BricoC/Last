@@ -38,13 +38,15 @@ export class ClientRepository {
           WHEN REPLACE(REPLACE(LOWER(business_name), '.', ''), ' ', '') LIKE '%' || $${cleanIdx} || '%' THEN 4
           ELSE 5
         END ASC,
-        business_name ASC LIMIT 200`;
+        business_name ASC LIMIT 1000`;
     } else {
-      query += " ORDER BY business_name ASC LIMIT 200";
+      query += " ORDER BY business_name ASC LIMIT 1000";
     }
 
-    const rows = await db.select<ClientRow[]>(query, params);
-    return rows.map(this.mapRowToClient);
+    const rows = params.length > 0
+      ? await db.select<ClientRow[]>(query, params)
+      : await db.select<ClientRow[]>(query);
+    return rows.map((r) => this.mapRowToClient(r));
   }
 
   public async getClientById(id: string): Promise<Client | null> {

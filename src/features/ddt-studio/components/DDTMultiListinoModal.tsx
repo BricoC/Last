@@ -21,6 +21,7 @@ import { formatDdtViewDate } from "../services/ddtViewFormatting";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { calculateRowAmounts } from "../utils/ddtCalculations";
+import { isClientMatching, resolveClientPriceLists } from "../utils/clientPriceListMatcher";
 
 export interface DDTMultiListinoModalProps {
   isOpen: boolean;
@@ -74,6 +75,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
 
   // Filtro cliente dedicato per Listini Clienti (supporta ricerca multi-parola!)
   const [clientFilter, setClientFilter] = useState<string>("");
+  const [currentClientPls, setCurrentClientPls] = useState<Set<string>>(new Set());
 
   // Dati delle 4 finestre
   const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>([]);
@@ -109,9 +111,17 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
       setHistoryRows(hist);
 
       if (currentClientName && currentClientName.trim()) {
-        const clean = currentClientName.trim().replace(/^LIST_/, "");
-        setClientFilter(clean);
+        const resolved = await resolveClientPriceLists(currentClientName);
+        const plSet = new Set<string>();
+        resolved.forEach((p) => {
+          plSet.add(p.toUpperCase());
+          plSet.add(p.replace(/^LIST_/, "").toUpperCase());
+        });
+        setCurrentClientPls(plSet);
+      } else {
+        setCurrentClientPls(new Set());
       }
+      setClientFilter("");
     } catch (err) {
       console.error("Errore caricamento dati Alex Multi-Listino:", err);
     } finally {
@@ -212,19 +222,35 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
     });
   }, [generalItems, searchTokens]);
 
-  // 2. Filtraggio Finestra Listini Clienti con ricerca multi-parola sul cliente!
+  // 2. Filtraggio Finestra Listini Clienti (Fedele a NoManV1: default su cliente DDT, override su filtro manuale)
   const filteredClients = useMemo(() => {
     let result = clientItems;
 
-    // Filtro multi-parola sul cliente
+    // Se l'utente ha digitato un filtro manuale
     if (clientFilter.trim()) {
-      const clientTokens = tokenizeSearch(clientFilter);
+      const filterClean = clientFilter.trim();
+      const matchesCurrentClient = currentClientName && isClientMatching(filterClean, currentClientName);
+
       result = result.filter((item) => {
-        // Normalizza rimuovendo punteggiatura così 'MO.VI' matcha 'mo vi' o 'movi'
+        if (matchesCurrentClient && currentClientPls.has(item.cliente.toUpperCase())) {
+          return true;
+        }
+        if (isClientMatching(filterClean, item.cliente)) {
+          return true;
+        }
         const rawCli = item.cliente.toLowerCase();
         const cleanCli = item.cliente.replace(/^LIST_/, "").toLowerCase();
         const normCli = `${rawCli} ${cleanCli} ${rawCli.replace(/[^a-z0-9]/g, " ")} ${cleanCli.replace(/[^a-z0-9]/g, " ")}`;
+        const clientTokens = tokenizeSearch(filterClean);
         return clientTokens.every((tok) => normCli.includes(tok));
+      });
+    } else if (currentClientName && currentClientName.trim()) {
+      // Nessun filtro manuale: mostra automaticamente il listino associato al cliente del DDT
+      result = result.filter((item) => {
+        if (currentClientPls.has(item.cliente.toUpperCase())) {
+          return true;
+        }
+        return isClientMatching(currentClientName, item.cliente);
       });
     }
 
@@ -236,7 +262,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
       });
     }
     return result;
-  }, [clientItems, clientFilter, searchTokens]);
+  }, [clientItems, clientFilter, currentClientName, currentClientPls, searchTokens]);
 
   // 3. Filtraggio Finestra Storico DDT (~31k vendite)
   const filteredHistory = useMemo(() => {
@@ -1027,7 +1053,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                         type="text"
                         value={clientFilter}
                         onChange={(e) => setClientFilter(e.target.value)}
-                        placeholder="Cerca cliente (multi-parola)..."
+                        placeholder={currentClientName ? `Filtro: ${currentClientName}` : "Cerca cliente (multi-parola)..."}
                         className="pl-2.5 pr-6 py-0.5 text-xs bg-[var(--background)] border border-amber-500/40 rounded text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none w-52 font-medium"
                       />
                       {clientFilter && (
