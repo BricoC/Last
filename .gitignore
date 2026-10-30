@@ -30,3 +30,6 @@ dist-ssr
 supabase.local.json
 supabase.local.json.tmp
 scratch/
+*.db
+*.db-shm
+*.db-wal
