@@ -13,6 +13,7 @@ import { ClientListPage } from "@/features/clients/ClientListPage";
 import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
 import { ElectronicInvoicesPage } from "@/features/invoices/ElectronicInvoicesPage";
 import { OrderManagerPage } from "@/features/orders/OrderManagerPage";
+import { OrNumbersPage } from "@/features/or-numbers/OrNumbersPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
@@ -77,6 +78,8 @@ export function App() {
         return <QuoteStudioPage windowId={windowId} />;
       case "invoices":
         return <ElectronicInvoicesPage />;
+      case "or-numbers":
+        return <OrNumbersPage windowId={windowId} />;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">
