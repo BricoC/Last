@@ -21,3 +21,4 @@ export function getOrStatus(row: OrRow): OrStatusType {
   }
   return "red";
 }
+
