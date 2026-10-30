@@ -333,7 +333,7 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="Es. 4500125437 del 05.10.2026"
+                  placeholder=""
                   value={orderReference}
                   onChange={(e) => setOrderReference(e.target.value)}
                   className="w-full bg-[#0f172a] border border-emerald-500/40 rounded px-2.5 py-1 text-xs text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-emerald-400"
