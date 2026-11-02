@@ -18,6 +18,7 @@ export interface OrderItem {
   sync_status?: 'synced' | 'pending' | 'failed';
   isNew?: boolean;           // per righe buffer vuote in griglia
   _localKey?: string;
+  _rowKey?: string;
 }
 
 export interface Supplier {

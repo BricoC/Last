@@ -315,7 +315,7 @@ export class OrderSupabaseService {
    * Sposta ordini nel cestino
    */
   async moveToTrash(items: Array<OrderItem | string>): Promise<boolean> {
-    const ids = items.map((it) => (typeof it === "string" ? it : it.id));
+    const ids = items.map((it) => (typeof it === "string" ? it : String(it.supabase_id || it.id)));
     const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
     const nowIso = new Date().toISOString();
 
@@ -356,7 +356,7 @@ export class OrderSupabaseService {
    * Ripristina ordini dal cestino
    */
   async restoreFromTrash(items: Array<OrderItem | string>): Promise<boolean> {
-    const ids = items.map((it) => (typeof it === "string" ? it : it.id));
+    const ids = items.map((it) => (typeof it === "string" ? it : String(it.supabase_id || it.id)));
     const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
     const nowIso = new Date().toISOString();
 
@@ -396,7 +396,7 @@ export class OrderSupabaseService {
    * Ripristina ordini dall'archivio
    */
   async restoreFromArchive(items: Array<OrderItem | string>): Promise<boolean> {
-    const ids = items.map((it) => (typeof it === "string" ? it : it.id));
+    const ids = items.map((it) => (typeof it === "string" ? it : String(it.supabase_id || it.id)));
     const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
     const nowIso = new Date().toISOString();
 
@@ -436,7 +436,7 @@ export class OrderSupabaseService {
    * Eliminazione definitiva (Cestino)
    */
   async permanentDelete(items: Array<OrderItem | string>): Promise<boolean> {
-    const ids = items.map((it) => (typeof it === "string" ? it : it.id));
+    const ids = items.map((it) => (typeof it === "string" ? it : String(it.supabase_id || it.id)));
     const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
     const nowIso = new Date().toISOString();
 
