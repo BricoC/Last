@@ -5,6 +5,10 @@ import { invoke } from "@tauri-apps/api/core";
 
 export class OrNumbersRepository {
   private static logsTableEnsured = false;
+  private static cachedLogsMap: Record<string, string> | null = null;
+  private static lastCacheTimestamp = 0;
+  private static readonly CACHE_TTL_MS = 60_000; // 1 minuto di cache
+  private static inFlightLogsPromise: Promise<Record<string, string>> | null = null;
 
   public static async ensureLogsTable(): Promise<void> {
     if (this.logsTableEnsured) return;
@@ -23,55 +27,103 @@ export class OrNumbersRepository {
     }
   }
 
-  public static async getLogsMap(): Promise<Record<string, string>> {
-    await this.ensureLogsTable();
+  /**
+   * Inserisce o aggiorna una serie di log in SQLite a blocchi (batch)
+   * invece di eseguire centinaia di singole transazioni sequenziali.
+   */
+  private static async saveRemoteLogsToSqliteBatch(
+    logs: Array<{ id: string; status: string }>
+  ): Promise<void> {
+    if (logs.length === 0) return;
+    const db = await getDatabase();
+    const CHUNK_SIZE = 50;
 
-    // Sincronizzazione automatica da Supabase verso SQLite
-    try {
-      const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
-      if (configRes?.config?.projectUrl && configRes?.config?.anonKey) {
-        const url = new URL("/rest/v1/ddt_logs?select=id,status", configRes.config.projectUrl.replace(/\/$/, ""));
-        const res = await fetch(url.toString(), {
-          headers: {
-            apikey: configRes.config.anonKey,
-            Authorization: `Bearer ${configRes.config.anonKey}`,
-          },
-        });
-        if (res.ok) {
-          const remoteLogs = (await res.json()) as Array<{ id: string; status: string }>;
-          if (Array.isArray(remoteLogs) && remoteLogs.length > 0) {
-            const db = await getDatabase();
-            for (const r of remoteLogs) {
-              await db.execute(
-                `INSERT OR REPLACE INTO ddt_logs (id, status, updated_at) VALUES ($1, $2, datetime('now'))`,
-                [r.id, r.status]
-              );
+    for (let i = 0; i < logs.length; i += CHUNK_SIZE) {
+      const chunk = logs.slice(i, i + CHUNK_SIZE);
+      const valuePlaceholders: string[] = [];
+      const params: string[] = [];
+
+      chunk.forEach((item, idx) => {
+        const p1 = `$${idx * 2 + 1}`;
+        const p2 = `$${idx * 2 + 2}`;
+        valuePlaceholders.push(`(${p1}, ${p2}, datetime('now'))`);
+        params.push(item.id, item.status);
+      });
+
+      const query = `INSERT OR REPLACE INTO ddt_logs (id, status, updated_at) VALUES ${valuePlaceholders.join(", ")}`;
+      await db.execute(query, params);
+    }
+  }
+
+  /**
+   * Restituisce la mappa dei log con cache in memoria e sincronizzazione batch da Supabase.
+   * Deduplica le chiamate simultanee in volo per evitare chiamate HTTP e scritture SQLite doppie.
+   */
+  public static async getLogsMap(forceRefresh = false): Promise<Record<string, string>> {
+    const now = Date.now();
+    if (!forceRefresh && this.cachedLogsMap && now - this.lastCacheTimestamp < this.CACHE_TTL_MS) {
+      return { ...this.cachedLogsMap };
+    }
+
+    if (this.inFlightLogsPromise) {
+      return this.inFlightLogsPromise;
+    }
+
+    this.inFlightLogsPromise = (async () => {
+      try {
+        await this.ensureLogsTable();
+
+        // Sincronizzazione automatica da Supabase verso SQLite
+        try {
+          const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
+          if (configRes?.config?.projectUrl && configRes?.config?.anonKey) {
+            const url = new URL("/rest/v1/ddt_logs?select=id,status", configRes.config.projectUrl.replace(/\/$/, ""));
+            const res = await fetch(url.toString(), {
+              headers: {
+                apikey: configRes.config.anonKey,
+                Authorization: `Bearer ${configRes.config.anonKey}`,
+              },
+            });
+            if (res.ok) {
+              const remoteLogs = (await res.json()) as Array<{ id: string; status: string }>;
+              if (Array.isArray(remoteLogs) && remoteLogs.length > 0) {
+                await this.saveRemoteLogsToSqliteBatch(remoteLogs);
+              }
             }
           }
+        } catch (err) {
+          console.warn("[OrNumbersRepository] Sync ddt_logs da Supabase:", err);
         }
-      }
-    } catch (err) {
-      console.warn("[OrNumbersRepository] Sync ddt_logs da Supabase:", err);
-    }
 
-    try {
-      const db = await getDatabase();
-      const rows = await db.select<{ id: string; status: string }[]>(
-        "SELECT id, status FROM ddt_logs"
-      );
-      const map: Record<string, string> = {};
-      for (const r of rows) {
-        map[r.id] = r.status;
+        try {
+          const db = await getDatabase();
+          const rows = await db.select<{ id: string; status: string }[]>(
+            "SELECT id, status FROM ddt_logs"
+          );
+          const map: Record<string, string> = {};
+          for (const r of rows) {
+            map[r.id] = r.status;
+          }
+          this.cachedLogsMap = map;
+          this.lastCacheTimestamp = Date.now();
+          return { ...map };
+        } catch (e) {
+          console.warn("Errore lettura ddt_logs:", e);
+          return this.cachedLogsMap ? { ...this.cachedLogsMap } : {};
+        }
+      } finally {
+        this.inFlightLogsPromise = null;
       }
-      return map;
-    } catch (e) {
-      console.warn("Errore lettura ddt_logs:", e);
-      return {};
-    }
+    })();
+
+    return this.inFlightLogsPromise;
   }
 
   public static async updateLog(key: string, status: string): Promise<void> {
     await this.ensureLogsTable();
+    if (this.cachedLogsMap) {
+      this.cachedLogsMap[key] = status;
+    }
     try {
       const db = await getDatabase();
       await db.execute(
@@ -88,12 +140,14 @@ export class OrNumbersRepository {
 
   public static async updateLogsBatch(updates: Record<string, string>): Promise<void> {
     await this.ensureLogsTable();
+    if (this.cachedLogsMap) {
+      Object.assign(this.cachedLogsMap, updates);
+    }
     try {
-      const db = await getDatabase();
-      for (const [key, status] of Object.entries(updates)) {
-        await db.execute(
-          `INSERT OR REPLACE INTO ddt_logs (id, status, updated_at) VALUES ($1, $2, datetime('now'))`,
-          [key, status]
+      const entries = Object.entries(updates);
+      if (entries.length > 0) {
+        await this.saveRemoteLogsToSqliteBatch(
+          entries.map(([id, status]) => ({ id, status }))
         );
       }
 
@@ -152,7 +206,8 @@ export class OrNumbersRepository {
   public static async getOrRowsForMonth(
     year: number,
     month: number,
-    clientType: "CARRARA" | "WEPA"
+    clientType: "CARRARA" | "WEPA",
+    prefetchedLogsMap?: Record<string, string>
   ): Promise<OrRow[]> {
     await this.ensureLogsTable();
     const db = await getDatabase();
@@ -195,7 +250,7 @@ export class OrNumbersRepository {
         destination_city: string | null;
         order_reference: string | null;
       }>>(query, [startDate, endDate]),
-      this.getLogsMap(),
+      prefetchedLogsMap ? Promise.resolve(prefetchedLogsMap) : this.getLogsMap(),
     ]);
 
     return rows.map((r) => {
