@@ -8,6 +8,7 @@ import {
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { OrderItem, Supplier } from "@/features/orders/types/order";
 import { orderRepository } from "@/features/orders/services/orderRepository";
+import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
 import { orderEmailService } from "@/features/orders/services/orderEmailService";
 import { orderExcelService } from "@/features/orders/services/orderExcelService";
 import { getFornitoreColor } from "@/features/orders/utils/constants";
@@ -88,7 +89,7 @@ export const OrderGlobalSearchTab: React.FC<OrderGlobalSearchTabProps> = ({
       };
 
       try {
-        await orderRepository.upsertOrder(itemToSave, currentUser);
+        await orderSupabaseService.saveOrder(itemToSave);
         if (node) node.setData(itemToSave);
         setActiveOrders((prev) => prev.map((r) => (r.id === itemToSave.id ? itemToSave : r)));
         showToast("Modifica salvata");
@@ -96,7 +97,7 @@ export const OrderGlobalSearchTab: React.FC<OrderGlobalSearchTabProps> = ({
         showToast("Errore durante il salvataggio");
       }
     },
-    [currentUser]
+    []
   );
 
   // Stop propagazione frecce verso finestra esterna e svuotamento cella con Delete/Backspace
@@ -126,9 +127,9 @@ export const OrderGlobalSearchTab: React.FC<OrderGlobalSearchTabProps> = ({
   const handleRestoreFromOthers = async (ord: OrderItem) => {
     try {
       if (ord.is_deleted) {
-        await orderRepository.restoreFromTrash([ord.id], currentUser);
+        await orderSupabaseService.restoreFromTrash([ord]);
       } else {
-        await orderRepository.restoreFromArchive([ord.id], currentUser);
+        await orderSupabaseService.restoreFromArchive([ord]);
       }
       showToast(`Ordine "${ord.article_code || ord.description}" ripristinato negli Attivi!`);
       void runSearch(searchQuery);
@@ -140,7 +141,7 @@ export const OrderGlobalSearchTab: React.FC<OrderGlobalSearchTabProps> = ({
   // Riordina: clona elemento e crea nuovo ordine attivo con data odierna
   const handleReorderFromOthers = async (ord: OrderItem) => {
     try {
-      await orderRepository.reorderArticles(
+      await orderSupabaseService.reorderArticles(
         [
           {
             supplier_name: ord.supplier_name,
@@ -156,7 +157,7 @@ export const OrderGlobalSearchTab: React.FC<OrderGlobalSearchTabProps> = ({
       showToast(`Articolo "${ord.article_code || ord.description}" inserito negli Ordini Attivi!`);
       void runSearch(searchQuery);
     } catch {
-      showToast("Errore durante il riordino");
+      showToast("Errore durante il ripristino");
     }
   };
 
@@ -172,9 +173,18 @@ export const OrderGlobalSearchTab: React.FC<OrderGlobalSearchTabProps> = ({
     if (!node || !node.data) return;
 
     const colId = cell.column.getColId();
+    if (!colId || colId === "col_select" || colId === "col_actions" || colId === "0" || colId === "1" || !isNaN(Number(colId))) return;
+
+    const currentHighlights = { ...(node.data.highlights || {}) };
+    if (currentHighlights[colId]) {
+      delete currentHighlights[colId];
+    } else {
+      currentHighlights[colId] = true;
+    }
+
     try {
-      const newHighlights = await orderRepository.toggleCellHighlight(node.data.id, colId);
-      node.setData({ ...node.data, highlights: newHighlights });
+      await orderSupabaseService.updateCellHighlight(node.data.id, currentHighlights);
+      node.setData({ ...node.data, highlights: currentHighlights });
       activeGridRef.current.api.redrawRows({ rowNodes: [node] });
       showToast("Evidenziazione aggiornata");
     } catch {
@@ -233,9 +243,8 @@ export const OrderGlobalSearchTab: React.FC<OrderGlobalSearchTabProps> = ({
   // Sposta selezionati nel cestino
   const handleDeleteSelected = async () => {
     if (selectedActiveRows.length === 0) return;
-    const ids = selectedActiveRows.map((r) => r.id);
-    await orderRepository.moveToTrash(ids, currentUser);
-    showToast(`${ids.length} ordini spostati nel cestino`);
+    await orderSupabaseService.moveToTrash(selectedActiveRows);
+    showToast(`${selectedActiveRows.length} ordini spostati nel cestino`);
     setSelectedActiveRows([]);
     void runSearch(searchQuery);
   };
@@ -337,7 +346,7 @@ export const OrderGlobalSearchTab: React.FC<OrderGlobalSearchTabProps> = ({
         cellRenderer: (p: any) => (
           <button
             onClick={() => {
-              void orderRepository.moveToTrash([p.data.id], currentUser);
+              void orderSupabaseService.moveToTrash([p.data]);
               void runSearch(searchQuery);
               showToast("Spostato nel cestino");
             }}

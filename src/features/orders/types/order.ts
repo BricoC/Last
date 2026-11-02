@@ -1,6 +1,6 @@
 export interface OrderItem {
   id: string;
-  supabase_id?: number | null;
+  supabase_id?: string | number | null;
   order_date: string;       // gg/mm/aaaa
   supplier_name: string;     // Fornitore
   article_code: string;      // Codice articolo
@@ -22,7 +22,7 @@ export interface OrderItem {
 
 export interface Supplier {
   id: string;
-  supabase_id?: number | null;
+  supabase_id?: string | number | null;
   name: string;              // Nome Azienda
   representative?: string;   // Rappresentante
   email?: string;            // Email per invio ordine
@@ -38,7 +38,7 @@ export interface Supplier {
 
 export interface OrderAuditLog {
   id: string;
-  supabase_id?: number | null;
+  supabase_id?: string | number | null;
   table_name: string;
   operation_type: 'INSERT' | 'UPDATE' | 'DELETE';
   operation_date: string;
@@ -50,4 +50,3 @@ export interface OrderAuditLog {
 }
 
 export type OrderViewMode = 'attivi' | 'archiviati' | 'cestino';
-

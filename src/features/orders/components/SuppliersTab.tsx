@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { Supplier, OrderItem } from "@/features/orders/types/order";
-import { orderRepository } from "@/features/orders/services/orderRepository";
+import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
 import { orderEmailService } from "@/features/orders/services/orderEmailService";
 import { getFornitoreColor } from "@/features/orders/utils/constants";
 import {
@@ -54,7 +54,7 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
   const loadPendingOrdersForSupplier = useCallback(async (supplierName: string) => {
     setLoadingOrders(true);
     try {
-      const active = await orderRepository.getOrders("attivi");
+      const active = await orderSupabaseService.fetchOrders("attivi");
       const filtered = active.filter(
         (o: OrderItem) =>
           (o.supplier_name || "").trim().toLowerCase() === supplierName.trim().toLowerCase() &&
@@ -105,7 +105,7 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
 
     const id = editingSupplier?.id || "sup_" + Date.now();
     try {
-      await orderRepository.upsertSupplier(
+      await orderSupabaseService.upsertSupplier(
         {
           id,
           name: formName.trim(),
@@ -129,7 +129,7 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
 
   const handleDeleteSupplier = async (id: string, name: string) => {
     if (window.confirm(`Eliminare il fornitore "${name}"?`)) {
-      await orderRepository.deleteSupplier(id, currentUser);
+      await orderSupabaseService.deleteSupplier(id);
       if (selectedSupplier?.id === id) {
         setSelectedSupplier(null);
       }

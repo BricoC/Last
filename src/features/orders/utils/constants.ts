@@ -1,6 +1,56 @@
 export const TODAY = (): string =>
   new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
+export const HIGHLIGHT_COLUMN_MAP: Record<string, string> = {
+  order_date: 'data',
+  data: 'order_date',
+  supplier_name: 'fornitore',
+  fornitore: 'supplier_name',
+  article_code: 'articolo',
+  articolo: 'article_code',
+  description: 'descrizione',
+  descrizione: 'description',
+  quantity: 'quantita',
+  quantita: 'quantity',
+  price: 'prezzo',
+  prezzo: 'price',
+  ordered_date: 'ordinato',
+  ordinato: 'ordered_date',
+  notes: 'note',
+  note: 'notes',
+};
+
+/**
+ * Converte qualsiasi rappresentazione (oggetto, stringa JSON, stringa doppiamente serializzata)
+ * in un oggetto valido Record<string, boolean>, mappando bidirezionalmente i nomi colonna
+ * per garantire interoperabilità al 100% con NoManV1 e Supabase Cloud.
+ */
+export function parseHighlights(raw: any): Record<string, boolean> {
+  if (!raw) return {};
+  let cur = raw;
+  while (typeof cur === "string") {
+    try {
+      cur = JSON.parse(cur);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof cur !== "object" || cur === null || Array.isArray(cur)) {
+    return {};
+  }
+  const clean: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(cur)) {
+    if (v === true && k !== "0" && k !== "1" && isNaN(Number(k)) && k !== "col_select" && k !== "col_actions") {
+      clean[k] = true;
+      const counterpart = HIGHLIGHT_COLUMN_MAP[k];
+      if (counterpart) {
+        clean[counterpart] = true;
+      }
+    }
+  }
+  return clean;
+}
+
 export interface FornitoreColor {
   bg: string;
   text: string;
@@ -132,4 +182,3 @@ export const ORDER_GRID_CSS = `
     justify-content: center !important; 
   }
 `;
-
