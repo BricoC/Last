@@ -561,7 +561,11 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       const api = gridRef.current?.api;
       if (!api) return;
 
-      // Trova il nodo esatto nella griglia (anche se row.id o _rowKey è variato)
+      // 1. Memorizza la posizione di scroll attuale per bloccare qualsiasi salto visivo
+      const viewports = document.querySelectorAll<HTMLElement>(".orders-modern-grid .ag-body-viewport");
+      const currentScrollTop = viewports[0]?.scrollTop;
+
+      // 2. Trova il nodo esatto nella griglia (anche se row.id o _rowKey è variato)
       let nodeToRemove: any = null;
       api.forEachNode((n: any) => {
         if (
@@ -579,11 +583,31 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         api.applyTransaction({ remove: [row] });
       }
 
-      // Aggiungi una nuova riga vuota di buffer in fondo
+      // 3. Aggiungi una nuova riga vuota di buffer in fondo
       const freshEmpty = createEmptyRow();
       api.applyTransaction({ add: [freshEmpty] });
 
-      // Ricalcola conteggio righe piene
+      // 4. Blocca rigidamente lo scroll alla posizione precedente
+      if (currentScrollTop !== undefined && viewports[0]) {
+        viewports[0].scrollTop = currentScrollTop;
+        requestAnimationFrame(() => {
+          if (viewports[0] && viewports[0].scrollTop !== currentScrollTop) {
+            viewports[0].scrollTop = currentScrollTop;
+          }
+        });
+      }
+
+      // 5. Mantieni sincronizzato lo stato React orders
+      setOrders((prev) =>
+        prev.filter((o) => {
+          if (row._rowKey && o._rowKey === row._rowKey) return false;
+          if (row.id && String(o.id) === String(row.id)) return false;
+          if (row.supabase_id && String(o.supabase_id) === String(row.supabase_id)) return false;
+          return true;
+        })
+      );
+
+      // 6. Ricalcola conteggio righe piene
       let count = 0;
       api.forEachNode((n: any) => {
         const d = n.data;
@@ -622,11 +646,26 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     const api = gridRef.current?.api;
     if (!api) return;
 
+    const viewports = document.querySelectorAll<HTMLElement>(".orders-modern-grid .ag-body-viewport");
+    const currentScrollTop = viewports[0]?.scrollTop;
+
     api.applyTransaction({ remove: toTrash });
     const freshEmpties = Array.from({ length: toTrash.length }, (_, i) => createEmptyRow(i));
     api.applyTransaction({ add: freshEmpties });
     api.deselectAll();
     setSelectedRows([]);
+
+    if (currentScrollTop !== undefined && viewports[0]) {
+      viewports[0].scrollTop = currentScrollTop;
+      requestAnimationFrame(() => {
+        if (viewports[0] && viewports[0].scrollTop !== currentScrollTop) {
+          viewports[0].scrollTop = currentScrollTop;
+        }
+      });
+    }
+
+    const trashKeys = new Set(toTrash.map((r) => r._rowKey || r.id));
+    setOrders((prev) => prev.filter((o) => !trashKeys.has(o._rowKey || o.id)));
 
     let count = 0;
     api.forEachNode((n: any) => {
@@ -920,7 +959,9 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           return (
             <button
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
+                (e.currentTarget as HTMLElement)?.blur();
                 handleDeleteRow(p.data);
               }}
               title="Sposta nel cestino"
@@ -1122,7 +1163,8 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
             stopEditingWhenCellsLoseFocus={true}
             enterNavigatesVertically={true}
             enterNavigatesVerticallyAfterEdit={true}
-            animateRows={true}
+            suppressScrollOnNewData={true}
+            animateRows={false}
             onSelectionChanged={(e) => setSelectedRows(e.api.getSelectedRows())}
             getRowClass={(p) => (p.data?.isNew ? "ag-row-new-entry" : "")}
           />
