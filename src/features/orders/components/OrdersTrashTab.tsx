@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { AgGridReact } from "ag-grid-react";
 import { ColDef } from "ag-grid-community";
 import { OrderItem } from "@/features/orders/types/order";
-import { orderRepository } from "@/features/orders/services/orderRepository";
+import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
 import { getFornitoreColor } from "@/features/orders/utils/constants";
 import { RotateCcw, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 
@@ -14,7 +14,7 @@ interface OrdersTrashTabProps {
 }
 
 export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
-  currentUser = "Operatore",
+  currentUser: _currentUser = "Operatore",
   onRefreshData,
   targetOrderId,
   clearTargetOrder,
@@ -33,7 +33,7 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
   const loadTrash = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await orderRepository.getOrders("cestino");
+      const data = await orderSupabaseService.fetchOrders("cestino");
       setOrders(data);
     } catch (err) {
       console.error("[OrdersTrashTab] Errore:", err);
@@ -67,7 +67,7 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
   const handleRestoreSelected = async () => {
     if (selectedRows.length === 0) return;
     const ids = selectedRows.map((r) => r.id);
-    await orderRepository.restoreFromTrash(ids, currentUser);
+    await orderSupabaseService.restoreFromTrash(selectedRows);
     gridRef.current?.api?.applyTransaction({ remove: selectedRows });
     setSelectedRows([]);
     showToast(`${ids.length} ordini ripristinati negli Attivi`);
@@ -77,7 +77,7 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
   const handlePermanentDeleteSelected = async () => {
     if (selectedRows.length === 0) return;
     const ids = selectedRows.map((r) => r.id);
-    await orderRepository.permanentDelete(ids, currentUser);
+    await orderSupabaseService.permanentDelete(selectedRows);
     gridRef.current?.api?.applyTransaction({ remove: selectedRows });
     setSelectedRows([]);
     showToast(`${ids.length} ordini eliminati definitivamente`);
@@ -86,8 +86,7 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
 
   const handleEmptyTrash = async () => {
     if (orders.length === 0) return;
-    const ids = orders.map((r) => r.id);
-    await orderRepository.permanentDelete(ids, currentUser);
+    await orderSupabaseService.permanentDelete(orders);
     setOrders([]);
     setSelectedRows([]);
     showToast("Cestino svuotato");
@@ -147,25 +146,25 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
           <div className="flex items-center gap-1">
             <button
               onClick={() => {
-                void orderRepository.restoreFromTrash([p.data.id], currentUser);
+                void orderSupabaseService.restoreFromTrash([p.data]);
                 gridRef.current?.api?.applyTransaction({ remove: [p.data] });
                 showToast("Ripristinato negli attivi");
                 if (onRefreshData) onRefreshData();
               }}
               title="Ripristina tra gli Attivi"
-              className="p-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30"
+              className="p-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
             </button>
             <button
               onClick={() => {
-                void orderRepository.permanentDelete([p.data.id], currentUser);
+                void orderSupabaseService.permanentDelete([p.data]);
                 gridRef.current?.api?.applyTransaction({ remove: [p.data] });
                 showToast("Eliminato definitivamente");
                 if (onRefreshData) onRefreshData();
               }}
               title="Elimina Definitivamente"
-              className="p-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30"
+              className="p-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30 cursor-pointer"
             >
               <Trash2 className="w-3 h-3" />
             </button>
@@ -173,7 +172,7 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
         ),
       },
     ],
-    [currentUser, onRefreshData]
+    [onRefreshData]
   );
 
   return (

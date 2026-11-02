@@ -11,11 +11,10 @@ import {
   PostSortRowsParams,
 } from "ag-grid-community";
 import { OrderItem, Supplier } from "@/features/orders/types/order";
-import { orderRepository, parseHighlights } from "@/features/orders/services/orderRepository";
-import { orderSyncService } from "@/features/orders/services/orderSyncService";
+import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
 import { orderEmailService } from "@/features/orders/services/orderEmailService";
 import { orderExcelService } from "@/features/orders/services/orderExcelService";
-import { TODAY, getFornitoreColor } from "@/features/orders/utils/constants";
+import { TODAY, getFornitoreColor, parseHighlights, HIGHLIGHT_COLUMN_MAP } from "@/features/orders/utils/constants";
 import { OrderShortcutsModal } from "./OrderShortcutsModal";
 import { ExcelTextEditor } from "./editors/ExcelTextEditor";
 import { SupplierEditor } from "./editors/SupplierEditor";
@@ -29,7 +28,6 @@ import {
   RefreshCw,
   Keyboard,
   CheckCircle2,
-  RotateCcw,
 } from "lucide-react";
 
 interface OrdersActiveTabProps {
@@ -69,7 +67,9 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
   const onModelUpdated = useCallback((e: any) => {
     let count = 0;
     e.api.forEachNode((node: any) => {
-      if (!node.data?.isNew) count++;
+      if (!node.data?.isNew && !String(node.data?.id).startsWith("new_") && !String(node.data?.id).startsWith("ord_draft_")) {
+        count++;
+      }
     });
     setFilledCount(count);
   }, []);
@@ -84,19 +84,21 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     price: "",
     ordered_date: null,
     notes: "",
+    user_name: currentUser,
     is_archived: false,
     is_deleted: false,
     highlights: {},
     created_at: "",
     updated_at: "",
+    sync_status: "synced",
     isNew: true,
   });
 
-  // Caricamento dati con 10 righe vuote in fondo (DATA VUOTA, non placeholder)
+  // Caricamento ordini attivi direttamente da Supabase Cloud (con fallback offline)
   const loadActiveOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const active = await orderRepository.getOrders("attivi");
+      const active = await orderSupabaseService.fetchOrders("attivi");
       const emptyRows: OrderItem[] = Array.from({ length: EMPTY_BUFFER_SIZE }, (_, i) => createEmptyRow(i));
       setOrders([...active, ...emptyRows]);
     } catch (err: any) {
@@ -117,7 +119,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       const api = gridRef.current.api;
       let targetNode: any = null;
       api.forEachNode((node) => {
-        if (node.data?.id === targetOrderId) {
+        if (node.data?.id === targetOrderId || node.data?.supabase_id === targetOrderId) {
           node.setSelected(true, true);
           targetNode = node;
         }
@@ -145,50 +147,42 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Ascolto in tempo reale degli aggiornamenti Supabase (da altre postazioni o da NoMan V1)
+  // Ascolto in tempo reale degli aggiornamenti Supabase (identico a noManV1)
   useEffect(() => {
     const handleRemoteUpdate = (e: any) => {
       const payload = e.detail;
       if (!payload || !gridRef.current?.api) return;
       const api = gridRef.current.api;
 
+      const findNode = (id: string | number) => {
+        let found: any = null;
+        const targetClean = orderSupabaseService.cleanId(id);
+        api.forEachNode((node: any) => {
+          if (
+            String(node.data?.id) === String(id) ||
+            String(node.data?.supabase_id) === String(id) ||
+            (targetClean && orderSupabaseService.cleanId(node.data?.id) === targetClean)
+          ) {
+            found = node;
+          }
+        });
+        return found;
+      };
+
       if (payload.eventType === "INSERT" && payload.new) {
         const item = payload.new;
-
-        // Se questo inserimento è stato effettuato da noi, non creare duplicati
-        if (orderSyncService.recentlyPushedRemoteIds.has(item.id)) {
+        if (orderSupabaseService.recentlyPushedRemoteIds.has(String(item.id))) {
           return;
         }
 
-        // Verifica se la riga esiste già per supabase_id o localId
-        let alreadyExists = false;
-        api.forEachNode((node) => {
-          if (node.data?.supabase_id === item.id || node.data?.id === "ord_" + item.id) {
-            alreadyExists = true;
-          }
-        });
-        if (alreadyExists) return;
-
-        // Riconcilia con eventuale riga locale non ancora associata
-        api.forEachNode((node) => {
-          if (
-            node.data &&
-            !node.data.isNew &&
-            !node.data.supabase_id &&
-            node.data.supplier_name?.toLowerCase() === (item.fornitore || "").toLowerCase() &&
-            node.data.description?.toUpperCase() === (item.descrizione || "").toUpperCase()
-          ) {
-            node.data.supabase_id = item.id;
-            alreadyExists = true;
-          }
-        });
-        if (alreadyExists) return;
+        const existing = findNode(item.id);
+        if (existing) return;
 
         const isBelonging = !item.archiviato && !item.eliminato;
         if (!isBelonging) return;
 
         const mapped: OrderItem = {
-          id: "ord_" + item.id,
+          id: String(item.id),
           supabase_id: item.id,
           order_date: item.data || "",
           supplier_name: item.fornitore || "",
@@ -208,21 +202,15 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         };
 
         api.applyTransaction({ add: [mapped] });
+        api.onSortChanged();
       } else if (payload.eventType === "UPDATE" && payload.new) {
         const item = payload.new;
-        if (orderSyncService.recentlyPushedRemoteIds.has(item.id)) {
+        if (orderSupabaseService.recentlyPushedRemoteIds.has(String(item.id))) {
           return;
         }
 
         const isBelonging = !item.archiviato && !item.eliminato;
-        const targetId = "ord_" + item.id;
-
-        let foundNode: any = null;
-        api.forEachNode((node) => {
-          if (node.data?.supabase_id === item.id || node.data?.id === targetId) {
-            foundNode = node;
-          }
-        });
+        const foundNode = findNode(item.id);
 
         if (foundNode) {
           if (!isBelonging) {
@@ -234,49 +222,53 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
               const cur = foundNode.data;
               const updated: OrderItem = {
                 ...cur,
-                order_date: item.data || cur.order_date,
-                supplier_name: item.fornitore || cur.supplier_name,
-                article_code: item.articolo || cur.article_code,
-                description: (item.descrizione || cur.description).toUpperCase(),
-                quantity: String(item.quantita || cur.quantity),
-                price: String(item.prezzo || cur.price),
-                ordered_date: item.ordinato ?? cur.ordered_date,
-                notes: item.note || cur.notes,
+                order_date: item.data ?? cur.order_date,
+                supplier_name: item.fornitore ?? cur.supplier_name,
+                article_code: item.articolo ?? cur.article_code,
+                description: (item.descrizione ?? cur.description).toUpperCase(),
+                quantity: String(item.quantita ?? cur.quantity),
+                price: String(item.prezzo ?? cur.price),
+                ordered_date: item.ordinato !== undefined ? item.ordinato : cur.ordered_date,
+                notes: item.note ?? cur.notes,
                 highlights: parseHighlights(item.evidenze || cur.highlights),
               };
               foundNode.setData(updated);
             }
           }
+        } else if (isBelonging) {
+          const mapped: OrderItem = {
+            id: String(item.id),
+            supabase_id: item.id,
+            order_date: item.data || "",
+            supplier_name: item.fornitore || "",
+            article_code: item.articolo || "",
+            description: (item.descrizione || "").toUpperCase(),
+            quantity: String(item.quantita || ""),
+            price: String(item.prezzo || ""),
+            ordered_date: item.ordinato || null,
+            notes: item.note || "",
+            user_name: item.utente || "",
+            is_archived: false,
+            is_deleted: false,
+            highlights: parseHighlights(item.evidenze),
+            created_at: item.created_at || new Date().toISOString(),
+            updated_at: item.ultima_modifica || new Date().toISOString(),
+            sync_status: "synced",
+          };
+          api.applyTransaction({ add: [mapped] });
+          api.onSortChanged();
         }
       } else if (payload.eventType === "DELETE" && payload.old) {
-        const delId = payload.old.id;
-        let foundNode: any = null;
-        api.forEachNode((node) => {
-          if (node.data?.supabase_id === delId || node.data?.id === "ord_" + delId) {
-            foundNode = node;
-          }
-        });
+        const foundNode = findNode(payload.old.id);
         if (foundNode) {
           api.applyTransaction({ remove: [foundNode.data] });
         }
       }
     };
 
-    const handleOrderSynced = (e: any) => {
-      const { localId, supabaseId } = e.detail || {};
-      if (!localId || !supabaseId || !gridRef.current?.api) return;
-      gridRef.current.api.forEachNode((node) => {
-        if (node.data && node.data.id === localId) {
-          node.data.supabase_id = supabaseId;
-        }
-      });
-    };
-
     window.addEventListener("supabase_update_ordini", handleRemoteUpdate);
-    window.addEventListener("order_synced_remote_id", handleOrderSynced);
     return () => {
       window.removeEventListener("supabase_update_ordini", handleRemoteUpdate);
-      window.removeEventListener("order_synced_remote_id", handleOrderSynced);
     };
   }, []);
 
@@ -291,7 +283,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     const empties: any[] = [];
 
     for (const node of nodes) {
-      if (node.data?.isNew) {
+      if (node.data?.isNew || String(node.data?.id).startsWith("new_") || String(node.data?.id).startsWith("ord_draft_")) {
         empties.push(node);
       } else {
         const forn = node.data?.supplier_name?.trim();
@@ -303,10 +295,26 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       }
     }
 
+    const parseItalianDate = (d: string | null | undefined): number => {
+      if (!d) return 0;
+      const parts = d.split("/");
+      if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        return new Date(year, month, day).getTime() || 0;
+      }
+      return new Date(d).getTime() || 0;
+    };
+
     const sortByDate = (a: any, b: any) => {
       const timeA = new Date(a.data?.created_at || 0).getTime();
       const timeB = new Date(b.data?.created_at || 0).getTime();
-      return timeA - timeB;
+      if (timeA !== timeB) return timeA - timeB;
+      const dateA = parseItalianDate(a.data?.order_date);
+      const dateB = parseItalianDate(b.data?.order_date);
+      if (dateA !== dateB) return dateA - dateB;
+      return (a.data?.id || "").localeCompare(b.data?.id || "");
     };
 
     const sortByFornitoreAndDate = (a: any, b: any) => {
@@ -324,7 +332,21 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     nodes.push(...filledWithFornitore, ...filledWithoutFornitore, ...empties);
   }, []);
 
-  // Memorizza il fornitore a fuoco tramite REF (senza forzare re-render React a ogni click!)
+  const onSortChanged = useCallback((e: any) => {
+    const sortState = e.api.getColumnState().filter((s: any) => s.sort != null);
+    localStorage.setItem("om_sort_attivi", JSON.stringify(sortState));
+  }, []);
+
+  const onGridReady = useCallback((e: any) => {
+    const saved = localStorage.getItem("om_sort_attivi");
+    if (saved) {
+      try {
+        const sortState = JSON.parse(saved);
+        e.api.applyColumnState({ state: sortState });
+      } catch (err) {}
+    }
+  }, []);
+
   const handleCellFocused = useCallback((e: CellFocusedEvent) => {
     if (!e.api || e.rowIndex === null || e.rowIndex === undefined) {
       focusedSupplierRef.current = null;
@@ -334,14 +356,15 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     focusedSupplierRef.current = node?.data?.supplier_name || null;
   }, []);
 
-  // Salvataggio cella modificata a 0ms con inserimento automatico data odierna
+  // Salvataggio cella: Diretto su Supabase Cloud (con accodamento offline automatico)
   const onCellValueChanged = useCallback(
     async (event: CellValueChangedEvent) => {
       if (event.oldValue === event.newValue) return;
       const { data, node } = event;
       if (!data) return;
 
-      const isDraftRow = Boolean(data.isNew);
+      const isDraftRow = Boolean(data.isNew) || String(data.id).startsWith("ord_draft_") || String(data.id).startsWith("new_");
+
       const hasContent =
         Boolean(data.supplier_name?.trim()) ||
         Boolean(data.article_code?.trim()) ||
@@ -351,55 +374,45 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         Boolean(data.notes?.trim()) ||
         Boolean(data.ordered_date?.trim());
 
-      // Se riga bozza senza dati compilati, non salvare
       if (isDraftRow && !hasContent) return;
 
-      // 1. Data automatica odierna alla prima compilazione di una bozza
       const autoDate = data.order_date?.trim() ? data.order_date : TODAY();
       data.order_date = autoDate;
-      const wasDraft = Boolean(data.isNew);
       data.isNew = false;
       const nowIso = new Date().toISOString();
-      if (wasDraft || !data.created_at) {
-        data.created_at = nowIso;
-      }
+      if (!data.created_at) data.created_at = nowIso;
       data.updated_at = nowIso;
       if (data.description) {
         data.description = data.description.toUpperCase();
       }
 
-      if (node) {
-        node.setDataValue("order_date", autoDate);
+      if (node?.data) {
+        node.data.order_date = autoDate;
+        node.data.isNew = false;
+        node.data.updated_at = nowIso;
       }
 
-      const itemToSave: OrderItem = {
-        ...data,
-        order_date: autoDate,
-        description: data.description || "",
-        created_at: data.created_at,
-        updated_at: data.updated_at,
-        isNew: false,
-      };
-
-      // 2. Se una riga vuota di fondo è stata compilata, aggiungine subito una nuova per mantenere sempre 10 vuote
+      // Se una riga vuota di fondo è stata compilata, aggiungine subito una nuova per mantenere il buffer
       if (isDraftRow && gridRef.current?.api) {
         const freshEmpty = createEmptyRow(Date.now());
         gridRef.current.api.applyTransaction({ add: [freshEmpty] });
       }
 
-      // 3. Salvataggio immediato SQLite + Push Supabase in background
-      try {
-        await orderRepository.upsertOrder(itemToSave, currentUser);
-        void orderSyncService.pushPendingOrdersToSupabase();
-      } catch (err: any) {
-        console.error("[OrdersActiveTab] Errore salvataggio riga:", err);
-        showToast("Errore salvataggio!");
+      // Salvataggio DIRETTO su Supabase
+      const res = await orderSupabaseService.saveOrder(data, isDraftRow);
+      if (res.success && res.data) {
+        data.id = res.data.id;
+        data.supabase_id = res.data.supabase_id;
+        if (node?.data) {
+          node.data.id = res.data.id;
+          node.data.supabase_id = res.data.supabase_id;
+        }
       }
     },
     [currentUser]
   );
 
-  // Gestione tastiera celle stile Excel puro
+  // Gestione tastiera celle (copia/incolla Excel nativo)
   const onCellKeyDown = useCallback((e: CellKeyDownEvent) => {
     const ev = e.event as KeyboardEvent;
     if (!ev) return;
@@ -420,64 +433,6 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       });
       return;
     }
-
-    // Canc o Backspace su cella selezionata: svuota il valore quando la cella NON è in modifica
-    const isEditing = e.api.getEditingCells().length > 0;
-    if (!isEditing && (ev.key === "Delete" || ev.key === "Backspace")) {
-      if (e.column.isCellEditable(e.node)) {
-        ev.preventDefault();
-        e.node.setDataValue(e.column.getColId(), "");
-        return;
-      }
-    }
-  }, []);
-
-  // Navigazione Tab tra sole colonne editabili con a capo automatico
-  const tabToNextCell = useCallback((params: any) => {
-    const { nextCellPosition, backwards, api, previousCellPosition } = params;
-    if (!nextCellPosition) return null;
-
-    const targetColId = nextCellPosition.column.getColId();
-    const isEditable = nextCellPosition.column.isCellEditable(nextCellPosition.node);
-
-    if (!isEditable || targetColId === "order_date" || targetColId === "azioni") {
-      const allDisplayed = api.getAllDisplayedColumns();
-      const editableCols = allDisplayed.filter(
-        (c: any) =>
-          c.getColId() !== "order_date" &&
-          c.getColId() !== "azioni" &&
-          c.isCellEditable(nextCellPosition.node)
-      );
-
-      const prevColId = previousCellPosition?.column?.getColId();
-      const curIndex = editableCols.findIndex((c: any) => c.getColId() === prevColId);
-
-      if (backwards) {
-        if (curIndex > 0) {
-          return { ...nextCellPosition, column: editableCols[curIndex - 1] };
-        }
-        if (nextCellPosition.rowIndex > 0) {
-          return {
-            rowIndex: nextCellPosition.rowIndex - 1,
-            rowPinned: nextCellPosition.rowPinned,
-            column: editableCols[editableCols.length - 1],
-          };
-        }
-      } else {
-        if (curIndex >= 0 && curIndex < editableCols.length - 1) {
-          return { ...nextCellPosition, column: editableCols[curIndex + 1] };
-        }
-        if (nextCellPosition.rowIndex < api.getDisplayedRowCount() - 1) {
-          return {
-            rowIndex: nextCellPosition.rowIndex + 1,
-            rowPinned: nextCellPosition.rowPinned,
-            column: editableCols[0],
-          };
-        }
-      }
-    }
-
-    return nextCellPosition;
   }, []);
 
   // Filtro rapido Shift + Clic
@@ -496,7 +451,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     }
   }, []);
 
-  // Evidenzia/disevidenzia cella attiva
+  // Evidenzia/disevidenzia cella attiva (0ms a video + Supabase Cloud)
   const handleHighlightCell = async () => {
     if (!gridRef.current?.api) return;
     const cell = gridRef.current.api.getFocusedCell();
@@ -508,56 +463,93 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     if (!node || !node.data || node.data.isNew) return;
 
     const colId = cell.column.getColId();
-    try {
-      const newHighlights = await orderRepository.toggleCellHighlight(node.data.id, colId);
-      node.setData({ ...node.data, highlights: newHighlights });
-      gridRef.current.api.redrawRows({ rowNodes: [node] });
-      void orderSyncService.pushPendingOrdersToSupabase();
-      showToast("Evidenziazione aggiornata");
-    } catch {
-      showToast("Errore evidenziazione");
+    const cur = parseHighlights(node.data.highlights);
+    const isHigh = !!cur[colId];
+    const counterpart = HIGHLIGHT_COLUMN_MAP[colId];
+    const newHigh = { ...cur };
+    if (isHigh) {
+      delete newHigh[colId];
+      if (counterpart) delete newHigh[counterpart];
+    } else {
+      newHigh[colId] = true;
+      if (counterpart) newHigh[counterpart] = true;
     }
+
+    const updatedData = { ...node.data, highlights: newHigh };
+    node.setData(updatedData);
+    gridRef.current.api.redrawRows({ rowNodes: [node] });
+    showToast("Evidenziazione aggiornata");
+
+    void orderSupabaseService.updateCellHighlight(node.data.id, newHigh);
   };
 
+  // Sposta una singola riga nel cestino (0ms feedback visivo + Supabase Cloud)
+  const handleDeleteRow = useCallback(
+    (row: OrderItem) => {
+      if (!row || row.isNew) return;
+      const api = gridRef.current?.api;
+      if (!api) return;
+
+      api.applyTransaction({ remove: [row] });
+      const freshEmpty = createEmptyRow();
+      api.applyTransaction({ add: [freshEmpty] });
+      api.onSortChanged();
+      showToast("Spostato nel cestino");
+
+      void orderSupabaseService.moveToTrash([row]);
+    },
+    [currentUser]
+  );
+
   // Sposta le righe selezionate nel cestino
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = useCallback(async () => {
     const toTrash = selectedRows.filter((r) => !r.isNew);
     if (toTrash.length === 0) return;
 
-    const ids = toTrash.map((r) => r.id);
-    await orderRepository.moveToTrash(ids, currentUser);
-    void orderSyncService.pushPendingOrdersToSupabase();
-    gridRef.current?.api?.applyTransaction({ remove: toTrash });
+    const api = gridRef.current?.api;
+    if (!api) return;
+
+    api.applyTransaction({ remove: toTrash });
+    const freshEmpties = Array.from({ length: toTrash.length }, (_, i) => createEmptyRow(i));
+    api.applyTransaction({ add: freshEmpties });
+    api.onSortChanged();
+    api.deselectAll();
     setSelectedRows([]);
-    showToast(`${ids.length} ordini spostati nel cestino`);
-    if (onRefreshData) onRefreshData();
-  };
+    showToast(`${toTrash.length} ordini spostati nel cestino`);
 
-  // Archivia tutte le righe ordinate
+    void orderSupabaseService.moveToTrash(toTrash);
+  }, [selectedRows, currentUser]);
+
+  // Archivia tutte le righe con Data Ordine compilata (0ms a video + Supabase Cloud)
   const handleArchiveOrdered = async () => {
-    const count = await orderRepository.archiveOrderedRows(currentUser);
-    if (count > 0) {
-      void orderSyncService.pushPendingOrdersToSupabase();
-      showToast(`${count} ordini archiviati con successo!`);
-      await loadActiveOrders();
-      if (onRefreshData) onRefreshData();
-    } else {
+    const api = gridRef.current?.api;
+    if (!api) return;
+
+    const toArchive: OrderItem[] = [];
+    api.forEachNode((node) => {
+      if (node.data && !node.data.isNew && node.data.ordered_date && String(node.data.ordered_date).trim() !== "") {
+        toArchive.push(node.data);
+      }
+    });
+
+    if (toArchive.length === 0) {
       showToast("Nessun ordine con Data Ordine compilata da archiviare");
+      return;
     }
+
+    api.applyTransaction({ remove: toArchive });
+    const freshEmpties = Array.from({ length: toArchive.length }, (_, i) => createEmptyRow(i));
+    api.applyTransaction({ add: freshEmpties });
+    api.onSortChanged();
+    showToast(`${toArchive.length} ordini archiviati con successo!`);
+
+    void orderSupabaseService.archiveOrders(toArchive.map((r) => r.id));
   };
 
-  // Ricarica e sincronizza manualmente con Supabase Cloud
+  // Ricarica manualmente da Supabase Cloud
   const handleManualRefresh = async () => {
-    setLoading(true);
-    try {
-      await orderSyncService.syncOrdersFromSupabase();
-      await loadActiveOrders();
-      showToast("Sincronizzato con Supabase Cloud");
-    } catch {
-      showToast("Errore durante la sincronizzazione");
-    } finally {
-      setLoading(false);
-    }
+    await loadActiveOrders();
+    showToast("Aggiornato da Supabase Cloud");
   };
 
   // Invio ordine email per fornitore della riga selezionata
@@ -567,14 +559,12 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       const cell = gridRef.current.api.getFocusedCell();
       if (cell) {
         const node = gridRef.current.api.getDisplayedRowAtIndex(cell.rowIndex);
-        if (node?.data && !node.data.isNew && node.data.supplier_name) {
-          targetSupplier = node.data.supplier_name;
-        }
+        targetSupplier = node?.data?.supplier_name || null;
       }
     }
 
-    if (!targetSupplier) {
-      showToast("Posizionati sulla riga del fornitore da ordinare prima di cliccare");
+    if (!targetSupplier || targetSupplier.trim() === "") {
+      showToast("Seleziona prima una riga appartenente al fornitore che desideri ordinare");
       return;
     }
 
@@ -643,12 +633,12 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         return;
       }
       for (const it of items) {
-        await orderRepository.upsertOrder(
+        await orderSupabaseService.saveOrder(
           {
-            id: "ord_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
+            id: "",
             ...it,
           } as OrderItem,
-          currentUser
+          true
         );
       }
       showToast(`${items.length} ordini importati con successo!`);
@@ -661,7 +651,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     }
   };
 
-  // Definizione Colonne AG Grid con editor nativo solido e zero refresh
+  // Definizione Colonne AG Grid
   const columnDefs: ColDef<OrderItem>[] = useMemo(
     () => [
       {
@@ -788,15 +778,12 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           if (p.data?.isNew) return null;
           return (
             <button
-              onClick={async () => {
-                await orderRepository.moveToTrash([p.data.id], currentUser);
-                void orderSyncService.pushPendingOrdersToSupabase();
-                gridRef.current?.api?.applyTransaction({ remove: [p.data] });
-                showToast("Spostato nel cestino");
-                if (onRefreshData) onRefreshData();
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteRow(p.data);
               }}
               title="Sposta nel cestino"
-              className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded transition-colors"
+              className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded transition-colors cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -804,7 +791,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         },
       },
     ],
-    [currentUser, suppliers]
+    [currentUser, suppliers, handleDeleteRow]
   );
 
   const defaultColDef: ColDef = useMemo(
@@ -812,26 +799,24 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       resizable: true,
       sortable: true,
       filter: true,
-      editable: false,
-      cellStyle: (p: any) => {
-        const colId = p.column.getColId();
-        if (
-          !colId ||
-          colId === "col_select" ||
-          colId === "col_actions" ||
-          colId === "0" ||
-          colId === "1" ||
-          !isNaN(Number(colId))
-        ) {
-          return null;
-        }
-        if (
-          p.data?.highlights &&
-          typeof p.data.highlights === "object" &&
-          !Array.isArray(p.data.highlights) &&
-          p.data.highlights[colId] === true
-        ) {
-          return { backgroundColor: "#ef4444", color: "#ffffff", fontWeight: "bold" };
+      floatingFilter: false,
+      suppressMovable: false,
+      comparator: (valueA, valueB, nodeA, nodeB, isDescending) => {
+        const aBottom = nodeA.data?.isNew || String(nodeA.data?.id).startsWith("new_") || String(nodeA.data?.id).startsWith("ord_draft_");
+        const bBottom = nodeB.data?.isNew || String(nodeB.data?.id).startsWith("new_") || String(nodeB.data?.id).startsWith("ord_draft_");
+        if (aBottom && !bBottom) return isDescending ? -1 : 1;
+        if (!aBottom && bBottom) return isDescending ? 1 : -1;
+        if (aBottom && bBottom) return 0;
+        if (valueA === valueB) return 0;
+        return valueA > valueB ? 1 : -1;
+      },
+      cellStyle: (p) => {
+        if (p.data && p.data.highlights) {
+          const colId = p.column.getColId();
+          const counterpart = HIGHLIGHT_COLUMN_MAP[colId];
+          if (p.data.highlights[colId] || (counterpart && p.data.highlights[counterpart])) {
+            return { backgroundColor: "#ef4444", color: "#000000", fontWeight: "bold" };
+          }
         }
         return null;
       },
@@ -840,14 +825,14 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
   );
 
   return (
-    <div className="flex flex-col h-full w-full text-[var(--foreground)] overflow-hidden">
-      {/* 1. Toolbar Azioni (senza riga 'pronti da ordinare') */}
-      <div className="px-4 py-2 bg-[var(--background)] border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-3">
+    <div className="flex flex-col h-full w-full bg-[var(--background)] select-none">
+      {/* 1. Barra Strumenti Principale */}
+      <div className="flex items-center justify-between px-4 py-2 bg-[var(--card)] border-b border-[var(--border)] gap-2 flex-wrap flex-shrink-0">
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleSendOrderEmail}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-xs transition-all"
-            title="Invia ordine via Outlook per il fornitore della riga selezionata"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-xs cursor-pointer transition-colors"
+            title="Invia ordine fornitore tramite Outlook"
           >
             <Mail className="w-3.5 h-3.5" />
             <span>Invia Ordine</span>
@@ -855,7 +840,8 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
 
           <button
             onClick={handleArchiveOrdered}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-500/30 cursor-pointer transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs cursor-pointer transition-colors"
+            title="Archivia tutti gli ordini che hanno la Data Ordine compilata"
           >
             <Archive className="w-3.5 h-3.5" />
             <span>Archivia Ordinate</span>
@@ -863,8 +849,8 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
 
           <button
             onClick={handleHighlightCell}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-red-600/20 text-red-300 hover:bg-red-600/30 border border-red-500/30 cursor-pointer transition-colors"
-            title="Evidenzia di rosso o toglie evidenziazione dalla cella selezionata"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-red-600 hover:bg-red-500 text-white shadow-xs cursor-pointer transition-colors"
+            title="Evidenzia di rosso la cella selezionata"
           >
             <Highlighter className="w-3.5 h-3.5" />
             <span>Evidenzia Cella</span>
@@ -873,19 +859,20 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           {selectedRows.filter((r) => !r.isNew).length > 0 && (
             <button
               onClick={handleDeleteSelected}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-red-600 text-white hover:bg-red-500 cursor-pointer transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 cursor-pointer transition-colors"
+              title="Sposta gli ordini selezionati nel cestino"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Cestina ({selectedRows.filter((r) => !r.isNew).length})</span>
+              <span>Sposta nel Cestino ({selectedRows.filter((r) => !r.isNew).length})</span>
             </button>
           )}
 
-          <div className="h-5 w-px bg-[var(--border)] mx-1" />
+          <div className="h-4 w-px bg-[var(--border)] mx-1" />
 
           <button
             onClick={handleExportExcel}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-[var(--card)] hover:bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer transition-colors"
-            title="Esporta foglio Excel sul Desktop"
+            title="Esporta ordini in file Excel"
           >
             <Download className="w-3.5 h-3.5 text-emerald-400" />
             <span>Excel</span>
@@ -903,7 +890,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           <button
             onClick={handleManualRefresh}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-[var(--card)] hover:bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer transition-colors"
-            title="Sincronizza ordini con Supabase Cloud"
+            title="Aggiorna ordini da Supabase Cloud"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -933,7 +920,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           )}
 
           <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-            {filledCount} ordini attivi
+            📝 {filledCount} righe piene
           </span>
           <span className="px-2.5 py-1 rounded-full bg-[var(--card)] text-[var(--muted-foreground)] border border-[var(--border)]">
             +10 righe vuote in fondo
@@ -953,33 +940,37 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           className="p-1 rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 border border-yellow-500/30 cursor-pointer"
           title="Azzera filtri (F4)"
         >
-          <RotateCcw className="w-3.5 h-3.5" />
+          🧹
         </button>
+
         <input
           type="text"
-          placeholder="Filtro rapido su tutte le colonne (es: Arexons, Viti, Knipex)..."
           value={quickFilterText}
           onChange={(e) => {
             setQuickFilterText(e.target.value);
             gridRef.current?.api?.setQuickFilter(e.target.value);
           }}
-          className="w-80 px-2.5 py-1 text-xs bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] rounded outline-none focus:border-[var(--primary)] font-medium"
+          placeholder="Filtro rapido su tutte le colonne (es: Arexons, Viti, Knip)..."
+          className="flex-1 max-w-md bg-[var(--card)] border border-[var(--border)] rounded px-2.5 py-1 text-xs text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]"
         />
-        <span className="text-[11px] text-[var(--muted-foreground)]">
-          Fai clic su una cella per modificarla subito. Premi <kbd className="px-1 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">Shift + Clic</kbd> per filtrare.
+
+        <span className="text-[11px] text-[var(--muted-foreground)] italic ml-2">
+          *Fai clic su una cella per modificarla subito. Premi <strong>Shift + Clic</strong> per Filtrare.
         </span>
       </div>
 
-      {/* 3. Griglia Principale AG Grid (Excel feel, navigazione frecce nativa e zero sfarfallio) */}
+      {/* 3. Griglia Principale AG Grid (identica a noManV1) */}
       <div className="flex-1 w-full h-full overflow-hidden p-2">
         <div className="ag-theme-alpine orders-modern-grid w-full h-full">
           <AgGridReact<OrderItem>
             ref={gridRef}
             rowData={orders}
-            getRowId={(p) => p.data.id}
+            getRowId={(p) => String(p.data.id)}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
             postSortRows={postSortRows}
+            onGridReady={onGridReady}
+            onSortChanged={onSortChanged}
             onCellValueChanged={onCellValueChanged}
             onModelUpdated={onModelUpdated}
             onCellKeyDown={onCellKeyDown}
@@ -987,21 +978,10 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
             onCellFocused={handleCellFocused}
             rowSelection="multiple"
             suppressRowClickSelection={true}
-            suppressMovableColumns={true}
-            singleClickEdit={false}
             stopEditingWhenCellsLoseFocus={true}
-            enterNavigatesVertically={false}
+            enterNavigatesVertically={true}
             enterNavigatesVerticallyAfterEdit={true}
-            tabToNextCell={tabToNextCell}
-            navigateToNextCell={(params) => params.nextCellPosition}
-            onCellEditingStarted={() => {
-              window.__isOrderCellEditing = true;
-            }}
-            onCellEditingStopped={() => {
-              setTimeout(() => {
-                window.__isOrderCellEditing = false;
-              }, 100);
-            }}
+            animateRows={true}
             onSelectionChanged={(e) => setSelectedRows(e.api.getSelectedRows())}
             getRowClass={(p) => (p.data?.isNew ? "ag-row-new-entry" : "")}
           />

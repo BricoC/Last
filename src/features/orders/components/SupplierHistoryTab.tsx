@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { AgGridReact } from "ag-grid-react";
 import { ColDef } from "ag-grid-community";
 import { orderRepository } from "@/features/orders/services/orderRepository";
+import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
 import { Supplier } from "@/features/orders/types/order";
 import { getFornitoreColor } from "@/features/orders/utils/constants";
 import {
@@ -164,7 +165,7 @@ export const SupplierHistoryTab: React.FC<SupplierHistoryTabProps> = ({
   const handleReorderSingle = async (item: SupplierHistoryRow) => {
     const key = `${item.supplier_name}_${item.article_code}`;
     try {
-      await orderRepository.reorderArticles(
+      await orderSupabaseService.reorderArticles(
         [
           {
             supplier_name: item.supplier_name,
@@ -193,7 +194,7 @@ export const SupplierHistoryTab: React.FC<SupplierHistoryTabProps> = ({
   const handleReorderSelected = async () => {
     if (selectedRows.length === 0) return;
     try {
-      await orderRepository.reorderArticles(
+      await orderSupabaseService.reorderArticles(
         selectedRows.map((it) => ({
           supplier_name: it.supplier_name,
           article_code: it.article_code,
