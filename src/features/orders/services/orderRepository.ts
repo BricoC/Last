@@ -1,32 +1,9 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import { OrderItem, Supplier, OrderAuditLog, OrderViewMode } from "../types/order";
-import { TODAY } from "../utils/constants";
+import { TODAY, parseHighlights } from "../utils/constants";
+import { orderSyncService } from "./orderSyncService";
 
-/**
- * Converte qualsiasi rappresentazione (oggetto, stringa JSON, stringa doppiamente serializzata)
- * in un oggetto valido Record<string, boolean>, escludendo indici numerici spurii.
- */
-export function parseHighlights(raw: any): Record<string, boolean> {
-  if (!raw) return {};
-  let cur = raw;
-  while (typeof cur === "string") {
-    try {
-      cur = JSON.parse(cur);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof cur !== "object" || cur === null || Array.isArray(cur)) {
-    return {};
-  }
-  const clean: Record<string, boolean> = {};
-  for (const [k, v] of Object.entries(cur)) {
-    if (v === true && k !== "0" && k !== "1" && isNaN(Number(k)) && k !== "col_select" && k !== "col_actions") {
-      clean[k] = true;
-    }
-  }
-  return clean;
-}
+export { parseHighlights };
 
 class OrderRepository {
   /**
@@ -37,31 +14,6 @@ class OrderRepository {
    */
   async getOrders(viewMode: OrderViewMode): Promise<OrderItem[]> {
     const db = await getDatabase();
-
-    // Elimina eventuali duplicati generati da desincronizzazione ID locale / remoto
-    try {
-      await db.execute(`
-        DELETE FROM orders 
-        WHERE supabase_id IS NOT NULL 
-        AND id NOT IN (
-          SELECT MIN(id) FROM orders WHERE supabase_id IS NOT NULL GROUP BY supabase_id
-        )
-      `);
-      await db.execute(`
-        DELETE FROM orders 
-        WHERE supabase_id IS NULL AND is_archived = 0 AND is_deleted = 0
-        AND (supplier_name IS NULL OR supplier_name = '') 
-        AND (description IS NULL OR description = '')
-        AND (article_code IS NULL OR article_code = '')
-      `);
-      await db.execute(`
-        UPDATE orders 
-        SET highlights = '{}' 
-        WHERE highlights = '"{}"' OR highlights = '\"{}\"' OR highlights LIKE '"%' OR highlights IS NULL
-      `);
-    } catch {
-      // Cleanup facoltativo
-    }
 
     let query = `
       SELECT 
@@ -76,7 +28,7 @@ class OrderRepository {
     } else if (viewMode === 'cestino') {
       query += ` WHERE is_deleted = 1 ORDER BY updated_at DESC`;
     } else {
-      query += ` WHERE is_archived = 0 AND is_deleted = 0 ORDER BY supplier_name ASC, created_at ASC`;
+      query += ` WHERE is_archived = 0 AND is_deleted = 0 ORDER BY supplier_name ASC, created_at ASC, id ASC`;
     }
 
     const rows = await db.select<Array<{
@@ -169,18 +121,19 @@ class OrderRepository {
       highlights: parseHighlights(order.highlights ?? (oldRecord ? oldRecord.highlights : {})),
       created_at: oldRecord ? oldRecord.created_at : now,
       updated_at: now,
-      sync_status: 'pending',
+      sync_status: order.sync_status || (order.supabase_id ? 'synced' : 'pending'),
     };
 
     if (oldRecord) {
       await db.execute(
         `UPDATE orders SET
-          order_date = $1, supplier_name = $2, article_code = $3, description = $4,
-          quantity = $5, price = $6, ordered_date = $7, notes = $8, user_name = $9,
-          is_archived = $10, is_deleted = $11, highlights = $12, updated_at = $13,
-          sync_status = 'pending'
-        WHERE id = $14`,
+          supabase_id = $1, order_date = $2, supplier_name = $3, article_code = $4, description = $5,
+          quantity = $6, price = $7, ordered_date = $8, notes = $9, user_name = $10,
+          is_archived = $11, is_deleted = $12, highlights = $13, updated_at = $14,
+          sync_status = $15
+        WHERE id = $16`,
         [
+          recordToSave.supabase_id,
           recordToSave.order_date,
           recordToSave.supplier_name,
           recordToSave.article_code,
@@ -194,6 +147,7 @@ class OrderRepository {
           recordToSave.is_deleted ? 1 : 0,
           JSON.stringify(recordToSave.highlights || {}),
           now,
+          recordToSave.sync_status,
           recordToSave.id,
         ]
       );
@@ -213,7 +167,7 @@ class OrderRepository {
           id, supabase_id, order_date, supplier_name, article_code, description,
           quantity, price, ordered_date, notes, user_name, is_archived, is_deleted,
           highlights, created_at, updated_at, sync_status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending')`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
         [
           recordToSave.id,
           recordToSave.supabase_id,
@@ -231,6 +185,7 @@ class OrderRepository {
           JSON.stringify(recordToSave.highlights || {}),
           recordToSave.created_at,
           recordToSave.updated_at,
+          recordToSave.sync_status,
         ]
       );
 
@@ -248,15 +203,85 @@ class OrderRepository {
   }
 
   /**
-   * Sposta uno o più ordini nel cestino (soft delete)
+   * Risolve in modo affidabile sia gli ID SQLite locali che gli ID Supabase remoti (UUID),
+   * supportando sia stringhe che oggetti OrderItem con `supabase_id`.
    */
-  async moveToTrash(ids: string[], currentUser: string = 'Operatore'): Promise<void> {
-    if (ids.length === 0) return;
+  private async resolveRemoteAndLocalIds(
+    items: Array<string | { id: string; supabase_id?: string | number | null }>
+  ): Promise<{ localIds: string[]; remoteIds: string[] }> {
+    const localIds: string[] = [];
+    const remoteIds: string[] = [];
+
+    for (const it of items) {
+      const id = typeof it === "string" ? it : it.id;
+      if (!id || id.startsWith("new_")) continue;
+      localIds.push(id);
+      
+      const sId = typeof it !== "string" && it.supabase_id != null ? String(it.supabase_id) : null;
+      if (sId && sId.length > 10) {
+        if (!remoteIds.includes(sId)) remoteIds.push(sId);
+      } else if (id.startsWith("ord_") && !id.startsWith("ord_draft_")) {
+        const clean = id.slice(4);
+        if (clean.length > 10 && !remoteIds.includes(clean)) remoteIds.push(clean);
+      } else if (!id.startsWith("draft_") && id.length > 10) {
+        // È già un UUID Supabase diretto
+        if (!remoteIds.includes(id)) remoteIds.push(id);
+      }
+    }
+
+    if (localIds.length > 0) {
+      try {
+        const db = await getDatabase();
+        const searchIds = Array.from(new Set([
+          ...localIds,
+          ...localIds.map(i => i.startsWith("ord_") ? i.slice(4) : "ord_" + i)
+        ]));
+        const placeholders = searchIds.map((_, i) => `$${i + 1}`).join(",");
+        const rows = await db.select<Array<{ supabase_id: string }>>(
+          `SELECT supabase_id FROM orders WHERE id IN (${placeholders}) AND supabase_id IS NOT NULL`,
+          searchIds
+        );
+        for (const r of rows) {
+          if (r.supabase_id && !remoteIds.includes(r.supabase_id)) {
+            remoteIds.push(r.supabase_id);
+          }
+        }
+      } catch {}
+    }
+
+    return { localIds, remoteIds };
+  }
+
+  /**
+   * Sposta uno o più ordini nel cestino (soft delete) - sincrono su Supabase Cloud e SQLite locale
+   */
+  async moveToTrash(
+    items: Array<string | { id: string; supabase_id?: string | number | null }>,
+    currentUser: string = 'Operatore'
+  ): Promise<void> {
+    if (items.length === 0) return;
     const db = await getDatabase();
     const now = new Date().toISOString();
-    for (const id of ids) {
+    const { localIds, remoteIds } = await this.resolveRemoteAndLocalIds(items);
+
+    if (remoteIds.length > 0) {
+      for (const rId of remoteIds) {
+        orderSyncService.recentlyPushedRemoteIds.add(rId);
+        setTimeout(() => orderSyncService.recentlyPushedRemoteIds.delete(rId), 30000);
+      }
+      try {
+        const supabase = await orderSyncService.getClient();
+        if (supabase) {
+          await supabase.from("ordini").update({ eliminato: true, ultima_modifica: now }).in("id", remoteIds);
+        }
+      } catch (err) {
+        console.warn("[orderRepository] Errore moveToTrash Supabase:", err);
+      }
+    }
+
+    for (const id of localIds) {
       await db.execute(
-        `UPDATE orders SET is_deleted = 1, updated_at = $1, sync_status = 'pending' WHERE id = $2`,
+        `UPDATE orders SET is_deleted = 1, updated_at = $1, sync_status = 'synced' WHERE id = $2`,
         [now, id]
       );
       await this.recordAuditLog('orders', 'UPDATE', currentUser, { id, is_deleted: 0 }, { id, is_deleted: 1 }, `Spostato nel cestino`);
@@ -266,13 +291,33 @@ class OrderRepository {
   /**
    * Ripristina ordini dal cestino
    */
-  async restoreFromTrash(ids: string[], currentUser: string = 'Operatore'): Promise<void> {
-    if (ids.length === 0) return;
+  async restoreFromTrash(
+    items: Array<string | { id: string; supabase_id?: string | number | null }>,
+    currentUser: string = 'Operatore'
+  ): Promise<void> {
+    if (items.length === 0) return;
     const db = await getDatabase();
     const now = new Date().toISOString();
-    for (const id of ids) {
+    const { localIds, remoteIds } = await this.resolveRemoteAndLocalIds(items);
+
+    if (remoteIds.length > 0) {
+      for (const rId of remoteIds) {
+        orderSyncService.recentlyPushedRemoteIds.add(rId);
+        setTimeout(() => orderSyncService.recentlyPushedRemoteIds.delete(rId), 30000);
+      }
+      try {
+        const supabase = await orderSyncService.getClient();
+        if (supabase) {
+          await supabase.from("ordini").update({ eliminato: false, ultima_modifica: now }).in("id", remoteIds);
+        }
+      } catch (err) {
+        console.warn("[orderRepository] Errore restoreFromTrash Supabase:", err);
+      }
+    }
+
+    for (const id of localIds) {
       await db.execute(
-        `UPDATE orders SET is_deleted = 0, updated_at = $1, sync_status = 'pending' WHERE id = $2`,
+        `UPDATE orders SET is_deleted = 0, updated_at = $1, sync_status = 'synced' WHERE id = $2`,
         [now, id]
       );
       await this.recordAuditLog('orders', 'UPDATE', currentUser, { id, is_deleted: 1 }, { id, is_deleted: 0 }, `Ripristinato dal cestino`);
@@ -282,13 +327,33 @@ class OrderRepository {
   /**
    * Ripristina ordini dall'archivio negli attivi
    */
-  async restoreFromArchive(ids: string[], currentUser: string = 'Operatore'): Promise<void> {
-    if (ids.length === 0) return;
+  async restoreFromArchive(
+    items: Array<string | { id: string; supabase_id?: string | number | null }>,
+    currentUser: string = 'Operatore'
+  ): Promise<void> {
+    if (items.length === 0) return;
     const db = await getDatabase();
     const now = new Date().toISOString();
-    for (const id of ids) {
+    const { localIds, remoteIds } = await this.resolveRemoteAndLocalIds(items);
+
+    if (remoteIds.length > 0) {
+      for (const rId of remoteIds) {
+        orderSyncService.recentlyPushedRemoteIds.add(rId);
+        setTimeout(() => orderSyncService.recentlyPushedRemoteIds.delete(rId), 30000);
+      }
+      try {
+        const supabase = await orderSyncService.getClient();
+        if (supabase) {
+          await supabase.from("ordini").update({ archiviato: false, ultima_modifica: now }).in("id", remoteIds);
+        }
+      } catch (err) {
+        console.warn("[orderRepository] Errore restoreFromArchive Supabase:", err);
+      }
+    }
+
+    for (const id of localIds) {
       await db.execute(
-        `UPDATE orders SET is_archived = 0, updated_at = $1, sync_status = 'pending' WHERE id = $2`,
+        `UPDATE orders SET is_archived = 0, updated_at = $1, sync_status = 'synced' WHERE id = $2`,
         [now, id]
       );
       await this.recordAuditLog('orders', 'UPDATE', currentUser, { id, is_archived: 1 }, { id, is_archived: 0 }, `Ripristinato tra gli attivi`);
@@ -298,10 +363,26 @@ class OrderRepository {
   /**
    * Elimina definitivamente record dal database
    */
-  async permanentDelete(ids: string[], currentUser: string = 'Operatore'): Promise<void> {
-    if (ids.length === 0) return;
+  async permanentDelete(
+    items: Array<string | { id: string; supabase_id?: string | number | null }>,
+    currentUser: string = 'Operatore'
+  ): Promise<void> {
+    if (items.length === 0) return;
     const db = await getDatabase();
-    for (const id of ids) {
+    const { localIds, remoteIds } = await this.resolveRemoteAndLocalIds(items);
+
+    if (remoteIds.length > 0) {
+      try {
+        const supabase = await orderSyncService.getClient();
+        if (supabase) {
+          await supabase.from("ordini").delete().in("id", remoteIds);
+        }
+      } catch (err) {
+        console.warn("[orderRepository] Errore permanentDelete Supabase:", err);
+      }
+    }
+
+    for (const id of localIds) {
       await db.execute(`DELETE FROM orders WHERE id = $1`, [id]);
       await this.recordAuditLog('orders', 'DELETE', currentUser, { id }, null, `Eliminazione definitiva`);
     }
@@ -317,9 +398,29 @@ class OrderRepository {
     );
     if (rows.length === 0) return 0;
     const now = new Date().toISOString();
+
+    const remoteIds = rows
+      .map(r => (r.id.startsWith("ord_") && !r.id.startsWith("ord_draft_") ? r.id.slice(4) : r.id))
+      .filter(id => id.length > 10);
+
+    if (remoteIds.length > 0) {
+      for (const rId of remoteIds) {
+        orderSyncService.recentlyPushedRemoteIds.add(rId);
+        setTimeout(() => orderSyncService.recentlyPushedRemoteIds.delete(rId), 30000);
+      }
+      try {
+        const supabase = await orderSyncService.getClient();
+        if (supabase) {
+          await supabase.from("ordini").update({ archiviato: true, ultima_modifica: now }).in("id", remoteIds);
+        }
+      } catch (err) {
+        console.warn("[orderRepository] Errore archiveOrderedRows Supabase:", err);
+      }
+    }
+
     for (const r of rows) {
       await db.execute(
-        `UPDATE orders SET is_archived = 1, updated_at = $1, sync_status = 'pending' WHERE id = $2`,
+        `UPDATE orders SET is_archived = 1, updated_at = $1, sync_status = 'synced' WHERE id = $2`,
         [now, r.id]
       );
     }

@@ -1,73 +1,33 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { ICellEditorParams } from "ag-grid-community";
 
-declare global {
-  interface Window {
-    __isOrderCellEditing?: boolean;
-  }
-}
-
 export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
-  const colId = props.column?.getColId();
-  const isUppercaseCol = colId === "description" || colId === "descrizione";
-
   const isTypedChar = Boolean(props.eventKey && props.eventKey.length === 1);
   const isDelete = props.eventKey === "Backspace" || props.eventKey === "Delete";
 
-  let startValue = props.value ?? "";
+  let startValue = props.value || "";
   if (isTypedChar && props.eventKey) startValue = props.eventKey;
   if (isDelete) startValue = "";
-  if (isUppercaseCol && typeof startValue === "string") {
-    startValue = startValue.toUpperCase();
-  }
 
-  const [value, setValue] = useState<string>(String(startValue));
-  const valueRef = useRef<string>(String(startValue));
+  const [value, setValue] = useState(startValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Quick edit vs Deep edit:
-  // Se l'utente digita un carattere o cancella, le frecce muovono la cella stile Excel.
-  // Se fa doppio clic, F2 o Invio, le frecce muovono il cursore all'interno del testo.
+  // "Deep edit" (dove le frecce muovono il cursore interno) si attiva SOLO 
+  // con Doppio Clic (nessun eventKey), con F2 o con Invio.
   const isDeepEdit = !isTypedChar && !isDelete && (!props.eventKey || props.eventKey === "F2" || props.eventKey === "Enter");
   const isQuickEdit = useRef(!isDeepEdit);
 
-  const updateValue = (v: string) => {
-    const next = isUppercaseCol ? v.toUpperCase() : v;
-    valueRef.current = next;
-    setValue(next);
-  };
-
   useImperativeHandle(ref, () => ({
-    getValue: () =>
-      isUppercaseCol && typeof valueRef.current === "string"
-        ? valueRef.current.toUpperCase()
-        : valueRef.current,
+    getValue: () => value,
     isPopup: () => false,
-    afterGuiAttached: () => {
-      if (inputRef.current) {
-        inputRef.current.focus();
-        const len = inputRef.current.value.length;
-        inputRef.current.setSelectionRange(len, len);
-      }
-    },
-    focusIn: () => {
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    },
   }));
 
   useEffect(() => {
-    window.__isOrderCellEditing = true;
     if (inputRef.current) {
       inputRef.current.focus();
-      const len = inputRef.current.value.length;
-      inputRef.current.setSelectionRange(len, len);
+      inputRef.current.setSelectionRange(startValue.length, startValue.length);
     }
-    return () => {
-      window.__isOrderCellEditing = false;
-    };
-  }, []);
+  }, [startValue]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (isQuickEdit.current && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
@@ -109,7 +69,7 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     <input
       ref={inputRef}
       value={value}
-      onChange={(e) => updateValue(e.target.value)}
+      onChange={(e) => setValue(e.target.value)}
       onKeyDown={onKeyDown}
       style={{
         width: "100%",
@@ -118,13 +78,13 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
         boxSizing: "border-box",
         border: "none",
         background: "#1e293b",
-        color: "#f8fafc",
+        color: "#e2e8f0",
         outline: "2px solid #3b82f6",
-        fontSize: "11px",
-        fontWeight: 500,
+        fontSize: "12px",
       }}
     />
   );
 });
 
 ExcelTextEditor.displayName = "ExcelTextEditor";
+export default ExcelTextEditor;

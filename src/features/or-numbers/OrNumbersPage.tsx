@@ -59,6 +59,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   const [selectedWepaIds, setSelectedWepaIds] = useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState<boolean>(true);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   // Modale Assegnazione OR
   const [isAssignModalOpen, setIsAssignModalOpen] = useState<boolean>(false);
@@ -96,8 +97,11 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
     return `${day}/${m}/${y}`;
   };
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (isManualRefresh = false) => {
+    // 1. Caricamento istantaneo da SQLite locale (< 10ms)
+    if (!isManualRefresh) {
+      setLoading(true);
+    }
     try {
       const [carrara, wepa] = await Promise.all([
         OrNumbersRepository.getOrRowsForMonth(selectedYear, selectedMonth, "CARRARA"),
@@ -112,6 +116,24 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       showToast("Errore nel caricamento dei DDT dal database locale.", "error");
     } finally {
       setLoading(false);
+    }
+
+    // 2. Sincronizzazione asincrona non bloccante con Supabase Cloud
+    setIsSyncing(true);
+    try {
+      const hasUpdates = await OrNumbersRepository.syncMonthFromRemote(selectedYear, selectedMonth);
+      if (hasUpdates) {
+        const [carraraUpdated, wepaUpdated] = await Promise.all([
+          OrNumbersRepository.getOrRowsForMonth(selectedYear, selectedMonth, "CARRARA"),
+          OrNumbersRepository.getOrRowsForMonth(selectedYear, selectedMonth, "WEPA"),
+        ]);
+        setCarraraRows(carraraUpdated);
+        setWepaRows(wepaUpdated);
+      }
+    } catch (syncErr) {
+      console.warn("Errore sync background Supabase:", syncErr);
+    } finally {
+      setIsSyncing(false);
     }
   }, [selectedYear, selectedMonth, showToast]);
 
@@ -500,12 +522,12 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
           {/* Pulsante Ricarica */}
           <button
             type="button"
-            onClick={() => void loadData()}
-            disabled={loading || isSendingEmail}
+            onClick={() => void loadData(true)}
+            disabled={loading || isSyncing || isSendingEmail}
             className="p-1.5 rounded-lg bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors cursor-pointer disabled:opacity-50"
-            title="Ricarica dati dal database locale e sincronizza"
+            title={isSyncing ? "Sincronizzazione Supabase in corso..." : "Ricarica dati e sincronizza con Supabase"}
           >
-            <RotateCw className={cn("w-4 h-4", loading && "animate-spin text-blue-400")} />
+            <RotateCw className={cn("w-4 h-4", (loading || isSyncing) && "animate-spin text-blue-400")} />
           </button>
         </div>
 

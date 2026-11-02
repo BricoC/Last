@@ -1,6 +1,6 @@
 export interface OrderItem {
   id: string;
-  supabase_id?: number | null;
+  supabase_id?: string | number | null;
   order_date: string;       // gg/mm/aaaa
   supplier_name: string;     // Fornitore
   article_code: string;      // Codice articolo
@@ -22,7 +22,7 @@ export interface OrderItem {
 
 export interface Supplier {
   id: string;
-  supabase_id?: number | null;
+  supabase_id?: string | number | null;
   name: string;              // Nome Azienda
   representative?: string;   // Rappresentante
   email?: string;            // Email per invio ordine
@@ -34,6 +34,12 @@ export interface Supplier {
   updated_at: string;
   sync_status?: 'synced' | 'pending' | 'failed';
   isNew?: boolean;
+}
+
+declare global {
+  interface Window {
+    __isOrderCellEditing?: boolean;
+  }
 }
 
 export interface OrderAuditLog {

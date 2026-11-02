@@ -3,7 +3,8 @@ import { AgGridReact } from "ag-grid-react";
 import { ColDef } from "ag-grid-community";
 import { OrderItem } from "@/features/orders/types/order";
 import { orderRepository } from "@/features/orders/services/orderRepository";
-import { getFornitoreColor } from "@/features/orders/utils/constants";
+import { orderSyncService } from "@/features/orders/services/orderSyncService";
+import { getFornitoreColor, parseHighlights } from "@/features/orders/utils/constants";
 import { RotateCcw, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 
 interface OrdersTrashTabProps {
@@ -33,11 +34,46 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
   const loadTrash = useCallback(async () => {
     setLoading(true);
     try {
+      const supabase = await orderSyncService.getClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from("ordini")
+          .select("*")
+          .eq("eliminato", true)
+          .order("created_at", { ascending: false });
+
+        if (!error && data) {
+          const mapped: OrderItem[] = data.map((r: any) => ({
+            id: r.id,
+            supabase_id: r.id,
+            order_date: r.data || "",
+            supplier_name: r.fornitore || "",
+            article_code: r.articolo || "",
+            description: (r.descrizione || "").toUpperCase(),
+            quantity: String(r.quantita || ""),
+            price: String(r.prezzo || ""),
+            ordered_date: r.ordinato || null,
+            notes: r.note || "",
+            user_name: r.utente || "",
+            is_archived: Boolean(r.archiviato),
+            is_deleted: true,
+            highlights: parseHighlights(r.evidenze),
+            created_at: r.created_at || new Date().toISOString(),
+            updated_at: r.ultima_modifica || new Date().toISOString(),
+            sync_status: "synced",
+          }));
+          setOrders(mapped);
+          return;
+        }
+      }
       const data = await orderRepository.getOrders("cestino");
       setOrders(data);
     } catch (err) {
-      console.error("[OrdersTrashTab] Errore:", err);
-      showToast("Errore caricamento cestino");
+      console.warn("[OrdersTrashTab] Fallback SQLite:", err);
+      try {
+        const data = await orderRepository.getOrders("cestino");
+        setOrders(data);
+      } catch {}
     } finally {
       setLoading(false);
     }
@@ -76,11 +112,10 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
 
   const handlePermanentDeleteSelected = async () => {
     if (selectedRows.length === 0) return;
-    const ids = selectedRows.map((r) => r.id);
-    await orderRepository.permanentDelete(ids, currentUser);
     gridRef.current?.api?.applyTransaction({ remove: selectedRows });
+    void orderRepository.permanentDelete(selectedRows, currentUser);
+    showToast(`${selectedRows.length} ordini eliminati definitivamente`);
     setSelectedRows([]);
-    showToast(`${ids.length} ordini eliminati definitivamente`);
     if (onRefreshData) onRefreshData();
   };
 
@@ -146,26 +181,28 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
         cellRenderer: (p: any) => (
           <div className="flex items-center gap-1">
             <button
-              onClick={() => {
-                void orderRepository.restoreFromTrash([p.data.id], currentUser);
+              onClick={(e) => {
+                e.stopPropagation();
                 gridRef.current?.api?.applyTransaction({ remove: [p.data] });
+                void orderRepository.restoreFromTrash([p.data.id], currentUser);
                 showToast("Ripristinato negli attivi");
                 if (onRefreshData) onRefreshData();
               }}
               title="Ripristina tra gli Attivi"
-              className="p-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30"
+              className="p-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
             </button>
             <button
-              onClick={() => {
-                void orderRepository.permanentDelete([p.data.id], currentUser);
+              onClick={(e) => {
+                e.stopPropagation();
                 gridRef.current?.api?.applyTransaction({ remove: [p.data] });
+                void orderRepository.permanentDelete([p.data.id], currentUser);
                 showToast("Eliminato definitivamente");
                 if (onRefreshData) onRefreshData();
               }}
               title="Elimina Definitivamente"
-              className="p-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30"
+              className="p-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30 cursor-pointer"
             >
               <Trash2 className="w-3 h-3" />
             </button>

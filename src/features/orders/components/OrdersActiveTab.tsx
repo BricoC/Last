@@ -15,7 +15,7 @@ import { orderRepository, parseHighlights } from "@/features/orders/services/ord
 import { orderSyncService } from "@/features/orders/services/orderSyncService";
 import { orderEmailService } from "@/features/orders/services/orderEmailService";
 import { orderExcelService } from "@/features/orders/services/orderExcelService";
-import { TODAY, getFornitoreColor } from "@/features/orders/utils/constants";
+import { TODAY, getFornitoreColor, HIGHLIGHT_COLUMN_MAP } from "@/features/orders/utils/constants";
 import { OrderShortcutsModal } from "./OrderShortcutsModal";
 import { ExcelTextEditor } from "./editors/ExcelTextEditor";
 import { SupplierEditor } from "./editors/SupplierEditor";
@@ -92,16 +92,57 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     isNew: true,
   });
 
-  // Caricamento dati con 10 righe vuote in fondo (DATA VUOTA, non placeholder)
+  // Caricamento ordini attivi direttamente da Supabase Cloud (identico a noManV1, con fallback locale offline)
   const loadActiveOrders = useCallback(async () => {
     setLoading(true);
     try {
+      const supabase = await orderSyncService.getClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from("ordini")
+          .select("*")
+          .or("archiviato.is.null,archiviato.eq.false")
+          .eq("eliminato", false)
+          .order("created_at", { ascending: true });
+
+        if (!error && data) {
+          const mapped: OrderItem[] = data.map((r: any) => ({
+            id: r.id,
+            supabase_id: r.id,
+            order_date: r.data || "",
+            supplier_name: r.fornitore || "",
+            article_code: r.articolo || "",
+            description: (r.descrizione || "").toUpperCase(),
+            quantity: String(r.quantita || ""),
+            price: String(r.prezzo || ""),
+            ordered_date: r.ordinato || null,
+            notes: r.note || "",
+            user_name: r.utente || "",
+            is_archived: Boolean(r.archiviato),
+            is_deleted: Boolean(r.eliminato),
+            highlights: parseHighlights(r.evidenze),
+            created_at: r.created_at || new Date().toISOString(),
+            updated_at: r.ultima_modifica || new Date().toISOString(),
+            sync_status: "synced",
+          }));
+
+          const emptyRows: OrderItem[] = Array.from({ length: EMPTY_BUFFER_SIZE }, (_, i) => createEmptyRow(i));
+          setOrders([...mapped, ...emptyRows]);
+          return;
+        }
+      }
+
+      // Fallback offline SQLite
       const active = await orderRepository.getOrders("attivi");
       const emptyRows: OrderItem[] = Array.from({ length: EMPTY_BUFFER_SIZE }, (_, i) => createEmptyRow(i));
       setOrders([...active, ...emptyRows]);
     } catch (err: any) {
-      console.error("[OrdersActiveTab] Errore caricamento ordini:", err);
-      showToast("Errore caricamento ordini");
+      console.warn("[OrdersActiveTab] Errore Supabase, fallback SQLite:", err);
+      try {
+        const active = await orderRepository.getOrders("attivi");
+        const emptyRows: OrderItem[] = Array.from({ length: EMPTY_BUFFER_SIZE }, (_, i) => createEmptyRow(i));
+        setOrders([...active, ...emptyRows]);
+      } catch {}
     } finally {
       setLoading(false);
     }
@@ -208,6 +249,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         };
 
         api.applyTransaction({ add: [mapped] });
+        api.onSortChanged();
       } else if (payload.eventType === "UPDATE" && payload.new) {
         const item = payload.new;
         if (orderSyncService.recentlyPushedRemoteIds.has(item.id)) {
@@ -234,19 +276,42 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
               const cur = foundNode.data;
               const updated: OrderItem = {
                 ...cur,
-                order_date: item.data || cur.order_date,
-                supplier_name: item.fornitore || cur.supplier_name,
-                article_code: item.articolo || cur.article_code,
-                description: (item.descrizione || cur.description).toUpperCase(),
-                quantity: String(item.quantita || cur.quantity),
-                price: String(item.prezzo || cur.price),
-                ordered_date: item.ordinato ?? cur.ordered_date,
-                notes: item.note || cur.notes,
+                order_date: item.data ?? cur.order_date,
+                supplier_name: item.fornitore ?? cur.supplier_name,
+                article_code: item.articolo ?? cur.article_code,
+                description: (item.descrizione ?? cur.description).toUpperCase(),
+                quantity: String(item.quantita ?? cur.quantity),
+                price: String(item.prezzo ?? cur.price),
+                ordered_date: item.ordinato !== undefined ? item.ordinato : cur.ordered_date,
+                notes: item.note ?? cur.notes,
                 highlights: parseHighlights(item.evidenze || cur.highlights),
               };
               foundNode.setData(updated);
+              api.onSortChanged();
             }
           }
+        } else if (isBelonging) {
+          const mapped: OrderItem = {
+            id: "ord_" + item.id,
+            supabase_id: item.id,
+            order_date: item.data || "",
+            supplier_name: item.fornitore || "",
+            article_code: item.articolo || "",
+            description: (item.descrizione || "").toUpperCase(),
+            quantity: String(item.quantita || ""),
+            price: String(item.prezzo || ""),
+            ordered_date: item.ordinato || null,
+            notes: item.note || "",
+            user_name: item.utente || "",
+            is_archived: false,
+            is_deleted: false,
+            highlights: parseHighlights(item.evidenze),
+            created_at: item.created_at || new Date().toISOString(),
+            updated_at: item.ultima_modifica || new Date().toISOString(),
+            sync_status: "synced",
+          };
+          api.applyTransaction({ add: [mapped] });
+          api.onSortChanged();
         }
       } else if (payload.eventType === "DELETE" && payload.old) {
         const delId = payload.old.id;
@@ -258,6 +323,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         });
         if (foundNode) {
           api.applyTransaction({ remove: [foundNode.data] });
+          api.onSortChanged();
         }
       }
     };
@@ -303,10 +369,26 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       }
     }
 
+    const parseItalianDate = (d: string | null | undefined): number => {
+      if (!d) return 0;
+      const parts = d.split("/");
+      if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        return new Date(year, month, day).getTime() || 0;
+      }
+      return new Date(d).getTime() || 0;
+    };
+
     const sortByDate = (a: any, b: any) => {
       const timeA = new Date(a.data?.created_at || 0).getTime();
       const timeB = new Date(b.data?.created_at || 0).getTime();
-      return timeA - timeB;
+      if (timeA !== timeB) return timeA - timeB;
+      const dateA = parseItalianDate(a.data?.order_date);
+      const dateB = parseItalianDate(b.data?.order_date);
+      if (dateA !== dateB) return dateA - dateB;
+      return (a.data?.id || "").localeCompare(b.data?.id || "");
     };
 
     const sortByFornitoreAndDate = (a: any, b: any) => {
@@ -322,6 +404,21 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
 
     nodes.length = 0;
     nodes.push(...filledWithFornitore, ...filledWithoutFornitore, ...empties);
+  }, []);
+
+  const onSortChanged = useCallback((e: any) => {
+    const sortState = e.api.getColumnState().filter((s: any) => s.sort != null);
+    localStorage.setItem("om_sort_attivi", JSON.stringify(sortState));
+  }, []);
+
+  const onGridReady = useCallback((e: any) => {
+    const saved = localStorage.getItem("om_sort_attivi");
+    if (saved) {
+      try {
+        const sortState = JSON.parse(saved);
+        e.api.applyColumnState({ state: sortState });
+      } catch (err) {}
+    }
   }, []);
 
   // Memorizza il fornitore a fuoco tramite REF (senza forzare re-render React a ogni click!)
@@ -368,8 +465,10 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         data.description = data.description.toUpperCase();
       }
 
-      if (node) {
-        node.setDataValue("order_date", autoDate);
+      if (node?.data) {
+        node.data.order_date = autoDate;
+        node.data.isNew = false;
+        node.data.updated_at = nowIso;
       }
 
       const itemToSave: OrderItem = {
@@ -387,13 +486,60 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         gridRef.current.api.applyTransaction({ add: [freshEmpty] });
       }
 
-      // 3. Salvataggio immediato SQLite + Push Supabase in background
+      // 3. Salvataggio DIRETTO e IMMEDIATO su Supabase (0ms, identico a NoManV1)
+      const remotePayload = {
+        data: itemToSave.order_date || null,
+        fornitore: itemToSave.supplier_name || "",
+        articolo: itemToSave.article_code || "",
+        descrizione: (itemToSave.description || "").toUpperCase(),
+        quantita: String(itemToSave.quantity || ""),
+        prezzo: String(itemToSave.price || ""),
+        ordinato: itemToSave.ordered_date || null,
+        note: itemToSave.notes || "",
+        utente: itemToSave.user_name || currentUser,
+        archiviato: Boolean(itemToSave.is_archived),
+        eliminato: Boolean(itemToSave.is_deleted),
+        evidenze: parseHighlights(itemToSave.highlights),
+        ultima_modifica: nowIso,
+      };
+
+      try {
+        const supabase = await orderSyncService.getClient();
+        if (supabase) {
+          const targetRemoteId =
+            itemToSave.supabase_id ||
+            (itemToSave.id && !itemToSave.id.startsWith("new_") && !itemToSave.id.startsWith("draft_")
+              ? String(itemToSave.id).replace(/^ord_/, "")
+              : null);
+
+          if (targetRemoteId) {
+            await supabase.from("ordini").update(remotePayload).eq("id", targetRemoteId);
+          } else {
+            const { data: inserted, error } = await supabase.from("ordini").insert([remotePayload]).select();
+            if (!error && inserted && inserted[0]) {
+              const remoteId = inserted[0].id;
+              itemToSave.supabase_id = remoteId;
+              itemToSave.id = remoteId;
+              data.supabase_id = remoteId;
+              data.id = remoteId;
+              if (node?.data) {
+                node.data.supabase_id = remoteId;
+                node.data.id = remoteId;
+              }
+              orderSyncService.recentlyPushedRemoteIds.add(remoteId);
+              setTimeout(() => orderSyncService.recentlyPushedRemoteIds.delete(remoteId), 30000);
+            }
+          }
+        }
+      } catch (sbErr) {
+        console.warn("[OrdersActiveTab] Errore salvataggio Supabase diretto:", sbErr);
+      }
+
+      // 4. Salvataggio su database SQLite locale in background (senza re-sort durante la digitazione)
       try {
         await orderRepository.upsertOrder(itemToSave, currentUser);
-        void orderSyncService.pushPendingOrdersToSupabase();
       } catch (err: any) {
-        console.error("[OrdersActiveTab] Errore salvataggio riga:", err);
-        showToast("Errore salvataggio!");
+        console.error("[OrdersActiveTab] Errore salvataggio riga SQLite:", err);
       }
     },
     [currentUser]
@@ -432,54 +578,6 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     }
   }, []);
 
-  // Navigazione Tab tra sole colonne editabili con a capo automatico
-  const tabToNextCell = useCallback((params: any) => {
-    const { nextCellPosition, backwards, api, previousCellPosition } = params;
-    if (!nextCellPosition) return null;
-
-    const targetColId = nextCellPosition.column.getColId();
-    const isEditable = nextCellPosition.column.isCellEditable(nextCellPosition.node);
-
-    if (!isEditable || targetColId === "order_date" || targetColId === "azioni") {
-      const allDisplayed = api.getAllDisplayedColumns();
-      const editableCols = allDisplayed.filter(
-        (c: any) =>
-          c.getColId() !== "order_date" &&
-          c.getColId() !== "azioni" &&
-          c.isCellEditable(nextCellPosition.node)
-      );
-
-      const prevColId = previousCellPosition?.column?.getColId();
-      const curIndex = editableCols.findIndex((c: any) => c.getColId() === prevColId);
-
-      if (backwards) {
-        if (curIndex > 0) {
-          return { ...nextCellPosition, column: editableCols[curIndex - 1] };
-        }
-        if (nextCellPosition.rowIndex > 0) {
-          return {
-            rowIndex: nextCellPosition.rowIndex - 1,
-            rowPinned: nextCellPosition.rowPinned,
-            column: editableCols[editableCols.length - 1],
-          };
-        }
-      } else {
-        if (curIndex >= 0 && curIndex < editableCols.length - 1) {
-          return { ...nextCellPosition, column: editableCols[curIndex + 1] };
-        }
-        if (nextCellPosition.rowIndex < api.getDisplayedRowCount() - 1) {
-          return {
-            rowIndex: nextCellPosition.rowIndex + 1,
-            rowPinned: nextCellPosition.rowPinned,
-            column: editableCols[0],
-          };
-        }
-      }
-    }
-
-    return nextCellPosition;
-  }, []);
-
   // Filtro rapido Shift + Clic
   const handleCellClicked = useCallback((e: CellClickedEvent) => {
     const ev = e.event as MouseEvent;
@@ -496,7 +594,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     }
   }, []);
 
-  // Evidenzia/disevidenzia cella attiva
+  // Evidenzia/disevidenzia cella attiva (immediato a video + Supabase Cloud + SQLite)
   const handleHighlightCell = async () => {
     if (!gridRef.current?.api) return;
     const cell = gridRef.current.api.getFocusedCell();
@@ -508,56 +606,149 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     if (!node || !node.data || node.data.isNew) return;
 
     const colId = cell.column.getColId();
-    try {
-      const newHighlights = await orderRepository.toggleCellHighlight(node.data.id, colId);
-      node.setData({ ...node.data, highlights: newHighlights });
-      gridRef.current.api.redrawRows({ rowNodes: [node] });
-      void orderSyncService.pushPendingOrdersToSupabase();
-      showToast("Evidenziazione aggiornata");
-    } catch {
-      showToast("Errore evidenziazione");
+    const cur = parseHighlights(node.data.highlights);
+    const isHigh = !!cur[colId];
+    const counterpart = HIGHLIGHT_COLUMN_MAP[colId];
+    const newHigh = { ...cur };
+    if (isHigh) {
+      delete newHigh[colId];
+      if (counterpart) delete newHigh[counterpart];
+    } else {
+      newHigh[colId] = true;
+      if (counterpart) newHigh[counterpart] = true;
     }
+
+    const updatedData = { ...node.data, highlights: newHigh };
+    node.setData(updatedData);
+    gridRef.current.api.redrawRows({ rowNodes: [node] });
+    showToast("Evidenziazione aggiornata");
+
+    const targetRemoteId =
+      node.data.supabase_id ||
+      (node.data.id && !String(node.data.id).startsWith("new_") && !String(node.data.id).startsWith("draft_")
+        ? String(node.data.id).replace(/^ord_/, "")
+        : null);
+
+    if (targetRemoteId) {
+      try {
+        const supabase = await orderSyncService.getClient();
+        if (supabase) {
+          await supabase
+            .from("ordini")
+            .update({ evidenze: newHigh, ultima_modifica: new Date().toISOString() })
+            .eq("id", targetRemoteId);
+        }
+      } catch (err) {
+        console.warn("[OrdersActiveTab] Errore evidenziazione Supabase:", err);
+      }
+    }
+    void orderRepository.toggleCellHighlight(node.data.id, colId);
   };
 
+  // Sposta una singola riga nel cestino (0ms feedback visivo + Supabase diretto + SQLite)
+  const handleDeleteRow = useCallback(
+    (row: OrderItem) => {
+      if (!row || row.isNew) return;
+      const api = gridRef.current?.api;
+      if (!api) return;
+
+      // 1. Rimozione istantanea da schermo (0ms)
+      api.applyTransaction({ remove: [row] });
+      const freshEmpty = createEmptyRow();
+      api.applyTransaction({ add: [freshEmpty] });
+      api.onSortChanged();
+      showToast("Spostato nel cestino");
+
+      // 2. Persistenza asincrona Supabase + SQLite
+      void orderRepository.moveToTrash([row], currentUser);
+    },
+    [currentUser]
+  );
+
   // Sposta le righe selezionate nel cestino
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = useCallback(async () => {
     const toTrash = selectedRows.filter((r) => !r.isNew);
     if (toTrash.length === 0) return;
 
-    const ids = toTrash.map((r) => r.id);
-    await orderRepository.moveToTrash(ids, currentUser);
-    void orderSyncService.pushPendingOrdersToSupabase();
-    gridRef.current?.api?.applyTransaction({ remove: toTrash });
-    setSelectedRows([]);
-    showToast(`${ids.length} ordini spostati nel cestino`);
-    if (onRefreshData) onRefreshData();
-  };
+    const api = gridRef.current?.api;
+    if (!api) return;
 
-  // Archivia tutte le righe ordinate
+    // 1. Rimozione istantanea da schermo (0ms)
+    api.applyTransaction({ remove: toTrash });
+    const freshEmpties = Array.from({ length: toTrash.length }, (_, i) => createEmptyRow(i));
+    api.applyTransaction({ add: freshEmpties });
+    api.onSortChanged();
+    api.deselectAll();
+    setSelectedRows([]);
+    showToast(`${toTrash.length} ordini spostati nel cestino`);
+
+    // 2. Persistenza asincrona Supabase + SQLite
+    void orderRepository.moveToTrash(toTrash, currentUser);
+  }, [selectedRows, currentUser]);
+
+  // Archivia tutte le righe con Data Ordine compilata (0ms a video + Supabase Cloud + SQLite)
   const handleArchiveOrdered = async () => {
-    const count = await orderRepository.archiveOrderedRows(currentUser);
-    if (count > 0) {
-      void orderSyncService.pushPendingOrdersToSupabase();
-      showToast(`${count} ordini archiviati con successo!`);
-      await loadActiveOrders();
-      if (onRefreshData) onRefreshData();
-    } else {
+    const api = gridRef.current?.api;
+    if (!api) return;
+
+    const toArchive: OrderItem[] = [];
+    api.forEachNode((node) => {
+      if (node.data && !node.data.isNew && node.data.ordered_date && String(node.data.ordered_date).trim() !== "") {
+        toArchive.push(node.data);
+      }
+    });
+
+    if (toArchive.length === 0) {
       showToast("Nessun ordine con Data Ordine compilata da archiviare");
+      return;
     }
+
+    // 1. Rimozione immediata da schermo (0ms)
+    api.applyTransaction({ remove: toArchive });
+    const freshEmpties = Array.from({ length: toArchive.length }, (_, i) => createEmptyRow(i));
+    api.applyTransaction({ add: freshEmpties });
+    api.onSortChanged();
+    showToast(`${toArchive.length} ordini archiviati con successo!`);
+
+    // 2. Persistenza diretta Supabase Cloud
+    const remoteIds: string[] = [];
+    for (const item of toArchive) {
+      const rId =
+        item.supabase_id ||
+        (item.id && !String(item.id).startsWith("new_") && !String(item.id).startsWith("draft_")
+          ? String(item.id).replace(/^ord_/, "")
+          : null);
+      if (rId && !remoteIds.includes(String(rId))) {
+        remoteIds.push(String(rId));
+      }
+    }
+
+    if (remoteIds.length > 0) {
+      for (const rId of remoteIds) {
+        orderSyncService.recentlyPushedRemoteIds.add(rId);
+        setTimeout(() => orderSyncService.recentlyPushedRemoteIds.delete(rId), 30000);
+      }
+      try {
+        const supabase = await orderSyncService.getClient();
+        if (supabase) {
+          await supabase
+            .from("ordini")
+            .update({ archiviato: true, ultima_modifica: new Date().toISOString() })
+            .in("id", remoteIds);
+        }
+      } catch (sbErr) {
+        console.warn("[OrdersActiveTab] Errore archiviazione Supabase:", sbErr);
+      }
+    }
+
+    // 3. Persistenza SQLite locale in background
+    void orderRepository.archiveOrderedRows(currentUser);
   };
 
   // Ricarica e sincronizza manualmente con Supabase Cloud
   const handleManualRefresh = async () => {
-    setLoading(true);
-    try {
-      await orderSyncService.syncOrdersFromSupabase();
-      await loadActiveOrders();
-      showToast("Sincronizzato con Supabase Cloud");
-    } catch {
-      showToast("Errore durante la sincronizzazione");
-    } finally {
-      setLoading(false);
-    }
+    await loadActiveOrders();
+    showToast("Aggiornato da Supabase Cloud");
   };
 
   // Invio ordine email per fornitore della riga selezionata
@@ -788,15 +979,12 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           if (p.data?.isNew) return null;
           return (
             <button
-              onClick={async () => {
-                await orderRepository.moveToTrash([p.data.id], currentUser);
-                void orderSyncService.pushPendingOrdersToSupabase();
-                gridRef.current?.api?.applyTransaction({ remove: [p.data] });
-                showToast("Spostato nel cestino");
-                if (onRefreshData) onRefreshData();
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteRow(p.data);
               }}
               title="Sposta nel cestino"
-              className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded transition-colors"
+              className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded transition-colors cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -804,7 +992,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         },
       },
     ],
-    [currentUser, suppliers]
+    [currentUser, suppliers, handleDeleteRow]
   );
 
   const defaultColDef: ColDef = useMemo(
@@ -933,7 +1121,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           )}
 
           <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-            {filledCount} ordini attivi
+            📝 {filledCount} righe piene
           </span>
           <span className="px-2.5 py-1 rounded-full bg-[var(--card)] text-[var(--muted-foreground)] border border-[var(--border)]">
             +10 righe vuote in fondo
@@ -980,6 +1168,8 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
             postSortRows={postSortRows}
+            onGridReady={onGridReady}
+            onSortChanged={onSortChanged}
             onCellValueChanged={onCellValueChanged}
             onModelUpdated={onModelUpdated}
             onCellKeyDown={onCellKeyDown}
@@ -987,21 +1177,10 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
             onCellFocused={handleCellFocused}
             rowSelection="multiple"
             suppressRowClickSelection={true}
-            suppressMovableColumns={true}
-            singleClickEdit={false}
             stopEditingWhenCellsLoseFocus={true}
-            enterNavigatesVertically={false}
+            enterNavigatesVertically={true}
             enterNavigatesVerticallyAfterEdit={true}
-            tabToNextCell={tabToNextCell}
-            navigateToNextCell={(params) => params.nextCellPosition}
-            onCellEditingStarted={() => {
-              window.__isOrderCellEditing = true;
-            }}
-            onCellEditingStopped={() => {
-              setTimeout(() => {
-                window.__isOrderCellEditing = false;
-              }, 100);
-            }}
+            animateRows={true}
             onSelectionChanged={(e) => setSelectedRows(e.api.getSelectedRows())}
             getRowClass={(p) => (p.data?.isNew ? "ag-row-new-entry" : "")}
           />

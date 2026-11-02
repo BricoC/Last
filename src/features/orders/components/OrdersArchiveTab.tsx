@@ -3,8 +3,9 @@ import { AgGridReact } from "ag-grid-react";
 import { ColDef } from "ag-grid-community";
 import { OrderItem } from "@/features/orders/types/order";
 import { orderRepository } from "@/features/orders/services/orderRepository";
+import { orderSyncService } from "@/features/orders/services/orderSyncService";
 import { orderExcelService } from "@/features/orders/services/orderExcelService";
-import { getFornitoreColor } from "@/features/orders/utils/constants";
+import { getFornitoreColor, parseHighlights } from "@/features/orders/utils/constants";
 import {
   RotateCcw,
   Trash2,
@@ -42,11 +43,47 @@ export const OrdersArchiveTab: React.FC<OrdersArchiveTabProps> = ({
   const loadArchive = useCallback(async () => {
     setLoading(true);
     try {
+      const supabase = await orderSyncService.getClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from("ordini")
+          .select("*")
+          .eq("archiviato", true)
+          .eq("eliminato", false)
+          .order("created_at", { ascending: false });
+
+        if (!error && data) {
+          const mapped: OrderItem[] = data.map((r: any) => ({
+            id: r.id,
+            supabase_id: r.id,
+            order_date: r.data || "",
+            supplier_name: r.fornitore || "",
+            article_code: r.articolo || "",
+            description: (r.descrizione || "").toUpperCase(),
+            quantity: String(r.quantita || ""),
+            price: String(r.prezzo || ""),
+            ordered_date: r.ordinato || null,
+            notes: r.note || "",
+            user_name: r.utente || "",
+            is_archived: true,
+            is_deleted: false,
+            highlights: parseHighlights(r.evidenze),
+            created_at: r.created_at || new Date().toISOString(),
+            updated_at: r.ultima_modifica || new Date().toISOString(),
+            sync_status: "synced",
+          }));
+          setOrders(mapped);
+          return;
+        }
+      }
       const data = await orderRepository.getOrders("archiviati");
       setOrders(data);
     } catch (err) {
-      console.error("[OrdersArchiveTab] Errore:", err);
-      showToast("Errore caricamento archivio");
+      console.warn("[OrdersArchiveTab] Fallback SQLite:", err);
+      try {
+        const data = await orderRepository.getOrders("archiviati");
+        setOrders(data);
+      } catch {}
     } finally {
       setLoading(false);
     }
@@ -85,11 +122,10 @@ export const OrdersArchiveTab: React.FC<OrdersArchiveTabProps> = ({
 
   const handleDeleteSelected = async () => {
     if (selectedRows.length === 0) return;
-    const ids = selectedRows.map((r) => r.id);
-    await orderRepository.moveToTrash(ids, currentUser);
     gridRef.current?.api?.applyTransaction({ remove: selectedRows });
+    void orderRepository.moveToTrash(selectedRows, currentUser);
+    showToast(`${selectedRows.length} ordini spostati nel cestino`);
     setSelectedRows([]);
-    showToast(`${ids.length} ordini spostati nel cestino`);
     if (onRefreshData) onRefreshData();
   };
 
@@ -168,26 +204,28 @@ export const OrdersArchiveTab: React.FC<OrdersArchiveTabProps> = ({
         cellRenderer: (p: any) => (
           <div className="flex items-center gap-1">
             <button
-              onClick={() => {
-                void orderRepository.restoreFromArchive([p.data.id], currentUser);
+              onClick={(e) => {
+                e.stopPropagation();
                 gridRef.current?.api?.applyTransaction({ remove: [p.data] });
+                void orderRepository.restoreFromArchive([p.data.id], currentUser);
                 showToast("Ripristinato negli attivi");
                 if (onRefreshData) onRefreshData();
               }}
               title="Ripristina tra gli Attivi"
-              className="p-1 rounded bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 border border-blue-500/30"
+              className="p-1 rounded bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 border border-blue-500/30 cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
             </button>
             <button
-              onClick={() => {
-                void orderRepository.moveToTrash([p.data.id], currentUser);
+              onClick={(e) => {
+                e.stopPropagation();
                 gridRef.current?.api?.applyTransaction({ remove: [p.data] });
+                void orderRepository.moveToTrash([p.data.id], currentUser);
                 showToast("Spostato nel cestino");
                 if (onRefreshData) onRefreshData();
               }}
               title="Sposta nel cestino"
-              className="p-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30"
+              className="p-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30 cursor-pointer"
             >
               <Trash2 className="w-3 h-3" />
             </button>

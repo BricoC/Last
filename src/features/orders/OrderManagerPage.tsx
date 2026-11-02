@@ -51,7 +51,10 @@ export const OrderManagerPage: React.FC<OrderManagerPageProps> = () => {
     setIsSyncing(true);
     void orderSyncService
       .fullSync()
-      .then(() => loadSuppliers())
+      .then(() => {
+        void loadSuppliers();
+        window.dispatchEvent(new CustomEvent("order_full_sync_completed"));
+      })
       .finally(() => setIsSyncing(false));
 
     void orderSyncService.startRealtime();
