@@ -242,6 +242,8 @@ export const OrdersTrashTab: React.FC<OrdersTrashTabProps> = ({
             rowSelection="multiple"
             suppressRowClickSelection={true}
             onSelectionChanged={(e) => setSelectedRows(e.api.getSelectedRows())}
+            suppressScrollOnNewData={true}
+            animateRows={false}
           />
         </div>
       </div>

@@ -278,7 +278,8 @@ export const OrdersArchiveTab: React.FC<OrdersArchiveTabProps> = ({
             rowSelection="multiple"
             suppressRowClickSelection={true}
             onSelectionChanged={(e) => setSelectedRows(e.api.getSelectedRows())}
-            animateRows={true}
+            suppressScrollOnNewData={true}
+            animateRows={false}
           />
         </div>
       </div>
