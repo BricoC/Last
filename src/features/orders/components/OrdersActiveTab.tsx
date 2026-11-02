@@ -67,47 +67,65 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
   const onModelUpdated = useCallback((e: any) => {
     let count = 0;
     e.api.forEachNode((node: any) => {
-      if (!node.data?.isNew && !String(node.data?.id).startsWith("new_") && !String(node.data?.id).startsWith("ord_draft_")) {
+      const d = node.data;
+      if (
+        !d?.isNew &&
+        (d?.description?.trim() ||
+          d?.article_code?.trim() ||
+          d?.supplier_name?.trim() ||
+          d?.quantity?.trim() ||
+          d?.price?.trim() ||
+          d?.ordered_date?.trim() ||
+          d?.notes?.trim())
+      ) {
         count++;
       }
     });
     setFilledCount(count);
   }, []);
 
-  const createEmptyRow = (idx: number = 0): OrderItem => ({
-    id: `ord_draft_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
-    order_date: "",
-    supplier_name: "",
-    article_code: "",
-    description: "",
-    quantity: "",
-    price: "",
-    ordered_date: null,
-    notes: "",
-    user_name: currentUser,
-    is_archived: false,
-    is_deleted: false,
-    highlights: {},
-    created_at: "",
-    updated_at: "",
-    sync_status: "synced",
-    isNew: true,
-  });
+  const createEmptyRow = (idx: number = 0): OrderItem => {
+    const k = `ord_draft_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`;
+    return {
+      _rowKey: k,
+      id: k,
+      order_date: "",
+      supplier_name: "",
+      article_code: "",
+      description: "",
+      quantity: "",
+      price: "",
+      ordered_date: null,
+      notes: "",
+      user_name: currentUser,
+      is_archived: false,
+      is_deleted: false,
+      highlights: {},
+      created_at: "",
+      updated_at: "",
+      sync_status: "synced",
+      isNew: true,
+    };
+  };
 
   // Caricamento ordini attivi direttamente da Supabase Cloud (con fallback offline)
   const loadActiveOrders = useCallback(async () => {
     setLoading(true);
     try {
       const active = await orderSupabaseService.fetchOrders("attivi");
+      const mappedActive: OrderItem[] = active.map((r) => ({
+        ...r,
+        _rowKey: r._rowKey || r.id,
+      }));
       const emptyRows: OrderItem[] = Array.from({ length: EMPTY_BUFFER_SIZE }, (_, i) => createEmptyRow(i));
-      setOrders([...active, ...emptyRows]);
+      setOrders([...mappedActive, ...emptyRows]);
     } catch (err: any) {
       console.error("[OrdersActiveTab] Errore caricamento ordini:", err);
       showToast("Errore caricamento ordini");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     void loadActiveOrders();
@@ -161,7 +179,9 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           if (
             String(node.data?.id) === String(id) ||
             String(node.data?.supabase_id) === String(id) ||
-            (targetClean && orderSupabaseService.cleanId(node.data?.id) === targetClean)
+            String(node.data?._rowKey) === String(id) ||
+            (targetClean && orderSupabaseService.cleanId(node.data?.id) === targetClean) ||
+            (targetClean && orderSupabaseService.cleanId(node.data?.supabase_id) === targetClean)
           ) {
             found = node;
           }
@@ -182,6 +202,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         if (!isBelonging) return;
 
         const mapped: OrderItem = {
+          _rowKey: String(item.id),
           id: String(item.id),
           supabase_id: item.id,
           order_date: item.data || "",
@@ -237,6 +258,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           }
         } else if (isBelonging) {
           const mapped: OrderItem = {
+            _rowKey: String(item.id),
             id: String(item.id),
             supabase_id: item.id,
             order_date: item.data || "",
@@ -283,7 +305,18 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     const empties: any[] = [];
 
     for (const node of nodes) {
-      if (node.data?.isNew || String(node.data?.id).startsWith("new_") || String(node.data?.id).startsWith("ord_draft_")) {
+      const d = node.data;
+      const isFilled =
+        !d?.isNew &&
+        (Boolean(d?.description?.trim()) ||
+          Boolean(d?.article_code?.trim()) ||
+          Boolean(d?.supplier_name?.trim()) ||
+          Boolean(d?.quantity?.trim()) ||
+          Boolean(d?.price?.trim()) ||
+          Boolean(d?.notes?.trim()) ||
+          Boolean(d?.ordered_date?.trim()));
+
+      if (!isFilled) {
         empties.push(node);
       } else {
         const forn = node.data?.supplier_name?.trim();
@@ -390,12 +423,43 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         node.data.order_date = autoDate;
         node.data.isNew = false;
         node.data.updated_at = nowIso;
+        node.data.description = data.description;
+      }
+
+      // Rinfresca IMMEDIATAMENTE le celle (inclusa la colonna cestino col_actions e la data)
+      if (gridRef.current?.api && node) {
+        gridRef.current.api.refreshCells({
+          rowNodes: [node],
+          columns: ["col_actions", "order_date", "description"],
+          force: true,
+        });
       }
 
       // Se una riga vuota di fondo è stata compilata, aggiungine subito una nuova per mantenere il buffer
       if (isDraftRow && gridRef.current?.api) {
-        const freshEmpty = createEmptyRow(Date.now());
+        const freshEmpty = createEmptyRow();
         gridRef.current.api.applyTransaction({ add: [freshEmpty] });
+      }
+
+      // Ricalcola conteggio righe piene
+      if (gridRef.current?.api) {
+        let count = 0;
+        gridRef.current.api.forEachNode((n: any) => {
+          const d = n.data;
+          if (
+            !d?.isNew &&
+            (d?.description?.trim() ||
+              d?.article_code?.trim() ||
+              d?.supplier_name?.trim() ||
+              d?.quantity?.trim() ||
+              d?.price?.trim() ||
+              d?.ordered_date?.trim() ||
+              d?.notes?.trim())
+          ) {
+            count++;
+          }
+        });
+        setFilledCount(count);
       }
 
       // Salvataggio DIRETTO su Supabase
@@ -406,6 +470,13 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         if (node?.data) {
           node.data.id = res.data.id;
           node.data.supabase_id = res.data.supabase_id;
+        }
+        if (gridRef.current?.api && node) {
+          gridRef.current.api.refreshCells({
+            rowNodes: [node],
+            columns: ["col_actions"],
+            force: true,
+          });
         }
       }
     },
@@ -486,24 +557,66 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
   // Sposta una singola riga nel cestino (0ms feedback visivo + Supabase Cloud)
   const handleDeleteRow = useCallback(
     (row: OrderItem) => {
-      if (!row || row.isNew) return;
+      if (!row) return;
       const api = gridRef.current?.api;
       if (!api) return;
 
-      api.applyTransaction({ remove: [row] });
+      // Trova il nodo esatto nella griglia (anche se row.id o _rowKey è variato)
+      let nodeToRemove: any = null;
+      api.forEachNode((n: any) => {
+        if (
+          (row._rowKey && n.data?._rowKey === row._rowKey) ||
+          (row.id && String(n.data?.id) === String(row.id)) ||
+          (row.supabase_id && String(n.data?.supabase_id) === String(row.supabase_id))
+        ) {
+          nodeToRemove = n;
+        }
+      });
+
+      if (nodeToRemove) {
+        api.applyTransaction({ remove: [nodeToRemove.data] });
+      } else {
+        api.applyTransaction({ remove: [row] });
+      }
+
+      // Aggiungi una nuova riga vuota di buffer in fondo
       const freshEmpty = createEmptyRow();
       api.applyTransaction({ add: [freshEmpty] });
-      api.onSortChanged();
+
+      // Ricalcola conteggio righe piene
+      let count = 0;
+      api.forEachNode((n: any) => {
+        const d = n.data;
+        if (
+          !d?.isNew &&
+          (d?.description?.trim() ||
+            d?.article_code?.trim() ||
+            d?.supplier_name?.trim() ||
+            d?.quantity?.trim() ||
+            d?.price?.trim() ||
+            d?.ordered_date?.trim() ||
+            d?.notes?.trim())
+        ) {
+          count++;
+        }
+      });
+      setFilledCount(count);
+
       showToast("Spostato nel cestino");
 
-      void orderSupabaseService.moveToTrash([row]);
+      const targetId = String(row.supabase_id || row.id);
+      void orderSupabaseService.moveToTrash([targetId]);
     },
     [currentUser]
   );
 
   // Sposta le righe selezionate nel cestino
   const handleDeleteSelected = useCallback(async () => {
-    const toTrash = selectedRows.filter((r) => !r.isNew);
+    const toTrash = selectedRows.filter(
+      (r) =>
+        !r.isNew &&
+        (r.description?.trim() || r.article_code?.trim() || r.supplier_name?.trim() || r.quantity?.trim())
+    );
     if (toTrash.length === 0) return;
 
     const api = gridRef.current?.api;
@@ -512,12 +625,31 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     api.applyTransaction({ remove: toTrash });
     const freshEmpties = Array.from({ length: toTrash.length }, (_, i) => createEmptyRow(i));
     api.applyTransaction({ add: freshEmpties });
-    api.onSortChanged();
     api.deselectAll();
     setSelectedRows([]);
+
+    let count = 0;
+    api.forEachNode((n: any) => {
+      const d = n.data;
+      if (
+        !d?.isNew &&
+        (d?.description?.trim() ||
+          d?.article_code?.trim() ||
+          d?.supplier_name?.trim() ||
+          d?.quantity?.trim() ||
+          d?.price?.trim() ||
+          d?.ordered_date?.trim() ||
+          d?.notes?.trim())
+      ) {
+        count++;
+      }
+    });
+    setFilledCount(count);
+
     showToast(`${toTrash.length} ordini spostati nel cestino`);
 
-    void orderSupabaseService.moveToTrash(toTrash);
+    const ids = toTrash.map((r) => String(r.supabase_id || r.id));
+    void orderSupabaseService.moveToTrash(ids);
   }, [selectedRows, currentUser]);
 
   // Archivia tutte le righe con Data Ordine compilata (0ms a video + Supabase Cloud)
@@ -775,7 +907,16 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         editable: false,
         cellClass: "centered-cell",
         cellRenderer: (p: any) => {
-          if (p.data?.isNew) return null;
+          const hasContent =
+            Boolean(p.data?.description?.trim()) ||
+            Boolean(p.data?.article_code?.trim()) ||
+            Boolean(p.data?.supplier_name?.trim()) ||
+            Boolean(p.data?.quantity?.trim()) ||
+            Boolean(p.data?.price?.trim()) ||
+            Boolean(p.data?.notes?.trim()) ||
+            Boolean(p.data?.ordered_date?.trim());
+
+          if (!hasContent && p.data?.isNew) return null;
           return (
             <button
               onClick={(e) => {
@@ -965,7 +1106,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           <AgGridReact<OrderItem>
             ref={gridRef}
             rowData={orders}
-            getRowId={(p) => String(p.data.id)}
+            getRowId={(p) => p.data._rowKey || String(p.data.id)}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
             postSortRows={postSortRows}
