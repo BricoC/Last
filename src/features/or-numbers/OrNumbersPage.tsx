@@ -96,12 +96,13 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
     return `${day}/${m}/${y}`;
   };
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     try {
+      const logsMap = await OrNumbersRepository.getLogsMap(forceRefresh);
       const [carrara, wepa] = await Promise.all([
-        OrNumbersRepository.getOrRowsForMonth(selectedYear, selectedMonth, "CARRARA"),
-        OrNumbersRepository.getOrRowsForMonth(selectedYear, selectedMonth, "WEPA"),
+        OrNumbersRepository.getOrRowsForMonth(selectedYear, selectedMonth, "CARRARA", logsMap),
+        OrNumbersRepository.getOrRowsForMonth(selectedYear, selectedMonth, "WEPA", logsMap),
       ]);
       setCarraraRows(carrara);
       setWepaRows(wepa);
@@ -500,7 +501,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
           {/* Pulsante Ricarica */}
           <button
             type="button"
-            onClick={() => void loadData()}
+            onClick={() => void loadData(true)}
             disabled={loading || isSendingEmail}
             className="p-1.5 rounded-lg bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors cursor-pointer disabled:opacity-50"
             title="Ricarica dati dal database locale e sincronizza"
