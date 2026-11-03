@@ -38,6 +38,7 @@ export const MonthlyPerformanceModal: React.FC<MonthlyPerformanceModalProps> = (
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
   const [selectedYear, setSelectedYear] = useState<number>(initialYear || currentYear);
+  const [comparisonYear, setComparisonYear] = useState<number>((initialYear || currentYear) - 1);
   const [report, setReport] = useState<MonthlyPerformanceReport | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -103,17 +104,41 @@ export const MonthlyPerformanceModal: React.FC<MonthlyPerformanceModalProps> = (
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* Selettore Anno */}
+            {/* Selettore Anno Principale */}
             <div className="flex items-center gap-1.5 bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1 text-xs shadow-xs">
               <Calendar className="w-3.5 h-3.5 text-[var(--primary)]" />
               <select
                 value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                onChange={(e) => {
+                  const y = Number(e.target.value);
+                  setSelectedYear(y);
+                  setComparisonYear(y - 1);
+                }}
                 className="bg-transparent text-white font-bold text-xs outline-none cursor-pointer"
               >
                 {availableYears.map((yr) => (
                   <option key={yr} value={yr} className="bg-slate-900 text-white">
                     Anno {yr}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Selettore Anno di Confronto */}
+            <div className="flex items-center gap-1 bg-[var(--card)] border border-[var(--border)] rounded-lg px-2 py-1 text-xs shadow-xs text-[var(--muted-foreground)]">
+              <span>vs</span>
+              <select
+                value={comparisonYear}
+                onChange={(e) => setComparisonYear(Number(e.target.value))}
+                className="bg-transparent text-white font-bold text-xs outline-none cursor-pointer"
+                title="Seleziona l'anno con cui confrontare le percentuali"
+              >
+                {(
+                  report?.availableComparisonYears ||
+                  availableYears.filter((y) => y !== selectedYear)
+                ).map((yr) => (
+                  <option key={yr} value={yr} className="bg-slate-900 text-white">
+                    {yr}
                   </option>
                 ))}
               </select>
@@ -215,7 +240,7 @@ export const MonthlyPerformanceModal: React.FC<MonthlyPerformanceModalProps> = (
                   <tr>
                     <th className="py-2.5 px-3">Mese</th>
                     <th className="py-2.5 px-3 text-right">Fatturato / Vendite</th>
-                    <th className="py-2.5 px-3 text-center">vs {selectedYear - 1}</th>
+                    <th className="py-2.5 px-3 text-center">vs {comparisonYear}</th>
                     <th className="py-2.5 px-3 text-right">Costi Acquisto</th>
                     <th className="py-2.5 px-3 text-right">Utile Lordo</th>
                     <th className="py-2.5 px-3 text-right">Margine %</th>
@@ -229,6 +254,18 @@ export const MonthlyPerformanceModal: React.FC<MonthlyPerformanceModalProps> = (
                   {report.months.map((m) => {
                     const isCurrent =
                       selectedYear === currentYear && m.month === currentMonth;
+                    const comp = m.comparisonsByYear?.[comparisonYear] || {
+                      year: comparisonYear,
+                      turnoverAtCutoff: m.prevYearTurnover,
+                      fullMonthTurnover: m.prevYearTurnover,
+                      deltaPercent: m.deltaPercentVsPrevYear,
+                      isCutoffApplied: false,
+                    };
+                    const deltaVal = comp.deltaPercent;
+                    const tooltipText = comp.isCutoffApplied
+                      ? `Anno ${comparisonYear}: ${formatEur(comp.turnoverAtCutoff)} di ${formatEur(comp.fullMonthTurnover)}`
+                      : `Anno ${comparisonYear}: ${formatEur(comp.fullMonthTurnover)}`;
+
                     return (
                       <tr
                         key={m.month}
@@ -263,20 +300,20 @@ export const MonthlyPerformanceModal: React.FC<MonthlyPerformanceModalProps> = (
                           {formatEur(m.turnover)}
                         </td>
 
-                        {/* vs Anno Prec. */}
+                        {/* vs Anno Selezionato */}
                         <td className="py-2.5 px-3 text-center font-sans">
-                          {m.deltaPercentVsPrevYear !== null ? (
+                          {deltaVal !== null ? (
                             <span
                               className={cn(
-                                "inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full border",
-                                m.deltaPercentVsPrevYear >= 0
+                                "inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full border cursor-help",
+                                deltaVal >= 0
                                   ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
                                   : "bg-red-950/60 text-red-400 border-red-500/30"
                               )}
-                              title={`Anno ${selectedYear - 1}: ${formatEur(m.prevYearTurnover)}`}
+                              title={tooltipText}
                             >
-                              {m.deltaPercentVsPrevYear >= 0 ? "+" : ""}
-                              {m.deltaPercentVsPrevYear.toFixed(1)}%
+                              {deltaVal >= 0 ? "+" : ""}
+                              {deltaVal.toFixed(1)}%
                             </span>
                           ) : (
                             <span className="text-[10px] text-[var(--muted-foreground)]">-</span>
@@ -343,21 +380,30 @@ export const MonthlyPerformanceModal: React.FC<MonthlyPerformanceModalProps> = (
                       {formatEur(report.totalTurnover)}
                     </td>
                     <td className="py-3 px-3 text-center font-sans">
-                      {totalDeltaPct !== null ? (
-                        <span
-                          className={cn(
-                            "inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full border",
-                            totalDeltaPct >= 0
-                              ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
-                              : "bg-red-950/60 text-red-400 border-red-500/30"
-                          )}
-                        >
-                          {totalDeltaPct >= 0 ? "+" : ""}
-                          {totalDeltaPct.toFixed(1)}%
-                        </span>
-                      ) : (
-                        "-"
-                      )}
+                      {(() => {
+                        const compTotals = report.totalsByComparisonYear?.[comparisonYear];
+                        const totDeltaVal = compTotals?.totDeltaPercent ?? totalDeltaPct;
+                        const totTooltip = compTotals
+                          ? `Anno ${comparisonYear}: ${formatEur(compTotals.totTurnoverSamePeriod)} di ${formatEur(compTotals.totTurnoverFullYear)}`
+                          : `Anno ${comparisonYear}`;
+
+                        return totDeltaVal !== null ? (
+                          <span
+                            className={cn(
+                              "inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full border cursor-help",
+                              totDeltaVal >= 0
+                                ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                                : "bg-red-950/60 text-red-400 border-red-500/30"
+                            )}
+                            title={totTooltip}
+                          >
+                            {totDeltaVal >= 0 ? "+" : ""}
+                            {totDeltaVal.toFixed(1)}%
+                          </span>
+                        ) : (
+                          "-"
+                        );
+                      })()}
                     </td>
                     <td className="py-3 px-3 text-right text-red-400 font-extrabold">
                       {formatEur(report.totalCost)}

@@ -14,6 +14,7 @@ import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
 import { ElectronicInvoicesPage } from "@/features/invoices/ElectronicInvoicesPage";
 import { OrderManagerPage } from "@/features/orders/OrderManagerPage";
 import { OrNumbersPage } from "@/features/or-numbers/OrNumbersPage";
+import { OffersPage } from "@/features/offers/OffersPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
@@ -80,6 +81,8 @@ export function App() {
         return <ElectronicInvoicesPage />;
       case "or-numbers":
         return <OrNumbersPage windowId={windowId} />;
+      case "offers":
+        return <OffersPage />;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">

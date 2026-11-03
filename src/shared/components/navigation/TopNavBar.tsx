@@ -12,6 +12,7 @@ import {
   Receipt,
   FileSpreadsheet,
   Calculator,
+  ClipboardList,
   Users,
   Settings as SettingsIcon,
   Columns2,
@@ -89,6 +90,7 @@ export const TopNavBar: React.FC = () => {
     { id: "invoices", title: "Fatture Elettroniche", componentId: "invoices", icon: <Receipt className="w-3.5 h-3.5" /> },
     { id: "ddt-studio", title: "DDT Studio (Pro)", componentId: "ddt-studio", icon: <FileSpreadsheet className="w-3.5 h-3.5" /> },
     { id: "quotes", title: "Preventivi", componentId: "quotes", icon: <Calculator className="w-3.5 h-3.5" /> },
+    { id: "offers", title: "Offerte", componentId: "offers", icon: <ClipboardList className="w-3.5 h-3.5" /> },
     { id: "clients", title: "Clienti", componentId: "clients", icon: <Users className="w-3.5 h-3.5" /> },
   ];
 
