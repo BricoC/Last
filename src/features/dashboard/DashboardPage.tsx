@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { requestOpenDdt } from "@/features/ddt-studio/services/ddtNavigation";
 import {
@@ -22,6 +22,8 @@ import {
   Maximize2,
   X,
   BarChart3,
+  Check,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { useEscClose } from "@/shared/hooks/useEscClose";
@@ -94,8 +96,26 @@ export const DashboardPage: React.FC = () => {
   const [performanceReport, setPerformanceReport] = useState<MonthlyPerformanceReport | null>(null);
   const [loadingPerformance, setLoadingPerformance] = useState(false);
 
-  // Hover popover per confronto YTD al giorno odierno
-  const [isYtdHovered, setIsYtdHovered] = useState(false);
+  // Hover popover per confronto YTD/MTD al giorno odierno su tutte le 5 metriche
+  const [hoveredKpi, setHoveredKpi] = useState<"turnover" | "margin" | "monthTurnover" | "monthMargin" | "ddtCount" | null>(null);
+
+  // Menù a tendina multi-selezione anni per il grafico
+  const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
+  const yearDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(e.target as Node)) {
+        setIsYearDropdownOpen(false);
+      }
+    };
+    if (isYearDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isYearDropdownOpen]);
 
   // Chiusura con tasto ESC per la matrice clienti a tutto schermo (gli altri modali gestiscono autonomamente il loro stack)
   useEscClose(isClientMatrixModalOpen, () => setIsClientMatrixModalOpen(false));
@@ -182,36 +202,13 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  // Gestione selettore ad albero/tendina per anni grafico
-  const yearFilterValue = useMemo(() => {
-    if (!data) return "all";
-    const available = data.availableYears || [2026, 2025, 2024, 2023];
-    if (selectedYears.length === available.length && available.every((y) => selectedYears.includes(y))) {
-      return "all";
-    }
-    if (
-      selectedYears.length === 3 &&
-      available.slice(0, 3).every((y) => selectedYears.includes(y))
-    ) {
-      return "last3";
-    }
-    if (selectedYears.length === 1) {
-      return String(selectedYears[0]);
-    }
-    return "custom";
-  }, [data, selectedYears]);
-
-  const handleYearFilterChange = (val: string) => {
-    if (!data) return;
-    const available = data.availableYears || [2026, 2025, 2024, 2023];
-    if (val === "all") {
-      setSelectedYears(available);
-    } else if (val === "last3") {
-      setSelectedYears(available.slice(0, 3));
-    } else if (val === "custom") {
-      // mantiene l'attuale
+  const handleToggleYear = (yr: number) => {
+    if (selectedYears.includes(yr)) {
+      if (selectedYears.length > 1) {
+        setSelectedYears(selectedYears.filter((y) => y !== yr));
+      }
     } else {
-      setSelectedYears([Number(val)]);
+      setSelectedYears([...selectedYears, yr].sort((a, b) => b - a));
     }
   };
 
@@ -276,15 +273,6 @@ export const DashboardPage: React.FC = () => {
     });
   }, [data, clientSearch, clientSortField]);
 
-  const monthDeltaPct = useMemo(() => {
-    if (!data || data.kpis.prevYearSameMonthTurnover === 0) return null;
-    return (
-      ((data.kpis.currentMonthTurnover - data.kpis.prevYearSameMonthTurnover) /
-        data.kpis.prevYearSameMonthTurnover) *
-      100
-    );
-  }, [data]);
-
   // Totali fatturato per anno (per la tabella Fatturato Clienti per Anno)
   const clientYearTotals = useMemo(() => {
     const totals: Record<number, number> = {};
@@ -318,13 +306,13 @@ export const DashboardPage: React.FC = () => {
           </h1>
         </div>
 
-        {/* Metriche Chiave Inline (Fatturato Annuo YTD con popup hover, Margine Lordo Medio Annuo, Mese Corrente, Lordo Medio Mese) */}
-        <div className="flex items-center gap-3 bg-[var(--card)]/90 border border-[var(--border)] px-3 py-1.5 rounded-xl shadow-xs overflow-visible">
-          {/* Fatturato Annuo con confronto YTD a oggi e Popover al passaggio del mouse */}
+        {/* Metriche Chiave Inline (Fatturato Annuo YTD, Margine Lordo Medio Annuo, Mese Corrente, Lordo Medio Mese, DDT Emessi) */}
+        <div className="flex items-center gap-2.5 bg-[var(--card)]/90 border border-[var(--border)] px-3 py-1.5 rounded-xl shadow-xs overflow-visible">
+          {/* 1. Fatturato Annuo con confronto YTD a oggi e Popover al passaggio del mouse */}
           <div
             className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
-            onMouseEnter={() => setIsYtdHovered(true)}
-            onMouseLeave={() => setIsYtdHovered(false)}
+            onMouseEnter={() => setHoveredKpi("turnover")}
+            onMouseLeave={() => setHoveredKpi(null)}
           >
             <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
               Fatturato {currentYearNum}:
@@ -340,21 +328,21 @@ export const DashboardPage: React.FC = () => {
                     ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
                     : "bg-red-950/60 text-red-400 border-red-500/30"
                 )}
-                title={`Confronto al ${data.kpis.ytd.cutoffDateFormatted} vs ${currentYearNum - 1} (passa il mouse per tutti gli anni)`}
+                title={`Confronto al ${data.kpis.ytd.cutoffDateFormatted} vs ${currentYearNum - 1}`}
               >
                 {data.kpis.ytd.deltaPercentVsPrevYear >= 0 ? "+" : ""}
                 {data.kpis.ytd.deltaPercentVsPrevYear.toFixed(1)}%
               </span>
             )}
 
-            {/* Popup informativo YTD con confronto pluriennale alla data odierna */}
-            {isYtdHovered && data?.kpis.ytd && (
+            {/* Popup informativo YTD Fatturato */}
+            {hoveredKpi === "turnover" && data?.kpis.ytd && (
               <div className="absolute top-full left-0 mt-2 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
                 <div className="flex items-center justify-between border-b border-[var(--border)]/70 pb-1.5 mb-2">
                   <div className="flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-[var(--primary)]" />
                     <span className="text-xs font-extrabold text-white">
-                      Confronto al {data.kpis.ytd.cutoffDateFormatted} (Oggi)
+                      Fatturato al {data.kpis.ytd.cutoffDateFormatted} (Oggi)
                     </span>
                   </div>
                   <span className="text-[9px] font-mono text-[var(--muted-foreground)]">
@@ -419,8 +407,12 @@ export const DashboardPage: React.FC = () => {
 
           <div className="h-4 w-px bg-[var(--border)] shrink-0" />
 
-          {/* Margine Lordo Medio Annuo */}
-          <div className="flex items-center gap-1.5 text-xs shrink-0">
+          {/* 2. Margine Lordo Medio Annuo YTD */}
+          <div
+            className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
+            onMouseEnter={() => setHoveredKpi("margin")}
+            onMouseLeave={() => setHoveredKpi(null)}
+          >
             <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
               Margine Lordo Annuo:
             </span>
@@ -429,49 +421,361 @@ export const DashboardPage: React.FC = () => {
                 ? `${data.kpis.averageMarginPercent.toFixed(1)}%`
                 : "..."}
             </span>
-          </div>
-
-          <div className="h-4 w-px bg-[var(--border)] shrink-0" />
-
-          {/* Mese Corrente */}
-          <div className="flex items-center gap-1.5 text-xs shrink-0">
-            <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
-              Mese Corrente ({MONTH_NAMES[new Date().getMonth()]}):
-            </span>
-            <span className="font-extrabold text-white font-mono">
-              {data ? formatEur(data.kpis.currentMonthTurnover) : "..."}
-            </span>
-            {monthDeltaPct !== null && (
+            {data?.kpis.ytd && data.kpis.ytd.marginPercentDiffVsPrevYear !== null && (
               <span
                 className={cn(
-                  "inline-flex items-center text-[9px] font-bold px-1 rounded border",
-                  monthDeltaPct >= 0
-                    ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/30"
-                    : "bg-red-950/40 text-red-400 border-red-500/30"
+                  "inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded border shadow-2xs transition-transform hover:scale-105",
+                  data.kpis.ytd.marginPercentDiffVsPrevYear >= 0
+                    ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                    : "bg-red-950/60 text-red-400 border-red-500/30"
                 )}
-                title="Rispetto allo stesso mese dell'anno precedente"
+                title={`Differenza punti % vs ${currentYearNum - 1} allo stesso giorno`}
               >
-                {monthDeltaPct >= 0 ? "+" : ""}{monthDeltaPct.toFixed(1)}%
+                {data.kpis.ytd.marginPercentDiffVsPrevYear >= 0 ? "+" : ""}
+                {data.kpis.ytd.marginPercentDiffVsPrevYear.toFixed(1)} pt
               </span>
+            )}
+
+            {/* Popup informativo Margine Annuo YTD */}
+            {hoveredKpi === "margin" && data?.kpis.ytd && (
+              <div className="absolute top-full left-0 mt-2 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+                <div className="flex items-center justify-between border-b border-[var(--border)]/70 pb-1.5 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-xs font-extrabold text-white">
+                      Margine Lordo al {data.kpis.ytd.cutoffDateFormatted} (Oggi)
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-mono text-[var(--muted-foreground)]">
+                    fino a oggi
+                  </span>
+                </div>
+
+                <div className="mb-2 bg-[var(--background)]/60 rounded-lg p-2 border border-[var(--border)]/50">
+                  <div className="text-[10px] text-[var(--muted-foreground)] uppercase font-semibold">
+                    Margine {currentYearNum} a oggi:
+                  </div>
+                  <div className="text-sm font-black text-emerald-400 font-mono">
+                    {(data.kpis.ytd.currentYearMarginPercent ?? data.kpis.averageMarginPercent ?? 0).toFixed(1)}%
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 px-0.5">
+                  Differenza vs anni precedenti allo stesso giorno:
+                </div>
+
+                <div className="space-y-1.5">
+                  {data.kpis.ytd.historyComparisons.map((item) => {
+                    const isPositive = item.marginDiffPoints !== null && item.marginDiffPoints >= 0;
+                    return (
+                      <div
+                        key={item.year}
+                        className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--background)]/40 border border-[var(--border)]/40 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white font-sans">Anno {item.year}:</span>
+                          <span className="font-mono text-[11px] text-emerald-400">
+                            {item.marginPercent !== null ? `${item.marginPercent.toFixed(1)}%` : "N/D"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          {item.marginDiffPoints !== null ? (
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                isPositive
+                                  ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                                  : "bg-red-950/60 text-red-400 border-red-500/30"
+                              )}
+                            >
+                              {isPositive ? "+" : ""}
+                              {item.marginDiffPoints.toFixed(1)} pt
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-[var(--muted-foreground)]">-</span>
+                          )}
+                          <span className="text-[9px] text-[var(--muted-foreground)]">
+                            ({formatEur(item.margin)})
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
 
           <div className="h-4 w-px bg-[var(--border)] shrink-0" />
 
-          {/* Margine Lordo Medio del Mese */}
-          <div className="flex items-center gap-1.5 text-xs shrink-0">
+          {/* 3. Mese Corrente MTD */}
+          <div
+            className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
+            onMouseEnter={() => setHoveredKpi("monthTurnover")}
+            onMouseLeave={() => setHoveredKpi(null)}
+          >
+            <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
+              Mese Corrente ({MONTH_NAMES[new Date().getMonth()]}):
+            </span>
+            <span className="font-extrabold text-white font-mono">
+              {data ? formatEur(data.kpis.ytd.currentMonthMtdTurnover) : "..."}
+            </span>
+            {data?.kpis.ytd && data.kpis.ytd.monthMtdTurnoverDeltaVsPrev !== null && (
+              <span
+                className={cn(
+                  "inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border shadow-2xs transition-transform hover:scale-105",
+                  data.kpis.ytd.monthMtdTurnoverDeltaVsPrev >= 0
+                    ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                    : "bg-red-950/60 text-red-400 border-red-500/30"
+                )}
+                title={`Confronto al ${data.kpis.ytd.cutoffDateFormatted} vs ${currentYearNum - 1}`}
+              >
+                {data.kpis.ytd.monthMtdTurnoverDeltaVsPrev >= 0 ? "+" : ""}
+                {data.kpis.ytd.monthMtdTurnoverDeltaVsPrev.toFixed(1)}%
+              </span>
+            )}
+
+            {/* Popup informativo Mese Corrente MTD */}
+            {hoveredKpi === "monthTurnover" && data?.kpis.ytd && (
+              <div className="absolute top-full left-0 mt-2 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+                <div className="flex items-center justify-between border-b border-[var(--border)]/70 pb-1.5 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="text-xs font-extrabold text-white">
+                      Mese {MONTH_NAMES[new Date().getMonth()]} al {data.kpis.ytd.cutoffDateFormatted}
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-mono text-[var(--muted-foreground)]">
+                    giorni 1-{data.kpis.ytd.cutoffDay}
+                  </span>
+                </div>
+
+                <div className="mb-2 bg-[var(--background)]/60 rounded-lg p-2 border border-[var(--border)]/50">
+                  <div className="text-[10px] text-[var(--muted-foreground)] uppercase font-semibold">
+                    Fatturato {MONTH_NAMES[new Date().getMonth()]} {currentYearNum} a oggi:
+                  </div>
+                  <div className="text-sm font-black text-white font-mono">
+                    {formatEur(data.kpis.ytd.currentMonthMtdTurnover)}
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 px-0.5">
+                  Stesso mese negli anni passati (1-{data.kpis.ytd.cutoffDay}):
+                </div>
+
+                <div className="space-y-1.5">
+                  {data.kpis.ytd.historyComparisons.map((item) => {
+                    const isPositive = item.mtdTurnoverDeltaPercent !== null && item.mtdTurnoverDeltaPercent >= 0;
+                    return (
+                      <div
+                        key={item.year}
+                        className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--background)]/40 border border-[var(--border)]/40 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white font-sans">Anno {item.year}:</span>
+                          <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
+                            {formatEur(item.mtdTurnover)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          {item.mtdTurnoverDeltaPercent !== null ? (
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                isPositive
+                                  ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                                  : "bg-red-950/60 text-red-400 border-red-500/30"
+                              )}
+                            >
+                              {isPositive ? "+" : ""}
+                              {item.mtdTurnoverDeltaPercent.toFixed(1)}%
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-[var(--muted-foreground)]">-</span>
+                          )}
+                          <span className="text-[9px] text-[var(--muted-foreground)]">
+                            ({item.mtdDdtCount} ddt)
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="h-4 w-px bg-[var(--border)] shrink-0" />
+
+          {/* 4. Margine Lordo Medio del Mese MTD */}
+          <div
+            className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
+            onMouseEnter={() => setHoveredKpi("monthMargin")}
+            onMouseLeave={() => setHoveredKpi(null)}
+          >
             <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
               Lordo Medio Mese:
             </span>
             <span className="font-extrabold text-emerald-400 font-mono">
-              {data?.kpis.currentMonthMarginPercent !== null && data?.kpis.currentMonthMarginPercent !== undefined
-                ? `${data.kpis.currentMonthMarginPercent.toFixed(1)}%`
+              {data?.kpis.ytd.currentMonthMtdMarginPercent !== null && data?.kpis.ytd.currentMonthMtdMarginPercent !== undefined
+                ? `${data.kpis.ytd.currentMonthMtdMarginPercent.toFixed(1)}%`
                 : (data?.kpis.currentMonthTurnover === 0 ? "0.0%" : "N/D")}
             </span>
+            {data?.kpis.ytd && data.kpis.ytd.monthMtdMarginDiffVsPrev !== null && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded border shadow-2xs transition-transform hover:scale-105",
+                  data.kpis.ytd.monthMtdMarginDiffVsPrev >= 0
+                    ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                    : "bg-red-950/60 text-red-400 border-red-500/30"
+                )}
+                title={`Differenza punti % vs ${currentYearNum - 1} allo stesso periodo`}
+              >
+                {data.kpis.ytd.monthMtdMarginDiffVsPrev >= 0 ? "+" : ""}
+                {data.kpis.ytd.monthMtdMarginDiffVsPrev.toFixed(1)} pt
+              </span>
+            )}
+
+            {/* Popup informativo Margine Mese MTD */}
+            {hoveredKpi === "monthMargin" && data?.kpis.ytd && (
+              <div className="absolute top-full left-0 mt-2 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+                <div className="flex items-center justify-between border-b border-[var(--border)]/70 pb-1.5 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-xs font-extrabold text-white">
+                      Margine {MONTH_NAMES[new Date().getMonth()]} al {data.kpis.ytd.cutoffDateFormatted}
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-mono text-[var(--muted-foreground)]">
+                    giorni 1-{data.kpis.ytd.cutoffDay}
+                  </span>
+                </div>
+
+                <div className="mb-2 bg-[var(--background)]/60 rounded-lg p-2 border border-[var(--border)]/50">
+                  <div className="text-[10px] text-[var(--muted-foreground)] uppercase font-semibold">
+                    Margine {MONTH_NAMES[new Date().getMonth()]} {currentYearNum} a oggi:
+                  </div>
+                  <div className="text-sm font-black text-emerald-400 font-mono">
+                    {(data.kpis.ytd.currentMonthMtdMarginPercent ?? 0).toFixed(1)}%
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 px-0.5">
+                  Stesso mese negli anni passati (1-{data.kpis.ytd.cutoffDay}):
+                </div>
+
+                <div className="space-y-1.5">
+                  {data.kpis.ytd.historyComparisons.map((item) => {
+                    const isPositive = item.mtdMarginDiffPoints !== null && item.mtdMarginDiffPoints >= 0;
+                    return (
+                      <div
+                        key={item.year}
+                        className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--background)]/40 border border-[var(--border)]/40 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white font-sans">Anno {item.year}:</span>
+                          <span className="font-mono text-[11px] text-emerald-400">
+                            {item.mtdMarginPercent !== null ? `${item.mtdMarginPercent.toFixed(1)}%` : "N/D"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          {item.mtdMarginDiffPoints !== null ? (
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                isPositive
+                                  ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                                  : "bg-red-950/60 text-red-400 border-red-500/30"
+                              )}
+                            >
+                              {isPositive ? "+" : ""}
+                              {item.mtdMarginDiffPoints.toFixed(1)} pt
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-[var(--muted-foreground)]">-</span>
+                          )}
+                          <span className="text-[9px] text-[var(--muted-foreground)]">
+                            ({formatEur(item.mtdMargin)})
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="h-4 w-px bg-[var(--border)] shrink-0" />
+
+          {/* 5. DDT Emessi Anno Corrente */}
+          <div
+            className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
+            onMouseEnter={() => setHoveredKpi("ddtCount")}
+            onMouseLeave={() => setHoveredKpi(null)}
+          >
+            <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
+              DDT {currentYearNum} Emessi:
+            </span>
+            <span className="font-extrabold text-white font-mono">
+              {data ? data.kpis.ytd.currentYearDdtCount.toLocaleString("it-IT") : "..."}
+            </span>
+
+            {/* Popup informativo DDT Emessi YTD vs Totale Anno */}
+            {hoveredKpi === "ddtCount" && data?.kpis.ytd && (
+              <div className="absolute top-full right-0 mt-2 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+                <div className="flex items-center justify-between border-b border-[var(--border)]/70 pb-1.5 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-purple-400" />
+                    <span className="text-xs font-extrabold text-white">
+                      DDT Emessi al {data.kpis.ytd.cutoffDateFormatted} (Oggi)
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-mono text-[var(--muted-foreground)]">
+                    fino a oggi
+                  </span>
+                </div>
+
+                <div className="mb-2 bg-[var(--background)]/60 rounded-lg p-2 border border-[var(--border)]/50">
+                  <div className="text-[10px] text-[var(--muted-foreground)] uppercase font-semibold">
+                    DDT Emessi nel {currentYearNum} a oggi:
+                  </div>
+                  <div className="text-sm font-black text-white font-mono">
+                    {data.kpis.ytd.currentYearDdtCount.toLocaleString("it-IT")} DDT
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 px-0.5">
+                  DDT a oggi rispetto al totale degli anni passati:
+                </div>
+
+                <div className="space-y-1.5">
+                  {data.kpis.ytd.historyComparisons.map((item) => {
+                    return (
+                      <div
+                        key={item.year}
+                        className="flex items-center justify-between p-2 rounded-lg bg-[var(--background)]/40 border border-[var(--border)]/40 text-xs"
+                      >
+                        <span className="font-bold text-white font-sans">Anno {item.year}:</span>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          <span className="font-extrabold text-white text-[12px]">
+                            {item.ddtCount.toLocaleString("it-IT")}
+                          </span>
+                          <span className="text-[11px] text-[var(--muted-foreground)]">di</span>
+                          <span className="font-bold text-purple-400 text-[12px]">
+                            {item.fullYearDdtCount.toLocaleString("it-IT")} DDT
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Destra: Tasto Storico Articoli, Menù a tendina Anni & Ricarica */}
+        {/* Destra: Tasto Storico Articoli, Menù a tendina Multi-selezione Anni & Ricarica */}
         <div className="flex items-center space-x-2 shrink-0">
           {/* Pulsante Storico Articoli (apre direttamente il popup a schermo intero) */}
           <button
@@ -485,32 +789,97 @@ export const DashboardPage: React.FC = () => {
             <ArrowUpRight className="w-3 h-3 text-[var(--muted-foreground)] group-hover:text-white transition-colors" />
           </button>
 
-          {/* Menù a Tendina Anni Grafico */}
-          <div className="flex items-center gap-1.5 bg-[var(--card)] px-2.5 py-1 rounded-lg border border-[var(--border)] shadow-xs">
-            <Calendar className="w-3.5 h-3.5 text-[var(--primary)]" />
-            <select
-              value={yearFilterValue}
-              onChange={(e) => handleYearFilterChange(e.target.value)}
-              className="bg-transparent text-[var(--foreground)] text-xs font-bold outline-none cursor-pointer"
-              title="Seleziona anni da visualizzare nel grafico"
+          {/* Menù a Tendina Multi-selezione Anni Grafico */}
+          <div className="relative" ref={yearDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsYearDropdownOpen((prev) => !prev)}
+              className="flex items-center gap-1.5 bg-[var(--card)] hover:bg-[var(--border)]/40 px-2.5 py-1 rounded-lg border border-[var(--border)] shadow-xs text-xs font-bold text-[var(--foreground)] transition-colors cursor-pointer select-none"
+              title="Seleziona gli anni da visualizzare nel grafico"
             >
-              <option value="all" className="bg-[var(--card)] text-white">
-                Tutti gli anni ({data?.availableYears.length || 4})
-              </option>
-              <option value="last3" className="bg-[var(--card)] text-white">
-                Ultimi 3 anni
-              </option>
-              {(data?.availableYears || [2026, 2025, 2024, 2023]).map((yr) => (
-                <option key={yr} value={String(yr)} className="bg-[var(--card)] text-white">
-                  Solo {yr}
-                </option>
-              ))}
-              {yearFilterValue === "custom" && (
-                <option value="custom" className="bg-[var(--card)] text-white">
-                  Personalizzato ({selectedYears.length})
-                </option>
-              )}
-            </select>
+              <Calendar className="w-3.5 h-3.5 text-[var(--primary)]" />
+              <span>
+                {selectedYears.length === (data?.availableYears.length || 4)
+                  ? `Tutti gli anni (${selectedYears.length})`
+                  : `Anni (${selectedYears.length}): ${[...selectedYears].sort((a, b) => b - a).join(", ")}`}
+              </span>
+              <ChevronDown
+                className={cn(
+                  "w-3 h-3 text-[var(--muted-foreground)] transition-transform duration-200",
+                  isYearDropdownOpen && "rotate-180"
+                )}
+              />
+            </button>
+
+            {isYearDropdownOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-60 rounded-xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+                <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-[var(--border)]/70 px-1 text-[10px]">
+                  <span className="font-bold text-[var(--muted-foreground)] uppercase tracking-wider">
+                    Anni Grafico
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const all = data?.availableYears || [2026, 2025, 2024, 2023];
+                      setSelectedYears(all);
+                    }}
+                    className="text-[var(--primary)] hover:underline font-semibold cursor-pointer"
+                  >
+                    Seleziona tutti
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  {(data?.availableYears || [2026, 2025, 2024, 2023]).map((yr) => {
+                    const isSelected = selectedYears.includes(yr);
+                    const color = YEAR_COLORS[yr]?.bg || "bg-zinc-400";
+                    return (
+                      <label
+                        key={yr}
+                        className={cn(
+                          "flex items-center justify-between px-2 py-1.5 rounded-lg text-xs cursor-pointer select-none transition-colors",
+                          isSelected
+                            ? "bg-[var(--background)] text-white font-bold"
+                            : "hover:bg-[var(--background)]/60 text-[var(--muted-foreground)]"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleYear(yr)}
+                            className="rounded border-[var(--border)] bg-[var(--background)] text-[var(--primary)] focus:ring-0 cursor-pointer"
+                          />
+                          <span className={cn("w-2 h-2 rounded-full shrink-0", color)} />
+                          <span>
+                            Anno {yr}
+                            {yr === currentYearNum && (
+                              <span className="text-[9px] font-normal text-emerald-400 ml-1">
+                                (in corso)
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-[var(--primary)]" />}
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-1.5 mt-1.5 border-t border-[var(--border)]/50 px-1 text-[9px] text-[var(--muted-foreground)] flex items-center justify-between">
+                  <span>
+                    Attivi: {selectedYears.length} di {(data?.availableYears || [2026, 2025, 2024, 2023]).length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedYears([currentYearNum])}
+                    className="hover:text-white underline cursor-pointer"
+                  >
+                    Solo {currentYearNum}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Ricarica */}
@@ -1035,8 +1404,8 @@ export const DashboardPage: React.FC = () => {
             </span>
           </div>
 
-          {/* Lista DDT del mese selezionato (Cliccabile: apre DDTQuickViewModal!) */}
-          <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar space-y-1">
+          {/* Lista DDT del mese selezionato (Cliccabile: apre DDTQuickViewModal!) con scrollbar visibile */}
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-1.5 scrollbar-thin">
             {monthDdts && monthDdts.length > 0 ? (
               monthDdts.map((doc) => {
                 const label = `${doc.series ? `${doc.series}/` : ""}${doc.docNumber ?? "BOZ"}`;
