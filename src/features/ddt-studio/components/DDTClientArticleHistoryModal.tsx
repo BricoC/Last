@@ -19,6 +19,7 @@ import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } 
 import { useAppSettingsStore } from "@/shared/stores/useAppSettingsStore";
 import { DDTArticleResocontoView } from "./DDTArticleResocontoView";
 import { DDTClientResocontoView } from "./DDTClientResocontoView";
+import { useEscClose } from "@/shared/hooks/useEscClose";
 
 export type HistoryViewMode = "movements" | "articleResoconto" | "clientResoconto";
 
@@ -29,6 +30,7 @@ export interface DDTClientArticleHistoryModalProps {
   articleDescription: string;
   articleCode?: string;
   availableClients?: string[];
+  initialYear?: number | string | null;
   onSelectDdt?: (ddtId: string) => void;
 }
 
@@ -63,6 +65,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   articleDescription,
   articleCode,
   availableClients,
+  initialYear,
   onSelectDdt,
 }) => {
   const [rows, setRows] = useState<ClientArticleHistoryRow[]>([]);
@@ -73,7 +76,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   const [dbClients, setDbClients] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState(articleDescription);
   const deferredSearchTerm = useDeferredValue(searchTerm);
-  const [selectedYear, setSelectedYear] = useState<string>("all");
+  const [selectedYear, setSelectedYear] = useState<string>(initialYear ? String(initialYear) : "all");
   const [viewMode, setViewMode] = useState<HistoryViewMode>("movements");
   const [mergeVariants, setMergeVariants] = useState<boolean>(true);
 
@@ -99,10 +102,10 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
       setSelectedClient(clientName);
       setIsAllClients(false);
       setSearchTerm(articleDescription);
-      setSelectedYear("all");
+      setSelectedYear(initialYear ? String(initialYear) : "all");
       setSortConfig({ field: "date", direction: "desc" });
     }
-  }, [isOpen, clientName, articleDescription]);
+  }, [isOpen, clientName, articleDescription, initialYear]);
 
   // Carica i clienti dal DB se non forniti tramite props
   useEffect(() => {
@@ -327,19 +330,8 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     );
   };
 
-  // Gestione tasto Escape in capture phase per chiudere solo questo popup
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [isOpen, onClose]);
+  // Chiusura in cascata con tasto Escape (LIFO stack)
+  useEscClose(isOpen, onClose);
 
   // Statistiche e totali (basati sui record filtrati per anno)
   const stats = useMemo(() => {
@@ -386,10 +378,10 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-[2px] p-2 sm:p-3 text-[var(--foreground)] animate-in fade-in duration-150"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-[2px] p-1 sm:p-2.5 text-[var(--foreground)] animate-in fade-in duration-150"
     >
       <div
-        className="flex h-[92vh] w-[98vw] max-w-[1600px] flex-col rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl overflow-hidden"
+        className="flex h-[96vh] w-[98vw] max-w-[99vw] flex-col rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl overflow-hidden"
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-6 py-3.5">
@@ -729,19 +721,17 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                     </div>
                   </th>
 
-                  {/* CLIENTE */}
-                  {isAllClients && (
-                    <th
-                      onClick={() => handleSort("client")}
-                      className="px-3 py-2.5 text-left w-52 max-w-[200px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
-                      title="Clicca per ordinare per Cliente"
-                    >
-                      <div className="inline-flex items-center gap-1">
-                        <span>CLIENTE</span>
-                        {renderSortIndicator("client")}
-                      </div>
-                    </th>
-                  )}
+                  {/* CLIENTE (sempre visibile prima della destinazione) */}
+                  <th
+                    onClick={() => handleSort("client")}
+                    className="px-3 py-2.5 text-left min-w-[140px] max-w-[220px] cursor-pointer group hover:text-[var(--foreground)] transition-colors"
+                    title="Clicca per ordinare per Cliente"
+                  >
+                    <div className="inline-flex items-center gap-1">
+                      <span>CLIENTE</span>
+                      {renderSortIndicator("client")}
+                    </div>
+                  </th>
 
                   {/* DESTINAZIONE - Larghezza ridotta */}
                   <th
@@ -900,12 +890,13 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                         )}
                       </td>
 
-                      {/* Cliente (se tutti) */}
-                      {isAllClients && (
-                        <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[200px]" title={row.client}>
-                          {row.client}
-                        </td>
-                      )}
+                      {/* Cliente (sempre visibile prima della destinazione) */}
+                      <td
+                        className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[220px]"
+                        title={row.client || selectedClient || clientName || "—"}
+                      >
+                        {row.client || selectedClient || clientName || "—"}
+                      </td>
 
                       {/* Destinazione - rimpicciolita con max-width e tooltip */}
                       <td
@@ -1008,7 +999,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
             <div className="flex items-center gap-1.5 ml-2">
               {historyModalLimit !== "tutti" && rows.length >= historyModalLimit && (
                 <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400 border border-amber-500/30 font-medium">
-                  Limite SQL raggiunto ({historyModalLimit.toLocaleString("it-IT")})
+                  Limite SQL ({historyModalLimit.toLocaleString("it-IT")}): dati parziali
                 </span>
               )}
               <div className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
@@ -1019,11 +1010,11 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                   className="bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[10px] font-medium outline-none cursor-pointer hover:border-[var(--primary)] transition-colors"
                   title="Modifica limite record caricati dal database locale"
                 >
-                  <option value={1000}>1.000 record</option>
-                  <option value={2500}>2.500 record</option>
-                  <option value={5000}>5.000 record</option>
+                  <option value="tutti">Tutti i record (Consigliato)</option>
                   <option value={10000}>10.000 record</option>
-                  <option value="tutti">Tutti i record</option>
+                  <option value={5000}>5.000 record</option>
+                  <option value={2500}>2.500 record</option>
+                  <option value={1000}>1.000 record (Parziale)</option>
                 </select>
               </div>
             </div>

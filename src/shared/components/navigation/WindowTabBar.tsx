@@ -55,6 +55,11 @@ export const WindowTabBar: React.FC = () => {
       {/* Contenitore Schede Aperte */}
       <div
         ref={scrollContainerRef}
+        onWheel={(e) => {
+          if (e.deltaY !== 0) {
+            e.currentTarget.scrollLeft += e.deltaY;
+          }
+        }}
         className="flex-1 flex items-center space-x-1.5 overflow-x-auto no-scrollbar px-1 h-full"
       >
         {windows.map((win) => {
