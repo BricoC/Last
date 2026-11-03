@@ -91,18 +91,53 @@ export interface MonthlyPerformanceReport {
 
 export interface YtdComparisonItem {
   year: number;
+  // Fatturato YTD al cutoff
   turnover: number;
-  ddtCount: number;
   deltaPercent: number | null;
+  // DDT YTD al cutoff e Totale Anno Completo
+  ddtCount: number;
+  fullYearDdtCount: number;
+  ddtCountDeltaPercent: number | null;
+  // Margine YTD al cutoff
+  cost: number;
+  margin: number;
+  marginPercent: number | null;
+  marginDiffPoints: number | null;
+  // Mese corrente MTD (fino allo stesso giorno)
+  mtdTurnover: number;
+  mtdTurnoverDeltaPercent: number | null;
+  mtdDdtCount: number;
+  mtdDdtCountDeltaPercent: number | null;
+  mtdCost: number;
+  mtdMargin: number;
+  mtdMarginPercent: number | null;
+  mtdMarginDiffPoints: number | null;
 }
 
 export interface DashboardYtdMetrics {
   cutoffDay: number;
   cutoffMonth: number;
   cutoffDateFormatted: string; // es. "3 Novembre"
+  // Fatturato YTD
   currentYearTurnover: number;
   prevYearTurnover: number;
   deltaPercentVsPrevYear: number | null;
+  // Margine YTD
+  currentYearMarginPercent: number | null;
+  prevYearMarginPercent: number | null;
+  marginPercentDiffVsPrevYear: number | null;
+  // DDT YTD
+  currentYearDdtCount: number;
+  prevYearDdtCount: number;
+  ddtCountDeltaVsPrevYear: number | null;
+  // Mese corrente MTD (fino a oggi)
+  currentMonthMtdTurnover: number;
+  prevYearMonthMtdTurnover: number;
+  monthMtdTurnoverDeltaVsPrev: number | null;
+  currentMonthMtdMarginPercent: number | null;
+  prevYearMonthMtdMarginPercent: number | null;
+  monthMtdMarginDiffVsPrev: number | null;
+  // Storico per tutti gli anni passati
   historyComparisons: YtdComparisonItem[];
 }
 
@@ -351,10 +386,11 @@ export class DashboardService {
         ? ((currentYearTurnover - totalCurrentCost) / currentYearTurnover) * 100
         : null;
 
-    // 8. Calcolo metriche YTD (Year-To-Date fino alla data odierna gg/mm per ciascun anno)
+    // 8. Calcolo metriche YTD e MTD (Year-To-Date e Month-To-Date fino alla data odierna gg/mm per ciascun anno)
     const currentDay = now.getDate();
     const cutoffDateFormatted = `${currentDay} ${MONTH_NAMES[currentMonth - 1]}`;
 
+    // Query 1: Documenti YTD (dal 1 Gennaio al giorno odierno)
     const ytdRows = await db.select<{
       year: number;
       turnover_subunits: number;
@@ -381,31 +417,200 @@ export class DashboardService {
       [currentMonth, currentDay]
     );
 
-    const ytdMap = new Map<number, { turnover: number; ddtCount: number }>();
+    // Query 2: Costi YTD (dal 1 Gennaio al giorno odierno)
+    const ytdCostRows = await db.select<{
+      year: number;
+      cost_subunits: number;
+    }[]>(
+      `SELECT 
+         d.year,
+         SUM(CAST(i.purchase_price_subunits AS REAL) * CAST(REPLACE(i.quantity, ',', '.') AS REAL)) AS cost_subunits
+       FROM ddt_items i
+       JOIN ddt_documents d ON d.id = i.ddt_id
+       WHERE d.deleted_at IS NULL 
+         AND i.deleted_at IS NULL
+         AND d.status <> 'bozza'
+         AND d.doc_number IS NOT NULL
+         AND d.year IS NOT NULL
+         AND (
+           CAST(strftime('%m', d.doc_date) AS INTEGER) < $1
+           OR (
+             CAST(strftime('%m', d.doc_date) AS INTEGER) = $1
+             AND CAST(strftime('%d', d.doc_date) AS INTEGER) <= $2
+           )
+         )
+       GROUP BY d.year`,
+      [currentMonth, currentDay]
+    );
+
+    // Query 3: Documenti MTD (mese corrente dal giorno 1 al giorno odierno)
+    const mtdRows = await db.select<{
+      year: number;
+      turnover_subunits: number;
+      ddt_count: number;
+    }[]>(
+      `SELECT 
+         year,
+         SUM(total_taxable_subunits) AS turnover_subunits,
+         COUNT(id) AS ddt_count
+       FROM ddt_documents
+       WHERE deleted_at IS NULL 
+         AND status <> 'bozza'
+         AND doc_number IS NOT NULL
+         AND year IS NOT NULL
+         AND CAST(strftime('%m', doc_date) AS INTEGER) = $1
+         AND CAST(strftime('%d', doc_date) AS INTEGER) <= $2
+       GROUP BY year
+       ORDER BY year DESC`,
+      [currentMonth, currentDay]
+    );
+
+    // Query 4: Costi MTD (mese corrente dal giorno 1 al giorno odierno)
+    const mtdCostRows = await db.select<{
+      year: number;
+      cost_subunits: number;
+    }[]>(
+      `SELECT 
+         d.year,
+         SUM(CAST(i.purchase_price_subunits AS REAL) * CAST(REPLACE(i.quantity, ',', '.') AS REAL)) AS cost_subunits
+       FROM ddt_items i
+       JOIN ddt_documents d ON d.id = i.ddt_id
+       WHERE d.deleted_at IS NULL 
+         AND i.deleted_at IS NULL
+         AND d.status <> 'bozza'
+         AND d.doc_number IS NOT NULL
+         AND d.year IS NOT NULL
+         AND CAST(strftime('%m', d.doc_date) AS INTEGER) = $1
+         AND CAST(strftime('%d', d.doc_date) AS INTEGER) <= $2
+       GROUP BY d.year`,
+      [currentMonth, currentDay]
+    );
+
+    // Query 5: Totale DDT anno intero per ciascun anno (escluse bozze)
+    const fullYearDdtRows = await db.select<{
+      year: number;
+      total_ddts: number;
+    }[]>(
+      `SELECT year, COUNT(id) AS total_ddts
+       FROM ddt_documents
+       WHERE deleted_at IS NULL 
+         AND status <> 'bozza'
+         AND doc_number IS NOT NULL
+         AND year IS NOT NULL
+       GROUP BY year`
+    );
+
+    const fullYearDdtMap = new Map<number, number>();
+    fullYearDdtRows.forEach((r) => fullYearDdtMap.set(Number(r.year), Number(r.total_ddts) || 0));
+
+    const ytdDataMap = new Map<number, { turnover: number; ddtCount: number; cost: number; margin: number; marginPercent: number | null }>();
+    const mtdDataMap = new Map<number, { turnover: number; ddtCount: number; cost: number; margin: number; marginPercent: number | null }>();
+
+    const ytdCostMap = new Map<number, number>();
+    ytdCostRows.forEach((r) => ytdCostMap.set(Number(r.year), (Number(r.cost_subunits) || 0) / 100000));
+
+    const mtdCostMap = new Map<number, number>();
+    mtdCostRows.forEach((r) => mtdCostMap.set(Number(r.year), (Number(r.cost_subunits) || 0) / 100000));
+
     ytdRows.forEach((r) => {
-      ytdMap.set(Number(r.year), {
-        turnover: (Number(r.turnover_subunits) || 0) / 100000,
-        ddtCount: Number(r.ddt_count) || 0,
-      });
+      const yr = Number(r.year);
+      const turnover = (Number(r.turnover_subunits) || 0) / 100000;
+      const ddtCount = Number(r.ddt_count) || 0;
+      const cost = ytdCostMap.get(yr) || 0;
+      const margin = turnover - cost;
+      const marginPercent = turnover > 0 && cost > 0 ? (margin / turnover) * 100 : null;
+      ytdDataMap.set(yr, { turnover, ddtCount, cost, margin, marginPercent });
     });
 
-    const currentYearYtd = ytdMap.get(currentYear)?.turnover ?? currentYearTurnover;
-    const prevYearYtd = ytdMap.get(prevYear)?.turnover ?? 0;
-    const ytdDeltaVsPrev =
-      prevYearYtd > 0 ? ((currentYearYtd - prevYearYtd) / prevYearYtd) * 100 : null;
+    mtdRows.forEach((r) => {
+      const yr = Number(r.year);
+      const turnover = (Number(r.turnover_subunits) || 0) / 100000;
+      const ddtCount = Number(r.ddt_count) || 0;
+      const cost = mtdCostMap.get(yr) || 0;
+      const margin = turnover - cost;
+      const marginPercent = turnover > 0 && cost > 0 ? (margin / turnover) * 100 : null;
+      mtdDataMap.set(yr, { turnover, ddtCount, cost, margin, marginPercent });
+    });
+
+    const curYtd = ytdDataMap.get(currentYear) || {
+      turnover: currentYearTurnover,
+      ddtCount: currentYearDdtCount,
+      cost: totalCurrentCost,
+      margin: currentYearTurnover - totalCurrentCost,
+      marginPercent: averageMarginPercent,
+    };
+    const prevYtd = ytdDataMap.get(prevYear) || { turnover: 0, ddtCount: 0, cost: 0, margin: 0, marginPercent: null };
+
+    const curMtd = mtdDataMap.get(currentYear) || {
+      turnover: currentMonthTurnover,
+      ddtCount: 0,
+      cost: currentMonthCost,
+      margin: currentMonthTurnover - currentMonthCost,
+      marginPercent: currentMonthMarginPercent,
+    };
+    const prevMtd = mtdDataMap.get(prevYear) || { turnover: 0, ddtCount: 0, cost: 0, margin: 0, marginPercent: null };
+
+    // Deltas YTD
+    const ytdDeltaVsPrev = prevYtd.turnover > 0 ? ((curYtd.turnover - prevYtd.turnover) / prevYtd.turnover) * 100 : null;
+    const marginPercentDiffVsPrev =
+      curYtd.marginPercent !== null && prevYtd.marginPercent !== null
+        ? curYtd.marginPercent - prevYtd.marginPercent
+        : null;
+    const ddtCountDeltaVsPrev =
+      prevYtd.ddtCount > 0 ? ((curYtd.ddtCount - prevYtd.ddtCount) / prevYtd.ddtCount) * 100 : null;
+
+    // Deltas MTD
+    const monthMtdTurnoverDeltaVsPrev =
+      prevMtd.turnover > 0 ? ((curMtd.turnover - prevMtd.turnover) / prevMtd.turnover) * 100 : null;
+    const monthMtdMarginDiffVsPrev =
+      curMtd.marginPercent !== null && prevMtd.marginPercent !== null
+        ? curMtd.marginPercent - prevMtd.marginPercent
+        : null;
 
     const pastYears = availableYears.filter((y) => y < currentYear);
     const historyComparisons: YtdComparisonItem[] = pastYears.map((pastY) => {
-      const pastData = ytdMap.get(pastY) || { turnover: 0, ddtCount: 0 };
+      const pastYtdData = ytdDataMap.get(pastY) || { turnover: 0, ddtCount: 0, cost: 0, margin: 0, marginPercent: null };
+      const pastMtdData = mtdDataMap.get(pastY) || { turnover: 0, ddtCount: 0, cost: 0, margin: 0, marginPercent: null };
+
       const deltaPercent =
-        pastData.turnover > 0
-          ? ((currentYearYtd - pastData.turnover) / pastData.turnover) * 100
+        pastYtdData.turnover > 0 ? ((curYtd.turnover - pastYtdData.turnover) / pastYtdData.turnover) * 100 : null;
+      const ddtCountDeltaPercent =
+        pastYtdData.ddtCount > 0 ? ((curYtd.ddtCount - pastYtdData.ddtCount) / pastYtdData.ddtCount) * 100 : null;
+      const marginDiffPoints =
+        curYtd.marginPercent !== null && pastYtdData.marginPercent !== null
+          ? curYtd.marginPercent - pastYtdData.marginPercent
           : null;
+
+      const mtdTurnoverDeltaPercent =
+        pastMtdData.turnover > 0 ? ((curMtd.turnover - pastMtdData.turnover) / pastMtdData.turnover) * 100 : null;
+      const mtdDdtCountDeltaPercent =
+        pastMtdData.ddtCount > 0 ? ((curMtd.ddtCount - pastMtdData.ddtCount) / pastMtdData.ddtCount) * 100 : null;
+      const mtdMarginDiffPoints =
+        curMtd.marginPercent !== null && pastMtdData.marginPercent !== null
+          ? curMtd.marginPercent - pastMtdData.marginPercent
+          : null;
+
+      const fullYearDdtCount = fullYearDdtMap.get(pastY) || 0;
+
       return {
         year: pastY,
-        turnover: pastData.turnover,
-        ddtCount: pastData.ddtCount,
+        turnover: pastYtdData.turnover,
         deltaPercent,
+        ddtCount: pastYtdData.ddtCount,
+        fullYearDdtCount,
+        ddtCountDeltaPercent,
+        cost: pastYtdData.cost,
+        margin: pastYtdData.margin,
+        marginPercent: pastYtdData.marginPercent,
+        marginDiffPoints,
+        mtdTurnover: pastMtdData.turnover,
+        mtdTurnoverDeltaPercent,
+        mtdDdtCount: pastMtdData.ddtCount,
+        mtdDdtCountDeltaPercent,
+        mtdCost: pastMtdData.cost,
+        mtdMargin: pastMtdData.margin,
+        mtdMarginPercent: pastMtdData.marginPercent,
+        mtdMarginDiffPoints,
       };
     });
 
@@ -413,9 +618,21 @@ export class DashboardService {
       cutoffDay: currentDay,
       cutoffMonth: currentMonth,
       cutoffDateFormatted,
-      currentYearTurnover: currentYearYtd,
-      prevYearTurnover: prevYearYtd,
+      currentYearTurnover: curYtd.turnover,
+      prevYearTurnover: prevYtd.turnover,
       deltaPercentVsPrevYear: ytdDeltaVsPrev,
+      currentYearMarginPercent: curYtd.marginPercent,
+      prevYearMarginPercent: prevYtd.marginPercent,
+      marginPercentDiffVsPrevYear: marginPercentDiffVsPrev,
+      currentYearDdtCount: curYtd.ddtCount,
+      prevYearDdtCount: prevYtd.ddtCount,
+      ddtCountDeltaVsPrevYear: ddtCountDeltaVsPrev,
+      currentMonthMtdTurnover: curMtd.turnover,
+      prevYearMonthMtdTurnover: prevMtd.turnover,
+      monthMtdTurnoverDeltaVsPrev: monthMtdTurnoverDeltaVsPrev,
+      currentMonthMtdMarginPercent: curMtd.marginPercent,
+      prevYearMonthMtdMarginPercent: prevMtd.marginPercent,
+      monthMtdMarginDiffVsPrev: monthMtdMarginDiffVsPrev,
       historyComparisons,
     };
 
