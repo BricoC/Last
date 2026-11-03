@@ -52,14 +52,21 @@ export function normalizeArticleDescription(desc: string): string {
   s = s.replace(/\bLUNG\./gi, "LUNG ");
   s = s.replace(/\bMIS\./gi, "MIS ");
 
-  // 4. Normalizzazione dimensioni (es: "4 X 50", "4X 50", "4 X50" -> "4X50")
-  s = s.replace(/(\d+)\s*[xX]\s*(\d+)/g, "$1X$2");
+  // 4. Normalizzazione dimensioni (es: "3,5 X 50" -> "3.5X50", "4 X 50" -> "4X50")
+  s = s.replace(/(\d+)[,](\d+)\s*[xX]\s*(\d+)/g, "$1.$2X$3");
+  s = s.replace(/(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)/g, "$1X$2");
 
-  // 5. Pulizia punteggiatura (punti, virgole, trattini isolati, parentesi rimaste)
-  s = s.replace(/[.,;:"'()[\]{}*]/g, " ");
+  // 5. Spostamento finitura dopo la dimensione (es: 'ZN 5X100' -> '5X100 ZN')
+  s = s.replace(
+    /\b(ZN|BR|TROP|BRUN|INOX|NICHEL|OTT|RAMATA|FOSF)\s+(\d+(?:\.\d+)?X\d+(?:\.\d+)?(?:X\d+(?:\.\d+)?)?)\b/gi,
+    "$2 $1"
+  );
+
+  // 6. Pulizia punteggiatura (punti, virgole isolate, trattini, parentesi, preservando decimali numerici)
+  s = s.replace(/(?<=\D)[.,;:"'()[\]{}*]|[.,;:"'()[\]{}*](?=\D)|[.,;:"'()[\]{}*]$|^[.,;:"'()[\]{}*]/g, " ");
   s = s.replace(/\s+-\s+/g, " ");
 
-  // 6. Normalizzazione spazi multipli e trim finale
+  // 7. Normalizzazione spazi multipli e trim finale
   s = s.replace(/\s+/g, " ").trim();
 
   return s;

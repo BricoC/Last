@@ -93,9 +93,16 @@ export const TopNavBar: React.FC = () => {
   ];
 
   return (
-    <header className="h-10 bg-[var(--card)] border-b border-[var(--border)] px-2 flex items-center justify-between select-none text-[var(--foreground)] transition-colors">
-      {/* Lista Moduli Navigazione Primaria (con scroll orizzontale senza barra brutta) */}
-      <div className="flex items-center space-x-1 overflow-x-auto no-scrollbar py-1">
+    <header className="h-11 bg-[var(--card)] border-b border-[var(--border)] px-2 flex items-center justify-between select-none text-[var(--foreground)] transition-colors gap-2">
+      {/* Lista Moduli Navigazione Primaria (con scrollbar e supporto rotellina del mouse) */}
+      <div
+        onWheel={(e) => {
+          if (e.deltaY !== 0) {
+            e.currentTarget.scrollLeft += e.deltaY;
+          }
+        }}
+        className="flex-1 min-w-0 flex items-center space-x-1 overflow-x-auto py-1"
+      >
         {modules.map((mod) => {
           const isActive = activeWindowId === mod.id;
           return (
@@ -110,7 +117,7 @@ export const TopNavBar: React.FC = () => {
                 })
               }
               className={cn(
-                "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap cursor-default",
+                "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap cursor-default shrink-0",
                 isActive
                   ? "bg-[var(--background)] text-[var(--foreground)] border border-[var(--primary)] shadow-sm font-semibold"
                   : "bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)]"
@@ -126,7 +133,7 @@ export const TopNavBar: React.FC = () => {
       </div>
 
       {/* Sezione Destra: Strumenti Desktop Finestre + Impostazioni */}
-      <div className="flex items-center space-x-2 pl-2">
+      <div className="flex items-center space-x-2 pl-2 shrink-0">
         {/* Strumenti Rapidi Disposizione Finestre Desktop */}
         <div className="hidden lg:flex items-center space-x-1 border-r border-[var(--border)] pr-2">
           <button

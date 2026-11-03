@@ -18,6 +18,7 @@ import { DdtDocument, DdtItem } from "../models/ddt";
 import { formatDdtMoney, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
 import { DDTClientArticleHistoryModal } from "./DDTClientArticleHistoryModal";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { useEscClose } from "@/shared/hooks/useEscClose";
 
 type QuickViewSortField =
   | "rowIndex"
@@ -101,18 +102,8 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
     };
   }, [isOpen, ddtId]);
 
-  // Gestione tasto Escape: chiude questo modal solo se non è aperto il popup dello storico
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !historyTarget) {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, historyTarget, onClose]);
+  // Chiusura in cascata con tasto Escape (LIFO stack)
+  useEscClose(isOpen, onClose);
 
   // Filtra le righe valide (escludendo quelle vuote) e applica eventuale ricerca locale
   const activeItems = useMemo(() => {

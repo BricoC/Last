@@ -54,8 +54,8 @@ export const DatabaseQuerySettingsPanel: React.FC = () => {
       <div className="flex items-center gap-2 rounded-lg bg-[var(--background)]/50 border border-[var(--border)]/60 px-3.5 py-2.5 text-xs text-[var(--muted-foreground)]">
         <Layers className="w-4 h-4 text-[var(--primary)] shrink-0" />
         <span>
-          <strong>Nota sulle prestazioni:</strong> Il valore predefinito è <strong>1.000</strong> record ordinati per data decrescente.
-          Impostare &quot;Tutti&quot; visualizza l&apos;intero archivio storico dell&apos;articolo senza alcun limite SQL.
+          <strong>Nota sulle prestazioni:</strong> L&apos;impostazione predefinita consigliata è <strong>Tutti i record</strong>,
+          che garantisce conteggi, quantità e totali di fatturato completi ed esatti al 100%. Grazie al caricamento progressivo a scorrimento, le prestazioni restano fluide e istantanee.
         </span>
       </div>
     </section>
