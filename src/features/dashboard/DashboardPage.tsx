@@ -93,11 +93,12 @@ export const DashboardPage: React.FC = () => {
 
   // Rendimento Mensile integrato nel Quadrante 2
   const [performanceYear, setPerformanceYear] = useState<number>(currentYearNum);
+  const [performanceCompYear, setPerformanceCompYear] = useState<number>(currentYearNum - 1);
   const [performanceReport, setPerformanceReport] = useState<MonthlyPerformanceReport | null>(null);
   const [loadingPerformance, setLoadingPerformance] = useState(false);
 
-  // Hover popover per confronto YTD/MTD al giorno odierno su tutte le 5 metriche
-  const [hoveredKpi, setHoveredKpi] = useState<"turnover" | "margin" | "monthTurnover" | "monthMargin" | "ddtCount" | null>(null);
+  // Hover popover per confronto YTD/MTD al giorno odierno su tutte le 7 metriche
+  const [hoveredKpi, setHoveredKpi] = useState<"turnover" | "margin" | "markup" | "monthTurnover" | "monthMargin" | "monthMarkup" | "ddtCount" | null>(null);
 
   // Menù a tendina multi-selezione anni per il grafico
   const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
@@ -508,6 +509,107 @@ export const DashboardPage: React.FC = () => {
 
           <div className="h-4 w-px bg-[var(--border)] shrink-0" />
 
+          {/* Ricarico Annuo YTD */}
+          <div
+            className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
+            onMouseEnter={() => setHoveredKpi("markup")}
+            onMouseLeave={() => setHoveredKpi(null)}
+          >
+            <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
+              Ricarico Annuo:
+            </span>
+            <span className="font-extrabold text-blue-400 font-mono">
+              {data?.kpis.averageMarkupPercent !== null && data?.kpis.averageMarkupPercent !== undefined
+                ? `${data.kpis.averageMarkupPercent.toFixed(1)}%`
+                : "..."}
+            </span>
+            {data?.kpis.ytd && data.kpis.ytd.markupPercentDiffVsPrevYear !== null && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded border shadow-2xs transition-transform hover:scale-105",
+                  data.kpis.ytd.markupPercentDiffVsPrevYear >= 0
+                    ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                    : "bg-red-950/60 text-red-400 border-red-500/30"
+                )}
+                title={`Differenza punti % vs ${currentYearNum - 1} allo stesso giorno`}
+              >
+                {data.kpis.ytd.markupPercentDiffVsPrevYear >= 0 ? "+" : ""}
+                {data.kpis.ytd.markupPercentDiffVsPrevYear.toFixed(1)} pt
+              </span>
+            )}
+
+            {/* Popup informativo Ricarico Annuo YTD */}
+            {hoveredKpi === "markup" && data?.kpis.ytd && (
+              <div className="absolute top-full left-0 mt-2 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+                <div className="flex items-center justify-between border-b border-[var(--border)]/70 pb-1.5 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="text-xs font-extrabold text-white">
+                      Ricarico al {data.kpis.ytd.cutoffDateFormatted} (Oggi)
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-mono text-[var(--muted-foreground)]">
+                    fino a oggi
+                  </span>
+                </div>
+
+                <div className="mb-2 bg-[var(--background)]/60 rounded-lg p-2 border border-[var(--border)]/50">
+                  <div className="text-[10px] text-[var(--muted-foreground)] uppercase font-semibold">
+                    Ricarico {currentYearNum} a oggi:
+                  </div>
+                  <div className="text-sm font-black text-blue-400 font-mono">
+                    {(data.kpis.ytd.currentYearMarkupPercent ?? data.kpis.averageMarkupPercent ?? 0).toFixed(1)}%
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 px-0.5">
+                  Differenza vs anni precedenti allo stesso giorno:
+                </div>
+
+                <div className="space-y-1.5">
+                  {data.kpis.ytd.historyComparisons.map((item) => {
+                    const isPositive = item.markupDiffPoints !== null && item.markupDiffPoints >= 0;
+                    return (
+                      <div
+                        key={item.year}
+                        className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--background)]/40 border border-[var(--border)]/40 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white font-sans">Anno {item.year}:</span>
+                          <span className="font-mono text-[11px] text-blue-400">
+                            {item.markupPercent !== null ? `${item.markupPercent.toFixed(1)}%` : "N/D"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          {item.markupDiffPoints !== null ? (
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                isPositive
+                                  ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                                  : "bg-red-950/60 text-red-400 border-red-500/30"
+                              )}
+                            >
+                              {isPositive ? "+" : ""}
+                              {item.markupDiffPoints.toFixed(1)} pt
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-[var(--muted-foreground)]">-</span>
+                          )}
+                          <span className="text-[9px] text-[var(--muted-foreground)]">
+                            (Costo: {formatEur(item.cost)})
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="h-4 w-px bg-[var(--border)] shrink-0" />
+
           {/* 3. Mese Corrente MTD */}
           <div
             className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
@@ -696,6 +798,107 @@ export const DashboardPage: React.FC = () => {
                           )}
                           <span className="text-[9px] text-[var(--muted-foreground)]">
                             ({formatEur(item.mtdMargin)})
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="h-4 w-px bg-[var(--border)] shrink-0" />
+
+          {/* Ricarico Mensile MTD */}
+          <div
+            className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
+            onMouseEnter={() => setHoveredKpi("monthMarkup")}
+            onMouseLeave={() => setHoveredKpi(null)}
+          >
+            <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
+              Ricarico Mensile:
+            </span>
+            <span className="font-extrabold text-blue-400 font-mono">
+              {data?.kpis.ytd.currentMonthMtdMarkupPercent !== null && data?.kpis.ytd.currentMonthMtdMarkupPercent !== undefined
+                ? `${data.kpis.ytd.currentMonthMtdMarkupPercent.toFixed(1)}%`
+                : (data?.kpis.currentMonthTurnover === 0 ? "0.0%" : "N/D")}
+            </span>
+            {data?.kpis.ytd && data.kpis.ytd.monthMtdMarkupDiffVsPrev !== null && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded border shadow-2xs transition-transform hover:scale-105",
+                  data.kpis.ytd.monthMtdMarkupDiffVsPrev >= 0
+                    ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                    : "bg-red-950/60 text-red-400 border-red-500/30"
+                )}
+                title={`Differenza punti % vs ${currentYearNum - 1} allo stesso periodo`}
+              >
+                {data.kpis.ytd.monthMtdMarkupDiffVsPrev >= 0 ? "+" : ""}
+                {data.kpis.ytd.monthMtdMarkupDiffVsPrev.toFixed(1)} pt
+              </span>
+            )}
+
+            {/* Popup informativo Ricarico Mese MTD */}
+            {hoveredKpi === "monthMarkup" && data?.kpis.ytd && (
+              <div className="absolute top-full left-0 mt-2 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+                <div className="flex items-center justify-between border-b border-[var(--border)]/70 pb-1.5 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="text-xs font-extrabold text-white">
+                      Ricarico {MONTH_NAMES[new Date().getMonth()]} al {data.kpis.ytd.cutoffDateFormatted}
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-mono text-[var(--muted-foreground)]">
+                    giorni 1-{data.kpis.ytd.cutoffDay}
+                  </span>
+                </div>
+
+                <div className="mb-2 bg-[var(--background)]/60 rounded-lg p-2 border border-[var(--border)]/50">
+                  <div className="text-[10px] text-[var(--muted-foreground)] uppercase font-semibold">
+                    Ricarico {MONTH_NAMES[new Date().getMonth()]} {currentYearNum} a oggi:
+                  </div>
+                  <div className="text-sm font-black text-blue-400 font-mono">
+                    {(data.kpis.ytd.currentMonthMtdMarkupPercent ?? 0).toFixed(1)}%
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 px-0.5">
+                  Stesso mese negli anni passati (1-{data.kpis.ytd.cutoffDay}):
+                </div>
+
+                <div className="space-y-1.5">
+                  {data.kpis.ytd.historyComparisons.map((item) => {
+                    const isPositive = item.mtdMarkupDiffPoints !== null && item.mtdMarkupDiffPoints >= 0;
+                    return (
+                      <div
+                        key={item.year}
+                        className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--background)]/40 border border-[var(--border)]/40 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white font-sans">Anno {item.year}:</span>
+                          <span className="font-mono text-[11px] text-blue-400">
+                            {item.mtdMarkupPercent !== null ? `${item.mtdMarkupPercent.toFixed(1)}%` : "N/D"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          {item.mtdMarkupDiffPoints !== null ? (
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                isPositive
+                                  ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                                  : "bg-red-950/60 text-red-400 border-red-500/30"
+                              )}
+                            >
+                              {isPositive ? "+" : ""}
+                              {item.mtdMarkupDiffPoints.toFixed(1)} pt
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-[var(--muted-foreground)]">-</span>
+                          )}
+                          <span className="text-[9px] text-[var(--muted-foreground)]">
+                            (Costo: {formatEur(item.mtdCost)})
                           </span>
                         </div>
                       </div>
@@ -1096,7 +1299,11 @@ export const DashboardPage: React.FC = () => {
               {/* Menù a tendina scelta anno per il rendimento */}
               <select
                 value={performanceYear}
-                onChange={(e) => setPerformanceYear(Number(e.target.value))}
+                onChange={(e) => {
+                  const newYr = Number(e.target.value);
+                  setPerformanceYear(newYr);
+                  setPerformanceCompYear(newYr - 1);
+                }}
                 className="bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-[10px] font-bold rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-[var(--primary)]"
                 title="Seleziona l'anno per il rendimento mensile"
               >
@@ -1106,6 +1313,26 @@ export const DashboardPage: React.FC = () => {
                   </option>
                 ))}
               </select>
+
+              {/* Filtro Anno di Confronto (default anno precedente, modificabile su qualsiasi anno) */}
+              <div className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
+                <span>vs</span>
+                <select
+                  value={performanceCompYear}
+                  onChange={(e) => setPerformanceCompYear(Number(e.target.value))}
+                  className="bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-[10px] font-bold rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-[var(--primary)]"
+                  title="Seleziona l'anno con cui confrontare le percentuali"
+                >
+                  {(
+                    performanceReport?.availableComparisonYears ||
+                    (data?.availableYears || [2026, 2025, 2024, 2023]).filter((y) => y !== performanceYear)
+                  ).map((yr) => (
+                    <option key={yr} value={yr}>
+                      {yr}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1136,7 +1363,7 @@ export const DashboardPage: React.FC = () => {
                   <tr>
                     <th className="py-1.5 px-2">Mese</th>
                     <th className="py-1.5 px-2 text-right">Fatturato</th>
-                    <th className="py-1.5 px-1.5 text-center">vs {performanceYear - 1}</th>
+                    <th className="py-1.5 px-1.5 text-center">vs {performanceCompYear}</th>
                     <th className="py-1.5 px-2 text-right">Costi</th>
                     <th className="py-1.5 px-2 text-right">Utile</th>
                     <th className="py-1.5 px-2 text-right">Marg %</th>
@@ -1145,6 +1372,18 @@ export const DashboardPage: React.FC = () => {
                 <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
                   {performanceReport.months.map((m) => {
                     const isCurrent = performanceYear === currentYearNum && m.month === currentMonthNum;
+                    const comp = m.comparisonsByYear?.[performanceCompYear] || {
+                      year: performanceCompYear,
+                      turnoverAtCutoff: m.prevYearTurnover,
+                      fullMonthTurnover: m.prevYearTurnover,
+                      deltaPercent: m.deltaPercentVsPrevYear,
+                      isCutoffApplied: false,
+                    };
+                    const deltaVal = comp.deltaPercent;
+                    const tooltipText = comp.isCutoffApplied
+                      ? `Anno ${performanceCompYear}: ${formatEur(comp.turnoverAtCutoff)} di ${formatEur(comp.fullMonthTurnover)}`
+                      : `Anno ${performanceCompYear}: ${formatEur(comp.fullMonthTurnover)}`;
+
                     return (
                       <tr
                         key={m.month}
@@ -1181,20 +1420,20 @@ export const DashboardPage: React.FC = () => {
                           {formatEur(m.turnover)}
                         </td>
 
-                        {/* vs Anno Prec */}
+                        {/* vs Anno Selezionato */}
                         <td className="py-1.5 px-1.5 text-center font-sans whitespace-nowrap">
-                          {m.deltaPercentVsPrevYear !== null ? (
+                          {deltaVal !== null ? (
                             <span
                               className={cn(
-                                "inline-flex items-center text-[9px] font-bold px-1 py-0.2 rounded border",
-                                m.deltaPercentVsPrevYear >= 0
+                                "inline-flex items-center text-[9px] font-bold px-1 py-0.2 rounded border cursor-help",
+                                deltaVal >= 0
                                   ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
                                   : "bg-red-950/60 text-red-400 border-red-500/30"
                               )}
-                              title={`Anno ${performanceYear - 1}: ${formatEur(m.prevYearTurnover)}`}
+                              title={tooltipText}
                             >
-                              {m.deltaPercentVsPrevYear >= 0 ? "+" : ""}
-                              {m.deltaPercentVsPrevYear.toFixed(1)}%
+                              {deltaVal >= 0 ? "+" : ""}
+                              {deltaVal.toFixed(1)}%
                             </span>
                           ) : (
                             <span className="text-[9px] text-[var(--muted-foreground)]">-</span>
@@ -1229,21 +1468,30 @@ export const DashboardPage: React.FC = () => {
                         {formatEur(perfTotals.totTurnover)}
                       </td>
                       <td className="py-1.5 px-1.5 text-center font-sans">
-                        {perfTotals.totDelta !== null ? (
-                          <span
-                            className={cn(
-                              "inline-flex items-center text-[9px] font-bold px-1 py-0.2 rounded border",
-                              perfTotals.totDelta >= 0
-                                ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
-                                : "bg-red-950/60 text-red-400 border-red-500/30"
-                            )}
-                          >
-                            {perfTotals.totDelta >= 0 ? "+" : ""}
-                            {perfTotals.totDelta.toFixed(1)}%
-                          </span>
-                        ) : (
-                          <span className="text-[9px] text-[var(--muted-foreground)]">-</span>
-                        )}
+                        {(() => {
+                          const compTotals = performanceReport.totalsByComparisonYear?.[performanceCompYear];
+                          const totDeltaVal = compTotals?.totDeltaPercent ?? perfTotals.totDelta;
+                          const totTooltip = compTotals
+                            ? `Anno ${performanceCompYear}: ${formatEur(compTotals.totTurnoverSamePeriod)} di ${formatEur(compTotals.totTurnoverFullYear)}`
+                            : `Anno ${performanceCompYear}`;
+
+                          return totDeltaVal !== null ? (
+                            <span
+                              className={cn(
+                                "inline-flex items-center text-[9px] font-bold px-1 py-0.2 rounded border cursor-help",
+                                totDeltaVal >= 0
+                                  ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/30"
+                                  : "bg-red-950/60 text-red-400 border-red-500/30"
+                              )}
+                              title={totTooltip}
+                            >
+                              {totDeltaVal >= 0 ? "+" : ""}
+                              {totDeltaVal.toFixed(1)}%
+                            </span>
+                          ) : (
+                            <span className="text-[9px] text-[var(--muted-foreground)]">-</span>
+                          );
+                        })()}
                       </td>
                       <td className="py-1.5 px-2 text-right text-red-400">
                         {formatEur(perfTotals.totCost)}

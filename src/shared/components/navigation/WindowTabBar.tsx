@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { requestWindowClose, useWindowStore } from "@/shared/stores/useWindowStore";
-import { ChevronLeft, ChevronRight, X, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users, Hash } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users, Hash, ClipboardList } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
 export const WindowTabBar: React.FC = () => {
@@ -31,6 +31,8 @@ export const WindowTabBar: React.FC = () => {
         return <ShoppingCart className="w-3.5 h-3.5" />;
       case "quotes":
         return <Calculator className="w-3.5 h-3.5" />;
+      case "offers":
+        return <ClipboardList className="w-3.5 h-3.5" />;
       case "clients":
         return <Users className="w-3.5 h-3.5" />;
       case "settings":
