@@ -14,7 +14,7 @@ import {
   ListFilter,
   BarChart3
 } from "lucide-react";
-import { getClientArticleHistory, getDdtClientNames, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
+import { getClientArticleHistory, getDdtClientNames, getClientAvailableYears, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
 import { useAppSettingsStore } from "@/shared/stores/useAppSettingsStore";
 import { DDTArticleResocontoView } from "./DDTArticleResocontoView";
@@ -90,7 +90,8 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   });
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const tableContainerRef = useRef<HTMLDivElement>(null);
-  const { historyModalLimit } = useAppSettingsStore();
+  const { historyModalLimit, setHistoryModalLimit } = useAppSettingsStore();
+  const [availableYears, setAvailableYears] = useState<number[]>([2026, 2025, 2024, 2023]);
 
   // Inizializza o aggiorna lo stato quando si apre il modal per un nuovo articolo o cliente
   useEffect(() => {
@@ -125,7 +126,25 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     return Array.from(set).sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
   }, [availableClients, dbClients, clientName]);
 
-  // Carica i dati quando cambia deferredSearchTerm, il cliente selezionato o la modalità tutti i clienti
+  // Carica gli anni disponibili per il cliente selezionato direttamente dal database
+  useEffect(() => {
+    if (!isOpen) return;
+    let isMounted = true;
+    const effectiveClient = isAllClients ? "" : selectedClient.trim();
+    void getClientAvailableYears({
+      clientName: effectiveClient,
+      onlyThisClient: !isAllClients && Boolean(effectiveClient),
+    }).then((years) => {
+      if (isMounted && years.length > 0) {
+        setAvailableYears(years);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, selectedClient, isAllClients]);
+
+  // Carica i dati quando cambia deferredSearchTerm, il cliente selezionato, la modalità tutti i clienti o l'anno selezionato
   useEffect(() => {
     if (!isOpen) return;
 
@@ -141,8 +160,23 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           code: deferredSearchTerm.trim() === articleDescription.trim() ? articleCode : undefined,
           onlyThisClient: !isAllClients && Boolean(effectiveClient),
           limit: historyModalLimit === "tutti" ? null : historyModalLimit,
+          year: selectedYear !== "all" ? Number(selectedYear) : undefined,
         });
-        if (isMounted) setRows(data);
+        if (isMounted) {
+          setRows(data);
+          // Arricchisce gli anni disponibili con eventuali anni presenti nei risultati
+          setAvailableYears((prev) => {
+            const set = new Set<number>(prev);
+            data.forEach((r) => {
+              if (r.year) set.add(r.year);
+              else if (r.date) {
+                const py = new Date(r.date).getFullYear();
+                if (!isNaN(py)) set.add(py);
+              }
+            });
+            return Array.from(set).sort((a, b) => b - a);
+          });
+        }
       } catch (err) {
         if (isMounted) {
           setError(err instanceof Error ? err.message : "Errore durante il caricamento dello storico.");
@@ -156,21 +190,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     return () => {
       isMounted = false;
     };
-  }, [isOpen, selectedClient, isAllClients, deferredSearchTerm, articleDescription, articleCode, historyModalLimit]);
-
-  // Anni disponibili ricavati dai dati estratti
-  const availableYears = useMemo(() => {
-    const yearsSet = new Set<number>();
-    for (const r of rows) {
-      if (r.year) {
-        yearsSet.add(r.year);
-      } else if (r.date) {
-        const parsedYear = new Date(r.date).getFullYear();
-        if (!isNaN(parsedYear)) yearsSet.add(parsedYear);
-      }
-    }
-    return Array.from(yearsSet).sort((a, b) => b - a);
-  }, [rows]);
+  }, [isOpen, selectedClient, isAllClients, deferredSearchTerm, articleDescription, articleCode, historyModalLimit, selectedYear]);
 
   // Se l'anno precedentemente selezionato non è più presente nei risultati, torna a "all"
   useEffect(() => {
@@ -985,11 +1005,28 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
                 </>
               )}
             </span>
-            {historyModalLimit !== "tutti" && rows.length >= historyModalLimit && (
-              <span className="rounded bg-[var(--card)] px-1.5 py-0.5 text-[10px] text-amber-400 border border-amber-500/30">
-                limite SQL impostato: {historyModalLimit.toLocaleString("it-IT")} record
-              </span>
-            )}
+            <div className="flex items-center gap-1.5 ml-2">
+              {historyModalLimit !== "tutti" && rows.length >= historyModalLimit && (
+                <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400 border border-amber-500/30 font-medium">
+                  Limite SQL raggiunto ({historyModalLimit.toLocaleString("it-IT")})
+                </span>
+              )}
+              <div className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
+                <span>Limite query:</span>
+                <select
+                  value={historyModalLimit}
+                  onChange={(e) => setHistoryModalLimit(e.target.value === "tutti" ? "tutti" : (Number(e.target.value) as any))}
+                  className="bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[10px] font-medium outline-none cursor-pointer hover:border-[var(--primary)] transition-colors"
+                  title="Modifica limite record caricati dal database locale"
+                >
+                  <option value={1000}>1.000 record</option>
+                  <option value={2500}>2.500 record</option>
+                  <option value={5000}>5.000 record</option>
+                  <option value={10000}>10.000 record</option>
+                  <option value="tutti">Tutti i record</option>
+                </select>
+              </div>
+            </div>
           </span>
           <span className="flex items-center gap-1.5 font-sans">
             Premi <kbd className="rounded border border-[var(--border)] bg-[var(--card)] px-1.5 py-0.5 text-[10px] font-mono">Esc</kbd> per chiudere e tornare al DDT

@@ -23,7 +23,7 @@ export interface DDTStudioHeaderProps {
   setSidebarOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   activeView: "editor" | "a4";
   setActiveView: (view: "editor" | "a4") => void;
-  selectedYear?: number;
+  selectedYear?: number | null;
   onNewDdt: () => void;
   onSaveDraft: () => void;
   onEmitDdt: () => void;

@@ -17,11 +17,12 @@ export interface DDTStudioSidebarProps {
   onSelectDdt: (id: string) => void;
   onNewDdt: () => void;
   onDeleteDdt: (id: string) => Promise<boolean>;
-  selectedYear: number;
-  setSelectedYear: (y: number) => void;
+  selectedYear: number | null;
+  setSelectedYear: (y: number | null) => void;
   search: string;
   setSearch: (s: string) => void;
   isLoading?: boolean;
+  availableYears?: number[];
 }
 
 export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
@@ -38,6 +39,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   search,
   setSearch,
   isLoading = false,
+  availableYears: propAvailableYears = [],
 }) => {
   const [marginFilter, setMarginFilter] = useState<"all" | "with_margins" | "without_margins">("all");
   const [archiveTab, setArchiveTab] = useState<ArchiveTab>("ddt");
@@ -63,7 +65,20 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   }, [searchTerm, search, setSearch]);
 
   const currentYearNum = new Date().getFullYear();
-  const availableYears = [currentYearNum, currentYearNum - 1, currentYearNum - 2];
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    if (propAvailableYears && propAvailableYears.length > 0) {
+      propAvailableYears.forEach((y) => yearsSet.add(y));
+    }
+    // Assicuriamo sempre l'anno corrente, gli ultimi anni e almeno fino al 2023
+    [currentYearNum, currentYearNum - 1, currentYearNum - 2, currentYearNum - 3, 2026, 2025, 2024, 2023].forEach((y) => {
+      if (y >= 2020) yearsSet.add(y);
+    });
+    ddtList.forEach((doc) => {
+      if (doc.year) yearsSet.add(doc.year);
+    });
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [propAvailableYears, ddtList, currentYearNum]);
   const drafts = ddtList.filter((doc) => doc.status === "bozza" || doc.doc_number === null);
   const issuedDdts = ddtList.filter((doc) => doc.status !== "bozza" && doc.doc_number !== null);
   const tabDocuments = archiveTab === "drafts" ? drafts : issuedDdts;
@@ -194,10 +209,14 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
             <div className="flex items-center space-x-1">
               <Calendar className="w-3 h-3 text-[var(--muted-foreground)]" />
               <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
+                value={selectedYear === null ? "all" : selectedYear}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedYear(val === "all" ? null : parseInt(val, 10));
+                }}
                 className="bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-xs rounded px-1.5 py-0.5 outline-none font-semibold cursor-pointer"
               >
+                <option value="all">Tutti gli anni</option>
                 {availableYears.map((y) => (
                   <option key={y} value={y}>
                     {y}
@@ -276,7 +295,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
             ) : archiveTab === "drafts" ? (
               "Nessuna bozza trovata."
             ) : (
-              `Nessun DDT trovato nel ${selectedYear}.`
+              selectedYear ? `Nessun DDT trovato nel ${selectedYear}.` : "Nessun DDT trovato."
             )}
           </div>
         ) : (

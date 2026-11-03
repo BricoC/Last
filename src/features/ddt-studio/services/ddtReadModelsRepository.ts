@@ -120,6 +120,7 @@ export async function getClientArticleHistory(options: {
   code?: string;
   onlyThisClient?: boolean;
   limit?: number | null;
+  year?: number | null;
 }): Promise<ClientArticleHistoryRow[]> {
   const db = await getDatabase();
   const trimmedDesc = options.description.trim();
@@ -159,6 +160,11 @@ export async function getClientArticleHistory(options: {
   if (onlyThisClient && trimmedClient) {
     params.push(trimmedClient);
     query += ` AND LOWER(TRIM(d.client_name)) = LOWER(TRIM($${params.length}))`;
+  }
+
+  if (options.year) {
+    params.push(options.year);
+    query += ` AND d.year = $${params.length}`;
   }
 
   if (trimmedDesc) {
@@ -230,5 +236,42 @@ export async function getDdtClientNames(): Promise<string[]> {
      ORDER BY client_name ASC`
   );
   return rows.map((r) => (r.client_name || "").trim()).filter(Boolean);
+}
+
+export async function getClientAvailableYears(options?: {
+  clientName?: string;
+  onlyThisClient?: boolean;
+}): Promise<number[]> {
+  const db = await getDatabase();
+  const trimmedClient = (options?.clientName || "").trim();
+  const onlyThisClient = options?.onlyThisClient !== false;
+
+  let query = `
+    SELECT DISTINCT d.year
+    FROM ddt_documents d
+    WHERE d.deleted_at IS NULL
+      AND d.status <> 'bozza'
+      AND d.doc_number IS NOT NULL
+      AND d.year IS NOT NULL
+  `;
+  const params: string[] = [];
+
+  if (onlyThisClient && trimmedClient) {
+    params.push(trimmedClient);
+    query += ` AND LOWER(TRIM(d.client_name)) = LOWER(TRIM($1))`;
+  }
+
+  query += ` ORDER BY d.year DESC`;
+
+  try {
+    const rows = await db.select<{ year: number }[]>(query, params);
+    const dbYears = rows.map((r) => Number(r.year)).filter((y) => !isNaN(y) && y > 0);
+    const fallbackYears = [new Date().getFullYear(), 2026, 2025, 2024, 2023];
+    const set = new Set<number>([...dbYears, ...fallbackYears]);
+    return Array.from(set).sort((a, b) => b - a);
+  } catch (err) {
+    console.warn("Errore getClientAvailableYears:", err);
+    return [2026, 2025, 2024, 2023];
+  }
 }
 

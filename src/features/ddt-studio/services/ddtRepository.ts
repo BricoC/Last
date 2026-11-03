@@ -9,7 +9,7 @@ export class DdtRepository {
   /**
    * Recupera la lista dei DDT recenti filtrata per anno e ricerca facoltativa
    */
-  public async getRecentDdts(year?: number, search = ""): Promise<DdtArchiveEntry[]> {
+  public async getRecentDdts(year?: number | null, search = ""): Promise<DdtArchiveEntry[]> {
     const db = await getDatabase();
     let query = `
       SELECT * FROM ddt_documents 
@@ -45,6 +45,8 @@ export class DdtRepository {
     if (year) {
       summaryQuery += ` AND ddt_id IN (SELECT id FROM ddt_documents WHERE deleted_at IS NULL AND year = $1)`;
       summaryParams.push(year);
+    } else {
+      summaryQuery += ` AND ddt_id IN (SELECT id FROM ddt_documents WHERE deleted_at IS NULL)`;
     }
     summaryQuery += ` GROUP BY ddt_id`;
 
@@ -67,6 +69,26 @@ export class DdtRepository {
         has_complete_margins: Boolean(state && state.billedRows > 0 && state.allHaveCost),
       };
     });
+  }
+
+  /**
+   * Recupera gli anni distinti presenti nei DDT per popolare i selettori
+   */
+  public async getAvailableYears(): Promise<number[]> {
+    const currentYear = new Date().getFullYear();
+    const fallbackYears = [currentYear, 2026, 2025, 2024, 2023];
+    try {
+      const db = await getDatabase();
+      const rows = await db.select<{ year: number }[]>(
+        "SELECT DISTINCT year FROM ddt_documents WHERE deleted_at IS NULL AND year IS NOT NULL ORDER BY year DESC"
+      );
+      const dbYears = rows.map((r) => Number(r.year)).filter((y) => !isNaN(y) && y > 0);
+      const yearsSet = new Set<number>([...fallbackYears, ...dbYears]);
+      return Array.from(yearsSet).sort((a, b) => b - a);
+    } catch (e) {
+      console.warn("Errore recupero anni DDT disponibili:", e);
+      return Array.from(new Set(fallbackYears)).sort((a, b) => b - a);
+    }
   }
 
   /**

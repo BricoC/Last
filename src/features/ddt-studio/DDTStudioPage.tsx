@@ -172,7 +172,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState<"editor" | "a4">("editor");
   const [showMargini, setShowMargini] = useState(false);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState<number | null>(new Date().getFullYear());
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [searchSidebar, setSearchSidebar] = useState("");
   const [recentDdts, setRecentDdts] = useState<DdtArchiveEntry[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
@@ -401,18 +402,32 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     }
   }, [selectedYear, searchSidebar]);
 
+  const loadAvailableYears = useCallback(async () => {
+    try {
+      const years = await ddtRepository.getAvailableYears();
+      setAvailableYears(years);
+    } catch (e) {
+      console.warn("Errore caricamento anni disponibili:", e);
+    }
+  }, []);
+
   useEffect(() => {
     loadRecentDdts();
   }, [loadRecentDdts]);
+
+  useEffect(() => {
+    loadAvailableYears();
+  }, [loadAvailableYears]);
 
   // Aggiornamento reattivo quando la sincronizzazione in background scarica nuovi DDT
   useEffect(() => {
     const handleSyncUpdate = () => {
       void loadRecentDdts();
+      void loadAvailableYears();
     };
     window.addEventListener("ddt-data-updated", handleSyncUpdate);
     return () => window.removeEventListener("ddt-data-updated", handleSyncUpdate);
-  }, [loadRecentDdts]);
+  }, [loadRecentDdts, loadAvailableYears]);
 
   useEffect(() => {
     const handleQuoteConversion = (event: Event) => {
@@ -446,8 +461,12 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
       currentDdtIdRef.current = fullDoc.id;
       setDdt(fullDoc);
-      // Keep the archive sidebar on the same year as a DDT opened from List or Articles.
-      setSelectedYear((prev) => (prev === fullDoc.year ? prev : fullDoc.year));
+      // Keep the archive sidebar on the same year as a DDT opened from List or Articles,
+      // but preserve "Tutti gli anni" (null) if chosen by the user.
+      setSelectedYear((prev) => {
+        if (prev === null) return null;
+        return prev === fullDoc.year ? prev : fullDoc.year;
+      });
 
       // Inizializza esattamente 500 righe per la griglia
       const docId = fullDoc.id;
@@ -1065,6 +1084,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           search={searchSidebar}
           setSearch={setSearchSidebar}
           isLoading={isLoadingList}
+          availableYears={availableYears}
         />
 
         {/* Area di Lavoro */}
