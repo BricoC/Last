@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
-import { LoaderCircle, RefreshCw, Search, X, FileText } from "lucide-react";
+import { LoaderCircle, RefreshCw, Search, X, FileText, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { getDdtArticleViewRows, type DdtArticleViewRow } from "./services/ddtReadModelsRepository";
@@ -10,6 +10,21 @@ import { DDTQuickViewModal } from "./components/DDTQuickViewModal";
 import { DDTClientArticleHistoryModal } from "./components/DDTClientArticleHistoryModal";
 
 type IndexedArticleRow = DdtArticleViewRow & { _searchIndex: string };
+
+export type DdtArticleSortField =
+  | "date"
+  | "docNumber"
+  | "client"
+  | "destination"
+  | "unit"
+  | "quantity"
+  | "description"
+  | "unitPriceSubunits"
+  | "discountPercent"
+  | "netAmountSubunits"
+  | "vatRate";
+
+export type SortDirection = "asc" | "desc";
 
 const BATCH_SIZE = 150;
 
@@ -24,6 +39,8 @@ export function DDTArticlesPage() {
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const [selectedDdtId, setSelectedDdtId] = useState<string | null>(null);
   const [selectedArticleForHistory, setSelectedArticleForHistory] = useState<DdtArticleViewRow | null>(null);
+  const [sortField, setSortField] = useState<DdtArticleSortField>("date");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const openWindow = useWindowStore((state) => state.openWindow);
 
   const load = async () => {
@@ -76,22 +93,105 @@ export function DDTArticlesPage() {
     });
   }, [indexedRows, searchTokens]);
 
-  // Reset del numero di righe visibili al cambio filtri e scroll in cima
+  const handleSort = (field: DdtArticleSortField) => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      const defaultDescFields: DdtArticleSortField[] = [
+        "date",
+        "docNumber",
+        "quantity",
+        "unitPriceSubunits",
+        "discountPercent",
+        "netAmountSubunits",
+        "vatRate",
+      ];
+      setSortDirection(defaultDescFields.includes(field) ? "desc" : "asc");
+    }
+  };
+
+  const renderSortIndicator = (field: DdtArticleSortField) => {
+    if (sortField !== field) {
+      return (
+        <ArrowUpDown className="h-3 w-3 opacity-30 group-hover:opacity-80 shrink-0 inline ml-1 transition-opacity" />
+      );
+    }
+    return sortDirection === "asc" ? (
+      <ArrowUp className="h-3 w-3 text-blue-400 shrink-0 inline ml-1" />
+    ) : (
+      <ArrowDown className="h-3 w-3 text-blue-400 shrink-0 inline ml-1" />
+    );
+  };
+
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case "date": {
+          cmp = a.date.localeCompare(b.date);
+          if (cmp === 0) cmp = (a.docNumber ?? 0) - (b.docNumber ?? 0);
+          break;
+        }
+        case "docNumber": {
+          cmp = (a.docNumber ?? 0) - (b.docNumber ?? 0);
+          if (cmp === 0 && a.series && b.series) cmp = a.series.localeCompare(b.series);
+          break;
+        }
+        case "client":
+          cmp = (a.client || "").localeCompare(b.client || "", "it", { sensitivity: "base" });
+          break;
+        case "destination":
+          cmp = (a.destination || "").localeCompare(b.destination || "", "it", { sensitivity: "base" });
+          break;
+        case "unit":
+          cmp = (a.unit || "").localeCompare(b.unit || "", "it", { sensitivity: "base" });
+          break;
+        case "quantity": {
+          const valA = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
+          const valB = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          cmp = valA - valB;
+          break;
+        }
+        case "description":
+          cmp = (a.description || "").localeCompare(b.description || "", "it", { sensitivity: "base" });
+          break;
+        case "unitPriceSubunits":
+          cmp = (a.unitPriceSubunits || 0) - (b.unitPriceSubunits || 0);
+          break;
+        case "discountPercent": {
+          const valA = parseFloat((a.discountPercent || "0").replace(",", ".")) || 0;
+          const valB = parseFloat((b.discountPercent || "0").replace(",", ".")) || 0;
+          cmp = valA - valB;
+          break;
+        }
+        case "netAmountSubunits":
+          cmp = (a.netAmountSubunits || 0) - (b.netAmountSubunits || 0);
+          break;
+        case "vatRate":
+          cmp = (a.vatRate || 0) - (b.vatRate || 0);
+          break;
+      }
+      return sortDirection === "asc" ? cmp : -cmp;
+    });
+  }, [filtered, sortField, sortDirection]);
+
+  // Reset del numero di righe visibili al cambio filtri o ordinamento e scroll in cima
   useEffect(() => {
     setVisibleCount(BATCH_SIZE);
     if (tableContainerRef.current) {
       tableContainerRef.current.scrollTop = 0;
     }
-  }, [deferredSearch]);
+  }, [deferredSearch, sortField, sortDirection]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     if (scrollTop + clientHeight >= scrollHeight - 350) {
-      setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, filtered.length));
+      setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, sorted.length));
     }
   };
 
-  const visibleRows = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const visibleRows = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2 text-[var(--foreground)]">
@@ -153,17 +253,72 @@ export function DDTArticlesPage() {
           <table className="w-full border-collapse text-xs">
             <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">
               <tr>
-                <th className="px-3 py-2 text-left w-36">DATA</th>
-                <th className="px-3 py-2 text-left w-24">DDT</th>
-                <th className="px-3 py-2 text-left w-48">CLIENTE</th>
-                <th className="px-3 py-2 text-left w-48">DESTINAZIONE</th>
-                <th className="px-2 py-2 text-center w-14">UM</th>
-                <th className="px-3 py-2 text-right w-20">QUANTITÀ</th>
-                <th className="px-3 py-2 text-left">DESCRIZIONE</th>
-                <th className="px-3 py-2 text-right w-28">PREZZO UNIT.</th>
-                <th className="px-2 py-2 text-center w-20">SCONTO</th>
-                <th className="px-3 py-2 text-right w-28">IMPORTO</th>
-                <th className="px-2 py-2 text-center w-16">IVA</th>
+                <th
+                  onClick={() => handleSort("date")}
+                  className="px-3 py-2 text-left w-36 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center">DATA {renderSortIndicator("date")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("docNumber")}
+                  className="px-3 py-2 text-left w-24 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center">DDT {renderSortIndicator("docNumber")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("client")}
+                  className="px-3 py-2 text-left w-48 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center">CLIENTE {renderSortIndicator("client")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("destination")}
+                  className="px-3 py-2 text-left w-48 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center">DESTINAZIONE {renderSortIndicator("destination")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("unit")}
+                  className="px-2 py-2 text-center w-14 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center justify-center w-full">UM {renderSortIndicator("unit")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("quantity")}
+                  className="px-3 py-2 text-right w-20 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center justify-end w-full">QUANTITÀ {renderSortIndicator("quantity")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("description")}
+                  className="px-3 py-2 text-left cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center">DESCRIZIONE {renderSortIndicator("description")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("unitPriceSubunits")}
+                  className="px-3 py-2 text-right w-28 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center justify-end w-full">PREZZO UNIT. {renderSortIndicator("unitPriceSubunits")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("discountPercent")}
+                  className="px-2 py-2 text-center w-20 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center justify-center w-full">SCONTO {renderSortIndicator("discountPercent")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("netAmountSubunits")}
+                  className="px-3 py-2 text-right w-28 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center justify-end w-full">IMPORTO {renderSortIndicator("netAmountSubunits")}</span>
+                </th>
+                <th
+                  onClick={() => handleSort("vatRate")}
+                  className="px-2 py-2 text-center w-16 cursor-pointer select-none hover:text-white transition-colors group"
+                >
+                  <span className="inline-flex items-center justify-center w-full">IVA {renderSortIndicator("vatRate")}</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
