@@ -448,7 +448,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
       <input
         ref={inputRef}
         value={value}
-        maxLength={colId === "description" || colId === "descrizione" ? 55 : undefined}
+        maxLength={undefined}
         onChange={handleInputChange}
         onKeyDown={onKeyDown}
         onBlur={() => {

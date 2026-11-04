@@ -9,21 +9,6 @@ pub(crate) async fn persist_quote(
     if !["bozza", "inviato", "confermato", "rifiutato"].contains(&payload.status.as_str()) {
         return Err("Stato preventivo non valido".to_string());
     }
-    if payload.status == "confermato" {
-        let is_existing_confirmed = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM quotes WHERE id = ? AND status = 'confermato' AND deleted_at IS NULL",
-        )
-        .bind(&payload.id)
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(|error| error.to_string())?
-            > 0;
-        if !is_existing_confirmed {
-            return Err(
-                "Un preventivo può essere confermato solo durante la conversione in DDT".to_string(),
-            );
-        }
-    }
     persist_header(connection, &payload).await?;
 
     let active_ids = sqlx::query_scalar::<_, String>(

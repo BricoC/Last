@@ -86,6 +86,51 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
     expect(pages[0].isLast).toBe(true);
   });
 
+  it("calcola gli slot verticali per descrizioni lunghe che vanno a capo senza sballare l'altezza pagina", () => {
+    // 3 articoli, uno dei quali lungo 80 caratteri (occupa 2 slot verticali)
+    const items: DdtItem[] = [
+      { id: "1", ddt_id: "d1", row_index: 1, description: "ARTICOLO CORTO", unit: "NR", quantity: "1", unit_price: money(10), discount_pct: "0", vat_rate: 22, net_amount: money(10), vat_amount: money(2.2), created_at: "", updated_at: "", updated_by: "", deleted_at: null, sync_status: "pending" },
+      { id: "2", ddt_id: "d1", row_index: 2, description: "QUESTA E' UNA DESCRIZIONE MOLTO LUNGA CHE SUPERA I 50 CARATTERI E QUINDI VA A CAPO SU DUE RIGHE", unit: "NR", quantity: "1", unit_price: money(10), discount_pct: "0", vat_rate: 22, net_amount: money(10), vat_amount: money(2.2), created_at: "", updated_at: "", updated_by: "", deleted_at: null, sync_status: "pending" },
+      { id: "3", ddt_id: "d1", row_index: 3, description: "ALTRO ARTICOLO", unit: "NR", quantity: "2", unit_price: money(5), discount_pct: "0", vat_rate: 22, net_amount: money(10), vat_amount: money(2.2), created_at: "", updated_at: "", updated_by: "", deleted_at: null, sync_status: "pending" },
+    ];
+    const pages = paginateDdtRows(items);
+    expect(pages.length).toBe(1);
+    // 3 articoli reali occupano 4 slot (1 + 2 + 1 = 4). Riempito con 21 righe vuote = 24 elementi totali, 25 slot esatti
+    expect(pages[0].rows.length).toBe(24);
+  });
+
+  it("gestisce la paginazione multipagina con 25 righe e altezza aumentata per pagina", () => {
+    // 35 articoli singoli
+    const items: DdtItem[] = Array.from({ length: 35 }, (_, i) => ({
+      id: `${i + 1}`,
+      ddt_id: "d1",
+      row_index: i + 1,
+      description: `ARTICOLO ${i + 1}`,
+      unit: "NR",
+      quantity: "1",
+      unit_price: money(10),
+      discount_pct: "0",
+      vat_rate: 22,
+      net_amount: money(10),
+      vat_amount: money(2.2),
+      created_at: "",
+      updated_at: "",
+      updated_by: "",
+      deleted_at: null,
+      sync_status: "pending",
+    }));
+    const pages = paginateDdtRows(items);
+    expect(pages.length).toBe(2);
+    // Pagina 1: 25 articoli -> 25 righe piene
+    expect(pages[0].rows.length).toBe(25);
+    expect(pages[0].isFirst).toBe(true);
+    expect(pages[0].isLast).toBe(false);
+    // Pagina 2: 10 articoli rimanenti + 15 righe vuote -> 25 righe totali
+    expect(pages[1].rows.length).toBe(25);
+    expect(pages[1].isFirst).toBe(false);
+    expect(pages[1].isLast).toBe(true);
+  });
+
   it("non applica l'IVA se non specificata (vat_rate vuoto o non impostato)", () => {
     // Se l'utente non inserisce l'IVA, l'IVA deve rimanere a 0 (nessun calcolo automatico al 22%)
     const resUndefined = calculateRowAmounts(2, money("10,00000"), 0, undefined);

@@ -25,10 +25,10 @@ export function QuoteKpiBanner({ items, discount, onDiscountChange, alexMode = f
           <span className="text-xs text-[var(--muted-foreground)]">% globale</span></div></div>
       <Tag className="h-5 w-5 text-[var(--primary)]" />
     </div>
-    <Metric title="Tot. acquisto" value={totals.cost.formatIT2()} note="Costo fornitore" icon={<ShoppingCart className="h-5 w-5 text-[var(--primary)]" />} />
-    <Metric title="Totale netto" value={totals.taxable.formatIT2()} note={`${computed.length} ${computed.length === 1 ? "articolo inserito" : "articoli inseriti"}`} icon={<CircleDollarSign className="h-5 w-5 text-[var(--primary)]" />} />
-    <Metric title="Ricavo (utile)" value={totals.gross_profit.formatIT2()} note="Netto meno costo acquisto" icon={<TrendingUp className="h-5 w-5 text-[var(--primary)]" />} />
-    {alexMode && <Metric title="Ricarico globale" value={totals.markup_pct === null ? "—" : `${totals.markup_pct.toFixed(1)}%`} note="(Netto - costo) / costo" />}
+    <Metric title="Tot. acquisto" value={totals.cost.formatIT(true, 4, 4)} note="Costo fornitore" icon={<ShoppingCart className="h-5 w-5 text-[var(--primary)]" />} />
+    <Metric title="Totale netto" value={totals.taxable.formatIT(true, 4, 4)} note={`${computed.length} ${computed.length === 1 ? "articolo inserito" : "articoli inseriti"}`} icon={<CircleDollarSign className="h-5 w-5 text-[var(--primary)]" />} />
+    <Metric title="Ricavo (utile)" value={totals.gross_profit.formatIT(true, 4, 4)} note="Netto meno costo acquisto" icon={<TrendingUp className="h-5 w-5 text-[var(--primary)]" />} />
+    {alexMode && <Metric title="Ricarico globale" value={totals.markup_pct === null ? "—" : `${totals.markup_pct.toFixed(2)}%`} note="(Netto - costo) / costo" />}
   </section>;
 }
 

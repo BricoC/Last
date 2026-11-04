@@ -456,7 +456,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         cellEditorParams: {
           onDescriptionTyping,
         },
-        valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase().slice(0, 55) : ""),
+        valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase() : ""),
         valueFormatter: (p: any) => (p.value ? String(p.value).toUpperCase() : ""),
         cellStyle: {
           fontSize: "12px",

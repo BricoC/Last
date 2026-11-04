@@ -121,11 +121,11 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, onUpdateRow, o
 function createColumns(alexMode: boolean, discount: number, onDelete: (index: number) => void): ColDef<QuoteGridRow>[] {
   const internal: ColDef<QuoteGridRow>[] = alexMode ? [
     textColumn("FORNITORE", "supplier", 140), textColumn("ART. FORN.", "supplier_item_code", 115),
-    priceColumn("ACQ. €", "purchase_price", 98, true),
-    { headerName: "RIC.%", field: "markup_pct", colId: "markup_pct", width: 74, editable: true, cellEditor: DDTTextEditor,
+    priceColumn("ACQ. €", "purchase_price", 105, true),
+    { headerName: "RIC.%", field: "markup_pct", colId: "markup_pct", width: 95, editable: true, cellEditor: DDTTextEditor,
       valueFormatter: (params) => isBlankRow(params.data) && !params.value ? "" : `${parseNumber(params.value).toFixed(2)}%`,
       valueParser: (params) => parseNumber(params.newValue), cellStyle: { textAlign: "right" } },
-    { headerName: "BASE €", field: "base_unit_price", colId: "base_unit_price", width: 95, editable: true, cellEditor: DDTTextEditor,
+    { headerName: "BASE €", field: "base_unit_price", colId: "base_unit_price", width: 105, editable: true, cellEditor: DDTTextEditor,
       valueGetter: (params) => params.data ? calculateBase(params.data).toCanonicalString() : "",
       valueSetter: (params) => { if (!params.data) return false; params.data.base_unit_price = money(params.newValue).toCanonicalString(); return true; },
       valueParser: (params) => money(params.newValue).toCanonicalString(),
@@ -139,7 +139,7 @@ function createColumns(alexMode: boolean, discount: number, onDelete: (index: nu
     { ...textColumn("DESCRIZIONE ARTICOLO / PRESTAZIONE", "description", 260, true), flex: 1,
       valueParser: (params) => String(params.newValue ?? "").trim().toUpperCase(),
       valueFormatter: (params) => String(params.value ?? "").toUpperCase() },
-    { headerName: "NETTO €", field: "forced_unit_price", colId: "unit_price", width: 112, editable: true, cellEditor: DDTTextEditor,
+    { headerName: "NETTO €", field: "forced_unit_price", colId: "unit_price", width: 118, editable: true, cellEditor: DDTTextEditor,
       valueGetter: (params) => params.data ? calculateEffectivePrice(params.data, discount).toCanonicalString() : "",
       valueSetter: (params) => { if (!params.data) return false; params.data.forced_unit_price = money(params.newValue).toCanonicalString(); params.data.discount_pct = 0; return true; },
       valueParser: (params) => money(params.newValue).toCanonicalString(), valueFormatter: (params) => formatMoney(params.value),
@@ -147,7 +147,7 @@ function createColumns(alexMode: boolean, discount: number, onDelete: (index: nu
     { headerName: "SC.%", field: "discount_pct", width: 78, editable: true, cellEditor: DDTTextEditor,
       valueFormatter: (params) => isBlankRow(params.data) && !params.value ? "" : `${parseNumber(params.value).toFixed(2)}%`,
       valueParser: (params) => parseNumber(params.newValue), cellStyle: { textAlign: "center" } },
-    { headerName: "IMPORTO €", colId: "net_amount", width: 120, editable: false,
+    { headerName: "IMPORTO €", colId: "net_amount", width: 125, editable: false,
       valueGetter: (params) => params.data ? calculateAmount(params.data, discount).toCanonicalString() : "",
       valueFormatter: (params) => formatMoney(params.value), cellStyle: { textAlign: "right", fontWeight: 800, color: "var(--primary)" } },
     textColumn("DISP.", "availability", 92, true),
@@ -211,7 +211,7 @@ function isBlankRow(row?: QuoteDraftItem): boolean {
 function formatMoney(value: unknown): string {
   if (value === null || value === undefined || value === "") return "";
   const result = money(String(value));
-  return result.isZero() ? "" : result.formatIT2();
+  return result.isZero() ? "" : result.formatIT(true, 4, 4);
 }
 
 function parseNumber(value: unknown): number {

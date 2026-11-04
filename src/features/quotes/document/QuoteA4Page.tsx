@@ -22,7 +22,6 @@ export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages,
           <h1 className="mb-1 text-[15px] font-black tracking-wider uppercase">OFFERTA PREVENTIVO</h1>
           <div className="text-[11px] font-semibold text-slate-600">Data: <strong className="text-slate-900">{date}</strong></div>
           <div className="text-[11px] font-semibold text-slate-600">Validità: <strong className="text-slate-900">{draft.validity_days || 30} giorni</strong></div>
-          {draft.id && <div className="mt-0.5 font-mono text-[10px] text-slate-400">Rif: #{draft.id}</div>}
         </div>
       </header>
 
@@ -43,20 +42,22 @@ export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages,
         <img src={logo} alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 m-auto w-3/4 max-w-[420px] select-none object-contain opacity-[0.045]" />
         <table className="relative z-[1] w-full border-collapse border text-[10.5px]" style={{ borderColor: "var(--document-table-border)" }}>
           <thead><tr className="border-b text-[9px] font-black tracking-wider text-slate-600 uppercase" style={{ backgroundColor: "var(--document-table-header)", borderColor: "var(--document-table-border)" }}>
-            <th className="w-[8%] border-r px-2 py-1.5 text-center" style={{ borderColor: "var(--document-table-border)" }}>U.M.</th>
-            <th className="w-[9%] border-r px-2 py-1.5 text-center" style={{ borderColor: "var(--document-table-border)" }}>Q.TÀ</th>
-            <th className="w-[47%] border-r px-2.5 py-1.5 text-left" style={{ borderColor: "var(--document-table-border)" }}>DESCRIZIONE ARTICOLO / PRESTAZIONE</th>
+            <th className="w-[7%] border-r px-2 py-1.5 text-center" style={{ borderColor: "var(--document-table-border)" }}>U.M.</th>
+            <th className="w-[8%] border-r px-2 py-1.5 text-center" style={{ borderColor: "var(--document-table-border)" }}>Q.TÀ</th>
+            <th className="w-[39%] border-r px-2.5 py-1.5 text-left" style={{ borderColor: "var(--document-table-border)" }}>DESCRIZIONE ARTICOLO / PRESTAZIONE</th>
             <th className="w-[14%] border-r px-2.5 py-1.5 text-right" style={{ borderColor: "var(--document-table-border)" }}>PREZZO UNIT.</th>
-            <th className="w-[8%] border-r px-2 py-1.5 text-center" style={{ borderColor: "var(--document-table-border)" }}>SC.%</th>
-            <th className="w-[14%] px-2.5 py-1.5 text-right">IMPORTO</th>
+            <th className="w-[7%] border-r px-2 py-1.5 text-center" style={{ borderColor: "var(--document-table-border)" }}>SC.%</th>
+            <th className="w-[13%] border-r px-2.5 py-1.5 text-right" style={{ borderColor: "var(--document-table-border)" }}>IMPORTO</th>
+            <th className="w-[12%] px-2 py-1.5 text-center">DISPONIBILITÀ</th>
           </tr></thead>
-          <tbody>{rows.length === 0 ? <tr><td colSpan={6} className="py-6 text-center italic text-slate-400">Nessun articolo inserito nel preventivo.</td></tr> : rows.map(({ item, calculation }, index) => <tr key={item.id || `${item.code}-${index}`} className="border-b" style={{ backgroundColor: index % 2 ? "var(--document-table-stripe)" : "var(--document-background)", borderColor: "var(--document-table-border)" }}>
+          <tbody>{rows.length === 0 ? <tr><td colSpan={7} className="py-6 text-center italic text-slate-400">Nessun articolo inserito nel preventivo.</td></tr> : rows.map(({ item, calculation }, index) => <tr key={item.id || `${item.code}-${index}`} className="border-b" style={{ backgroundColor: index % 2 ? "var(--document-table-stripe)" : "var(--document-background)", borderColor: "var(--document-table-border)" }}>
             <td className="border-r px-2 py-1 text-center font-bold text-slate-700 uppercase" style={{ borderColor: "var(--document-table-border)" }}>{item.unit || "NR"}</td>
             <td className="border-r px-2 py-1 text-center font-bold text-slate-900" style={{ borderColor: "var(--document-table-border)" }}>{item.quantity || "1"}</td>
             <td className="border-r px-2.5 py-1 font-semibold leading-tight text-slate-800" style={{ borderColor: "var(--document-table-border)" }}>{item.description}</td>
             <td className="border-r px-2.5 py-1 text-right font-mono text-slate-700" style={{ borderColor: "var(--document-table-border)" }}>{calculation.effective_unit_price.isZero() ? "" : calculation.effective_unit_price.formatIT(true, 4, 4)}</td>
             <td className="border-r px-2 py-1 text-center font-mono text-slate-600" style={{ borderColor: "var(--document-table-border)" }}>{item.discount_pct ? `${item.discount_pct}%` : ""}</td>
-            <td className="px-2.5 py-1 text-right font-mono font-bold text-slate-900">{calculation.net_amount.isZero() ? "" : calculation.net_amount.formatIT(true, 4, 4)}</td>
+            <td className="border-r px-2.5 py-1 text-right font-mono font-bold text-slate-900" style={{ borderColor: "var(--document-table-border)" }}>{calculation.net_amount.isZero() ? "" : calculation.net_amount.formatIT(true, 4, 4)}</td>
+            <td className="px-2 py-1 text-center text-[10px] font-medium text-slate-700">{item.availability || ""}</td>
           </tr>)}</tbody>
         </table>
       </div>

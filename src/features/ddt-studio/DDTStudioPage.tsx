@@ -809,7 +809,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       copy[targetIdx] = {
         ...copy[targetIdx],
         code: article.code || "",
-        description: (article.description || "").toUpperCase().slice(0, 55),
+        description: (article.description || "").toUpperCase(),
         unit: article.unit || "NR",
         quantity: q,
         unit_price: effectivePrice,
