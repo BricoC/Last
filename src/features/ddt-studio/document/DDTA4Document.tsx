@@ -58,7 +58,7 @@ export const DDT_CONFIG = {
     altezzaHeader: "23px",
     fontSizeHeader: "8.5px",
     paddingTopHeader: "6px",
-    altezzaRiga: "21px",
+    altezzaRiga: "26px",
     fontSizeDescrizione: "9.5px",
     fontSizePrezzo: "9px",
     fontSizeScontoIva: "8.5px",
@@ -118,7 +118,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
             }}
           >
             {/* ZONA SUPERIORE: INTESTAZIONE & METADATI DDT */}
-            <div>
+            <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
               {/* Header: Logo Azienda a Sinistra + Riquadro N° Doc / Data a Destra */}
               <div className="pb-1 mb-2">
                 <div className="flex justify-between items-center">
@@ -558,10 +558,11 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
               )}
 
               {/* TABELLA RIGHE ARTICOLI CON HEADER #DCDCDC E GRIGLIA A LINEE CONTINUE */}
-              <table
-                className="w-full border-collapse border border-black text-[9.5px]"
-                style={{ tableLayout: "fixed" }}
-              >
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <table
+                  className="w-full border-collapse border border-black text-[9.5px]"
+                  style={{ tableLayout: "fixed", width: "100%", height: "100%" }}
+                >
                 <thead>
                   <tr
                     style={{
@@ -669,7 +670,6 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         key={i}
                         style={{
                           height: DDT_CONFIG.articoli.altezzaRiga,
-                          maxHeight: DDT_CONFIG.articoli.altezzaRiga,
                           fontWeight: "normal",
                         }}
                       >
@@ -677,11 +677,11 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           style={{
                             borderRight: "1px solid black",
                             textAlign: "center",
+                            verticalAlign: "middle",
                             textTransform: "uppercase",
                             fontSize: DDT_CONFIG.articoli.fontSizeDescrizione,
-                            paddingTop: DDT_CONFIG.articoli.paddingTopRiga,
-                            height: DDT_CONFIG.articoli.altezzaRiga,
-                            lineHeight: "1",
+                            minHeight: DDT_CONFIG.articoli.altezzaRiga,
+                            lineHeight: "1.2",
                             boxSizing: "border-box",
                           }}
                         >
@@ -691,10 +691,10 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           style={{
                             borderRight: "1px solid black",
                             textAlign: "center",
+                            verticalAlign: "middle",
                             fontSize: DDT_CONFIG.articoli.fontSizeDescrizione,
-                            paddingTop: DDT_CONFIG.articoli.paddingTopRiga,
-                            height: DDT_CONFIG.articoli.altezzaRiga,
-                            lineHeight: "1",
+                            minHeight: DDT_CONFIG.articoli.altezzaRiga,
+                            lineHeight: "1.2",
                             boxSizing: "border-box",
                           }}
                         >
@@ -703,18 +703,18 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         <td
                           style={{
                             borderRight: "1px solid black",
-                            textAlign: "center",
+                            textAlign: "left",
                             verticalAlign: "middle",
                             paddingLeft: "8px",
                             paddingRight: "8px",
+                            paddingTop: "2px",
+                            paddingBottom: "2px",
                             textTransform: "uppercase",
-                            overflow: "hidden",
-                            whiteSpace: "nowrap",
-                            textOverflow: "ellipsis",
+                            whiteSpace: "normal",
+                            wordBreak: "break-word",
+                            overflowWrap: "anywhere",
                             fontSize: DDT_CONFIG.articoli.fontSizeDescrizione,
-                            paddingTop: DDT_CONFIG.articoli.paddingTopRiga,
-                            height: DDT_CONFIG.articoli.altezzaRiga,
-                            lineHeight: "1",
+                            lineHeight: "1.25",
                             boxSizing: "border-box",
                           }}
                         >
@@ -724,11 +724,11 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           style={{
                             borderRight: "1px solid black",
                             textAlign: "right",
+                            verticalAlign: "middle",
                             paddingRight: "6px",
                             fontSize: DDT_CONFIG.articoli.fontSizePrezzo,
-                            paddingTop: DDT_CONFIG.articoli.paddingTopRiga,
-                            height: DDT_CONFIG.articoli.altezzaRiga,
-                            lineHeight: "1",
+                            minHeight: DDT_CONFIG.articoli.altezzaRiga,
+                            lineHeight: "1.2",
                             boxSizing: "border-box",
                           }}
                         >
@@ -738,10 +738,10 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           style={{
                             borderRight: "1px solid black",
                             textAlign: "center",
+                            verticalAlign: "middle",
                             fontSize: DDT_CONFIG.articoli.fontSizeScontoIva,
-                            paddingTop: DDT_CONFIG.articoli.paddingTopRiga,
-                            height: DDT_CONFIG.articoli.altezzaRiga,
-                            lineHeight: "1",
+                            minHeight: DDT_CONFIG.articoli.altezzaRiga,
+                            lineHeight: "1.2",
                             boxSizing: "border-box",
                           }}
                         >
@@ -751,11 +751,11 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           style={{
                             borderRight: "1px solid black",
                             textAlign: "right",
+                            verticalAlign: "middle",
                             paddingRight: "6px",
                             fontSize: DDT_CONFIG.articoli.fontSizePrezzo,
-                            paddingTop: DDT_CONFIG.articoli.paddingTopRiga,
-                            height: DDT_CONFIG.articoli.altezzaRiga,
-                            lineHeight: "1",
+                            minHeight: DDT_CONFIG.articoli.altezzaRiga,
+                            lineHeight: "1.2",
                             boxSizing: "border-box",
                           }}
                         >
@@ -764,10 +764,10 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         <td
                           style={{
                             textAlign: "center",
+                            verticalAlign: "middle",
                             fontSize: DDT_CONFIG.articoli.fontSizeScontoIva,
-                            paddingTop: DDT_CONFIG.articoli.paddingTopRiga,
-                            height: DDT_CONFIG.articoli.altezzaRiga,
-                            lineHeight: "1",
+                            minHeight: DDT_CONFIG.articoli.altezzaRiga,
+                            lineHeight: "1.2",
                             boxSizing: "border-box",
                           }}
                         >
@@ -778,6 +778,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                   })}
                 </tbody>
               </table>
+              </div>
 
               {p.totalPages > 1 && (
                 <div style={{ textAlign: "right", fontSize: "8.5px", fontStyle: "italic", marginTop: "3px" }}>
@@ -788,7 +789,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
 
             {/* ZONA INFERIORE: FOOTER TOTALI E LOGISTICA IDENTICO ALL'ORIGINALE (SOLO ULTIMA PAGINA) */}
             {p.isLast ? (
-              <div style={{ paddingTop: "4px" }}>
+              <div style={{ paddingTop: "4px", flexShrink: 0 }}>
                 <table
                   style={{
                     width: "100%",
@@ -1070,6 +1071,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                   borderTop: "1px solid #e4e4e7",
                   color: "#27272a",
                   letterSpacing: "-0.2px",
+                  flexShrink: 0,
                 }}
               >
                 Via di Carraia, 218 - 55061 Carraia - Capannori (LU) Tel. 0583.980126 - Email: Bricoclass@live.it Cod. Univoco: M5UXCR1 - P.Iva e C.F: 01601690462

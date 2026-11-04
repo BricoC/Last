@@ -94,22 +94,11 @@ pub async fn convert_quote_to_ddt_transaction(
         .map_err(|error| format!("Impossibile avviare la conversione preventivo-DDT: {error}"))?;
 
     let result = async {
-        let already_converted = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM quotes WHERE id = ? AND deleted_at IS NULL AND converted_ddt_id IS NOT NULL",
-        )
-        .bind(&quote_id)
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(|error| error.to_string())?;
-        if already_converted > 0 {
-            return Err("Questo preventivo è già stato convertito in DDT".to_string());
-        }
-
         persist_quote(&mut connection, quote_payload).await?;
         persist_ddt(&mut connection, ddt_payload).await?;
         let updated = sqlx::query(
             "UPDATE quotes SET status = 'confermato', converted_ddt_id = ?, updated_at = ?, updated_by = ?, sync_status = 'pending'
-             WHERE id = ? AND deleted_at IS NULL AND converted_ddt_id IS NULL",
+             WHERE id = ? AND deleted_at IS NULL",
         )
         .bind(&ddt_id)
         .bind(&updated_at)
@@ -119,7 +108,7 @@ pub async fn convert_quote_to_ddt_transaction(
         .await
         .map_err(|error| error.to_string())?;
         if updated.rows_affected() == 0 {
-            return Err("Preventivo non attivo o già convertito".to_string());
+            return Err("Preventivo non attivo".to_string());
         }
         Ok::<(), String>(())
     }

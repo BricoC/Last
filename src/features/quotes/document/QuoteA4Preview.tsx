@@ -4,8 +4,10 @@ import type { QuoteDraft } from "../models/quoteDraft";
 import { QuoteA4Page } from "./QuoteA4Page";
 import { prepareQuoteForPrint } from "./quotePrintModel";
 
-const FIRST_PAGE_ROWS = 18;
-const FOLLOWING_PAGE_ROWS = 24;
+const SINGLE_PAGE_MAX_ROWS = 24;
+const FIRST_PAGE_MULTI_MAX_ROWS = 30;
+const MIDDLE_PAGE_MAX_ROWS = 34;
+const LAST_PAGE_MAX_ROWS = 24;
 
 export function QuoteA4Preview({ draft, inline = false, captureOnly = false }: {
   draft: QuoteDraft; inline?: boolean; captureOnly?: boolean;
@@ -41,11 +43,26 @@ export function QuoteA4Preview({ draft, inline = false, captureOnly = false }: {
   </div>;
 }
 
-function paginate<T>(rows: T[]): T[][] {
-  const first = rows.slice(0, FIRST_PAGE_ROWS);
-  const pages = [first];
-  for (let offset = FIRST_PAGE_ROWS; offset < rows.length; offset += FOLLOWING_PAGE_ROWS) {
-    pages.push(rows.slice(offset, offset + FOLLOWING_PAGE_ROWS));
+export function paginate<T>(rows: T[]): T[][] {
+  if (rows.length <= SINGLE_PAGE_MAX_ROWS) {
+    return [rows];
   }
+
+  const pages: T[][] = [];
+  const firstCount = Math.min(FIRST_PAGE_MULTI_MAX_ROWS, Math.max(1, rows.length - 1));
+  pages.push(rows.slice(0, firstCount));
+  let offset = firstCount;
+
+  while (offset < rows.length) {
+    const remaining = rows.length - offset;
+    if (remaining <= LAST_PAGE_MAX_ROWS) {
+      pages.push(rows.slice(offset));
+      break;
+    }
+    const take = Math.min(MIDDLE_PAGE_MAX_ROWS, Math.max(1, remaining - 1));
+    pages.push(rows.slice(offset, offset + take));
+    offset += take;
+  }
+
   return pages;
 }

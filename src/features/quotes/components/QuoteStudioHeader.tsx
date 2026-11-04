@@ -6,7 +6,7 @@ import type { QuoteStatus } from "../models/quote";
 export function QuoteStudioHeader(props: {
   status: QuoteStatus; viewMode: "calculation" | "customer"; alexMode: boolean;
   saving: boolean; archiveCount: number; quoteDate: string;
-  onStatusChange: (status: Exclude<QuoteStatus, "confermato">) => void;
+  onStatusChange: (status: QuoteStatus) => void;
   onViewChange: (mode: "calculation" | "customer") => void;
   onAlexToggle: () => void; onArchive: () => void; onSave: () => void;
   onNew: () => void; onPdf: () => void; onConvert: () => void; onFillRandomRows: () => void;
@@ -31,11 +31,11 @@ export function QuoteStudioHeader(props: {
     <div className="flex min-w-[260px] items-start gap-3">
       <span className="mt-1 rounded-lg bg-[var(--card)] p-2 text-[var(--primary)]"><FileText className="h-5 w-5" /></span>
       <div><div className="flex flex-wrap items-center gap-2"><h1 className="text-base font-bold tracking-wide">STUDIO PREVENTIVI</h1>
-        {props.status === "confermato" ? <span className="rounded-full border border-[var(--primary)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--primary)]">Confermato</span> : <select aria-label="Stato preventivo" value={props.status}
-          onChange={(event) => props.onStatusChange(event.target.value as Exclude<QuoteStatus, "confermato">)}
+        <select aria-label="Stato preventivo" value={props.status}
+          onChange={(event) => props.onStatusChange(event.target.value as QuoteStatus)}
           className="rounded-full border border-[var(--primary)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--primary)]">
-          <option value="bozza">Bozza</option><option value="inviato">Inviato</option><option value="rifiutato">Rifiutato</option>
-        </select>}</div>
+          <option value="bozza">Bozza</option><option value="inviato">Inviato</option><option value="confermato">Confermato</option><option value="rifiutato">Rifiutato</option>
+        </select></div>
         <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">Preventivo {formatDate(props.quoteDate)}</p>
       </div>
     </div>
@@ -50,7 +50,7 @@ export function QuoteStudioHeader(props: {
       <Button size="sm" variant="outline" disabled={props.saving} onClick={props.onSave}><Save className="mr-1 h-3.5 w-3.5" />{props.saving ? "Salva…" : "Salva"}</Button>
       <Button size="sm" variant="danger" onClick={props.onPdf}>PDF</Button>
       <div className="relative flex" ref={menuRef}>
-        <Button size="sm" variant="secondary" disabled={props.saving || props.status === "confermato"} title={props.status === "confermato" ? "Preventivo già convertito" : "Crea una bozza DDT dal preventivo"} onClick={props.onConvert} className="rounded-r-none"><Truck className="mr-1 h-3.5 w-3.5" />Trasforma in DDT</Button>
+        <Button size="sm" variant="secondary" disabled={props.saving} title="Crea una bozza DDT dal preventivo" onClick={props.onConvert} className="rounded-r-none"><Truck className="mr-1 h-3.5 w-3.5" />Trasforma in DDT</Button>
         <Button size="sm" variant="secondary" aria-label="Altre azioni preventivo" aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)} className="rounded-l-none border-l border-[var(--border)] px-2">
           <ChevronDown className="h-3.5 w-3.5" />
