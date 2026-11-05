@@ -41,6 +41,7 @@ export interface ListinoClienteRow {
 
 export interface PriceListLogEntry {
   id: number;
+  row_id?: string | null;
   created_at: string;
   tipo_listino: string;
   cliente: string;
@@ -49,6 +50,8 @@ export interface PriceListLogEntry {
   campo_modificato: string;
   vecchio_valore: number | null;
   nuovo_valore: number | null;
+  vecchio_testo?: string | null;
+  nuovo_testo?: string | null;
   variazione_pct: number | null;
   operatore: string;
   motivo: string | null;

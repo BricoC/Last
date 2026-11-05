@@ -177,9 +177,22 @@ export class PriceListRepository {
     }));
   }
 
+  private schemaLogChecked = false;
+  private async ensureLogColumns(): Promise<void> {
+    if (this.schemaLogChecked) return;
+    try {
+      const db = await getDatabase();
+      try { await db.execute("ALTER TABLE listini_prezzi_log ADD COLUMN row_id TEXT;"); } catch {}
+      try { await db.execute("ALTER TABLE listini_prezzi_log ADD COLUMN vecchio_testo TEXT;"); } catch {}
+      try { await db.execute("ALTER TABLE listini_prezzi_log ADD COLUMN nuovo_testo TEXT;"); } catch {}
+      try { await db.execute("CREATE INDEX IF NOT EXISTS idx_listini_log_row ON listini_prezzi_log(row_id);"); } catch {}
+      this.schemaLogChecked = true;
+    } catch {}
+  }
+
   /**
-   * Ricerca storico modifiche di una riga/articolo da listini_prezzi_log (massimo 25 modifiche).
-   * Ricerca per codice_articolo, rowId oppure per descrizione.
+   * Ricerca storico modifiche di una riga/articolo da listini_prezzi_log (massimo 30 modifiche).
+   * Ricerca per row_id (id fisso), codice_articolo oppure per descrizione.
    */
   async getItemPriceHistory(
     codiceArticolo?: string | null,
@@ -187,9 +200,14 @@ export class PriceListRepository {
     descrizione?: string | null
   ): Promise<PriceListLogEntry[]> {
     const db = await getDatabase();
+    await this.ensureLogColumns();
     const conds: string[] = [];
     const params: any[] = [];
 
+    if (rowId && rowId.trim()) {
+      params.push(rowId.trim());
+      conds.push(`row_id = $${params.length}`);
+    }
     if (codiceArticolo && codiceArticolo.trim()) {
       params.push(codiceArticolo.trim());
       conds.push(`codice_articolo = $${params.length}`);
@@ -209,26 +227,28 @@ export class PriceListRepository {
       `SELECT * FROM listini_prezzi_log 
        WHERE ${conds.join(" OR ")} 
        ORDER BY created_at DESC 
-       LIMIT 25;`,
+       LIMIT 30;`,
       params
     );
   }
 
   /**
-   * Registra variazioni di prezzo nello storico listini_prezzi_log.
+   * Registra variazioni di prezzo e testi nello storico listini_prezzi_log.
    */
   async logPriceChanges(entries: Omit<PriceListLogEntry, "id">[]): Promise<void> {
     if (entries.length === 0) return;
     const db = await getDatabase();
+    await this.ensureLogColumns();
     for (const entry of entries) {
       try {
         await db.execute(
           `INSERT INTO listini_prezzi_log (
-            created_at, tipo_listino, cliente, codice_articolo, descrizione,
-            campo_modificato, vecchio_valore, nuovo_valore, variazione_pct,
-            operatore, motivo
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);`,
+            row_id, created_at, tipo_listino, cliente, codice_articolo, descrizione,
+            campo_modificato, vecchio_valore, nuovo_valore, vecchio_testo, nuovo_testo,
+            variazione_pct, operatore, motivo
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
           [
+            entry.row_id ?? null,
             entry.created_at || new Date().toISOString(),
             entry.tipo_listino || "generale",
             entry.cliente || "",
@@ -237,6 +257,8 @@ export class PriceListRepository {
             entry.campo_modificato,
             cleanNum5(entry.vecchio_valore),
             cleanNum5(entry.nuovo_valore),
+            entry.vecchio_testo ?? null,
+            entry.nuovo_testo ?? null,
             cleanNum5(entry.variazione_pct),
             entry.operatore || "Operatore",
             entry.motivo ?? null,

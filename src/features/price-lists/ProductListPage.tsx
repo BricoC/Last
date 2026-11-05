@@ -534,6 +534,7 @@ export const ProductListPage: React.FC = () => {
               const newNum = newV ?? 0;
               const pct = oldNum > 0 ? ((newNum - oldNum) / oldNum) * 100 : 0;
               logEntries.push({
+                row_id: row.id,
                 created_at: nowIso,
                 tipo_listino: "generale",
                 cliente: "",
@@ -542,6 +543,8 @@ export const ProductListPage: React.FC = () => {
                 campo_modificato: f.label,
                 vecchio_valore: oldV != null ? round5(oldV) : null,
                 nuovo_valore: newV != null ? round5(newV) : null,
+                vecchio_testo: null,
+                nuovo_testo: null,
                 variazione_pct: round5(pct),
                 operatore: operatorName,
                 motivo: "Modifica Excel Listino Generale",
@@ -563,6 +566,7 @@ export const ProductListPage: React.FC = () => {
             const newT = (row[f.key] as string | null) ?? "";
             if (oldT !== newT) {
               logEntries.push({
+                row_id: row.id,
                 created_at: nowIso,
                 tipo_listino: "generale",
                 cliente: "",
@@ -571,6 +575,8 @@ export const ProductListPage: React.FC = () => {
                 campo_modificato: f.label,
                 vecchio_valore: null,
                 nuovo_valore: null,
+                vecchio_testo: oldT || "—",
+                nuovo_testo: newT || "—",
                 variazione_pct: null,
                 operatore: operatorName,
                 motivo: `Da "${oldT || '—'}" a "${newT || '—'}"`,
@@ -580,6 +586,7 @@ export const ProductListPage: React.FC = () => {
         } else {
           // Nuovo articolo aggiunto
           logEntries.push({
+            row_id: row.id,
             created_at: nowIso,
             tipo_listino: "generale",
             cliente: "",
@@ -588,6 +595,8 @@ export const ProductListPage: React.FC = () => {
             campo_modificato: "Nuovo Articolo",
             vecchio_valore: null,
             nuovo_valore: row.prezzo_acquisto ? round5(row.prezzo_acquisto) : null,
+            vecchio_testo: null,
+            nuovo_testo: row.descrizione || "Nuovo Articolo",
             variazione_pct: null,
             operatore: operatorName,
             motivo: "Creazione nuovo articolo",
@@ -2184,6 +2193,7 @@ interface CellInputEditorProps {
   rowId: string;
   colId: string;
   initialValue: string;
+  isInitialCharTyped?: boolean;
   alignClass: string;
   className: string;
   onCommit: (rowId: string, colId: string, val: string) => void;
@@ -2195,6 +2205,7 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
   rowId,
   colId,
   initialValue,
+  isInitialCharTyped,
   alignClass,
   className,
   onCommit,
@@ -2207,13 +2218,16 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
   useLayoutEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus();
-      if (initialValue.length === 1 && !initialValue.startsWith("0")) {
-        inputRef.current.setSelectionRange(1, 1);
+      if (isInitialCharTyped) {
+        // Cursore posizionato alla fine, NESSUNA selezione del carattere digitato
+        const len = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(len, len);
       } else {
+        // Doppio click o F2: seleziona tutto per riscrittura rapida
         inputRef.current.select();
       }
     }
-  }, []);
+  }, [isInitialCharTyped]);
 
   return (
     <td className={`p-0 relative ${alignClass} ${className}`}>
@@ -2297,6 +2311,7 @@ const EditableCell: React.FC<EditableCellProps> = memo(
           rowId={rowId}
           colId={colId}
           initialValue={getFormattedInitValue(value, colId, initialChar)}
+          isInitialCharTyped={initialChar !== undefined}
           alignClass={alignClass}
           className={className}
           onCommit={onCommit}
