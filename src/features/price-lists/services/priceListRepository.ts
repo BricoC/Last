@@ -198,9 +198,8 @@ export class PriceListRepository {
   async logPriceChanges(entries: Omit<PriceListLogEntry, "id">[]): Promise<void> {
     if (entries.length === 0) return;
     const db = await getDatabase();
-    await db.execute("BEGIN TRANSACTION;");
-    try {
-      for (const entry of entries) {
+    for (const entry of entries) {
+      try {
         await db.execute(
           `INSERT INTO listini_prezzi_log (
             created_at, tipo_listino, cliente, codice_articolo, descrizione,
@@ -221,13 +220,9 @@ export class PriceListRepository {
             entry.motivo ?? null,
           ]
         );
+      } catch (err) {
+        console.warn("[PriceListRepository] Skip log entry error:", err);
       }
-      await db.execute("COMMIT;");
-    } catch (err) {
-      try {
-        await db.execute("ROLLBACK;");
-      } catch {}
-      console.error("[PriceListRepository] Errore inserimento log:", err);
     }
   }
 
@@ -237,70 +232,61 @@ export class PriceListRepository {
   async saveGeneralRows(rows: ListinoGeneraleRow[]): Promise<void> {
     if (rows.length === 0) return;
     const db = await getDatabase();
-    await db.execute("BEGIN TRANSACTION;");
-    try {
-      for (const row of rows) {
-        await db.execute(
-          `INSERT INTO listino_generale (
-            id, source_table, cat, fornitore, codice_articolo, data_ref,
-            descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
-            perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
-            perc_iva, note, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-          ON CONFLICT(id) DO UPDATE SET
-            cat = excluded.cat,
-            fornitore = excluded.fornitore,
-            codice_articolo = excluded.codice_articolo,
-            data_ref = excluded.data_ref,
-            descrizione = excluded.descrizione,
-            um = excluded.um,
-            perc_pub = excluded.perc_pub,
-            prezzo_pubblico = excluded.prezzo_pubblico,
-            perc_prof = excluded.perc_prof,
-            prezzo_profess = excluded.prezzo_profess,
-            perc_fatt = excluded.perc_fatt,
-            prezzo_fattura = excluded.prezzo_fattura,
-            prezzo_acquisto = excluded.prezzo_acquisto,
-            aumento = excluded.aumento,
-            r1 = excluded.r1,
-            maga = excluded.maga,
-            r2 = excluded.r2,
-            perc_iva = excluded.perc_iva,
-            note = excluded.note,
-            updated_at = excluded.updated_at;`,
-          [
-            row.id,
-            row.source_table || "listino_generale",
-            row.cat ?? null,
-            row.fornitore ?? null,
-            row.codice_articolo ?? null,
-            row.data_ref ?? null,
-            row.descrizione || "",
-            row.um ?? "NR.",
-            cleanNum5(row.perc_pub),
-            cleanNum5(row.prezzo_pubblico),
-            cleanNum5(row.perc_prof),
-            cleanNum5(row.prezzo_profess),
-            cleanNum5(row.perc_fatt),
-            cleanNum5(row.prezzo_fattura),
-            cleanNum5(row.prezzo_acquisto),
-            cleanNum5(row.aumento),
-            cleanNum5(row.r1),
-            cleanNum5(row.maga),
-            cleanNum5(row.r2),
-            cleanNum5(row.perc_iva ?? 0.22),
-            row.note ?? null,
-            row.created_at || new Date().toISOString(),
-            new Date().toISOString(),
-          ]
-        );
-      }
-      await db.execute("COMMIT;");
-    } catch (err) {
-      try {
-        await db.execute("ROLLBACK;");
-      } catch {}
-      throw err;
+    for (const row of rows) {
+      await db.execute(
+        `INSERT INTO listino_generale (
+          id, source_table, cat, fornitore, codice_articolo, data_ref,
+          descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
+          perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
+          perc_iva, note, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        ON CONFLICT(id) DO UPDATE SET
+          cat = excluded.cat,
+          fornitore = excluded.fornitore,
+          codice_articolo = excluded.codice_articolo,
+          data_ref = excluded.data_ref,
+          descrizione = excluded.descrizione,
+          um = excluded.um,
+          perc_pub = excluded.perc_pub,
+          prezzo_pubblico = excluded.prezzo_pubblico,
+          perc_prof = excluded.perc_prof,
+          prezzo_profess = excluded.prezzo_profess,
+          perc_fatt = excluded.perc_fatt,
+          prezzo_fattura = excluded.prezzo_fattura,
+          prezzo_acquisto = excluded.prezzo_acquisto,
+          aumento = excluded.aumento,
+          r1 = excluded.r1,
+          maga = excluded.maga,
+          r2 = excluded.r2,
+          perc_iva = excluded.perc_iva,
+          note = excluded.note,
+          updated_at = excluded.updated_at;`,
+        [
+          row.id,
+          row.source_table || "listino_generale",
+          row.cat ?? null,
+          row.fornitore ?? null,
+          row.codice_articolo ?? null,
+          row.data_ref ?? null,
+          row.descrizione || "",
+          row.um ?? "NR.",
+          cleanNum5(row.perc_pub),
+          cleanNum5(row.prezzo_pubblico),
+          cleanNum5(row.perc_prof),
+          cleanNum5(row.prezzo_profess),
+          cleanNum5(row.perc_fatt),
+          cleanNum5(row.prezzo_fattura),
+          cleanNum5(row.prezzo_acquisto),
+          cleanNum5(row.aumento),
+          cleanNum5(row.r1),
+          cleanNum5(row.maga),
+          cleanNum5(row.r2),
+          cleanNum5(row.perc_iva ?? 0.22),
+          row.note ?? null,
+          row.created_at || new Date().toISOString(),
+          new Date().toISOString(),
+        ]
+      );
     }
   }
 
@@ -310,17 +296,8 @@ export class PriceListRepository {
   async deleteGeneralRows(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     const db = await getDatabase();
-    await db.execute("BEGIN TRANSACTION;");
-    try {
-      for (const id of ids) {
-        await db.execute("DELETE FROM listino_generale WHERE id = $1;", [id]);
-      }
-      await db.execute("COMMIT;");
-    } catch (err) {
-      try {
-        await db.execute("ROLLBACK;");
-      } catch {}
-      throw err;
+    for (const id of ids) {
+      await db.execute("DELETE FROM listino_generale WHERE id = $1;", [id]);
     }
   }
 }
