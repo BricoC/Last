@@ -36,3 +36,4 @@ export async function migratePriceListTrashSchemaV19(db: Database): Promise<void
     ON listino_generale_cestino(deleted_at DESC);
   `);
 }
+

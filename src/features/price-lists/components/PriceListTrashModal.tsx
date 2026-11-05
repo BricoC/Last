@@ -249,3 +249,4 @@ export const PriceListTrashModal: React.FC<PriceListTrashModalProps> = ({
     </div>
   );
 };
+

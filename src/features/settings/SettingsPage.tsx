@@ -14,7 +14,7 @@ export const SettingsPage: React.FC = () => {
   const [editEnabled, setEditEnabled] = useState(true);
   const [autoSaveMinutes, setAutoSaveMinutes] = useState<number>(() => {
     const saved = localStorage.getItem("price_list_autosave_minutes");
-    return saved ? Math.max(1, parseInt(saved, 10)) : 10;
+    return saved ? Math.max(1, parseInt(saved, 10)) : 30;
   });
 
   const presets: { id: ThemePresetId; name: string; desc: string; colors: string[] }[] = [
@@ -166,13 +166,13 @@ export const SettingsPage: React.FC = () => {
                   max={60}
                   value={autoSaveMinutes}
                   onChange={(e) => {
-                    const val = Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 10));
+                    const val = Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 30));
                     setAutoSaveMinutes(val);
                     localStorage.setItem("price_list_autosave_minutes", String(val));
                   }}
                   className="w-20 px-2.5 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md font-mono text-[var(--foreground)] focus:border-[var(--primary)] outline-none"
                 />
-                <span className="text-xs text-[var(--muted-foreground)]">minuti (predefinito: 10 minuti)</span>
+                <span className="text-xs text-[var(--muted-foreground)]">minuti (predefinito: 30 minuti)</span>
               </div>
             </div>
             <DatabaseQuerySettingsPanel />
