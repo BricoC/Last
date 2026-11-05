@@ -178,17 +178,39 @@ export class PriceListRepository {
   }
 
   /**
-   * Ricerca storico modifiche di una riga/articolo da listini_prezzi_log (massimo 15 modifiche).
+   * Ricerca storico modifiche di una riga/articolo da listini_prezzi_log (massimo 25 modifiche).
+   * Ricerca per codice_articolo, rowId oppure per descrizione.
    */
-  async getItemPriceHistory(codiceArticolo: string): Promise<PriceListLogEntry[]> {
-    if (!codiceArticolo) return [];
+  async getItemPriceHistory(
+    codiceArticolo?: string | null,
+    rowId?: string | null,
+    descrizione?: string | null
+  ): Promise<PriceListLogEntry[]> {
     const db = await getDatabase();
+    const conds: string[] = [];
+    const params: any[] = [];
+
+    if (codiceArticolo && codiceArticolo.trim()) {
+      params.push(codiceArticolo.trim());
+      conds.push(`codice_articolo = $${params.length}`);
+    }
+    if (rowId && rowId.trim()) {
+      params.push(rowId.trim());
+      conds.push(`codice_articolo = $${params.length}`);
+    }
+    if (descrizione && descrizione.trim()) {
+      params.push(descrizione.trim());
+      conds.push(`descrizione = $${params.length}`);
+    }
+
+    if (conds.length === 0) return [];
+
     return await db.select<PriceListLogEntry[]>(
       `SELECT * FROM listini_prezzi_log 
-       WHERE codice_articolo = $1 
+       WHERE ${conds.join(" OR ")} 
        ORDER BY created_at DESC 
-       LIMIT 15;`,
-      [codiceArticolo]
+       LIMIT 25;`,
+      params
     );
   }
 
