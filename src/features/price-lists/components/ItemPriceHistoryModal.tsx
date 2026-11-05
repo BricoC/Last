@@ -208,7 +208,7 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden select-none animate-in fade-in zoom-in-95 duration-100">
+      <div className="w-[94vw] max-w-6xl max-h-[90vh] bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl flex flex-col overflow-hidden select-none animate-in fade-in zoom-in-95 duration-100">
         {/* Header Modale */}
         <div className="p-3.5 border-b border-[var(--border)] flex items-center justify-between bg-[var(--background)]">
           <div className="flex items-center space-x-2.5">
@@ -268,7 +268,6 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                   <th className="px-3 py-2 text-left">Nuovo</th>
                   <th className="px-3 py-2 text-right">Variazione %</th>
                   <th className="px-3 py-2 text-left">Operatore</th>
-                  <th className="px-3 py-2 text-left">Motivo</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
@@ -299,13 +298,13 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                       <td className="px-3 py-2 font-bold text-[var(--primary)] font-sans">
                         {log.campo_modificato}
                       </td>
-                      <td className="px-3 py-2 text-right text-[var(--muted-foreground)] max-w-[200px] truncate" title={displayOld}>
+                      <td className="px-3 py-2 text-right text-[var(--muted-foreground)] max-w-[280px] truncate" title={displayOld}>
                         {displayOld}
                       </td>
                       <td className="px-2 py-2 text-center text-[var(--muted-foreground)]">
                         <ArrowRight className="w-3 h-3 inline text-[var(--muted-foreground)]" />
                       </td>
-                      <td className="px-3 py-2 text-left font-bold text-[var(--foreground)] max-w-[200px] truncate" title={displayNew}>
+                      <td className="px-3 py-2 text-left font-bold text-[var(--foreground)] max-w-[280px] truncate" title={displayNew}>
                         {displayNew}
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -331,9 +330,6 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                       </td>
                       <td className="px-3 py-2 text-[var(--muted-foreground)] font-sans text-xs">
                         {log.operatore || "Banco"}
-                      </td>
-                      <td className="px-3 py-2 text-[var(--muted-foreground)] font-sans text-xs truncate max-w-[140px]" title={log.motivo || ""}>
-                        {log.motivo || "Modifica diretta"}
                       </td>
                     </tr>
                   );
