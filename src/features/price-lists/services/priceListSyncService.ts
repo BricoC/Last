@@ -345,6 +345,131 @@ export class PriceListSyncService {
       clientCount: clientRows.length,
     };
   }
+
+  /**
+   * Spinge in background un batch di modifiche o nuovi articoli verso Supabase.
+   */
+  async pushGeneralBatchToSupabase(
+    rows: ListinoGeneraleRow[]
+  ): Promise<{ success: boolean; updatedCount: number; error?: string }> {
+    if (rows.length === 0) return { success: true, updatedCount: 0 };
+    try {
+      const creds = await getSupabaseCredentials();
+      const db = await getDatabase();
+
+      const genRows = rows.filter((r) => r.source_table !== "listini_vari");
+      const varRows = rows.filter((r) => r.source_table === "listini_vari");
+
+      const processBatch = async (
+        items: ListinoGeneraleRow[],
+        table: "listino_generale" | "listini_vari"
+      ) => {
+        for (const r of items) {
+          const isNew = r.id.startsWith("new_");
+          const payload: any = {
+            cat: r.cat ?? null,
+            fornitore: r.fornitore ?? null,
+            codice_articolo: r.codice_articolo ?? null,
+            data: r.data_ref ?? null,
+            descrizione: r.descrizione,
+            um: r.um ?? "NR.",
+            perc_pub: r.perc_pub ?? null,
+            prezzo_pubblico: r.prezzo_pubblico ?? null,
+            perc_prof: r.perc_prof ?? null,
+            prezzo_profess: r.prezzo_profess ?? null,
+            perc_fatt: r.perc_fatt ?? null,
+            prezzo_fattura: r.prezzo_fattura ?? null,
+            prezzo_acquisto: r.prezzo_acquisto ?? null,
+            aumento: r.aumento ?? null,
+            r1: r.r1 ?? null,
+            maga: r.maga ?? null,
+            r2: r.r2 ?? null,
+            perc_iva: r.perc_iva ?? 0.22,
+            note: r.note ?? null,
+            updated_at: new Date().toISOString(),
+          };
+
+          if (isNew) {
+            payload.created_at = new Date().toISOString();
+            const res = await fetch(`${creds.projectUrl}/rest/v1/${table}`, {
+              method: "POST",
+              headers: {
+                apikey: creds.anonKey,
+                "Content-Type": "application/json",
+                Prefer: "return=representation",
+              },
+              body: JSON.stringify(payload),
+            });
+            if (res.ok) {
+              const inserted = await res.json();
+              if (inserted && inserted[0]?.id) {
+                const prefix = table === "listino_generale" ? "gen_" : "var_";
+                const newDbId = `${prefix}${inserted[0].id}`;
+                await db.execute(
+                  "UPDATE listino_generale SET id = $1 WHERE id = $2;",
+                  [newDbId, r.id]
+                );
+                r.id = newDbId;
+              }
+            }
+          } else {
+            const rawIdStr = r.id.replace(/^(gen_|var_)/, "");
+            const numId = parseInt(rawIdStr, 10);
+            const targetId = isNaN(numId) ? rawIdStr : numId;
+
+            await fetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
+              method: "PATCH",
+              headers: {
+                apikey: creds.anonKey,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+            });
+          }
+        }
+      };
+
+      await processBatch(genRows, "listino_generale");
+      if (varRows.length > 0) {
+        await processBatch(varRows, "listini_vari");
+      }
+
+      return { success: true, updatedCount: rows.length };
+    } catch (err: any) {
+      console.warn(
+        "[PriceListSyncService] Push Supabase asincrono non riuscito (modalità locale attiva):",
+        err
+      );
+      return { success: false, updatedCount: 0, error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Elimina un lotto di articoli da Supabase in background.
+   */
+  async deleteGeneralBatchFromSupabase(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    try {
+      const creds = await getSupabaseCredentials();
+      for (const id of ids) {
+        if (id.startsWith("new_")) continue;
+        const isGen = id.startsWith("gen_");
+        const table = isGen ? "listino_generale" : "listini_vari";
+        const rawIdStr = id.replace(/^(gen_|var_)/, "");
+        const numId = parseInt(rawIdStr, 10);
+        const targetId = isNaN(numId) ? rawIdStr : numId;
+
+        await fetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
+          method: "DELETE",
+          headers: {
+            apikey: creds.anonKey,
+          },
+        });
+      }
+    } catch (err) {
+      console.warn("[PriceListSyncService] Delete Supabase asincrono non riuscito:", err);
+    }
+  }
 }
 
 export const priceListSyncService = new PriceListSyncService();
