@@ -167,7 +167,7 @@ export function makeTestDdt(): Partial<DdtDocument> {
   };
 }
 
-type DdtCloseChoice = "emit" | "draft" | "discard" | "cancel";
+type DdtCloseChoice = "save" | "discard" | "cancel";
 
 export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -263,15 +263,13 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   }, [windowId]);
 
   const handleSaveDraftRef = useRef<() => Promise<boolean>>(async () => false);
-  const handleEmitDdtRef = useRef<() => Promise<boolean>>(async () => false);
 
   const promptUnsavedChanges = useCallback(async (): Promise<boolean> => {
     if (!isDirtyRef.current) return true;
     const choice = await new Promise<DdtCloseChoice>((resolve) => setClosePrompt(() => resolve));
     setClosePrompt(null);
     if (choice === "discard") return true;
-    if (choice === "draft") return await handleSaveDraftRef.current();
-    if (choice === "emit") return await handleEmitDdtRef.current();
+    if (choice === "save") return await handleSaveDraftRef.current();
     return false;
   }, []);
 
@@ -695,7 +693,6 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       setIsSaving(false);
     }
   };
-  handleEmitDdtRef.current = handleEmitDdt;
 
   // The One: Salva DDT con numero progressivo e stampa immediatamente 3 copie
   const handleTheOne = async () => {
@@ -1080,11 +1077,9 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         message="Attenzione: sono presenti modifiche non salvate in questo DDT. Se prosegui senza salvare, tutte le modifiche apportate verranno cancellate definitivamente."
         onCancel={() => closePrompt?.("cancel")}
         onDiscard={() => closePrompt?.("discard")}
-        onSave={() => closePrompt?.("draft")}
-        onSecondaryAction={() => closePrompt?.("emit")}
-        saveLabel="Salva in bozze"
-        secondaryActionLabel="Emetti DDT"
-        discardLabel="Continua senza salvare"
+        onSave={() => closePrompt?.("save")}
+        saveLabel="Salva"
+        discardLabel="Non salvare"
         cancelLabel="Annulla"
         isSaving={isSaving}
       />

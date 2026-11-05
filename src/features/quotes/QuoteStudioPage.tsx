@@ -207,8 +207,8 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
       onCancel={() => closePrompt?.("cancel")}
       onDiscard={() => closePrompt?.("discard")}
       onSave={() => closePrompt?.("save")}
-      saveLabel="Salva modifiche"
-      discardLabel="Continua senza salvare"
+      saveLabel="Salva"
+      discardLabel="Non salvare"
       cancelLabel="Annulla"
       isSaving={saving}
     />
