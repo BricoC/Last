@@ -15,17 +15,17 @@ export const ALL_GENERAL_COLUMNS: ColumnDefinition[] = [
   { id: "data_ref", label: "Data Ref.", defaultVisible: true, category: "anagrafica" },
   { id: "descrizione", label: "Descrizione", defaultVisible: true, category: "anagrafica" },
   { id: "um", label: "U.M.", defaultVisible: true, category: "anagrafica" },
-  { id: "prezzo_acquisto", label: "Acquisto Base (€)", defaultVisible: true, category: "costi" },
-  { id: "aumento", label: "Aumento (%)", defaultVisible: true, category: "costi" },
-  { id: "maga", label: "Magazzino (%)", defaultVisible: true, category: "costi" },
-  { id: "costo_maggiorato", label: "Acquisto Maggiorato (€)", defaultVisible: true, category: "costi" },
   { id: "perc_pub", label: "% Pubblico", defaultVisible: true, category: "ricarichi" },
   { id: "prezzo_pubblico", label: "Prezzo Pubblico (€)", defaultVisible: true, category: "ricarichi" },
   { id: "perc_prof", label: "% Professionista", defaultVisible: true, category: "ricarichi" },
   { id: "prezzo_profess", label: "Prezzo Profess (€)", defaultVisible: true, category: "ricarichi" },
   { id: "perc_fatt", label: "% Fattura", defaultVisible: true, category: "ricarichi" },
   { id: "prezzo_fattura", label: "Prezzo Fattura (€)", defaultVisible: true, category: "ricarichi" },
+  { id: "prezzo_acquisto", label: "Acquisto Base (€)", defaultVisible: true, category: "costi" },
   { id: "perc_iva", label: "Aliquota IVA (%)", defaultVisible: true, category: "ricarichi" },
+  { id: "aumento", label: "Aumento (%)", defaultVisible: true, category: "costi" },
+  { id: "maga", label: "Magazzino (%)", defaultVisible: true, category: "costi" },
+  { id: "costo_maggiorato", label: "Acquisto Maggiorato (€)", defaultVisible: true, category: "costi" },
 ];
 
 export function useColumnVisibility(userId?: string) {
@@ -99,3 +99,4 @@ export function useColumnVisibility(userId?: string) {
     resetDefaultColumns,
   };
 }
+

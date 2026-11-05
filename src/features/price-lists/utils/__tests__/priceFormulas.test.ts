@@ -57,3 +57,4 @@ describe("priceFormulas logic", () => {
     expect(reversePerc).toBeCloseTo(68.32, 1);
   });
 });
+
