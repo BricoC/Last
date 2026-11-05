@@ -4,8 +4,11 @@ import {
   AppUser,
   ALL_APP_PAGE_MODULES,
   DEFAULT_ALLOWED_PAGES,
+  DEFAULT_TOPBAR_ORDER,
   hashPassword,
 } from "@/shared/services/appUserService";
+import { TopbarOrderModal } from "@/shared/components/navigation/TopbarOrderModal";
+import { ALL_TOPBAR_NAV_MODULES } from "@/shared/components/navigation/TopNavBar";
 import {
   Users,
   Shield,
@@ -18,6 +21,7 @@ import {
   Palette,
   LayoutGrid,
   Sliders,
+  SlidersHorizontal,
   CheckSquare,
   Square,
   X,
@@ -40,10 +44,13 @@ export const UserManagementPanel: React.FC = () => {
     createUser,
     updateUser,
     deleteUser,
+    updateCurrentUserTopbarOrder,
+    setUserTopbarOrder,
   } = useUserStore();
 
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [orderModalUser, setOrderModalUser] = useState<AppUser | null>(null);
 
   // Form state per modifica password utente
   const [editPassword, setEditPassword] = useState("");
@@ -277,21 +284,33 @@ export const UserManagementPanel: React.FC = () => {
             </div>
           </div>
 
-          {/* Switcher rapido utente */}
-          <div className="flex items-center space-x-2">
-            <span className="text-xs text-[var(--muted-foreground)]">Cambia Postazione:</span>
-            <select
-              value={currentUser?.id || ""}
-              onChange={(e) => void requestSwitchUser(e.target.value)}
-              className="bg-[var(--background)] border border-[var(--border)] text-xs rounded-md px-3 py-1.5 font-semibold text-[var(--foreground)] outline-none focus:border-[var(--primary)] cursor-pointer"
+          {/* Azioni rapide postazione: Ordina Finestre Barra + Switcher */}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setOrderModalUser(currentUser)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 text-xs font-bold transition-all shadow-sm cursor-pointer"
+              title="Personalizza l'ordine delle finestre nella barra superiore per questa postazione"
             >
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} {u.station_name ? `(${u.station_name})` : ""}{" "}
-                  {u.require_password ? "🔒" : ""}
-                </option>
-              ))}
-            </select>
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Ordina Finestre Barra</span>
+            </button>
+
+            <div className="flex items-center space-x-2 bg-[var(--background)] border border-[var(--border)] rounded-lg px-2.5 py-1">
+              <span className="text-xs text-[var(--muted-foreground)]">Cambia Postazione:</span>
+              <select
+                value={currentUser?.id || ""}
+                onChange={(e) => void requestSwitchUser(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-[var(--foreground)] outline-none cursor-pointer border-none p-0 pr-1"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.id} className="bg-[var(--card)] text-[var(--foreground)]">
+                    {u.name} {u.station_name ? `(${u.station_name})` : ""}{" "}
+                    {u.require_password ? "🔒" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -526,27 +545,39 @@ export const UserManagementPanel: React.FC = () => {
                   </span>
                 </label>
 
-                {!editingUser.is_admin && (
-                  <div className="flex items-center space-x-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={selectAllPagesEditing}
-                      className="text-[11px] font-semibold text-[var(--primary)] hover:underline flex items-center space-x-1 cursor-pointer"
-                    >
-                      <CheckSquare className="w-3 h-3" />
-                      <span>Seleziona Tutte</span>
-                    </button>
-                    <span className="text-[var(--border)]">|</span>
-                    <button
-                      type="button"
-                      onClick={deselectAllPagesEditing}
-                      className="text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-white flex items-center space-x-1 cursor-pointer"
-                    >
-                      <Square className="w-3 h-3" />
-                      <span>Deseleziona Tutte</span>
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setOrderModalUser(editingUser)}
+                    className="flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-[var(--background)] hover:bg-[var(--accent)] border border-[var(--border)] text-[11px] font-semibold text-[var(--foreground)] transition-colors cursor-pointer"
+                    title="Modifica l'ordine personalizzato di questi pulsanti nella barra"
+                  >
+                    <SlidersHorizontal className="w-3 h-3 text-[var(--primary)]" />
+                    <span>Ordina Finestre</span>
+                  </button>
+
+                  {!editingUser.is_admin && (
+                    <div className="flex items-center space-x-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={selectAllPagesEditing}
+                        className="text-[11px] font-semibold text-[var(--primary)] hover:underline flex items-center space-x-1 cursor-pointer"
+                      >
+                        <CheckSquare className="w-3 h-3" />
+                        <span>Seleziona Tutte</span>
+                      </button>
+                      <span className="text-[var(--border)]">|</span>
+                      <button
+                        type="button"
+                        onClick={deselectAllPagesEditing}
+                        className="text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-white flex items-center space-x-1 cursor-pointer"
+                      >
+                        <Square className="w-3 h-3" />
+                        <span>Deseleziona Tutte</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {editingUser.is_admin && (
@@ -1221,6 +1252,44 @@ export const UserManagementPanel: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Modale per ordinare i pulsanti delle finestre nella barra */}
+      {orderModalUser && (
+        <TopbarOrderModal
+          isOpen={Boolean(orderModalUser)}
+          onClose={() => setOrderModalUser(null)}
+          modules={ALL_TOPBAR_NAV_MODULES.filter(
+            (m) => orderModalUser.is_admin || (orderModalUser.allowed_pages || []).includes(m.id)
+          )}
+          currentOrder={orderModalUser.topbar_order || DEFAULT_TOPBAR_ORDER}
+          onSaveOrder={async (newOrder) => {
+            const targetId = orderModalUser.id;
+            const fullOrder = [...newOrder];
+            const existingOrder = orderModalUser.topbar_order || DEFAULT_TOPBAR_ORDER;
+            for (const id of existingOrder) {
+              if (!fullOrder.includes(id)) fullOrder.push(id);
+            }
+            for (const m of ALL_TOPBAR_NAV_MODULES) {
+              if (!fullOrder.includes(m.id)) fullOrder.push(m.id);
+            }
+
+            if (editingUser && editingUser.id === targetId) {
+              setEditingUser({ ...editingUser, topbar_order: fullOrder });
+            }
+
+            if (currentUser && currentUser.id === targetId) {
+              await updateCurrentUserTopbarOrder(fullOrder);
+            } else {
+              await setUserTopbarOrder(targetId, fullOrder);
+            }
+            setMessage({
+              type: "success",
+              text: `Ordine finestre della barra per "${orderModalUser.name}" aggiornato con successo!`,
+            });
+            setOrderModalUser(null);
+          }}
+        />
+      )}
     </div>
   );
 };
