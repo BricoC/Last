@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { X, ArrowUp, ArrowDown, RotateCcw, Check, Move, GripVertical } from "lucide-react";
 import { NavModule } from "./TopNavBar";
 import { DEFAULT_TOPBAR_ORDER } from "@/shared/services/appUserService";
@@ -19,7 +19,8 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
   onSaveOrder,
 }) => {
   const [order, setOrder] = useState<string[]>([]);
-  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Chiusura tramite tasto ESC
   useEffect(() => {
@@ -36,7 +37,6 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      // Combina l'ordine attuale con eventuali moduli non ancora presenti
       const base = currentOrder && currentOrder.length > 0 ? [...currentOrder] : [...DEFAULT_TOPBAR_ORDER];
       const allModuleIds = modules.map((m) => m.id);
       for (const id of allModuleIds) {
@@ -45,7 +45,7 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
         }
       }
       setOrder(base.filter((id) => allModuleIds.includes(id)));
-      setDraggedId(null);
+      setActiveDragId(null);
     }
   }, [isOpen, currentOrder, modules]);
 
@@ -78,20 +78,31 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
     onClose();
   };
 
-  const handleDragStart = (e: React.DragEvent, id: string) => {
-    setDraggedId(id);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", id);
+  // Pointer Drag Handler (Immune al cursore di divieto del sistema operativo)
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, id: string) => {
+    if (e.button !== 0) return; // solo click sinistro
+    // Ignora se si cliccano i pulsanti freccia
+    if ((e.target as HTMLElement).closest("button")) return;
+
+    setActiveDragId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
   };
 
-  const handleDragOver = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (!draggedId || draggedId === targetId) return;
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!activeDragId) return;
 
-    // Scambio reattivo immediato durante il trascinamento
+    // Individua la riga su cui si trova il puntatore del mouse
+    const elements = document.elementsFromPoint(e.clientX, e.clientY);
+    const targetElement = elements.find((el) => el.getAttribute("data-module-id"));
+    if (!targetElement) return;
+
+    const targetId = targetElement.getAttribute("data-module-id");
+    if (!targetId || targetId === activeDragId) return;
+
     setOrder((prev) => {
-      const from = prev.indexOf(draggedId);
+      const from = prev.indexOf(activeDragId);
       const to = prev.indexOf(targetId);
       if (from === -1 || to === -1 || from === to) return prev;
       const next = [...prev];
@@ -101,8 +112,13 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
     });
   };
 
-  const handleDragEnd = () => {
-    setDraggedId(null);
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (activeDragId) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+      setActiveDragId(null);
+    }
   };
 
   return (
@@ -125,7 +141,7 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
                 Ordine Finestre nella Barra
               </h3>
               <p className="text-xs text-[var(--muted-foreground)]">
-                Trascina le schede o usa le frecce per posizionare i pulsanti
+                Trascina le schede con il mouse o usa le frecce
               </p>
             </div>
           </div>
@@ -140,28 +156,32 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
         </div>
 
         {/* Lista Moduli Riordinabili */}
-        <div className="p-4 space-y-1.5 overflow-y-auto flex-1">
+        <div
+          ref={containerRef}
+          className="p-4 space-y-1.5 overflow-y-auto flex-1 select-none"
+        >
           {order.map((modId, index) => {
             const mod = modules.find((m) => m.id === modId);
             if (!mod) return null;
-            const isDragging = draggedId === modId;
+            const isDragging = activeDragId === modId;
 
             return (
               <div
                 key={mod.id}
-                draggable
-                onDragStart={(e) => handleDragStart(e, mod.id)}
-                onDragOver={(e) => handleDragOver(e, mod.id)}
-                onDragEnd={handleDragEnd}
-                onDrop={handleDragEnd}
-                className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-all select-none cursor-grab active:cursor-grabbing ${
+                data-module-id={mod.id}
+                onPointerDown={(e) => handlePointerDown(e, mod.id)}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                style={{ touchAction: "none" }}
+                className={`flex items-center justify-between px-3 py-2.5 rounded-lg border text-xs transition-colors select-none ${
                   isDragging
-                    ? "opacity-50 bg-[var(--primary)]/15 border-dashed border-[var(--primary)] shadow-md"
-                    : "border-[var(--border)] bg-[var(--background)]/70 hover:bg-[var(--background)] hover:border-[var(--primary)]/40 shadow-xs"
+                    ? "bg-[var(--primary)]/20 border-2 border-[var(--primary)] shadow-lg scale-[1.01] cursor-grabbing z-10"
+                    : "border-[var(--border)] bg-[var(--background)]/70 hover:bg-[var(--background)] hover:border-[var(--primary)]/40 shadow-xs cursor-grab"
                 }`}
               >
-                <div className="flex items-center space-x-2.5 min-w-0">
-                  <GripVertical className="w-4 h-4 text-[var(--muted-foreground)] shrink-0 cursor-grab" />
+                <div className="flex items-center space-x-2.5 min-w-0 pointer-events-none">
+                  <GripVertical className="w-4 h-4 text-[var(--muted-foreground)] shrink-0" />
                   <span className="w-4 text-[11px] font-mono text-[var(--muted-foreground)] font-bold text-right shrink-0">
                     {index + 1}.
                   </span>
