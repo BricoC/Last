@@ -17,7 +17,6 @@ import {
   RotateCcw,
   Save,
   CheckCircle2,
-  FileSpreadsheet,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -234,7 +233,10 @@ export const ProductListPage: React.FC = () => {
   const [dirtyRows, setDirtyRows] = useState<Map<string, ListinoGeneraleRow>>(new Map());
   const [originalRowsSnapshot, setOriginalRowsSnapshot] = useState<Map<string, ListinoGeneraleRow>>(new Map());
   const [isSaving, setIsSaving] = useState(false);
-  const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
+  const [lastSavedTime, setLastSavedTime] = useState<Date | null>(() => {
+    const saved = localStorage.getItem("price_list_last_saved_time");
+    return saved ? new Date(saved) : null;
+  });
 
   // Selezione righe per Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -624,7 +626,11 @@ export const ProductListPage: React.FC = () => {
       });
 
       setDirtyRows(new Map());
-      setLastSavedTime(new Date());
+      const now = new Date();
+      setLastSavedTime(now);
+      try {
+        localStorage.setItem("price_list_last_saved_time", now.toISOString());
+      } catch {}
 
       void priceListSyncService.pushGeneralBatchToSupabase(rowsToSave).catch((e) => {
         console.warn("[ProductListPage] Push Supabase asincrono non riuscito:", e);
@@ -1133,7 +1139,9 @@ export const ProductListPage: React.FC = () => {
               title={
                 dirtyRows.size > 0
                   ? `Salva subito ${dirtyRows.size} articoli modificati`
-                  : "Nessuna modifica da salvare"
+                  : lastSavedTime
+                  ? `Ultimo salvataggio listino: ${lastSavedTime.toLocaleDateString("it-IT")} alle ${lastSavedTime.toLocaleTimeString("it-IT")}`
+                  : "Nessuna modifica recente registrata"
               }
             >
               {isSaving ? (
@@ -1739,26 +1747,10 @@ export const ProductListPage: React.FC = () => {
       </div>
 
       {/* 3. Footer */}
-      <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-[11px] text-[var(--muted-foreground)] font-mono">
-        <div className="flex items-center space-x-3">
-          <span>
-            Visualizzati: {Math.min(visibleCount, filteredItems.length)} su {filteredItems.length} filtrati (Totale DB: {totalDbCount})
-          </span>
-          {canEdit && (
-            <span className="text-emerald-500/90 flex items-center space-x-1">
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Modalità Excel attiva (Click/Frecce/Tab/Invio per scrivere, Copia/Incolla rapido)</span>
-            </span>
-          )}
-        </div>
-        <div className="flex items-center space-x-3">
-          {lastSavedTime && (
-            <span className="text-xs text-[var(--muted-foreground)]">
-              Ultimo salvataggio: {lastSavedTime.toLocaleTimeString()}
-            </span>
-          )}
-          <span>Listino Generale + Listini Vari (Unificati)</span>
-        </div>
+      <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center text-[11px] text-[var(--muted-foreground)] font-mono">
+        <span>
+          Visualizzati: {Math.min(visibleCount, filteredItems.length)} su {filteredItems.length} filtrati (Totale DB: {totalDbCount})
+        </span>
       </div>
 
       <ItemPriceHistoryModal
