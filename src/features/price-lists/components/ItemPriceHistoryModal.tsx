@@ -177,6 +177,19 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
     return String(round5(val));
   };
 
+  const getTextDiff = (log: PriceListLogEntry) => {
+    if (log.vecchio_testo != null || log.nuovo_testo != null) {
+      return { oldText: log.vecchio_testo ?? "—", newText: log.nuovo_testo ?? "—" };
+    }
+    if (log.motivo) {
+      const match = log.motivo.match(/Da "([^"]*)" a "([^"]*)"/);
+      if (match) {
+        return { oldText: match[1] || "—", newText: match[2] || "—" };
+      }
+    }
+    return { oldText: null, newText: null };
+  };
+
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="w-full max-w-3xl bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden select-none animate-in fade-in zoom-in-95 duration-100">
@@ -247,6 +260,9 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                   const isPositive = (log.variazione_pct ?? 0) > 0;
                   const isNegative = (log.variazione_pct ?? 0) < 0;
                   const isPending = (log.id ?? 0) < 0;
+                  const textDiff = getTextDiff(log);
+                  const displayOld = textDiff.oldText ?? formatVal(log.vecchio_valore, log.campo_modificato);
+                  const displayNew = textDiff.newText ?? formatVal(log.nuovo_valore, log.campo_modificato);
 
                   return (
                     <tr
@@ -267,14 +283,14 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                       <td className="px-3 py-2 font-bold text-[var(--primary)] font-sans">
                         {log.campo_modificato}
                       </td>
-                      <td className="px-3 py-2 text-right text-[var(--muted-foreground)]">
-                        {formatVal(log.vecchio_valore, log.campo_modificato)}
+                      <td className="px-3 py-2 text-right text-[var(--muted-foreground)] max-w-[200px] truncate" title={displayOld}>
+                        {displayOld}
                       </td>
                       <td className="px-2 py-2 text-center text-[var(--muted-foreground)]">
                         <ArrowRight className="w-3 h-3 inline text-[var(--muted-foreground)]" />
                       </td>
-                      <td className="px-3 py-2 text-left font-bold text-[var(--foreground)]">
-                        {formatVal(log.nuovo_valore, log.campo_modificato)}
+                      <td className="px-3 py-2 text-left font-bold text-[var(--foreground)] max-w-[200px] truncate" title={displayNew}>
+                        {displayNew}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {log.variazione_pct != null ? (
