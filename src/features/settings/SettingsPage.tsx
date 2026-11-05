@@ -66,9 +66,9 @@ export const SettingsPage: React.FC = () => {
   const brightnessLevels = getBrightnessLevels();
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6 select-none text-[var(--foreground)]">
+    <div className="w-full min-h-full flex flex-col p-6 space-y-6 select-none text-[var(--foreground)]">
       {/* Header Impostazioni */}
-      <div className="flex items-center justify-between pb-4 border-b border-[var(--border)]">
+      <div className="flex items-center justify-between pb-4 border-b border-[var(--border)] shrink-0">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">Impostazioni</h1>
           <p className="text-xs text-[var(--muted-foreground)] mt-1">
@@ -80,7 +80,7 @@ export const SettingsPage: React.FC = () => {
             type="button"
             onClick={() => setEditEnabled(!editEnabled)}
             className={cn(
-              "flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-default",
+              "flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer",
               editEnabled ? "bg-red-600 text-white" : "bg-slate-700 text-slate-300"
             )}
           >
@@ -89,7 +89,7 @@ export const SettingsPage: React.FC = () => {
           </button>
           <button
             type="button"
-            className="flex items-center space-x-1.5 px-4 py-1.5 rounded-md bg-[var(--primary)] text-white font-semibold text-xs hover:opacity-90 transition-opacity cursor-default"
+            className="flex items-center space-x-1.5 px-4 py-1.5 rounded-md bg-[var(--primary)] text-white font-semibold text-xs hover:opacity-90 transition-opacity cursor-pointer"
           >
             <Save className="w-3.5 h-3.5" />
             <span>Salva</span>
@@ -97,9 +97,9 @@ export const SettingsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="flex-1 flex flex-col md:flex-row gap-6 min-h-0">
         {/* Sidebar Impostazioni */}
-        <div className="space-y-1">
+        <div className="w-full md:w-56 shrink-0 space-y-1">
           {[
             { id: "users", label: "Utenti & Postazioni", icon: <Users className="w-4 h-4" /> },
             { id: "theme", label: "Aspetto & Temi", icon: <Palette className="w-4 h-4" /> },
@@ -114,7 +114,7 @@ export const SettingsPage: React.FC = () => {
               type="button"
               onClick={() => setActiveNav(item.id)}
               className={cn(
-                "w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-default",
+                "w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer",
                 activeNav === item.id
                   ? "bg-[var(--card)] text-[var(--foreground)] border border-[var(--primary)] font-semibold shadow-sm"
                   : "text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)]"
@@ -130,24 +130,24 @@ export const SettingsPage: React.FC = () => {
 
         {/* Contenuto Principale: Utenti / Aspetto & Temi / Database / Parametri Generali / Dati Aziendali */}
         {activeNav === "users" || activeNav === "security" ? (
-          <div className="md:col-span-3">
+          <div className="flex-1 min-w-0">
             <UserManagementPanel />
           </div>
         ) : activeNav === "company" ? (
-          <div className="md:col-span-3">
+          <div className="flex-1 min-w-0">
             <CompanySettingsPanel />
           </div>
         ) : activeNav === "database" ? (
-          <div className="md:col-span-3 space-y-4">
+          <div className="flex-1 min-w-0 space-y-4">
             <SupabaseConnectionFields />
             <DatabaseQuerySettingsPanel />
           </div>
         ) : activeNav === "general" ? (
-          <div className="md:col-span-3 space-y-4">
+          <div className="flex-1 min-w-0 space-y-4">
             <DatabaseQuerySettingsPanel />
           </div>
         ) : (
-          <div className="md:col-span-3 space-y-6">
+          <div className="flex-1 min-w-0 space-y-6">
           {/* Box Schemi di Colore Predefiniti */}
           <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between">

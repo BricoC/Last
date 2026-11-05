@@ -68,3 +68,4 @@ describe("isPageAllowedForUser", () => {
     expect(isPageAllowedForUser(userWithSettingsInList, "dashboard")).toBe(true);
   });
 });
+
