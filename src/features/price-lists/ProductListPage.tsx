@@ -209,6 +209,19 @@ function getFormattedInitValue(val: any, col: string, char?: string): string {
   return String(val);
 }
 
+function formatDateTime(date: Date | string | null | undefined): string {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (isNaN(d.getTime())) return typeof date === "string" ? date : "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  const seconds = String(d.getSeconds()).padStart(2, "0");
+  return `${day}/${month}/${year} alle ${hours}:${minutes}:${seconds}`;
+}
+
 export const ProductListPage: React.FC = () => {
   const { currentUser } = useUserStore();
   const canEdit = Boolean(currentUser?.is_admin || currentUser?.can_edit_price_lists);
@@ -237,6 +250,33 @@ export const ProductListPage: React.FC = () => {
     const saved = localStorage.getItem("price_list_last_saved_time");
     return saved ? new Date(saved) : null;
   });
+  const [lastDbModTime, setLastDbModTime] = useState<Date | null>(null);
+  const [lastAccessTime] = useState<Date>(() => {
+    const now = new Date();
+    try {
+      localStorage.setItem("price_list_last_access_time", now.toISOString());
+    } catch {}
+    return now;
+  });
+
+  const mostRecentModTime = useMemo(() => {
+    if (lastSavedTime && lastDbModTime) {
+      return lastSavedTime.getTime() >= lastDbModTime.getTime() ? lastSavedTime : lastDbModTime;
+    }
+    return lastSavedTime || lastDbModTime;
+  }, [lastSavedTime, lastDbModTime]);
+
+  const saveButtonTooltip = useMemo(() => {
+    if (dirtyRows.size > 0) {
+      return `Salva subito ${dirtyRows.size} articoli modificati`;
+    }
+    const lines: string[] = [];
+    if (mostRecentModTime) {
+      lines.push(`Ultima modifica listino: ${formatDateTime(mostRecentModTime)}`);
+    }
+    lines.push(`Ultimo accesso al listino: ${formatDateTime(lastAccessTime)}`);
+    return lines.join("\n");
+  }, [dirtyRows.size, mostRecentModTime, lastAccessTime]);
 
   // Selezione righe per Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -273,6 +313,18 @@ export const ProductListPage: React.FC = () => {
       setTotalDbCount(count);
       const rows = await priceListRepository.searchGeneral("", 15000);
       setItems(rows);
+
+      try {
+        const lastMod = await priceListRepository.getLastModificationTime();
+        if (lastMod) {
+          const modDate = new Date(lastMod);
+          if (!isNaN(modDate.getTime())) {
+            setLastDbModTime(modDate);
+          }
+        }
+      } catch (e) {
+        console.warn("[ProductListPage] Errore lettura data ultima modifica:", e);
+      }
 
       const snapshot = new Map<string, ListinoGeneraleRow>();
       for (const r of rows) {
@@ -1136,13 +1188,7 @@ export const ProductListPage: React.FC = () => {
                   ? "bg-[var(--primary)] hover:opacity-90 text-white cursor-pointer"
                   : "bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)] opacity-70 cursor-default"
               }`}
-              title={
-                dirtyRows.size > 0
-                  ? `Salva subito ${dirtyRows.size} articoli modificati`
-                  : lastSavedTime
-                  ? `Ultimo salvataggio listino: ${lastSavedTime.toLocaleDateString("it-IT")} alle ${lastSavedTime.toLocaleTimeString("it-IT")}`
-                  : "Nessuna modifica recente registrata"
-              }
+              title={saveButtonTooltip}
             >
               {isSaving ? (
                 <>
