@@ -278,6 +278,27 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
     };
   }, [filteredRows]);
 
+  const currentQuickDdtIndex = useMemo(() => {
+    if (!selectedDdtId) return -1;
+    return filteredRows.findIndex((d) => d.id === selectedDdtId);
+  }, [filteredRows, selectedDdtId]);
+
+  const hasPrevQuickDdt = currentQuickDdtIndex > 0;
+  const hasNextQuickDdt =
+    currentQuickDdtIndex >= 0 && currentQuickDdtIndex < filteredRows.length - 1;
+
+  const handlePrevQuickDdt = useCallback(() => {
+    if (currentQuickDdtIndex > 0) {
+      setSelectedDdtId(filteredRows[currentQuickDdtIndex - 1].id);
+    }
+  }, [currentQuickDdtIndex, filteredRows]);
+
+  const handleNextQuickDdt = useCallback(() => {
+    if (currentQuickDdtIndex >= 0 && currentQuickDdtIndex < filteredRows.length - 1) {
+      setSelectedDdtId(filteredRows[currentQuickDdtIndex + 1].id);
+    }
+  }, [currentQuickDdtIndex, filteredRows]);
+
   const handleOpenInStudio = (id: string) => {
     setSelectedDdtId(null);
     openWindow({
@@ -742,6 +763,12 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
           onClose={() => setSelectedDdtId(null)}
           ddtId={selectedDdtId}
           onOpenInStudio={handleOpenInStudio}
+          onNavigatePrev={handlePrevQuickDdt}
+          onNavigateNext={handleNextQuickDdt}
+          hasPrev={hasPrevQuickDdt}
+          hasNext={hasNextQuickDdt}
+          currentIndex={currentQuickDdtIndex}
+          totalCount={filteredRows.length}
         />
       )}
     </div>

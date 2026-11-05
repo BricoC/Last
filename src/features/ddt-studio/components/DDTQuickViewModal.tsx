@@ -12,6 +12,10 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Check,
 } from "lucide-react";
 import { DdtRepository } from "../services/ddtRepository";
 import { DdtDocument, DdtItem } from "../models/ddt";
@@ -19,6 +23,8 @@ import { formatDdtMoney, formatDdtPercent, formatDdtViewDate } from "../services
 import { DDTClientArticleHistoryModal } from "./DDTClientArticleHistoryModal";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { useEscClose } from "@/shared/hooks/useEscClose";
+import { cn } from "@/shared/utils/cn";
+import { copySingleDdtPdfToClipboard } from "../utils/ddtPdfClipboard";
 
 type QuickViewSortField =
   | "rowIndex"
@@ -47,6 +53,12 @@ export interface DDTQuickViewModalProps {
   onClose: () => void;
   ddtId: string | null;
   onOpenInStudio?: (ddtId: string) => void;
+  onNavigatePrev?: () => void;
+  onNavigateNext?: () => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
+  currentIndex?: number;
+  totalCount?: number;
 }
 
 export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
@@ -54,6 +66,12 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
   onClose,
   ddtId,
   onOpenInStudio,
+  onNavigatePrev,
+  onNavigateNext,
+  hasPrev = false,
+  hasNext = false,
+  currentIndex,
+  totalCount,
 }) => {
   const [doc, setDoc] = useState<DdtDocument | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -64,6 +82,22 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
     field: "rowIndex",
     direction: "asc",
   });
+  const [isCopyingPdf, setIsCopyingPdf] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+
+  const handleCopyPdf = async () => {
+    if (!doc || isCopyingPdf) return;
+    setIsCopyingPdf(true);
+    try {
+      await copySingleDdtPdfToClipboard(doc);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 3000);
+    } catch (err) {
+      console.error("Errore durante la copia del PDF:", err);
+    } finally {
+      setIsCopyingPdf(false);
+    }
+  };
 
   useEffect(() => {
     if (!isOpen || !ddtId) {
@@ -78,6 +112,8 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
     const loadDdt = async () => {
       setIsLoading(true);
       setError(null);
+      setHistoryTarget(null);
+      setSearchFilter("");
       try {
         const repo = new DdtRepository();
         const loaded = await repo.getDdtById(ddtId);
@@ -101,6 +137,54 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
       isMounted = false;
     };
   }, [isOpen, ddtId]);
+
+  // Navigazione tra DDT con tasti freccia destra e sinistra
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Non intercettare la navigazione se l'utente sta digitando in un campo di input o textarea
+      const activeElement = document.activeElement as HTMLElement | null;
+      const tagName = activeElement?.tagName?.toUpperCase();
+      const isInput =
+        tagName === "INPUT" ||
+        tagName === "TEXTAREA" ||
+        Boolean(activeElement?.isContentEditable);
+
+      if (isInput) return;
+
+      // Non navigare se è aperto il sotto-modale dello storico articolo
+      if (historyTarget) return;
+
+      // Shortcut Ctrl+C per copiare il file PDF negli appunti
+      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+        const selectedText = window.getSelection()?.toString().trim();
+        if (!selectedText && !isInput && !historyTarget && doc) {
+          e.preventDefault();
+          e.stopPropagation();
+          void handleCopyPdf();
+          return;
+        }
+      }
+
+      if (e.key === "ArrowLeft") {
+        if (onNavigatePrev && hasPrev) {
+          e.preventDefault();
+          e.stopPropagation();
+          onNavigatePrev();
+        }
+      } else if (e.key === "ArrowRight") {
+        if (onNavigateNext && hasNext) {
+          e.preventDefault();
+          e.stopPropagation();
+          onNavigateNext();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onNavigatePrev, onNavigateNext, hasPrev, hasNext, historyTarget]);
 
   // Chiusura in cascata con tasto Escape (LIFO stack)
   useEscClose(isOpen, onClose);
@@ -277,9 +361,11 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
 
   if (!isOpen) return null;
 
-  const numberLabel = doc?.doc_number === null || doc?.status === "bozza"
+  const numberLabel = !doc
+    ? "Caricamento DDT…"
+    : doc.doc_number === null || doc.status === "bozza"
     ? "BOZZA"
-    : `DDT n. ${doc?.doc_number}${doc?.series ? `/${doc.series}` : ""} · Anno ${doc?.year}`;
+    : `DDT n. ${doc.doc_number}${doc.series ? `/${doc.series}` : ""} · Anno ${doc.year}`;
 
   return (
     <>
@@ -325,6 +411,72 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Navigatore sequenziale tra i DDT (Frecce Sinistra / Destra) */}
+              {(onNavigatePrev || onNavigateNext) && (
+                <div className="flex items-center bg-[var(--card)] border border-[var(--border)] rounded-lg p-0.5 shadow-xs mr-1">
+                  <button
+                    type="button"
+                    onClick={onNavigatePrev}
+                    disabled={!hasPrev}
+                    className="p-1.5 rounded-md text-[var(--foreground)] hover:bg-[var(--background)] hover:text-white disabled:opacity-25 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="DDT Precedente (← Freccia Sinistra)"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+
+                  {totalCount !== undefined && currentIndex !== undefined && currentIndex >= 0 && (
+                    <span className="font-mono text-xs px-2.5 text-[var(--muted-foreground)] select-none whitespace-nowrap">
+                      <span className="font-bold text-white">{currentIndex + 1}</span>
+                      <span className="opacity-40 mx-1">/</span>
+                      <span>{totalCount}</span>
+                    </span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={onNavigateNext}
+                    disabled={!hasNext}
+                    className="p-1.5 rounded-md text-[var(--foreground)] hover:bg-[var(--background)] hover:text-white disabled:opacity-25 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="DDT Successivo (→ Freccia Destra)"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Pulsante Copia PDF (Ctrl+C) */}
+              {doc && (
+                <button
+                  type="button"
+                  onClick={() => void handleCopyPdf()}
+                  disabled={isCopyingPdf}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer",
+                    copySuccess
+                      ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-300 shadow-xs"
+                      : "border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 hover:text-white"
+                  )}
+                  title="Genera e copia il PDF negli appunti di Windows per incollarlo in un'email o cartella (Ctrl+C)"
+                >
+                  {isCopyingPdf ? (
+                    <>
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+                      <span>Copia PDF…</span>
+                    </>
+                  ) : copySuccess ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                      <span>PDF Copiato! (Ctrl+V)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>Copia PDF (Ctrl+C)</span>
+                    </>
+                  )}
+                </button>
+              )}
+
               {onOpenInStudio && doc?.id && (
                 <button
                   type="button"
