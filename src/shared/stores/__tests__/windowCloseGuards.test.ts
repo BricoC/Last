@@ -74,3 +74,4 @@ describe("windowCloseGuards and dirty checks", () => {
     unreg2();
   });
 });
+
