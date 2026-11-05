@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
-import { isPageAllowedForUser } from "@/shared/services/appUserService";
+import { isPageAllowedForUser, DEFAULT_TOPBAR_ORDER } from "@/shared/services/appUserService";
 import {
   LayoutGrid,
   ShoppingCart,
@@ -24,9 +24,11 @@ import {
   User,
   Cloud,
   Loader2,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
+import { TopbarOrderModal } from "./TopbarOrderModal";
 
 export interface NavModule {
   id: string;
@@ -47,7 +49,17 @@ export const TopNavBar: React.FC = () => {
     areAllWindowsMinimized,
   } = useWindowStore();
 
-  const { users, currentUser, loadUsers, requestSwitchUser } = useUserStore();
+  const {
+    users,
+    currentUser,
+    loadUsers,
+    requestSwitchUser,
+    updateCurrentUserTopbarOrder,
+  } = useUserStore();
+
+  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
+  const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
+  const [dragOverModuleId, setDragOverModuleId] = useState<string | null>(null);
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
@@ -95,47 +107,134 @@ export const TopNavBar: React.FC = () => {
     { id: "clients", title: "Clienti", componentId: "clients", icon: <Users className="w-3.5 h-3.5" /> },
   ];
 
+  const userOrder =
+    currentUser?.topbar_order && currentUser.topbar_order.length > 0
+      ? currentUser.topbar_order
+      : DEFAULT_TOPBAR_ORDER;
+
+  const visibleModules = [...modules]
+    .filter((mod) => isPageAllowedForUser(currentUser, mod.id))
+    .sort((a, b) => {
+      const idxA = userOrder.indexOf(a.id);
+      const idxB = userOrder.indexOf(b.id);
+      const posA = idxA === -1 ? 999 : idxA;
+      const posB = idxB === -1 ? 999 : idxB;
+      return posA - posB;
+    });
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    setDraggedModuleId(id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverModuleId !== id) {
+      setDragOverModuleId(id);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const sourceId = draggedModuleId || e.dataTransfer.getData("text/plain");
+    setDraggedModuleId(null);
+    setDragOverModuleId(null);
+
+    if (!sourceId || sourceId === targetId) return;
+
+    const visibleIds = visibleModules.map((m) => m.id);
+    const fromIdx = visibleIds.indexOf(sourceId);
+    const toIdx = visibleIds.indexOf(targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const newVisibleIds = [...visibleIds];
+    const [moved] = newVisibleIds.splice(fromIdx, 1);
+    newVisibleIds.splice(toIdx, 0, moved);
+
+    // Mantieni eventuali moduli non visibili nell'ordine generale
+    const fullOrder = [...newVisibleIds];
+    for (const id of userOrder) {
+      if (!fullOrder.includes(id)) {
+        fullOrder.push(id);
+      }
+    }
+    for (const m of modules) {
+      if (!fullOrder.includes(m.id)) {
+        fullOrder.push(m.id);
+      }
+    }
+
+    await updateCurrentUserTopbarOrder(fullOrder);
+  };
+
   return (
-    <header className="h-11 bg-[var(--card)] border-b border-[var(--border)] px-2 flex items-center justify-between select-none text-[var(--foreground)] transition-colors gap-2">
-      {/* Lista Moduli Navigazione Primaria (con scrollbar e supporto rotellina del mouse) */}
-      <div
-        onWheel={(e) => {
-          if (e.deltaY !== 0) {
-            e.currentTarget.scrollLeft += e.deltaY;
-          }
-        }}
-        className="flex-1 min-w-0 flex items-center space-x-1 overflow-x-auto py-1"
-      >
-        {modules
-          .filter((mod) => isPageAllowedForUser(currentUser, mod.id))
-          .map((mod) => {
+    <>
+      <header className="h-11 bg-[var(--card)] border-b border-[var(--border)] px-2 flex items-center justify-between select-none text-[var(--foreground)] transition-colors gap-2">
+        {/* Lista Moduli Navigazione Primaria (con scrollbar e supporto rotellina del mouse) */}
+        <div
+          onWheel={(e) => {
+            if (e.deltaY !== 0) {
+              e.currentTarget.scrollLeft += e.deltaY;
+            }
+          }}
+          className="flex-1 min-w-0 flex items-center space-x-1 overflow-x-auto py-1"
+        >
+          {visibleModules.map((mod) => {
             const isActive = activeWindowId === mod.id;
-          return (
-            <button
-              key={mod.id}
-              type="button"
-              onClick={() =>
-                openWindow({
-                  id: mod.id,
-                  title: mod.title,
-                  componentId: mod.componentId,
-                })
-              }
-              className={cn(
-                "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap cursor-default shrink-0",
-                isActive
-                  ? "bg-[var(--background)] text-[var(--foreground)] border border-[var(--primary)] shadow-sm font-semibold"
-                  : "bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)]"
-              )}
-            >
-              <span className={cn(isActive ? "text-[var(--primary)]" : "text-[var(--muted-foreground)]")}>
-                {mod.icon}
-              </span>
-              <span>{mod.title}</span>
-            </button>
-          );
-        })}
-      </div>
+            const isDragging = draggedModuleId === mod.id;
+            const isOver = dragOverModuleId === mod.id;
+
+            return (
+              <button
+                key={mod.id}
+                type="button"
+                draggable
+                onDragStart={(e) => handleDragStart(e, mod.id)}
+                onDragOver={(e) => handleDragOver(e, mod.id)}
+                onDragLeave={() => setDragOverModuleId(null)}
+                onDrop={(e) => void handleDrop(e, mod.id)}
+                onDragEnd={() => {
+                  setDraggedModuleId(null);
+                  setDragOverModuleId(null);
+                }}
+                onClick={() =>
+                  openWindow({
+                    id: mod.id,
+                    title: mod.title,
+                    componentId: mod.componentId,
+                  })
+                }
+                title={`${mod.title} (Trascina per riordinare)`}
+                className={cn(
+                  "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap shrink-0 select-none cursor-pointer",
+                  isActive
+                    ? "bg-[var(--background)] text-[var(--foreground)] border border-[var(--primary)] shadow-sm font-semibold"
+                    : "bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)]",
+                  isDragging && "opacity-40 border-dashed border-[var(--primary)]",
+                  isOver && "border-l-2 border-l-[var(--primary)] bg-[var(--primary)]/10 scale-105"
+                )}
+              >
+                <span className={cn(isActive ? "text-[var(--primary)]" : "text-[var(--muted-foreground)]")}>
+                  {mod.icon}
+                </span>
+                <span>{mod.title}</span>
+              </button>
+            );
+          })}
+
+          {/* Pulsante rapido per personalizzare l'ordine finestre con popup / frecce */}
+          <button
+            type="button"
+            onClick={() => setIsOrderModalOpen(true)}
+            title="Personalizza l'ordine delle finestre nella barra"
+            className="h-7 px-2 rounded-md flex items-center space-x-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors shrink-0 cursor-pointer border border-transparent hover:border-[var(--border)]"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span className="text-[11px] hidden xl:inline font-medium">Ordina</span>
+          </button>
+        </div>
 
       {/* Sezione Destra: Strumenti Desktop Finestre + Impostazioni */}
       <div className="flex items-center space-x-2 pl-2 shrink-0">
@@ -258,5 +357,24 @@ export const TopNavBar: React.FC = () => {
         )}
       </div>
     </header>
+
+    <TopbarOrderModal
+      isOpen={isOrderModalOpen}
+      onClose={() => setIsOrderModalOpen(false)}
+      modules={visibleModules}
+      currentOrder={userOrder}
+      onSaveOrder={async (newOrder) => {
+        // Preserva i moduli non presenti nella lista visibile
+        const full = [...newOrder];
+        for (const id of userOrder) {
+          if (!full.includes(id)) full.push(id);
+        }
+        for (const m of modules) {
+          if (!full.includes(m.id)) full.push(m.id);
+        }
+        await updateCurrentUserTopbarOrder(full);
+      }}
+    />
+  </>
   );
 };
