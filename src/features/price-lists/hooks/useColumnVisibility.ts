@@ -9,6 +9,7 @@ export interface ColumnDefinition {
 
 export const ALL_GENERAL_COLUMNS: ColumnDefinition[] = [
   { id: "history", label: "Storico Modifiche", defaultVisible: true, category: "anagrafica" },
+  { id: "actions", label: "Cestino (Elimina Riga)", defaultVisible: true, category: "anagrafica" },
   { id: "cat", label: "Categoria", defaultVisible: true, category: "anagrafica" },
   { id: "fornitore", label: "Fornitore", defaultVisible: true, category: "anagrafica" },
   { id: "codice_articolo", label: "Codice Articolo", defaultVisible: true, category: "anagrafica" },

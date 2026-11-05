@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { ListinoGeneraleRow, PriceListLogEntry } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
@@ -906,6 +907,36 @@ export const ProductListPage: React.FC = () => {
     });
   }, []);
 
+  // Eliminazione di una singola riga dal listino
+  const handleDeleteRow = useCallback(
+    async (row: ListinoGeneraleRow) => {
+      if (!canEdit) return;
+      const desc = row.descrizione || row.codice_articolo || "questo articolo";
+      if (!confirm(`Sei sicuro di voler eliminare "${desc}" dal listino?`)) {
+        return;
+      }
+      try {
+        await priceListRepository.deleteGeneralRows([row.id]);
+        setItems((prev) => prev.filter((r) => r.id !== row.id));
+        setDirtyRows((prev) => {
+          const next = new Map(prev);
+          next.delete(row.id);
+          return next;
+        });
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(row.id);
+          return next;
+        });
+        void priceListSyncService.deleteGeneralBatchFromSupabase([row.id]);
+      } catch (err: any) {
+        console.error("Errore cancellazione articolo:", err);
+        setError(`Errore cancellazione articolo: ${err?.message || err}`);
+      }
+    },
+    [canEdit]
+  );
+
   return (
     <div
       ref={tableContainerRef}
@@ -1041,6 +1072,13 @@ export const ProductListPage: React.FC = () => {
               {visibleColumns.history !== false && (
                 <th className="px-2 py-2 w-10 text-center" title="Storico modifiche riga">
                   A...
+                </th>
+              )}
+
+              {/* Colonna Cestino per eliminare riga singola */}
+              {visibleColumns.actions !== false && canEdit && (
+                <th className="px-1.5 py-2 w-8 text-center" title="Elimina riga articolo">
+                  <Trash2 className="w-3.5 h-3.5 mx-auto text-[var(--muted-foreground)]" />
                 </th>
               )}
 
@@ -1195,6 +1233,10 @@ export const ProductListPage: React.FC = () => {
                   <td className="px-2 py-1 text-center text-emerald-400/60 font-semibold text-[10px]">
                     NUOVO
                   </td>
+                )}
+
+                {visibleColumns.actions !== false && canEdit && (
+                  <td className="px-1.5 py-1 text-center text-[var(--muted-foreground)]/30">—</td>
                 )}
 
                 {visibleColumns.cat !== false && (
@@ -1522,6 +1564,7 @@ export const ProductListPage: React.FC = () => {
                   visibleColumns={visibleColumns}
                   onToggleSelectRow={handleToggleSelectRow}
                   onOpenHistory={setHistoryModalItem}
+                  onDeleteRow={handleDeleteRow}
                   onStartEdit={startEditing}
                   onCommitCell={commitCellEdit}
                   onCancelEdit={cancelCellEdit}
@@ -1583,6 +1626,7 @@ interface MemoizedProductRowProps {
   visibleColumns: Record<string, boolean>;
   onToggleSelectRow: (id: string) => void;
   onOpenHistory: (item: ListinoGeneraleRow) => void;
+  onDeleteRow: (item: ListinoGeneraleRow) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
   onCommitCell: (rowId: string, colId: string, val: string) => void;
   onCancelEdit: () => void;
@@ -1601,6 +1645,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
     visibleColumns,
     onToggleSelectRow,
     onOpenHistory,
+    onDeleteRow,
     onStartEdit,
     onCommitCell,
     onCancelEdit,
@@ -1637,6 +1682,20 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
               title="Visualizza storico modifiche riga (max 15)"
             >
               <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </td>
+        )}
+
+        {/* Tasto Cestino Elimina Riga */}
+        {visibleColumns.actions !== false && canEdit && (
+          <td className="px-1.5 py-1 text-center">
+            <button
+              type="button"
+              onClick={() => onDeleteRow(item)}
+              className="p-1 rounded text-[var(--muted-foreground)] hover:text-red-400 hover:bg-red-500/15 transition-colors"
+              title={`Elimina articolo "${item.descrizione || item.codice_articolo || ""}"`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           </td>
         )}
