@@ -12,6 +12,10 @@ export const SettingsPage: React.FC = () => {
   const { theme, setPreset, setBrightness, resetTheme } = useThemeStore();
   const [activeNav, setActiveNav] = useState("users");
   const [editEnabled, setEditEnabled] = useState(true);
+  const [autoSaveMinutes, setAutoSaveMinutes] = useState<number>(() => {
+    const saved = localStorage.getItem("price_list_autosave_minutes");
+    return saved ? Math.max(1, parseInt(saved, 10)) : 10;
+  });
 
   const presets: { id: ThemePresetId; name: string; desc: string; colors: string[] }[] = [
     {
@@ -144,6 +148,33 @@ export const SettingsPage: React.FC = () => {
           </div>
         ) : activeNav === "general" ? (
           <div className="flex-1 min-w-0 space-y-4">
+            {/* Impostazioni Auto-Salvataggio Listini Prezzi */}
+            <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--foreground)]">Auto-Salvataggio Listino Generale</h3>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  Frequenza del salvataggio automatico silenzioso in background dopo la prima modifica effettuata.
+                </p>
+              </div>
+              <div className="flex items-center space-x-3 pt-1">
+                <label className="text-xs font-medium text-[var(--foreground)]">
+                  Intervallo di salvataggio (minuti):
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={autoSaveMinutes}
+                  onChange={(e) => {
+                    const val = Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 10));
+                    setAutoSaveMinutes(val);
+                    localStorage.setItem("price_list_autosave_minutes", String(val));
+                  }}
+                  className="w-20 px-2.5 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md font-mono text-[var(--foreground)] focus:border-[var(--primary)] outline-none"
+                />
+                <span className="text-xs text-[var(--muted-foreground)]">minuti (predefinito: 10 minuti)</span>
+              </div>
+            </div>
             <DatabaseQuerySettingsPanel />
           </div>
         ) : (

@@ -2,6 +2,11 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { ListinoGeneraleRow, ListinoClienteRow, PriceListLogEntry } from "../models/priceList";
 import { resolveClientPriceLists } from "@/features/ddt-studio/utils/clientPriceListMatcher";
 
+function cleanNum5(val: number | null | undefined): number | null {
+  if (val == null || isNaN(val) || !isFinite(val)) return null;
+  return Math.round(val * 100000) / 100000;
+}
+
 export class PriceListRepository {
   /**
    * Conteggio totale articoli Listino Generale in SQLite locale.
@@ -206,12 +211,12 @@ export class PriceListRepository {
             entry.created_at || new Date().toISOString(),
             entry.tipo_listino || "generale",
             entry.cliente || "",
-            entry.codice_articolo,
+            entry.codice_articolo || "SCONOSCIUTO",
             entry.descrizione || null,
             entry.campo_modificato,
-            entry.vecchio_valore ?? null,
-            entry.nuovo_valore ?? null,
-            entry.variazione_pct ?? null,
+            cleanNum5(entry.vecchio_valore),
+            cleanNum5(entry.nuovo_valore),
+            cleanNum5(entry.variazione_pct),
             entry.operatore || "Operatore",
             entry.motivo ?? null,
           ]
@@ -219,7 +224,9 @@ export class PriceListRepository {
       }
       await db.execute("COMMIT;");
     } catch (err) {
-      await db.execute("ROLLBACK;");
+      try {
+        await db.execute("ROLLBACK;");
+      } catch {}
       console.error("[PriceListRepository] Errore inserimento log:", err);
     }
   }
@@ -268,20 +275,20 @@ export class PriceListRepository {
             row.fornitore ?? null,
             row.codice_articolo ?? null,
             row.data_ref ?? null,
-            row.descrizione,
+            row.descrizione || "",
             row.um ?? "NR.",
-            row.perc_pub ?? null,
-            row.prezzo_pubblico ?? null,
-            row.perc_prof ?? null,
-            row.prezzo_profess ?? null,
-            row.perc_fatt ?? null,
-            row.prezzo_fattura ?? null,
-            row.prezzo_acquisto ?? null,
-            row.aumento ?? null,
-            row.r1 ?? null,
-            row.maga ?? null,
-            row.r2 ?? null,
-            row.perc_iva ?? 0.22,
+            cleanNum5(row.perc_pub),
+            cleanNum5(row.prezzo_pubblico),
+            cleanNum5(row.perc_prof),
+            cleanNum5(row.prezzo_profess),
+            cleanNum5(row.perc_fatt),
+            cleanNum5(row.prezzo_fattura),
+            cleanNum5(row.prezzo_acquisto),
+            cleanNum5(row.aumento),
+            cleanNum5(row.r1),
+            cleanNum5(row.maga),
+            cleanNum5(row.r2),
+            cleanNum5(row.perc_iva ?? 0.22),
             row.note ?? null,
             row.created_at || new Date().toISOString(),
             new Date().toISOString(),
@@ -290,7 +297,9 @@ export class PriceListRepository {
       }
       await db.execute("COMMIT;");
     } catch (err) {
-      await db.execute("ROLLBACK;");
+      try {
+        await db.execute("ROLLBACK;");
+      } catch {}
       throw err;
     }
   }
@@ -308,7 +317,9 @@ export class PriceListRepository {
       }
       await db.execute("COMMIT;");
     } catch (err) {
-      await db.execute("ROLLBACK;");
+      try {
+        await db.execute("ROLLBACK;");
+      } catch {}
       throw err;
     }
   }

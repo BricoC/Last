@@ -8,18 +8,23 @@
  * - prezzo_profess = r2 * (1 + perc_prof) * (1 + perc_iva)  [IVA inclusa]
  */
 
+export function round5(num: number): number {
+  if (isNaN(num) || !isFinite(num)) return 0;
+  return Math.round(num * 100000) / 100000;
+}
+
 export function calculateR1(prezzoAcquisto: number | null | undefined, aumentoPercent: number | null | undefined): number {
   const acq = Number(prezzoAcquisto) || 0;
   const aum = Number(aumentoPercent) || 0;
   // aumento è memorizzato come percentuale intera (es. 5 = 5%) o frazione (es. 0.05)
   const aumFrac = aum > 1 ? aum / 100 : aum;
-  return acq * (1 + aumFrac);
+  return round5(acq * (1 + aumFrac));
 }
 
 export function calculateR2(r1: number, magaPercent: number | null | undefined): number {
   const maga = Number(magaPercent) || 0;
   const magaFrac = maga > 1 ? maga / 100 : maga;
-  return r1 * (1 + magaFrac);
+  return round5(r1 * (1 + magaFrac));
 }
 
 export function calculateCostoMaggiorato(
@@ -35,12 +40,12 @@ export function calculatePrezzoFattura(costoMaggiorato: number, percFatt: number
   if (costoMaggiorato <= 0) return 0;
   const p = Number(percFatt) || 0;
   const frac = p > 2 ? p / 100 : p;
-  return costoMaggiorato * (1 + frac);
+  return round5(costoMaggiorato * (1 + frac));
 }
 
 export function calculatePercFattura(prezzoFattura: number, costoMaggiorato: number): number {
   if (costoMaggiorato <= 0) return 0;
-  return ((prezzoFattura - costoMaggiorato) / costoMaggiorato) * 100;
+  return round5(((prezzoFattura - costoMaggiorato) / costoMaggiorato) * 100);
 }
 
 export function calculatePrezzoPubblico(
@@ -53,7 +58,7 @@ export function calculatePrezzoPubblico(
   const frac = p > 2 ? p / 100 : p;
   const iva = Number(percIva) || 0.22;
   const ivaFrac = iva > 1 ? iva / 100 : iva;
-  return costoMaggiorato * (1 + frac) * (1 + ivaFrac);
+  return round5(costoMaggiorato * (1 + frac) * (1 + ivaFrac));
 }
 
 export function calculatePercPubblico(
@@ -65,7 +70,7 @@ export function calculatePercPubblico(
   const iva = Number(percIva) || 0.22;
   const ivaFrac = iva > 1 ? iva / 100 : iva;
   const nettoIva = prezzoPubblico / (1 + ivaFrac);
-  return ((nettoIva - costoMaggiorato) / costoMaggiorato) * 100;
+  return round5(((nettoIva - costoMaggiorato) / costoMaggiorato) * 100);
 }
 
 export function calculatePrezzoProfess(
@@ -78,7 +83,7 @@ export function calculatePrezzoProfess(
   const frac = p > 2 ? p / 100 : p;
   const iva = Number(percIva) || 0.22;
   const ivaFrac = iva > 1 ? iva / 100 : iva;
-  return costoMaggiorato * (1 + frac) * (1 + ivaFrac);
+  return round5(costoMaggiorato * (1 + frac) * (1 + ivaFrac));
 }
 
 export function calculatePercProfess(
@@ -90,5 +95,6 @@ export function calculatePercProfess(
   const iva = Number(percIva) || 0.22;
   const ivaFrac = iva > 1 ? iva / 100 : iva;
   const nettoIva = prezzoProfess / (1 + ivaFrac);
-  return ((nettoIva - costoMaggiorato) / costoMaggiorato) * 100;
+  return round5(((nettoIva - costoMaggiorato) / costoMaggiorato) * 100);
 }
+

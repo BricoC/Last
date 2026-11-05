@@ -5,6 +5,7 @@ import React, {
   useRef,
   useDeferredValue,
   useCallback,
+  memo,
 } from "react";
 import {
   Search,
@@ -16,6 +17,7 @@ import {
   Save,
   CheckCircle2,
   FileSpreadsheet,
+  Plus,
 } from "lucide-react";
 import { ListinoGeneraleRow, PriceListLogEntry } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
@@ -33,6 +35,7 @@ import {
   BulkOperationPayload,
 } from "./components/BulkEditToolbar";
 import {
+  round5,
   calculateR1,
   calculateR2,
   calculateCostoMaggiorato,
@@ -45,7 +48,6 @@ import {
 } from "./utils/priceFormulas";
 
 const BATCH_SIZE = 150;
-const BUFFER_EMPTY_ROWS_COUNT = 10;
 
 type SortField =
   | "descrizione"
@@ -59,7 +61,8 @@ type SortField =
   | "prezzo_acquisto"
   | "costo_maggiorato";
 
-// ID delle colonne modificabili nella griglia Excel
+// Ordine esatto colonne modificabili richiesto:
+// ... | U.M. | % PUB | PUBBLICO | % PROF | PROFESS | % FATT | FATTURA | ACQUISTO BASE | IVA | AUMENTO % | MAGAZZINO % | ACQ. MAGG.
 const EDITABLE_COL_ORDER = [
   "cat",
   "fornitore",
@@ -67,23 +70,23 @@ const EDITABLE_COL_ORDER = [
   "data_ref",
   "descrizione",
   "um",
-  "prezzo_acquisto",
-  "aumento",
-  "maga",
   "perc_pub",
   "prezzo_pubblico",
   "perc_prof",
   "prezzo_profess",
   "perc_fatt",
   "prezzo_fattura",
+  "prezzo_acquisto", // tra fattura ed iva
   "perc_iva",
+  "aumento", // dopo iva
+  "maga", // dopo iva
 ] as const;
 
 type EditableColumnKey = (typeof EDITABLE_COL_ORDER)[number];
 
-function createEmptyBufferRow(idx: number): ListinoGeneraleRow {
+function createBlankRow(): ListinoGeneraleRow {
   return {
-    id: `new_temp_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+    id: `new_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     source_table: "listino_generale",
     cat: "",
     fornitore: "",
@@ -111,14 +114,34 @@ function parseInputNumber(val: string): number | null {
   const clean = val.trim().replace("€", "").replace("%", "").replace(/\s+/g, "").replace(",", ".");
   if (clean === "") return null;
   const num = parseFloat(clean);
-  return isNaN(num) ? null : num;
+  return isNaN(num) ? null : round5(num);
 }
 
 function parseInputPercent(val: string): number | null {
   const num = parseInputNumber(val);
   if (num == null) return null;
-  // Se l'utente digita 30 o 30%, in DB lo normalizziamo se > 2 -> num / 100
-  return num > 2 ? num / 100 : num;
+  return round5(num > 2 ? num / 100 : num);
+}
+
+// Formattazione a 5 decimali pulita
+function formatEuro5(val: number | null | undefined): string {
+  if (val == null || isNaN(val)) return "—";
+  const rounded = round5(val);
+  return `€ ${rounded.toLocaleString("it-IT", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 5,
+  })}`;
+}
+
+// Formattazione percentuale pulita
+function formatPercentClean(val: number | null | undefined): string {
+  if (val == null || isNaN(val)) return "—";
+  const pct = val > 2 ? val : val * 100;
+  const rounded = Math.round(pct * 100) / 100;
+  return `${rounded.toLocaleString("it-IT", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}%`;
 }
 
 export const ProductListPage: React.FC = () => {
@@ -138,17 +161,14 @@ export const ProductListPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 10 Righe vuote sempre in fondo per inserimento continuo
-  const [bufferRows, setBufferRows] = useState<ListinoGeneraleRow[]>(() =>
-    Array.from({ length: BUFFER_EMPTY_ROWS_COUNT }, (_, i) => createEmptyBufferRow(i))
-  );
+  // 1 Riga vuota sempre in cima per creazione nuovi articoli
+  const [newTopRow, setNewTopRow] = useState<ListinoGeneraleRow>(() => createBlankRow());
 
-  // Tracciamento modifiche non salvate (mappa id -> riga)
+  // Tracciamento modifiche non salvate
   const [dirtyRows, setDirtyRows] = useState<Map<string, ListinoGeneraleRow>>(new Map());
   const [originalRowsSnapshot, setOriginalRowsSnapshot] = useState<Map<string, ListinoGeneraleRow>>(new Map());
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
-  const [autoSaveCountdown, setAutoSaveCountdown] = useState<number | null>(null);
 
   // Selezione righe per Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -159,18 +179,22 @@ export const ProductListPage: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
-  const [sortField, setSortField] = useState<SortField>("descrizione");
+  const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
 
-  // Cella attiva ed editing stile Excel
+  // Cella attiva ed editing
   const [activeCell, setActiveCell] = useState<{ rowId: string; colId: string } | null>(null);
   const [editingCell, setEditingCell] = useState<{ rowId: string; colId: string } | null>(null);
-  const [cellEditValue, setCellEditValue] = useState<string>("");
-  const cellInputRef = useRef<HTMLInputElement>(null);
-  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [initialEditChar, setInitialEditChar] = useState<string | undefined>(undefined);
 
   // Modale Storico Variazioni Riga (Colonna A...)
   const [historyModalItem, setHistoryModalItem] = useState<ListinoGeneraleRow | null>(null);
+
+  // Riferimento container tabella
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+
+  // Timer auto-save silenzioso ogni 10 minuti (configurabile)
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Caricamento iniziale da SQLite locale
   const loadData = useCallback(async () => {
@@ -182,7 +206,6 @@ export const ProductListPage: React.FC = () => {
       const rows = await priceListRepository.searchGeneral("", 15000);
       setItems(rows);
 
-      // Crea snapshot iniziale per calcolo differenze log
       const snapshot = new Map<string, ListinoGeneraleRow>();
       for (const r of rows) {
         snapshot.set(r.id, { ...r });
@@ -217,6 +240,7 @@ export const ProductListPage: React.FC = () => {
   // Ricerca tokenizzata
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
 
+  // Visualizzazione elementi: filtrati per ricerca rapida, ma l'ordine rimane STABILE durante l'editing!
   const filteredItems = useMemo(() => {
     let result = items;
 
@@ -225,6 +249,10 @@ export const ProductListPage: React.FC = () => {
         const text = `${item.descrizione} ${item.codice_articolo || ""} ${item.fornitore || ""} ${item.cat || ""}`.toLowerCase();
         return searchTokens.every((token) => text.includes(token));
       });
+    }
+
+    if (!sortField) {
+      return result;
     }
 
     return [...result].sort((a, b) => {
@@ -266,7 +294,7 @@ export const ProductListPage: React.FC = () => {
     }
   };
 
-  // Funzione unificata di aggiornamento riga con calcoli bidirezionali
+  // Funzione di calcolo riga con formule bidirezionali e arrotondamento a 5 decimali
   const updateRowWithField = useCallback(
     (
       prevRow: ListinoGeneraleRow,
@@ -295,21 +323,19 @@ export const ProductListPage: React.FC = () => {
           updated.um = rawVal ? String(rawVal).trim().toUpperCase() : "NR.";
           break;
         case "prezzo_acquisto": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputNumber(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputNumber(String(rawVal ?? ""));
           updated.prezzo_acquisto = num;
-          // Ricalcola R1, R2
           const r1 = calculateR1(num, updated.aumento);
           const r2 = calculateR2(r1, updated.maga);
           updated.r1 = r1;
           updated.r2 = r2;
-          // Aggiorna prezzi di vendita mantenendo le percentuali fisse
           updated.prezzo_fattura = calculatePrezzoFattura(r2, updated.perc_fatt);
           updated.prezzo_pubblico = calculatePrezzoPubblico(r2, updated.perc_pub, updated.perc_iva);
           updated.prezzo_profess = calculatePrezzoProfess(r2, updated.perc_prof, updated.perc_iva);
           break;
         }
         case "aumento": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal ?? ""));
           updated.aumento = num;
           const r1 = calculateR1(updated.prezzo_acquisto, num);
           const r2 = calculateR2(r1, updated.maga);
@@ -321,7 +347,7 @@ export const ProductListPage: React.FC = () => {
           break;
         }
         case "maga": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal ?? ""));
           updated.maga = num;
           const r1 = calculateR1(updated.prezzo_acquisto, updated.aumento);
           const r2 = calculateR2(r1, num);
@@ -333,55 +359,55 @@ export const ProductListPage: React.FC = () => {
           break;
         }
         case "perc_pub": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal ?? ""));
           updated.perc_pub = num;
           const costoMaggiorato = calculateCostoMaggiorato(updated.prezzo_acquisto, updated.aumento, updated.maga);
           updated.prezzo_pubblico = calculatePrezzoPubblico(costoMaggiorato, num, updated.perc_iva);
           break;
         }
         case "prezzo_pubblico": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputNumber(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputNumber(String(rawVal ?? ""));
           updated.prezzo_pubblico = num;
           const costoMaggiorato = calculateCostoMaggiorato(updated.prezzo_acquisto, updated.aumento, updated.maga);
           if (num != null && costoMaggiorato > 0) {
-            updated.perc_pub = calculatePercPubblico(num, costoMaggiorato, updated.perc_iva) / 100;
+            updated.perc_pub = round5(calculatePercPubblico(num, costoMaggiorato, updated.perc_iva) / 100);
           }
           break;
         }
         case "perc_prof": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal ?? ""));
           updated.perc_prof = num;
           const costoMaggiorato = calculateCostoMaggiorato(updated.prezzo_acquisto, updated.aumento, updated.maga);
           updated.prezzo_profess = calculatePrezzoProfess(costoMaggiorato, num, updated.perc_iva);
           break;
         }
         case "prezzo_profess": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputNumber(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputNumber(String(rawVal ?? ""));
           updated.prezzo_profess = num;
           const costoMaggiorato = calculateCostoMaggiorato(updated.prezzo_acquisto, updated.aumento, updated.maga);
           if (num != null && costoMaggiorato > 0) {
-            updated.perc_prof = calculatePercProfess(num, costoMaggiorato, updated.perc_iva) / 100;
+            updated.perc_prof = round5(calculatePercProfess(num, costoMaggiorato, updated.perc_iva) / 100);
           }
           break;
         }
         case "perc_fatt": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal ?? ""));
           updated.perc_fatt = num;
           const costoMaggiorato = calculateCostoMaggiorato(updated.prezzo_acquisto, updated.aumento, updated.maga);
           updated.prezzo_fattura = calculatePrezzoFattura(costoMaggiorato, num);
           break;
         }
         case "prezzo_fattura": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputNumber(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputNumber(String(rawVal ?? ""));
           updated.prezzo_fattura = num;
           const costoMaggiorato = calculateCostoMaggiorato(updated.prezzo_acquisto, updated.aumento, updated.maga);
           if (num != null && costoMaggiorato > 0) {
-            updated.perc_fatt = calculatePercFattura(num, costoMaggiorato) / 100;
+            updated.perc_fatt = round5(calculatePercFattura(num, costoMaggiorato) / 100);
           }
           break;
         }
         case "perc_iva": {
-          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal || ""));
+          const num = typeof rawVal === "number" ? rawVal : parseInputPercent(String(rawVal ?? ""));
           updated.perc_iva = num ?? 0.22;
           const costoMaggiorato = calculateCostoMaggiorato(updated.prezzo_acquisto, updated.aumento, updated.maga);
           updated.prezzo_pubblico = calculatePrezzoPubblico(costoMaggiorato, updated.perc_pub, updated.perc_iva);
@@ -397,83 +423,22 @@ export const ProductListPage: React.FC = () => {
     []
   );
 
-  // Applica una modifica ad una riga esistente o ad una delle 10 righe vuote
-  const applyCellChange = useCallback(
-    (rowId: string, colId: string, value: string | number | null) => {
-      // 1. Controlla se la modifica è su una delle 10 righe vuote del buffer in fondo
-      const bufferIndex = bufferRows.findIndex((r) => r.id === rowId);
-      if (bufferIndex !== -1) {
-        const targetRow = bufferRows[bufferIndex];
-        const updatedRow = updateRowWithField(targetRow, colId, value);
-
-        // Se la riga ha ora almeno una descrizione o codice o prezzo, viene promossa a riga attiva
-        const hasContent = Boolean(
-          updatedRow.descrizione?.trim() ||
-            updatedRow.codice_articolo?.trim() ||
-            updatedRow.prezzo_acquisto != null ||
-            updatedRow.prezzo_fattura != null
-        );
-
-        if (hasContent) {
-          // Promuovi a riga reale
-          setItems((prev) => [updatedRow, ...prev]);
-          setDirtyRows((prev) => {
-            const next = new Map(prev);
-            next.set(updatedRow.id, updatedRow);
-            return next;
-          });
-          // Rimpiazza lo slot nel buffer per mantenere SEMPRE esattamente 10 righe vuote
-          setBufferRows((prev) => {
-            const next = [...prev];
-            next.splice(bufferIndex, 1);
-            next.push(createEmptyBufferRow(Date.now()));
-            return next;
-          });
-        } else {
-          // Aggiorna solo nello stato del buffer
-          setBufferRows((prev) => {
-            const next = [...prev];
-            next[bufferIndex] = updatedRow;
-            return next;
-          });
-        }
-        return;
-      }
-
-      // 2. Modifica su una riga normale già presente in items
-      setItems((prev) =>
-        prev.map((r) => {
-          if (r.id !== rowId) return r;
-          const updated = updateRowWithField(r, colId, value);
-          setDirtyRows((dirtyPrev) => {
-            const next = new Map(dirtyPrev);
-            next.set(rowId, updated);
-            return next;
-          });
-          return updated;
-        })
-      );
-    },
-    [bufferRows, updateRowWithField]
-  );
-
-  // Salvataggio effettivo (SQLite locale + Log + Supabase asincrono)
+  // Salvataggio effettivo
   const saveAllPendingChanges = useCallback(async () => {
     if (dirtyRows.size === 0 || isSaving) return;
     setIsSaving(true);
+    setError(null);
     try {
       const rowsToSave = Array.from(dirtyRows.values());
 
-      // 1. Prepara log delle variazioni di prezzo per listini_prezzi_log
       const logEntries: Omit<PriceListLogEntry, "id">[] = [];
       const nowIso = new Date().toISOString();
       const operatorName = currentUser?.name || currentUser?.station_name || "Operatore";
 
       for (const row of rowsToSave) {
         const original = originalRowsSnapshot.get(row.id);
-        if (original) {
-          // Prezzo Acquisto
-          if (original.prezzo_acquisto !== row.prezzo_acquisto && row.codice_articolo) {
+        if (original && row.codice_articolo) {
+          if (original.prezzo_acquisto !== row.prezzo_acquisto) {
             const oldV = original.prezzo_acquisto ?? 0;
             const newV = row.prezzo_acquisto ?? 0;
             const pct = oldV > 0 ? ((newV - oldV) / oldV) * 100 : 0;
@@ -486,13 +451,12 @@ export const ProductListPage: React.FC = () => {
               campo_modificato: "prezzo_acquisto",
               vecchio_valore: oldV,
               nuovo_valore: newV,
-              variazione_pct: Math.round(pct * 100) / 100,
+              variazione_pct: round5(pct),
               operatore: operatorName,
               motivo: "Modifica Excel Listino Generale",
             });
           }
-          // Prezzo Fattura
-          if (original.prezzo_fattura !== row.prezzo_fattura && row.codice_articolo) {
+          if (original.prezzo_fattura !== row.prezzo_fattura) {
             const oldV = original.prezzo_fattura ?? 0;
             const newV = row.prezzo_fattura ?? 0;
             const pct = oldV > 0 ? ((newV - oldV) / oldV) * 100 : 0;
@@ -505,13 +469,12 @@ export const ProductListPage: React.FC = () => {
               campo_modificato: "prezzo_fattura",
               vecchio_valore: oldV,
               nuovo_valore: newV,
-              variazione_pct: Math.round(pct * 100) / 100,
+              variazione_pct: round5(pct),
               operatore: operatorName,
               motivo: "Modifica Excel Listino Generale",
             });
           }
-          // Prezzo Pubblico
-          if (original.prezzo_pubblico !== row.prezzo_pubblico && row.codice_articolo) {
+          if (original.prezzo_pubblico !== row.prezzo_pubblico) {
             const oldV = original.prezzo_pubblico ?? 0;
             const newV = row.prezzo_pubblico ?? 0;
             const pct = oldV > 0 ? ((newV - oldV) / oldV) * 100 : 0;
@@ -524,7 +487,7 @@ export const ProductListPage: React.FC = () => {
               campo_modificato: "prezzo_pubblico",
               vecchio_valore: oldV,
               nuovo_valore: newV,
-              variazione_pct: Math.round(pct * 100) / 100,
+              variazione_pct: round5(pct),
               operatore: operatorName,
               motivo: "Modifica Excel Listino Generale",
             });
@@ -532,15 +495,12 @@ export const ProductListPage: React.FC = () => {
         }
       }
 
-      // 2. Salva in SQLite locale
       await priceListRepository.saveGeneralRows(rowsToSave);
 
-      // 3. Salva logs in SQLite se presenti
       if (logEntries.length > 0) {
         await priceListRepository.logPriceChanges(logEntries);
       }
 
-      // 4. Aggiorna snapshot locale
       setOriginalRowsSnapshot((prev) => {
         const next = new Map(prev);
         for (const r of rowsToSave) {
@@ -549,15 +509,11 @@ export const ProductListPage: React.FC = () => {
         return next;
       });
 
-      // 5. Pulisci dirtyRows
       setDirtyRows(new Map());
       setLastSavedTime(new Date());
 
-      // 6. Push asincrono verso Supabase Cloud (senza bloccare la UI)
-      void priceListSyncService.pushGeneralBatchToSupabase(rowsToSave).then((res) => {
-        if (!res.success && res.error) {
-          console.warn("[ProductListPage] Push Supabase asincrono:", res.error);
-        }
+      void priceListSyncService.pushGeneralBatchToSupabase(rowsToSave).catch((e) => {
+        console.warn("[ProductListPage] Push Supabase asincrono non riuscito:", e);
       });
     } catch (err: any) {
       console.error("[ProductListPage] Errore salvataggio:", err);
@@ -567,112 +523,131 @@ export const ProductListPage: React.FC = () => {
     }
   }, [dirtyRows, isSaving, originalRowsSnapshot, currentUser]);
 
-  // Gestione Timer Auto-Save (10 secondi dall'ultima modifica)
-  useEffect(() => {
-    if (dirtyRows.size === 0) {
-      setAutoSaveCountdown(null);
+  // Gestione timer auto-save silenzioso:
+  // Parte alla PRIMA modifica e solo quella, non si resetta durante i 10 minuti, mai due contemporanei.
+  const scheduleSilentAutoSaveIfNeeded = useCallback(() => {
+    if (autoSaveTimerRef.current !== null) {
+      // Timer già attivo per questo ciclo, non fare nulla
       return;
     }
+    const savedMinStr = localStorage.getItem("price_list_autosave_minutes");
+    const intervalMin = savedMinStr ? Math.max(1, parseInt(savedMinStr, 10)) : 10;
+    const intervalMs = intervalMin * 60 * 1000;
 
-    setAutoSaveCountdown(10);
-    const interval = setInterval(() => {
-      setAutoSaveCountdown((prev) => {
-        if (prev === null || prev <= 1) {
-          clearInterval(interval);
-          void saveAllPendingChanges();
-          return null;
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void saveAllPendingChanges();
+    }, intervalMs);
+  }, [saveAllPendingChanges]);
+
+  // Applica modifica ad una cella
+  const applyCellChange = useCallback(
+    (rowId: string, colId: string, value: string | number | null) => {
+      // 1. Modifica sulla riga vuota in cima per creazione nuovo articolo
+      if (rowId === newTopRow.id) {
+        const updatedTop = updateRowWithField(newTopRow, colId, value);
+
+        // Se ha almeno descrizione, codice o prezzo, lo promuoviamo ad articolo attivo
+        const hasData = Boolean(
+          updatedTop.descrizione?.trim() ||
+            updatedTop.codice_articolo?.trim() ||
+            updatedTop.prezzo_acquisto != null ||
+            updatedTop.prezzo_fattura != null
+        );
+
+        if (hasData) {
+          // Inserisci in cima agli articoli senza re-ordinare
+          setItems((prev) => [updatedTop, ...prev]);
+          setDirtyRows((prev) => {
+            const next = new Map(prev);
+            next.set(updatedTop.id, updatedTop);
+            return next;
+          });
+          // Resetta la riga vuota in cima
+          setNewTopRow(createBlankRow());
+          scheduleSilentAutoSaveIfNeeded();
+        } else {
+          setNewTopRow(updatedTop);
         }
-        return prev - 1;
-      });
-    }, 1000);
+        return;
+      }
 
-    return () => clearInterval(interval);
-  }, [dirtyRows, saveAllPendingChanges]);
+      // 2. Modifica su riga normale
+      setItems((prev) =>
+        prev.map((r) => {
+          if (r.id !== rowId) return r;
+          const updated = updateRowWithField(r, colId, value);
+          setDirtyRows((dirtyPrev) => {
+            const next = new Map(dirtyPrev);
+            next.set(rowId, updated);
+            return next;
+          });
+          return updated;
+        })
+      );
+      scheduleSilentAutoSaveIfNeeded();
+    },
+    [newTopRow, updateRowWithField, scheduleSilentAutoSaveIfNeeded]
+  );
 
-  // Gestione Apertura/Chiusura Editor Cella
-  const startEditing = (rowId: string, colId: string, initialVal?: string) => {
+  // Apertura editor cella
+  const startEditing = (rowId: string, colId: string, char?: string) => {
     if (!canEdit) return;
     setActiveCell({ rowId, colId });
     setEditingCell({ rowId, colId });
-
-    // Cerca il valore corrente
-    const allRows = [...filteredItems, ...bufferRows];
-    const row = allRows.find((r) => r.id === rowId);
-    let valStr = initialVal ?? "";
-    if (initialVal === undefined && row) {
-      const v = (row as any)[colId];
-      if (v != null) {
-        if (
-          colId === "perc_pub" ||
-          colId === "perc_prof" ||
-          colId === "perc_fatt" ||
-          colId === "aumento" ||
-          colId === "maga" ||
-          colId === "perc_iva"
-        ) {
-          const pct = v > 2 ? v : v * 100;
-          valStr = `${Math.round(pct * 10) / 10}%`;
-        } else {
-          valStr = String(v);
-        }
-      }
-    }
-    setCellEditValue(valStr);
-    setTimeout(() => {
-      cellInputRef.current?.focus();
-      cellInputRef.current?.select();
-    }, 20);
+    setInitialEditChar(char);
   };
 
-  const commitCellEdit = () => {
-    if (editingCell) {
-      applyCellChange(editingCell.rowId, editingCell.colId, cellEditValue);
-      setEditingCell(null);
-    }
+  const commitCellEdit = (rowId: string, colId: string, committedValue: string) => {
+    applyCellChange(rowId, colId, committedValue);
+    setEditingCell(null);
+    setInitialEditChar(undefined);
   };
 
   const cancelCellEdit = () => {
     setEditingCell(null);
-    setCellEditValue("");
+    setInitialEditChar(undefined);
   };
 
-  // Navigazione tastiera stile Excel (Invio, Tab, Frecce, Escape)
-  const handleCellKeyDown = (e: React.KeyboardEvent, rowId: string, colId: string) => {
+  // Navigazione tastiera stile Excel
+  const handleCellKeyDown = (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string
+  ) => {
     const isEditing = Boolean(editingCell && editingCell.rowId === rowId && editingCell.colId === colId);
     const allVisibleCols = EDITABLE_COL_ORDER.filter((c) => visibleColumns[c] !== false);
     const colIdx = allVisibleCols.indexOf(colId as EditableColumnKey);
-    const allDisplayRows = [...filteredItems.slice(0, visibleCount), ...bufferRows];
-    const rowIdx = allDisplayRows.findIndex((r) => r.id === rowId);
+    const allRows = [newTopRow, ...filteredItems.slice(0, visibleCount)];
+    const rowIdx = allRows.findIndex((r) => r.id === rowId);
 
     if (e.key === "Enter") {
       e.preventDefault();
       if (isEditing) {
-        commitCellEdit();
+        commitCellEdit(rowId, colId, currentValStr);
       }
-      // Sposta in basso sulla stessa colonna
-      if (rowIdx < allDisplayRows.length - 1) {
-        const nextRow = allDisplayRows[rowIdx + 1];
+      if (rowIdx < allRows.length - 1) {
+        const nextRow = allRows[rowIdx + 1];
         setActiveCell({ rowId: nextRow.id, colId });
       }
     } else if (e.key === "Tab") {
       e.preventDefault();
       if (isEditing) {
-        commitCellEdit();
+        commitCellEdit(rowId, colId, currentValStr);
       }
       if (e.shiftKey) {
-        // Sposta a sinistra
         if (colIdx > 0) {
           setActiveCell({ rowId, colId: allVisibleCols[colIdx - 1] });
         } else if (rowIdx > 0) {
-          const prevRow = allDisplayRows[rowIdx - 1];
+          const prevRow = allRows[rowIdx - 1];
           setActiveCell({ rowId: prevRow.id, colId: allVisibleCols[allVisibleCols.length - 1] });
         }
       } else {
-        // Sposta a destra
         if (colIdx < allVisibleCols.length - 1) {
           setActiveCell({ rowId, colId: allVisibleCols[colIdx + 1] });
-        } else if (rowIdx < allDisplayRows.length - 1) {
-          const nextRow = allDisplayRows[rowIdx + 1];
+        } else if (rowIdx < allRows.length - 1) {
+          const nextRow = allRows[rowIdx + 1];
           setActiveCell({ rowId: nextRow.id, colId: allVisibleCols[0] });
         }
       }
@@ -680,33 +655,33 @@ export const ProductListPage: React.FC = () => {
       e.preventDefault();
       cancelCellEdit();
     } else if (!isEditing) {
-      if (e.key === "ArrowDown" && rowIdx < allDisplayRows.length - 1) {
+      if (e.key === "ArrowDown" && rowIdx < allRows.length - 1) {
         e.preventDefault();
-        setActiveCell({ rowId: allDisplayRows[rowIdx + 1].id, colId });
+        e.stopPropagation();
+        setActiveCell({ rowId: allRows[rowIdx + 1].id, colId });
       } else if (e.key === "ArrowUp" && rowIdx > 0) {
         e.preventDefault();
-        setActiveCell({ rowId: allDisplayRows[rowIdx - 1].id, colId });
+        e.stopPropagation();
+        setActiveCell({ rowId: allRows[rowIdx - 1].id, colId });
       } else if (e.key === "ArrowRight" && colIdx < allVisibleCols.length - 1) {
         e.preventDefault();
+        e.stopPropagation();
         setActiveCell({ rowId, colId: allVisibleCols[colIdx + 1] });
       } else if (e.key === "ArrowLeft" && colIdx > 0) {
         e.preventDefault();
+        e.stopPropagation();
         setActiveCell({ rowId, colId: allVisibleCols[colIdx - 1] });
       } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        // Se si inizia a digitare un carattere qualsiasi, entra in edit mode con quel carattere
         startEditing(rowId, colId, e.key);
       }
     }
   };
 
-  // Supporto Incolla a più celle/righe/colonne stile Excel (TSV / Tab-delimited)
+  // Supporto Incolla stile Excel
   const handleGridPaste = (e: React.ClipboardEvent) => {
-    if (!canEdit) return;
+    if (!canEdit || !activeCell || editingCell) return;
     const clipText = e.clipboardData.getData("text/plain");
-    if (!clipText || !activeCell) return;
-
-    // Se stiamo già editando una specifica casella di testo con cursore dentro, lascia fare al browser
-    if (editingCell) return;
+    if (!clipText) return;
 
     e.preventDefault();
     const rows = clipText.split(/\r?\n/).filter((line) => line.length > 0);
@@ -716,24 +691,20 @@ export const ProductListPage: React.FC = () => {
     const startColIdx = allVisibleCols.indexOf(activeCell.colId as EditableColumnKey);
     if (startColIdx === -1) return;
 
-    const allDisplayRows = [...filteredItems, ...bufferRows];
-    const startRowIdx = allDisplayRows.findIndex((r) => r.id === activeCell.rowId);
+    const allRows = [newTopRow, ...filteredItems];
+    const startRowIdx = allRows.findIndex((r) => r.id === activeCell.rowId);
     if (startRowIdx === -1) return;
 
-    let modifiedCount = 0;
-
-    // Itera sulle righe e colonne incollate
     rows.forEach((rowStr, rOffset) => {
       const targetRowIdx = startRowIdx + rOffset;
       const cells = rowStr.split("\t");
 
       let targetRow: ListinoGeneraleRow;
-      if (targetRowIdx < allDisplayRows.length) {
-        targetRow = allDisplayRows[targetRowIdx];
+      if (targetRowIdx < allRows.length) {
+        targetRow = allRows[targetRowIdx];
       } else {
-        // Genera nuova riga se l'incolla va oltre le righe disponibili
-        targetRow = createEmptyBufferRow(Date.now() + rOffset);
-        setBufferRows((prev) => [...prev, targetRow]);
+        targetRow = createBlankRow();
+        setItems((prev) => [...prev, targetRow]);
       }
 
       cells.forEach((cellVal, cOffset) => {
@@ -741,15 +712,12 @@ export const ProductListPage: React.FC = () => {
         if (targetColIdx < allVisibleCols.length) {
           const colId = allVisibleCols[targetColIdx];
           applyCellChange(targetRow.id, colId, cellVal.trim());
-          modifiedCount++;
         }
       });
     });
-
-    console.info(`[Excel Paste] Incollate ${modifiedCount} celle da appunti.`);
   };
 
-  // Supporto Copia TSV di righe/celle selezionate (Ctrl+C)
+  // Supporto Copia TSV (Ctrl+C)
   const handleGridCopy = (e: React.KeyboardEvent) => {
     if (e.key === "c" && (e.ctrlKey || e.metaKey) && !editingCell) {
       if (selectedIds.size > 0) {
@@ -762,8 +730,8 @@ export const ProductListPage: React.FC = () => {
         void navigator.clipboard.writeText(tsv);
       } else if (activeCell) {
         e.preventDefault();
-        const allDisplayRows = [...filteredItems, ...bufferRows];
-        const row = allDisplayRows.find((r) => r.id === activeCell.rowId);
+        const allRows = [newTopRow, ...filteredItems];
+        const row = allRows.find((r) => r.id === activeCell.rowId);
         if (row) {
           const val = String((row as any)[activeCell.colId] ?? "");
           void navigator.clipboard.writeText(val);
@@ -778,9 +746,7 @@ export const ProductListPage: React.FC = () => {
 
     if (payload.action === "delete") {
       const idsToDelete = Array.from(selectedIds);
-      // Elimina da SQLite locale
       await priceListRepository.deleteGeneralRows(idsToDelete);
-      // Rimuovi da stato
       setItems((prev) => prev.filter((r) => !selectedIds.has(r.id)));
       setDirtyRows((prev) => {
         const next = new Map(prev);
@@ -788,12 +754,10 @@ export const ProductListPage: React.FC = () => {
         return next;
       });
       setSelectedIds(new Set());
-      // Elimina da Supabase in background
       void priceListSyncService.deleteGeneralBatchFromSupabase(idsToDelete);
       return;
     }
 
-    // Applica variazioni di massa
     setItems((prev) =>
       prev.map((r) => {
         if (!selectedIds.has(r.id)) return r;
@@ -805,7 +769,7 @@ export const ProductListPage: React.FC = () => {
           case "var_acq_perc": {
             if (!isNaN(numVal)) {
               const currentAcq = updated.prezzo_acquisto || 0;
-              const newAcq = currentAcq * (1 + numVal / 100);
+              const newAcq = round5(currentAcq * (1 + numVal / 100));
               updated = updateRowWithField(updated, "prezzo_acquisto", newAcq);
             }
             break;
@@ -813,27 +777,27 @@ export const ProductListPage: React.FC = () => {
           case "var_acq_val": {
             if (!isNaN(numVal)) {
               const currentAcq = updated.prezzo_acquisto || 0;
-              const newAcq = Math.max(0, currentAcq + numVal);
+              const newAcq = round5(Math.max(0, currentAcq + numVal));
               updated = updateRowWithField(updated, "prezzo_acquisto", newAcq);
             }
             break;
           }
           case "set_aumento": {
             if (!isNaN(numVal)) {
-              updated = updateRowWithField(updated, "aumento", numVal / 100);
+              updated = updateRowWithField(updated, "aumento", round5(numVal / 100));
             }
             break;
           }
           case "set_maga": {
             if (!isNaN(numVal)) {
-              updated = updateRowWithField(updated, "maga", numVal / 100);
+              updated = updateRowWithField(updated, "maga", round5(numVal / 100));
             }
             break;
           }
           case "var_pub_perc": {
             if (!isNaN(numVal)) {
               const currentPub = updated.prezzo_pubblico || 0;
-              const newPub = currentPub * (1 + numVal / 100);
+              const newPub = round5(currentPub * (1 + numVal / 100));
               updated = updateRowWithField(updated, "prezzo_pubblico", newPub);
             }
             break;
@@ -841,7 +805,7 @@ export const ProductListPage: React.FC = () => {
           case "var_prof_perc": {
             if (!isNaN(numVal)) {
               const currentProf = updated.prezzo_profess || 0;
-              const newProf = currentProf * (1 + numVal / 100);
+              const newProf = round5(currentProf * (1 + numVal / 100));
               updated = updateRowWithField(updated, "prezzo_profess", newProf);
             }
             break;
@@ -849,14 +813,14 @@ export const ProductListPage: React.FC = () => {
           case "var_fatt_perc": {
             if (!isNaN(numVal)) {
               const currentFatt = updated.prezzo_fattura || 0;
-              const newFatt = currentFatt * (1 + numVal / 100);
+              const newFatt = round5(currentFatt * (1 + numVal / 100));
               updated = updateRowWithField(updated, "prezzo_fattura", newFatt);
             }
             break;
           }
           case "set_perc_fatt": {
             if (!isNaN(numVal)) {
-              updated = updateRowWithField(updated, "perc_fatt", numVal / 100);
+              updated = updateRowWithField(updated, "perc_fatt", round5(numVal / 100));
             }
             break;
           }
@@ -870,7 +834,7 @@ export const ProductListPage: React.FC = () => {
           }
           case "set_iva": {
             if (!isNaN(numVal)) {
-              updated = updateRowWithField(updated, "perc_iva", numVal / 100);
+              updated = updateRowWithField(updated, "perc_iva", round5(numVal / 100));
             }
             break;
           }
@@ -889,9 +853,10 @@ export const ProductListPage: React.FC = () => {
     );
 
     setSelectedIds(new Set());
+    scheduleSilentAutoSaveIfNeeded();
   };
 
-  // Seleziona / Deseleziona tutto ciò che è filtrato
+  // Toggle selezione
   const handleToggleSelectAll = () => {
     if (selectedIds.size === filteredItems.length && filteredItems.length > 0) {
       setSelectedIds(new Set());
@@ -909,21 +874,6 @@ export const ProductListPage: React.FC = () => {
     });
   };
 
-  // Formattatori numerici
-  const formatEuro = (val: number | null | undefined, digits: number = 3) => {
-    if (val == null) return "—";
-    return `€ ${val.toLocaleString("it-IT", {
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits,
-    })}`;
-  };
-
-  const formatPercent = (val: number | null | undefined) => {
-    if (val == null) return "—";
-    const pct = val > 2 ? val : val * 100;
-    return `${Math.round(pct * 10) / 10}%`;
-  };
-
   return (
     <div
       ref={tableContainerRef}
@@ -934,7 +884,6 @@ export const ProductListPage: React.FC = () => {
     >
       {/* 1. Header Toolbar */}
       <div className="p-2.5 border-b border-[var(--border)] bg-[var(--card)] flex items-center space-x-3 shrink-0">
-        {/* Ricerca Rapida F4 */}
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-[var(--muted-foreground)] absolute left-3 top-2.5" />
           <input
@@ -959,9 +908,7 @@ export const ProductListPage: React.FC = () => {
           )}
         </div>
 
-        {/* Azioni destra */}
         <div className="flex items-center space-x-2 text-xs shrink-0">
-          {/* Menu Scelta Colonne Personalizzate */}
           <ColumnVisibilityMenu
             columns={ALL_GENERAL_COLUMNS}
             visibleColumns={visibleColumns}
@@ -969,7 +916,6 @@ export const ProductListPage: React.FC = () => {
             onResetDefault={resetDefaultColumns}
           />
 
-          {/* Ricarica Locale */}
           <button
             type="button"
             onClick={loadData}
@@ -980,21 +926,21 @@ export const ProductListPage: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
 
-          {/* Tasto Salvataggio Manuale con Badge Modifiche Pendenti */}
+          {/* Tasto Salvataggio Manuale (Calmo, nessun timer o lampeggio) */}
           {canEdit && (
             <button
               type="button"
               onClick={saveAllPendingChanges}
               disabled={dirtyRows.size === 0 || isSaving}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold shadow-sm transition-all ${
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold shadow-sm transition-colors ${
                 dirtyRows.size > 0
-                  ? "bg-amber-500 hover:bg-amber-600 text-white animate-pulse"
-                  : "bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)] cursor-default"
+                  ? "bg-[var(--primary)] hover:opacity-90 text-white cursor-pointer"
+                  : "bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)] opacity-70 cursor-default"
               }`}
               title={
                 dirtyRows.size > 0
-                  ? `Salva subito ${dirtyRows.size} articoli modificati (auto-save in ${autoSaveCountdown ?? 0}s)`
-                  : "Tutte le modifiche sono sincronizzate"
+                  ? `Salva subito ${dirtyRows.size} articoli modificati`
+                  : "Nessuna modifica da salvare"
               }
             >
               {isSaving ? (
@@ -1005,12 +951,7 @@ export const ProductListPage: React.FC = () => {
               ) : dirtyRows.size > 0 ? (
                 <>
                   <Save className="w-3.5 h-3.5" />
-                  <span>Salva ({dirtyRows.size})</span>
-                  {autoSaveCountdown !== null && (
-                    <span className="text-[10px] opacity-80 font-mono ml-0.5">
-                      ({autoSaveCountdown}s)
-                    </span>
-                  )}
+                  <span>Salva Modifiche ({dirtyRows.size})</span>
                 </>
               ) : (
                 <>
@@ -1021,14 +962,12 @@ export const ProductListPage: React.FC = () => {
             </button>
           )}
 
-          {/* Badge Articoli Presenti */}
           <span className="px-2.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] font-semibold text-[var(--primary)]">
             Articoli: {totalDbCount}
           </span>
         </div>
       </div>
 
-      {/* Toolbar Modifiche di Massa (se ci sono righe selezionate) */}
       {canEdit && (
         <BulkEditToolbar
           selectedCount={selectedIds.size}
@@ -1059,7 +998,6 @@ export const ProductListPage: React.FC = () => {
         <table className="w-full border-collapse text-left text-xs whitespace-nowrap">
           <thead className="bg-[var(--background)] sticky top-0 z-20 text-[11px] uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] shadow-sm">
             <tr>
-              {/* Checkbox selezione multipla */}
               <th className="px-2 py-2 w-8 text-center bg-[var(--background)] sticky left-0 z-20">
                 <input
                   type="checkbox"
@@ -1069,14 +1007,12 @@ export const ProductListPage: React.FC = () => {
                 />
               </th>
 
-              {/* Colonna A... Storico Variazioni */}
               {visibleColumns.history !== false && (
                 <th className="px-2 py-2 w-10 text-center" title="Storico modifiche riga">
                   A...
                 </th>
               )}
 
-              {/* Categoria */}
               {visibleColumns.cat !== false && (
                 <th
                   className="px-2 py-2 w-20 max-w-[90px] cursor-pointer hover:text-[var(--foreground)]"
@@ -1089,7 +1025,6 @@ export const ProductListPage: React.FC = () => {
                 </th>
               )}
 
-              {/* Fornitore */}
               {visibleColumns.fornitore !== false && (
                 <th
                   className="px-2.5 py-2 w-20 max-w-[85px] cursor-pointer hover:text-[var(--foreground)]"
@@ -1102,7 +1037,6 @@ export const ProductListPage: React.FC = () => {
                 </th>
               )}
 
-              {/* Codice Articolo */}
               {visibleColumns.codice_articolo !== false && (
                 <th
                   className="px-2.5 py-2 w-24 max-w-[95px] cursor-pointer hover:text-[var(--foreground)]"
@@ -1115,12 +1049,10 @@ export const ProductListPage: React.FC = () => {
                 </th>
               )}
 
-              {/* Data */}
               {visibleColumns.data_ref !== false && (
                 <th className="px-2 py-2 text-center w-20">DATA</th>
               )}
 
-              {/* Descrizione */}
               {visibleColumns.descrizione !== false && (
                 <th
                   className="px-3 py-2 cursor-pointer hover:text-[var(--foreground)] min-w-[280px]"
@@ -1133,54 +1065,14 @@ export const ProductListPage: React.FC = () => {
                 </th>
               )}
 
-              {/* U.M. */}
               {visibleColumns.um !== false && (
                 <th className="px-2 py-2 text-center w-14">U.M.</th>
               )}
 
-              {/* Acquisto Base (€) */}
-              {visibleColumns.prezzo_acquisto !== false && (
-                <th
-                  className="px-3 py-2 text-right w-24 cursor-pointer hover:text-[var(--foreground)] bg-sky-950/20"
-                  onClick={() => handleToggleSort("prezzo_acquisto")}
-                >
-                  <div className="flex items-center justify-end space-x-1">
-                    <span>ACQUISTO BASE</span>
-                    <ArrowUpDown className="w-3 h-3" />
-                  </div>
-                </th>
-              )}
-
-              {/* Aumento (%) */}
-              {visibleColumns.aumento !== false && (
-                <th className="px-2.5 py-2 text-right w-16 bg-sky-950/20">AUMENTO %</th>
-              )}
-
-              {/* Magazzino (%) */}
-              {visibleColumns.maga !== false && (
-                <th className="px-2.5 py-2 text-right w-16 bg-sky-950/20">MAGAZZINO %</th>
-              )}
-
-              {/* Acquisto Maggiorato (R2) */}
-              {visibleColumns.costo_maggiorato !== false && (
-                <th
-                  className="px-3 py-2 text-right w-28 bg-sky-900/40 text-sky-300 font-bold border-x border-sky-500/30 cursor-pointer"
-                  onClick={() => handleToggleSort("costo_maggiorato")}
-                  title="Costo base + Aumento% + Magazzino% (Riferimento per tutti i ricarichi)"
-                >
-                  <div className="flex items-center justify-end space-x-1">
-                    <span>ACQ. MAGG.</span>
-                    <ArrowUpDown className="w-3 h-3" />
-                  </div>
-                </th>
-              )}
-
-              {/* % Pubblico */}
               {visibleColumns.perc_pub !== false && (
                 <th className="px-2.5 py-2 text-right w-16">% PUB</th>
               )}
 
-              {/* Prezzo Pubblico (€) */}
               {visibleColumns.prezzo_pubblico !== false && (
                 <th
                   className="px-3 py-2 text-right w-24 cursor-pointer hover:text-[var(--foreground)]"
@@ -1190,12 +1082,10 @@ export const ProductListPage: React.FC = () => {
                 </th>
               )}
 
-              {/* % Profess */}
               {visibleColumns.perc_prof !== false && (
                 <th className="px-2.5 py-2 text-right w-16">% PROF</th>
               )}
 
-              {/* Prezzo Profess (€) */}
               {visibleColumns.prezzo_profess !== false && (
                 <th
                   className="px-3 py-2 text-right w-24 cursor-pointer hover:text-[var(--foreground)]"
@@ -1205,12 +1095,10 @@ export const ProductListPage: React.FC = () => {
                 </th>
               )}
 
-              {/* % Fattura */}
               {visibleColumns.perc_fatt !== false && (
                 <th className="px-2.5 py-2 text-right w-16">% FATT</th>
               )}
 
-              {/* Prezzo Fattura (€) - Evidenziato */}
               {visibleColumns.prezzo_fattura !== false && (
                 <th
                   className="px-3 py-2 text-right w-28 bg-amber-500/20 text-amber-300 font-bold border-x border-amber-500/30 cursor-pointer"
@@ -1220,14 +1108,370 @@ export const ProductListPage: React.FC = () => {
                 </th>
               )}
 
-              {/* Aliquota IVA */}
+              {/* 5. ACQUISTO BASE (posizionato tra FATTURA ed IVA) */}
+              {visibleColumns.prezzo_acquisto !== false && (
+                <th
+                  className="px-3 py-2 text-right w-28 cursor-pointer hover:text-[var(--foreground)] bg-sky-950/30 text-sky-200 font-semibold border-x border-sky-500/30"
+                  onClick={() => handleToggleSort("prezzo_acquisto")}
+                >
+                  <div className="flex items-center justify-end space-x-1">
+                    <span>ACQ. BASE</span>
+                    <ArrowUpDown className="w-3 h-3" />
+                  </div>
+                </th>
+              )}
+
+              {/* IVA */}
               {visibleColumns.perc_iva !== false && (
                 <th className="px-2.5 py-2 text-center w-14">IVA</th>
+              )}
+
+              {/* Colonne create posizionate DOPO IVA */}
+              {visibleColumns.aumento !== false && (
+                <th className="px-2.5 py-2 text-right w-16 bg-sky-950/20">AUMENTO %</th>
+              )}
+
+              {visibleColumns.maga !== false && (
+                <th className="px-2.5 py-2 text-right w-16 bg-sky-950/20">MAGAZZINO %</th>
+              )}
+
+              {visibleColumns.costo_maggiorato !== false && (
+                <th
+                  className="px-3 py-2 text-right w-28 bg-sky-900/40 text-sky-300 font-bold border-x border-sky-500/30 cursor-pointer"
+                  onClick={() => handleToggleSort("costo_maggiorato")}
+                  title="Costo base + Aumento% + Magazzino% (Riferimento per tutti i prezzi)"
+                >
+                  <div className="flex items-center justify-end space-x-1">
+                    <span>ACQ. MAGG.</span>
+                    <ArrowUpDown className="w-3 h-3" />
+                  </div>
+                </th>
               )}
             </tr>
           </thead>
 
           <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11.5px]">
+            {/* 4. SINGOLA RIGA VUOTA IN CIMA SEMPRE VISIBILE PER CREARE NUOVI ARTICOLI */}
+            {canEdit && (
+              <tr className="bg-emerald-500/10 hover:bg-emerald-500/15 border-b-2 border-emerald-500/40 sticky top-[33px] z-10 shadow-sm">
+                <td className="px-2 py-1 text-center bg-[var(--card)] sticky left-0 z-10">
+                  <span className="flex items-center justify-center text-emerald-400 font-bold text-[10px]">
+                    <Plus className="w-3.5 h-3.5" />
+                  </span>
+                </td>
+
+                {visibleColumns.history !== false && (
+                  <td className="px-2 py-1 text-center text-emerald-400/60 font-semibold text-[10px]">
+                    NUOVO
+                  </td>
+                )}
+
+                {visibleColumns.cat !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="cat"
+                    value={newTopRow.cat || ""}
+                    displayValue={newTopRow.cat || "Categoria..."}
+                    align="left"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "cat"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "cat"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                    className="italic text-emerald-200/70"
+                  />
+                )}
+
+                {visibleColumns.fornitore !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="fornitore"
+                    value={newTopRow.fornitore || ""}
+                    displayValue={newTopRow.fornitore || "Fornitore..."}
+                    align="left"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "fornitore"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "fornitore"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                    className="italic text-emerald-200/70"
+                  />
+                )}
+
+                {visibleColumns.codice_articolo !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="codice_articolo"
+                    value={newTopRow.codice_articolo || ""}
+                    displayValue={newTopRow.codice_articolo || "Codice..."}
+                    align="left"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "codice_articolo"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "codice_articolo"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                    className="italic font-bold text-emerald-400"
+                  />
+                )}
+
+                {visibleColumns.data_ref !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="data_ref"
+                    value={newTopRow.data_ref || ""}
+                    displayValue={newTopRow.data_ref || "—"}
+                    align="center"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "data_ref"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "data_ref"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.descrizione !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="descrizione"
+                    value={newTopRow.descrizione}
+                    displayValue={newTopRow.descrizione || "Digita per inserire nuovo articolo..."}
+                    align="left"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "descrizione"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                    className="italic text-emerald-200/80 font-medium"
+                  />
+                )}
+
+                {visibleColumns.um !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="um"
+                    value={newTopRow.um || "NR."}
+                    displayValue={newTopRow.um || "NR."}
+                    align="center"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "um"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "um"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.perc_pub !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="perc_pub"
+                    value={newTopRow.perc_pub ?? ""}
+                    displayValue={formatPercentClean(newTopRow.perc_pub)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "perc_pub"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_pub"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.prezzo_pubblico !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="prezzo_pubblico"
+                    value={newTopRow.prezzo_pubblico ?? ""}
+                    displayValue={formatEuro5(newTopRow.prezzo_pubblico)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_pubblico"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_pubblico"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.perc_prof !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="perc_prof"
+                    value={newTopRow.perc_prof ?? ""}
+                    displayValue={formatPercentClean(newTopRow.perc_prof)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "perc_prof"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_prof"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.prezzo_profess !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="prezzo_profess"
+                    value={newTopRow.prezzo_profess ?? ""}
+                    displayValue={formatEuro5(newTopRow.prezzo_profess)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_profess"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_profess"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.perc_fatt !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="perc_fatt"
+                    value={newTopRow.perc_fatt ?? ""}
+                    displayValue={formatPercentClean(newTopRow.perc_fatt)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "perc_fatt"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_fatt"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.prezzo_fattura !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="prezzo_fattura"
+                    value={newTopRow.prezzo_fattura ?? ""}
+                    displayValue={formatEuro5(newTopRow.prezzo_fattura)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_fattura"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_fattura"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                    className="border-x border-amber-500/20"
+                  />
+                )}
+
+                {/* Acquisto Base tra fattura ed iva */}
+                {visibleColumns.prezzo_acquisto !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="prezzo_acquisto"
+                    value={newTopRow.prezzo_acquisto ?? ""}
+                    displayValue={formatEuro5(newTopRow.prezzo_acquisto)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_acquisto"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_acquisto"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                    className="border-x border-sky-500/20"
+                  />
+                )}
+
+                {visibleColumns.perc_iva !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="perc_iva"
+                    value={newTopRow.perc_iva ?? 0.22}
+                    displayValue={formatPercentClean(newTopRow.perc_iva)}
+                    align="center"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "perc_iva"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_iva"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.aumento !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="aumento"
+                    value={newTopRow.aumento ?? ""}
+                    displayValue={formatPercentClean(newTopRow.aumento)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "aumento"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "aumento"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.maga !== false && (
+                  <EditableCell
+                    rowId={newTopRow.id}
+                    colId="maga"
+                    value={newTopRow.maga ?? ""}
+                    displayValue={formatPercentClean(newTopRow.maga)}
+                    align="right"
+                    isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "maga"}
+                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "maga"}
+                    initialChar={initialEditChar}
+                    canEdit={canEdit}
+                    onStartEdit={startEditing}
+                    onCommit={commitCellEdit}
+                    onCancel={cancelCellEdit}
+                    onKeyDown={handleCellKeyDown}
+                  />
+                )}
+
+                {visibleColumns.costo_maggiorato !== false && (
+                  <td className="px-3 py-1 text-right font-medium text-sky-200/70 border-x border-sky-500/20">
+                    {formatEuro5(
+                      newTopRow.r2 ??
+                        calculateCostoMaggiorato(newTopRow.prezzo_acquisto, newTopRow.aumento, newTopRow.maga)
+                    )}
+                  </td>
+                )}
+              </tr>
+            )}
+
             {/* Righe filtrate e visualizzate */}
             {filteredItems.slice(0, visibleCount).map((item) => {
               const isDirty = dirtyRows.has(item.id);
@@ -1246,7 +1490,6 @@ export const ProductListPage: React.FC = () => {
                       : "hover:bg-[var(--background)]"
                   }`}
                 >
-                  {/* Checkbox */}
                   <td className="px-2 py-1 text-center bg-[var(--card)] sticky left-0 z-10">
                     <input
                       type="checkbox"
@@ -1256,7 +1499,6 @@ export const ProductListPage: React.FC = () => {
                     />
                   </td>
 
-                  {/* Storico Modifiche A... */}
                   {visibleColumns.history !== false && (
                     <td className="px-2 py-1 text-center">
                       <button
@@ -1270,7 +1512,6 @@ export const ProductListPage: React.FC = () => {
                     </td>
                   )}
 
-                  {/* Categoria */}
                   {visibleColumns.cat !== false && (
                     <EditableCell
                       rowId={item.id}
@@ -1280,18 +1521,16 @@ export const ProductListPage: React.FC = () => {
                       align="left"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "cat"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "cat"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="font-sans font-medium text-[var(--foreground)] truncate max-w-[90px]"
                     />
                   )}
 
-                  {/* Fornitore */}
                   {visibleColumns.fornitore !== false && (
                     <EditableCell
                       rowId={item.id}
@@ -1301,18 +1540,16 @@ export const ProductListPage: React.FC = () => {
                       align="left"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "fornitore"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "fornitore"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="font-sans font-medium text-[var(--foreground)] truncate max-w-[85px]"
                     />
                   )}
 
-                  {/* Codice Articolo */}
                   {visibleColumns.codice_articolo !== false && (
                     <EditableCell
                       rowId={item.id}
@@ -1322,18 +1559,16 @@ export const ProductListPage: React.FC = () => {
                       align="left"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "codice_articolo"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "codice_articolo"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="font-bold text-[var(--primary)] truncate max-w-[95px]"
                     />
                   )}
 
-                  {/* Data Ref */}
                   {visibleColumns.data_ref !== false && (
                     <EditableCell
                       rowId={item.id}
@@ -1343,18 +1578,16 @@ export const ProductListPage: React.FC = () => {
                       align="center"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "data_ref"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "data_ref"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="text-[var(--muted-foreground)]"
                     />
                   )}
 
-                  {/* Descrizione */}
                   {visibleColumns.descrizione !== false && (
                     <EditableCell
                       rowId={item.id}
@@ -1364,18 +1597,16 @@ export const ProductListPage: React.FC = () => {
                       align="left"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "descrizione"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "descrizione"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="font-sans font-medium text-[var(--foreground)] truncate max-w-[420px]"
                     />
                   )}
 
-                  {/* U.M. */}
                   {visibleColumns.um !== false && (
                     <EditableCell
                       rowId={item.id}
@@ -1385,213 +1616,148 @@ export const ProductListPage: React.FC = () => {
                       align="center"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "um"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "um"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="text-[var(--muted-foreground)] w-14"
                     />
                   )}
 
-                  {/* Acquisto Base (€) */}
-                  {visibleColumns.prezzo_acquisto !== false && (
-                    <EditableCell
-                      rowId={item.id}
-                      colId="prezzo_acquisto"
-                      value={item.prezzo_acquisto ?? ""}
-                      displayValue={formatEuro(item.prezzo_acquisto, 4)}
-                      align="right"
-                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "prezzo_acquisto"}
-                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "prezzo_acquisto"}
-                      editValue={cellEditValue}
-                      canEdit={canEdit}
-                      onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
-                      onCommit={commitCellEdit}
-                      onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
-                      className="text-[var(--foreground)] font-medium bg-sky-950/10"
-                    />
-                  )}
-
-                  {/* Aumento (%) */}
-                  {visibleColumns.aumento !== false && (
-                    <EditableCell
-                      rowId={item.id}
-                      colId="aumento"
-                      value={item.aumento ?? ""}
-                      displayValue={formatPercent(item.aumento)}
-                      align="right"
-                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "aumento"}
-                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "aumento"}
-                      editValue={cellEditValue}
-                      canEdit={canEdit}
-                      onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
-                      onCommit={commitCellEdit}
-                      onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
-                      className="text-[var(--muted-foreground)] bg-sky-950/10"
-                    />
-                  )}
-
-                  {/* Magazzino (%) */}
-                  {visibleColumns.maga !== false && (
-                    <EditableCell
-                      rowId={item.id}
-                      colId="maga"
-                      value={item.maga ?? ""}
-                      displayValue={formatPercent(item.maga)}
-                      align="right"
-                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "maga"}
-                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "maga"}
-                      editValue={cellEditValue}
-                      canEdit={canEdit}
-                      onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
-                      onCommit={commitCellEdit}
-                      onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
-                      className="text-[var(--muted-foreground)] bg-sky-950/10"
-                    />
-                  )}
-
-                  {/* Acquisto Maggiorato (R2) - Calcolato */}
-                  {visibleColumns.costo_maggiorato !== false && (
-                    <td
-                      className="px-3 py-1 text-right font-bold bg-sky-900/20 text-sky-200 border-x border-sky-500/20"
-                      title="Prezzo acquisto base maggiorato da aumento e magazzino"
-                    >
-                      {formatEuro(costoMagg, 4)}
-                    </td>
-                  )}
-
-                  {/* % Pubblico */}
                   {visibleColumns.perc_pub !== false && (
                     <EditableCell
                       rowId={item.id}
                       colId="perc_pub"
                       value={item.perc_pub ?? ""}
-                      displayValue={formatPercent(item.perc_pub)}
+                      displayValue={formatPercentClean(item.perc_pub)}
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "perc_pub"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "perc_pub"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="text-[var(--muted-foreground)]"
                     />
                   )}
 
-                  {/* Prezzo Pubblico (€) */}
                   {visibleColumns.prezzo_pubblico !== false && (
                     <EditableCell
                       rowId={item.id}
                       colId="prezzo_pubblico"
                       value={item.prezzo_pubblico ?? ""}
-                      displayValue={formatEuro(item.prezzo_pubblico)}
+                      displayValue={formatEuro5(item.prezzo_pubblico)}
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "prezzo_pubblico"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "prezzo_pubblico"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="font-medium text-[var(--foreground)]"
                     />
                   )}
 
-                  {/* % Profess */}
                   {visibleColumns.perc_prof !== false && (
                     <EditableCell
                       rowId={item.id}
                       colId="perc_prof"
                       value={item.perc_prof ?? ""}
-                      displayValue={formatPercent(item.perc_prof)}
+                      displayValue={formatPercentClean(item.perc_prof)}
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "perc_prof"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "perc_prof"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="text-[var(--muted-foreground)]"
                     />
                   )}
 
-                  {/* Prezzo Profess (€) */}
                   {visibleColumns.prezzo_profess !== false && (
                     <EditableCell
                       rowId={item.id}
                       colId="prezzo_profess"
                       value={item.prezzo_profess ?? ""}
-                      displayValue={formatEuro(item.prezzo_profess)}
+                      displayValue={formatEuro5(item.prezzo_profess)}
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "prezzo_profess"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "prezzo_profess"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="font-medium text-[var(--foreground)]"
                     />
                   )}
 
-                  {/* % Fattura */}
                   {visibleColumns.perc_fatt !== false && (
                     <EditableCell
                       rowId={item.id}
                       colId="perc_fatt"
                       value={item.perc_fatt ?? ""}
-                      displayValue={formatPercent(item.perc_fatt)}
+                      displayValue={formatPercentClean(item.perc_fatt)}
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "perc_fatt"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "perc_fatt"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="text-[var(--muted-foreground)]"
                     />
                   )}
 
-                  {/* Prezzo Fattura (€) - Evidenziato Giallino */}
+                  {/* Prezzo Fattura (€) */}
                   {visibleColumns.prezzo_fattura !== false && (
                     <EditableCell
                       rowId={item.id}
                       colId="prezzo_fattura"
                       value={item.prezzo_fattura ?? ""}
-                      displayValue={formatEuro(item.prezzo_fattura)}
+                      displayValue={formatEuro5(item.prezzo_fattura)}
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "prezzo_fattura"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "prezzo_fattura"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="font-bold bg-amber-500/15 text-amber-200 border-x border-amber-500/20"
+                    />
+                  )}
+
+                  {/* 5. ACQUISTO BASE (posizionato tra FATTURA ed IVA) */}
+                  {visibleColumns.prezzo_acquisto !== false && (
+                    <EditableCell
+                      rowId={item.id}
+                      colId="prezzo_acquisto"
+                      value={item.prezzo_acquisto ?? ""}
+                      displayValue={formatEuro5(item.prezzo_acquisto)}
+                      align="right"
+                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "prezzo_acquisto"}
+                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "prezzo_acquisto"}
+                      initialChar={initialEditChar}
+                      canEdit={canEdit}
+                      onStartEdit={startEditing}
+                      onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
+                      onKeyDown={handleCellKeyDown}
+                      className="text-sky-200 font-semibold bg-sky-950/20 border-x border-sky-500/20"
                     />
                   )}
 
@@ -1601,361 +1767,70 @@ export const ProductListPage: React.FC = () => {
                       rowId={item.id}
                       colId="perc_iva"
                       value={item.perc_iva ?? 0.22}
-                      displayValue={formatPercent(item.perc_iva)}
+                      displayValue={formatPercentClean(item.perc_iva)}
                       align="center"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "perc_iva"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "perc_iva"}
-                      editValue={cellEditValue}
+                      initialChar={initialEditChar}
                       canEdit={canEdit}
                       onStartEdit={startEditing}
-                      onChangeValue={setCellEditValue}
                       onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
-                      inputRef={cellInputRef}
                       className="text-[var(--muted-foreground)]"
                     />
+                  )}
+
+                  {/* Colonne create DOPO IVA */}
+                  {visibleColumns.aumento !== false && (
+                    <EditableCell
+                      rowId={item.id}
+                      colId="aumento"
+                      value={item.aumento ?? ""}
+                      displayValue={formatPercentClean(item.aumento)}
+                      align="right"
+                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "aumento"}
+                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "aumento"}
+                      initialChar={initialEditChar}
+                      canEdit={canEdit}
+                      onStartEdit={startEditing}
+                      onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
+                      onKeyDown={handleCellKeyDown}
+                      className="text-[var(--muted-foreground)] bg-sky-950/10"
+                    />
+                  )}
+
+                  {visibleColumns.maga !== false && (
+                    <EditableCell
+                      rowId={item.id}
+                      colId="maga"
+                      value={item.maga ?? ""}
+                      displayValue={formatPercentClean(item.maga)}
+                      align="right"
+                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "maga"}
+                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "maga"}
+                      initialChar={initialEditChar}
+                      canEdit={canEdit}
+                      onStartEdit={startEditing}
+                      onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
+                      onKeyDown={handleCellKeyDown}
+                      className="text-[var(--muted-foreground)] bg-sky-950/10"
+                    />
+                  )}
+
+                  {visibleColumns.costo_maggiorato !== false && (
+                    <td
+                      className="px-3 py-1 text-right font-bold bg-sky-900/20 text-sky-200 border-x border-sky-500/20"
+                      title="Prezzo acquisto base maggiorato da aumento e magazzino"
+                    >
+                      {formatEuro5(costoMagg)}
+                    </td>
                   )}
                 </tr>
               );
             })}
-
-            {/* 10 RIGHE VUOTE SEMPRE IN FONDO PER CREAZIONE CONTINUA NUOVI ARTICOLI */}
-            {canEdit &&
-              bufferRows.map((bufRow, bufIdx) => {
-                const costoMagg =
-                  bufRow.r2 ??
-                  calculateCostoMaggiorato(bufRow.prezzo_acquisto, bufRow.aumento, bufRow.maga);
-
-                return (
-                  <tr
-                    key={bufRow.id}
-                    className="bg-[var(--card)]/40 hover:bg-[var(--background)]/80 text-[var(--muted-foreground)]/80 transition-colors"
-                  >
-                    <td className="px-2 py-1 text-center font-mono text-[10px] text-[var(--muted-foreground)]/50">
-                      +{bufIdx + 1}
-                    </td>
-
-                    {visibleColumns.history !== false && (
-                      <td className="px-2 py-1 text-center text-[var(--muted-foreground)]/30">—</td>
-                    )}
-
-                    {visibleColumns.cat !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="cat"
-                        value={bufRow.cat || ""}
-                        displayValue={bufRow.cat || "Nuova Cat..."}
-                        align="left"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "cat"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "cat"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                        className="italic text-[var(--muted-foreground)]/60"
-                      />
-                    )}
-
-                    {visibleColumns.fornitore !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="fornitore"
-                        value={bufRow.fornitore || ""}
-                        displayValue={bufRow.fornitore || "Fornitore..."}
-                        align="left"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "fornitore"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "fornitore"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                        className="italic text-[var(--muted-foreground)]/60"
-                      />
-                    )}
-
-                    {visibleColumns.codice_articolo !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="codice_articolo"
-                        value={bufRow.codice_articolo || ""}
-                        displayValue={bufRow.codice_articolo || "Codice..."}
-                        align="left"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "codice_articolo"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "codice_articolo"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                        className="italic text-[var(--muted-foreground)]/60"
-                      />
-                    )}
-
-                    {visibleColumns.data_ref !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="data_ref"
-                        value={bufRow.data_ref || ""}
-                        displayValue={bufRow.data_ref || "—"}
-                        align="center"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "data_ref"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "data_ref"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.descrizione !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="descrizione"
-                        value={bufRow.descrizione}
-                        displayValue={bufRow.descrizione || "Digita descrizione nuovo articolo..."}
-                        align="left"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "descrizione"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "descrizione"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                        className="italic text-[var(--muted-foreground)]/60"
-                      />
-                    )}
-
-                    {visibleColumns.um !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="um"
-                        value={bufRow.um || "NR."}
-                        displayValue={bufRow.um || "NR."}
-                        align="center"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "um"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "um"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.prezzo_acquisto !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="prezzo_acquisto"
-                        value={bufRow.prezzo_acquisto ?? ""}
-                        displayValue={formatEuro(bufRow.prezzo_acquisto, 4)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "prezzo_acquisto"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "prezzo_acquisto"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.aumento !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="aumento"
-                        value={bufRow.aumento ?? ""}
-                        displayValue={formatPercent(bufRow.aumento)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "aumento"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "aumento"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.maga !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="maga"
-                        value={bufRow.maga ?? ""}
-                        displayValue={formatPercent(bufRow.maga)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "maga"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "maga"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.costo_maggiorato !== false && (
-                      <td className="px-3 py-1 text-right font-medium text-[var(--muted-foreground)]/50 border-x border-[var(--border)]/30">
-                        {formatEuro(costoMagg, 4)}
-                      </td>
-                    )}
-
-                    {visibleColumns.perc_pub !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="perc_pub"
-                        value={bufRow.perc_pub ?? ""}
-                        displayValue={formatPercent(bufRow.perc_pub)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "perc_pub"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "perc_pub"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.prezzo_pubblico !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="prezzo_pubblico"
-                        value={bufRow.prezzo_pubblico ?? ""}
-                        displayValue={formatEuro(bufRow.prezzo_pubblico)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "prezzo_pubblico"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "prezzo_pubblico"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.perc_prof !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="perc_prof"
-                        value={bufRow.perc_prof ?? ""}
-                        displayValue={formatPercent(bufRow.perc_prof)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "perc_prof"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "perc_prof"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.prezzo_profess !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="prezzo_profess"
-                        value={bufRow.prezzo_profess ?? ""}
-                        displayValue={formatEuro(bufRow.prezzo_profess)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "prezzo_profess"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "prezzo_profess"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.perc_fatt !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="perc_fatt"
-                        value={bufRow.perc_fatt ?? ""}
-                        displayValue={formatPercent(bufRow.perc_fatt)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "perc_fatt"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "perc_fatt"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-
-                    {visibleColumns.prezzo_fattura !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="prezzo_fattura"
-                        value={bufRow.prezzo_fattura ?? ""}
-                        displayValue={formatEuro(bufRow.prezzo_fattura)}
-                        align="right"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "prezzo_fattura"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "prezzo_fattura"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                        className="border-x border-amber-500/20"
-                      />
-                    )}
-
-                    {visibleColumns.perc_iva !== false && (
-                      <EditableCell
-                        rowId={bufRow.id}
-                        colId="perc_iva"
-                        value={bufRow.perc_iva ?? 0.22}
-                        displayValue={formatPercent(bufRow.perc_iva)}
-                        align="center"
-                        isActive={activeCell?.rowId === bufRow.id && activeCell?.colId === "perc_iva"}
-                        isEditing={editingCell?.rowId === bufRow.id && editingCell?.colId === "perc_iva"}
-                        editValue={cellEditValue}
-                        canEdit={canEdit}
-                        onStartEdit={startEditing}
-                        onChangeValue={setCellEditValue}
-                        onCommit={commitCellEdit}
-                        onKeyDown={handleCellKeyDown}
-                        inputRef={cellInputRef}
-                      />
-                    )}
-                  </tr>
-                );
-              })}
           </tbody>
         </table>
 
@@ -1966,7 +1841,7 @@ export const ProductListPage: React.FC = () => {
         )}
       </div>
 
-      {/* 3. Footer con conteggio e stato Excel */}
+      {/* 3. Footer */}
       <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-[11px] text-[var(--muted-foreground)] font-mono">
         <div className="flex items-center space-x-3">
           <span>
@@ -1975,7 +1850,7 @@ export const ProductListPage: React.FC = () => {
           {canEdit && (
             <span className="text-emerald-500/90 flex items-center space-x-1">
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Modalità Excel attiva (Frecce, Tab, Invio, Ctrl+C / Ctrl+V supportati)</span>
+              <span>Modalità Excel attiva (Frecce, Tab, Invio, Copia / Incolla)</span>
             </span>
           )}
         </div>
@@ -1989,7 +1864,6 @@ export const ProductListPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Modale Storico Modifiche Riga */}
       <ItemPriceHistoryModal
         isOpen={Boolean(historyModalItem)}
         onClose={() => setHistoryModalItem(null)}
@@ -1999,7 +1873,7 @@ export const ProductListPage: React.FC = () => {
   );
 };
 
-// Componente Cella Editabile Stile Excel
+// Componente Cella Editabile Stile Excel Ultra-Performante
 interface EditableCellProps {
   rowId: string;
   colId: string;
@@ -2008,65 +1882,125 @@ interface EditableCellProps {
   align?: "left" | "center" | "right";
   isActive: boolean;
   isEditing: boolean;
-  editValue: string;
+  initialChar?: string;
   canEdit: boolean;
-  onStartEdit: (rowId: string, colId: string) => void;
-  onChangeValue: (v: string) => void;
-  onCommit: () => void;
-  onKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string) => void;
-  inputRef: React.RefObject<HTMLInputElement>;
+  onStartEdit: (rowId: string, colId: string, char?: string) => void;
+  onCommit: (rowId: string, colId: string, val: string) => void;
+  onCancel: () => void;
+  onKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
   className?: string;
 }
 
-const EditableCell: React.FC<EditableCellProps> = ({
-  rowId,
-  colId,
-  displayValue,
-  align = "left",
-  isActive,
-  isEditing,
-  editValue,
-  canEdit,
-  onStartEdit,
-  onChangeValue,
-  onCommit,
-  onKeyDown,
-  inputRef,
-  className = "",
-}) => {
-  const alignClass =
-    align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+const EditableCell: React.FC<EditableCellProps> = memo(
+  ({
+    rowId,
+    colId,
+    value,
+    displayValue,
+    align = "left",
+    isActive,
+    isEditing,
+    initialChar,
+    canEdit,
+    onStartEdit,
+    onCommit,
+    onCancel,
+    onKeyDown,
+    className = "",
+  }) => {
+    const tdRef = useRef<HTMLTableCellElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
-  if (isEditing) {
+    // Valore locale per editing senza re-render dell'intera tabella
+    const [localValue, setLocalValue] = useState<string>("");
+
+    useEffect(() => {
+      if (isEditing) {
+        if (initialChar !== undefined) {
+          setLocalValue(initialChar);
+        } else {
+          let init = "";
+          if (value != null) {
+            if (
+              colId === "perc_pub" ||
+              colId === "perc_prof" ||
+              colId === "perc_fatt" ||
+              colId === "aumento" ||
+              colId === "maga" ||
+              colId === "perc_iva"
+            ) {
+              const pct = value > 2 ? value : value * 100;
+              init = `${round5(pct)}%`;
+            } else {
+              init = String(value);
+            }
+          }
+          setLocalValue(init);
+        }
+        setTimeout(() => {
+          if (inputRef.current) {
+            inputRef.current.focus();
+            if (initialChar === undefined) {
+              inputRef.current.select();
+            } else {
+              const len = inputRef.current.value.length;
+              inputRef.current.setSelectionRange(len, len);
+            }
+          }
+        }, 10);
+      }
+    }, [isEditing, initialChar, value, colId]);
+
+    // Gestione scroll / focus quando la cella diventa attiva tramite frecce
+    useEffect(() => {
+      if (isActive && !isEditing && tdRef.current) {
+        tdRef.current.focus();
+        tdRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    }, [isActive, isEditing]);
+
+    const alignClass =
+      align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+
+    if (isEditing) {
+      return (
+        <td className={`p-0 relative ${alignClass} ${className}`}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={localValue}
+            onChange={(e) => setLocalValue(e.target.value)}
+            onBlur={() => onCommit(rowId, colId, localValue)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onCancel();
+                return;
+              }
+              onKeyDown(e, rowId, colId, localValue);
+            }}
+            className={`w-full h-full px-2 py-1 bg-[var(--background)] text-[var(--foreground)] outline-none border-2 border-[var(--primary)] text-[11.5px] font-mono shadow-inner ${alignClass}`}
+          />
+        </td>
+      );
+    }
+
     return (
-      <td className={`p-0 relative ${alignClass} ${className}`}>
-        <input
-          ref={inputRef}
-          type="text"
-          value={editValue}
-          onChange={(e) => onChangeValue(e.target.value)}
-          onBlur={onCommit}
-          onKeyDown={(e) => onKeyDown(e, rowId, colId)}
-          className={`w-full h-full px-2 py-1 bg-[var(--background)] text-[var(--foreground)] outline-none border-2 border-[var(--primary)] text-[11.5px] font-mono shadow-inner ${alignClass}`}
-        />
+      <td
+        ref={tdRef}
+        onClick={() => onStartEdit(rowId, colId)}
+        onDoubleClick={() => onStartEdit(rowId, colId)}
+        onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue)}
+        tabIndex={canEdit ? 0 : -1}
+        className={`px-2.5 py-1.5 transition-colors outline-none cursor-pointer select-none ${alignClass} ${className} ${
+          isActive
+            ? "ring-2 ring-[var(--primary)] ring-inset bg-[var(--primary)]/15 font-semibold text-[var(--foreground)]"
+            : ""
+        }`}
+        title={displayValue}
+      >
+        {displayValue}
       </td>
     );
   }
-
-  return (
-    <td
-      onClick={() => onStartEdit(rowId, colId)}
-      onDoubleClick={() => onStartEdit(rowId, colId)}
-      onKeyDown={(e) => onKeyDown(e, rowId, colId)}
-      tabIndex={canEdit ? 0 : -1}
-      className={`px-2.5 py-1.5 transition-all outline-none cursor-pointer select-none ${alignClass} ${className} ${
-        isActive
-          ? "ring-2 ring-[var(--primary)] ring-inset bg-[var(--primary)]/10 font-semibold"
-          : ""
-      }`}
-      title={displayValue}
-    >
-      {displayValue}
-    </td>
-  );
-};
+);
