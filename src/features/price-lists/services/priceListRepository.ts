@@ -1,5 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
-import { ListinoGeneraleRow, ListinoClienteRow, PriceListLogEntry } from "../models/priceList";
+import { ListinoGeneraleRow, ListinoClienteRow, PriceListLogEntry, TrashListinoRow } from "../models/priceList";
 import { resolveClientPriceLists } from "@/features/ddt-studio/utils/clientPriceListMatcher";
 
 function cleanNum5(val: number | null | undefined): number | null {
@@ -384,6 +384,129 @@ export class PriceListRepository {
     for (const id of ids) {
       await db.execute("DELETE FROM listino_generale WHERE id = $1;", [id]);
     }
+  }
+
+  /**
+   * Sposta uno o più articoli nel Cestino (massimo 30 elementi a scorrimento FIFO)
+   * e li rimuove dal listino generale attivo.
+   */
+  async moveToTrash(rows: ListinoGeneraleRow[], deletedBy?: string): Promise<void> {
+    if (rows.length === 0) return;
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+    const op = deletedBy || "Operatore";
+
+    for (const row of rows) {
+      await db.execute(
+        `INSERT INTO listino_generale_cestino (
+          id, deleted_at, deleted_by, source_table, cat, fornitore, codice_articolo, data_ref,
+          descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
+          perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
+          perc_iva, note, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+        ON CONFLICT(id) DO UPDATE SET
+          deleted_at = excluded.deleted_at,
+          deleted_by = excluded.deleted_by,
+          cat = excluded.cat,
+          fornitore = excluded.fornitore,
+          codice_articolo = excluded.codice_articolo,
+          data_ref = excluded.data_ref,
+          descrizione = excluded.descrizione,
+          um = excluded.um,
+          perc_pub = excluded.perc_pub,
+          prezzo_pubblico = excluded.prezzo_pubblico,
+          perc_prof = excluded.perc_prof,
+          prezzo_profess = excluded.prezzo_profess,
+          perc_fatt = excluded.perc_fatt,
+          prezzo_fattura = excluded.prezzo_fattura,
+          prezzo_acquisto = excluded.prezzo_acquisto,
+          aumento = excluded.aumento,
+          r1 = excluded.r1,
+          maga = excluded.maga,
+          r2 = excluded.r2,
+          perc_iva = excluded.perc_iva,
+          note = excluded.note,
+          updated_at = excluded.updated_at;`,
+        [
+          row.id,
+          now,
+          op,
+          row.source_table || "listino_generale",
+          row.cat ?? null,
+          row.fornitore ?? null,
+          row.codice_articolo ?? null,
+          row.data_ref ?? null,
+          row.descrizione || "",
+          row.um ?? "NR.",
+          cleanNum5(row.perc_pub),
+          cleanNum5(row.prezzo_pubblico),
+          cleanNum5(row.perc_prof),
+          cleanNum5(row.prezzo_profess),
+          cleanNum5(row.perc_fatt),
+          cleanNum5(row.prezzo_fattura),
+          cleanNum5(row.prezzo_acquisto),
+          cleanNum5(row.aumento),
+          cleanNum5(row.r1),
+          cleanNum5(row.maga),
+          cleanNum5(row.r2),
+          cleanNum5(row.perc_iva ?? 0.22),
+          row.note ?? null,
+          row.created_at || now,
+          now,
+        ]
+      );
+
+      await db.execute("DELETE FROM listino_generale WHERE id = $1;", [row.id]);
+    }
+
+    // Tronca il cestino alle ultime 30 voci (FIFO: le più vecchie vengono eliminate)
+    await db.execute(`
+      DELETE FROM listino_generale_cestino 
+      WHERE id NOT IN (
+        SELECT id FROM listino_generale_cestino 
+        ORDER BY deleted_at DESC 
+        LIMIT 30
+      );
+    `);
+  }
+
+  /**
+   * Restituisce gli articoli nel cestino ordinati dal più recente al più vecchio (max 30).
+   */
+  async getTrashItems(): Promise<TrashListinoRow[]> {
+    const db = await getDatabase();
+    return await db.select<TrashListinoRow[]>(
+      "SELECT * FROM listino_generale_cestino ORDER BY deleted_at DESC LIMIT 30;"
+    );
+  }
+
+  /**
+   * Conteggio voci nel cestino.
+   */
+  async getTrashCount(): Promise<number> {
+    const db = await getDatabase();
+    const rows = await db.select<{ count: number }[]>(
+      "SELECT COUNT(*) as count FROM listino_generale_cestino;"
+    );
+    return rows[0]?.count ?? 0;
+  }
+
+  /**
+   * Ripristina un articolo dal Cestino al Listino Generale attivo.
+   */
+  async restoreFromTrash(id: string): Promise<ListinoGeneraleRow | null> {
+    const db = await getDatabase();
+    const rows = await db.select<ListinoGeneraleRow[]>(
+      "SELECT * FROM listino_generale_cestino WHERE id = $1 LIMIT 1;",
+      [id]
+    );
+    if (rows.length === 0) return null;
+
+    const row = rows[0];
+    await this.saveGeneralRows([row]);
+    await db.execute("DELETE FROM listino_generale_cestino WHERE id = $1;", [id]);
+
+    return row;
   }
 }
 

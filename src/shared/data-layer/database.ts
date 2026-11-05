@@ -12,6 +12,7 @@ import { migratePriceListLogSchemaV12 } from "./migrations/priceListLogSchema";
 import { migrateElectronicInvoicesSchemaV15 } from "./migrations/electronicInvoicesSchema";
 import { migrateOrdersSchemaV16 } from "./migrations/ordersSchema";
 import { migrateOffersSchemaV17, migrateOffersSchemaV18 } from "./migrations/offersSchema";
+import { migratePriceListTrashSchemaV19 } from "./migrations/priceListTrashSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -330,6 +331,13 @@ const MIGRATIONS: Migration[] = [
     name: "add_urgent_and_audit_fields_to_offers",
     up: async (db: Database) => {
       await migrateOffersSchemaV18(db);
+    },
+  },
+  {
+    version: 19,
+    name: "create_price_list_trash_table",
+    up: async (db: Database) => {
+      await migratePriceListTrashSchemaV19(db);
     },
   },
 ];
