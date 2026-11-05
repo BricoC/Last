@@ -79,18 +79,24 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
       if (oldV !== newV) {
         const oldNum = oldV ?? 0;
         const newNum = newV ?? 0;
-        const pct = oldNum > 0 ? ((newNum - oldNum) / oldNum) * 100 : 0;
+        let pct: number | null = null;
+        if (oldNum > 0) {
+          pct = ((newNum - oldNum) / oldNum) * 100;
+        } else if (newNum > 0) {
+          pct = newNum > 2 ? newNum : newNum * 100;
+        }
         diffs.push({
           id: -Math.floor(Math.random() * 10000) - 1,
+          row_id: item.id,
           created_at: new Date().toISOString(),
           tipo_listino: "generale",
           cliente: "",
           codice_articolo: item.codice_articolo || item.id,
-          descrizione: item.descrizione,
+          descrizione: sourceItem.descrizione || item.descrizione,
           campo_modificato: f.label,
           vecchio_valore: oldV,
           nuovo_valore: newV,
-          variazione_pct: round5(pct),
+          variazione_pct: pct != null ? round5(pct) : null,
           operatore: "Sessione (Non salvato)",
           motivo: "Modifica in corso non ancora salvata",
         });
@@ -111,17 +117,20 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
       if (oldT !== newT) {
         diffs.push({
           id: -Math.floor(Math.random() * 10000) - 1,
+          row_id: item.id,
           created_at: new Date().toISOString(),
           tipo_listino: "generale",
           cliente: "",
           codice_articolo: item.codice_articolo || item.id,
-          descrizione: item.descrizione,
+          descrizione: sourceItem.descrizione || item.descrizione,
           campo_modificato: f.label,
           vecchio_valore: null,
           nuovo_valore: null,
+          vecchio_testo: oldT || "(vuoto)",
+          nuovo_testo: newT || "(vuoto)",
           variazione_pct: null,
           operatore: "Sessione (Non salvato)",
-          motivo: `Modifica da "${oldT || '—'}" a "${newT || '—'}"`,
+          motivo: `Modifica da "${oldT || 'vuoto'}" a "${newT || 'vuoto'}"`,
         });
       }
     }
@@ -162,13 +171,20 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
   };
 
   const formatVal = (val: number | null | undefined, campo: string) => {
-    if (val == null) return "—";
     const c = campo.toLowerCase();
-    if (c.includes("%") || c.includes("iva") || c.includes("aumento") || c.includes("magazzino")) {
+    const isPct = c.includes("%") || c.includes("iva") || c.includes("aumento") || c.includes("magazzino");
+    const isMoney = c.includes("prezzo") || c.includes("costo") || c.includes("acquisto") || c.includes("fattura") || c.includes("pubblico") || c.includes("profess");
+
+    if (val == null) {
+      if (isPct) return "0% (Non impostato)";
+      if (isMoney) return "€ 0,00";
+      return "(vuoto)";
+    }
+    if (isPct) {
       const pct = val > 2 ? val : val * 100;
       return `${round5(pct)}%`;
     }
-    if (c.includes("prezzo") || c.includes("costo") || c.includes("acquisto") || c.includes("fattura") || c.includes("pubblico") || c.includes("profess")) {
+    if (isMoney) {
       return `€ ${round5(val).toLocaleString("it-IT", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 5,
@@ -179,12 +195,12 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
 
   const getTextDiff = (log: PriceListLogEntry) => {
     if (log.vecchio_testo != null || log.nuovo_testo != null) {
-      return { oldText: log.vecchio_testo ?? "—", newText: log.nuovo_testo ?? "—" };
+      return { oldText: log.vecchio_testo || "(vuoto)", newText: log.nuovo_testo || "(vuoto)" };
     }
     if (log.motivo) {
-      const match = log.motivo.match(/Da "([^"]*)" a "([^"]*)"/);
+      const match = log.motivo.match(/da "([^"]*)" a "([^"]*)"/i);
       if (match) {
-        return { oldText: match[1] || "—", newText: match[2] || "—" };
+        return { oldText: match[1] || "(vuoto)", newText: match[2] || "(vuoto)" };
       }
     }
     return { oldText: null, newText: null };
@@ -293,7 +309,11 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                         {displayNew}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {log.variazione_pct != null ? (
+                        {log.vecchio_valore == null && log.nuovo_valore != null ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-emerald-500/15 text-emerald-400">
+                            Nuovo {log.variazione_pct ? `(+${log.variazione_pct}%)` : ""}
+                          </span>
+                        ) : log.variazione_pct != null ? (
                           <span
                             className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold ${
                               isPositive
