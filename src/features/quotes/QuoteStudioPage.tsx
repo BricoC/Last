@@ -8,7 +8,8 @@ import { QuoteA4Preview } from "./document/QuoteA4Preview";
 import { quoteRepository } from "./services/quoteRepository";
 import { exportQuotePdf } from "./utils/quoteExportManager";
 import { money } from "@/shared/domain/monetaryValue";
-import { registerWindowCloseGuard, useWindowStore } from "@/shared/stores/useWindowStore";
+import { registerWindowCloseGuard, registerDirtyCheck, useWindowStore } from "@/shared/stores/useWindowStore";
+import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import { useFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import type { Quote } from "./models/quote";
 import { createEmptyQuoteDraft, createEmptyQuoteItem, isQuoteDraftItemActive, quoteToDraft, toQuoteInput, type QuoteDraft, type QuoteDraftItem } from "./models/quoteDraft";
@@ -35,6 +36,12 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
 
   const signature = (value: QuoteDraft) => JSON.stringify(value);
   const isDirty = savedSignature.current !== null && signature(draft) !== savedSignature.current;
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+
+  useEffect(() => {
+    return registerDirtyCheck(windowId, () => isDirtyRef.current);
+  }, [windowId]);
 
   useEffect(() => { savedSignature.current = signature(draft); }, []);
 
@@ -66,14 +73,28 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     finally { setSaving(false); }
   }, [draft, refreshQuotes]);
 
-  useEffect(() => registerWindowCloseGuard(windowId, async () => {
-    if (!isDirty) return true;
+  const confirmIfDirty = useCallback(async (): Promise<boolean> => {
+    if (!isDirtyRef.current) return true;
     const choice = await new Promise<QuoteCloseChoice>((resolve) => setClosePrompt(() => resolve));
     setClosePrompt(null);
     if (choice === "discard") return true;
-    if (choice === "save") return save();
+    if (choice === "save") return await save();
     return false;
-  }), [windowId, isDirty, save]);
+  }, [save]);
+
+  useEffect(() => registerWindowCloseGuard(windowId, async () => {
+    return await confirmIfDirty();
+  }), [windowId, confirmIfDirty]);
+
+  const handleNewQuote = async () => {
+    if (!(await confirmIfDirty())) return;
+    const next = createEmptyQuoteDraft();
+    setDraft(next);
+    savedSignature.current = signature(next);
+    setViewMode("calculation");
+    setMessage("");
+  };
+
   const convertToDdt = async () => {
     setSaving(true); setMessage("");
     try {
@@ -100,17 +121,32 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   });
   const updateHeader = (updates: Partial<QuoteDraft>) => setDraft((current) => ({ ...current, ...updates }));
   const openQuote = async (quoteId: string) => {
+    if (draft.id === quoteId) {
+      setShowArchive(false);
+      return;
+    }
+    if (!(await confirmIfDirty())) return;
     try {
       const quote = await quoteRepository.getQuoteById(quoteId);
-      if (quote) { const next = quoteToDraft(quote); setDraft(next); savedSignature.current = signature(next); setShowArchive(false); setMessage(""); }
+      if (quote) {
+        const next = quoteToDraft(quote);
+        setDraft(next);
+        savedSignature.current = signature(next);
+        setShowArchive(false);
+        setMessage("");
+      }
     } catch (error) { setMessage(errorMessage(error)); }
   };
   const copyQuote = async (quoteId: string) => {
+    if (!(await confirmIfDirty())) return;
     try {
       const copy = await quoteRepository.duplicateQuote(quoteId);
       const next = quoteToDraft(copy);
-      setDraft(next); savedSignature.current = signature(next); setShowArchive(false);
-      setMessage("Copia del preventivo creata in bozza."); await refreshQuotes();
+      setDraft(next);
+      savedSignature.current = signature(next);
+      setShowArchive(false);
+      setMessage("Copia del preventivo creata in bozza.");
+      await refreshQuotes();
     } catch (error) { setMessage(errorMessage(error)); }
   };
   const deleteQuote = async (quoteId: string) => {
@@ -146,7 +182,7 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
       archiveCount={quotes.length} quoteDate={draft.quote_date ?? ""}
       onStatusChange={(status) => updateHeader({ status })} onViewChange={setViewMode}
       onAlexToggle={() => setAlexMode((value) => !value)} onArchive={() => setShowArchive((value) => !value)}
-      onSave={() => void save()} onNew={() => { const next = createEmptyQuoteDraft(); setDraft(next); savedSignature.current = signature(next); setViewMode("calculation"); setMessage(""); }}
+      onSave={() => void save()} onNew={() => void handleNewQuote()}
       onPdf={() => void printPdf()} onConvert={() => void convertToDdt()} onFillRandomRows={fillRandomRows} />
     <QuoteKpiBanner items={draft.items} discount={draft.global_discount_pct ?? 0} alexMode={alexMode}
       onDiscountChange={(value) => updateHeader({ global_discount_pct: value })} />
@@ -164,17 +200,18 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     {message && <div role="status" className="absolute bottom-12 left-4 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs shadow-lg">{message}</div>}
     {showArchive && <QuoteArchiveSidebar quotes={filteredQuotes} search={archiveSearch} onSearch={setArchiveSearch}
       onClose={() => setShowArchive(false)} onOpen={(id) => void openQuote(id)} onCopy={(id) => void copyQuote(id)} onDelete={(id) => void deleteQuote(id)} />}
-    {closePrompt && <div className="absolute inset-0 z-50 flex items-center justify-center bg-[var(--background)]/70 p-4" role="presentation">
-      <section role="dialog" aria-modal="true" aria-labelledby="quote-close-title" className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--document-shadow)]">
-        <h2 id="quote-close-title" className="text-base font-semibold">Preventivo non salvato</h2>
-        <p className="mt-2 text-sm text-[var(--muted-foreground)]">Hai modifiche non salvate. Vuoi salvare il preventivo prima di chiudere?</p>
-        <div className="mt-5 flex flex-wrap justify-end gap-2">
-          <button type="button" onClick={() => closePrompt("cancel")} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm">Annulla</button>
-          <button type="button" onClick={() => closePrompt("discard")} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm">Chiudi senza salvare</button>
-          <button type="button" disabled={saving} onClick={() => closePrompt("save")} className="rounded-md bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50">Salva e chiudi</button>
-        </div>
-      </section>
-    </div>}
+    <UnsavedChangesModal
+      isOpen={Boolean(closePrompt)}
+      title="Preventivo con modifiche non salvate"
+      message="Attenzione: sono presenti modifiche non salvate in questo preventivo. Se non salvi, le modifiche apportate verranno cancellate definitivamente."
+      onCancel={() => closePrompt?.("cancel")}
+      onDiscard={() => closePrompt?.("discard")}
+      onSave={() => closePrompt?.("save")}
+      saveLabel="Salva modifiche"
+      discardLabel="Continua senza salvare"
+      cancelLabel="Annulla"
+      isSaving={saving}
+    />
   </div>;
 }
 

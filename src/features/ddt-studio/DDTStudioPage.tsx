@@ -6,7 +6,8 @@ import { ddtRepository } from "./services/ddtRepository";
 import { subscribeToOpenDdt } from "./services/ddtNavigation";
 import { clientRepository } from "@/features/clients/services/clientRepository";
 import { money, isPositivePrice } from "@/shared/domain/monetaryValue";
-import { registerWindowCloseGuard } from "@/shared/stores/useWindowStore";
+import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
+import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import { calculateRowAmounts, calculateDdtTotals } from "./utils/ddtCalculations";
 
 import { DDTStudioHeader } from "./components/DDTStudioHeader";
@@ -254,6 +255,25 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     [ddt, items, globalDiscount, globalMarkup, signature]
   );
   const isDirty = savedSignature.current !== null && currentSignature !== savedSignature.current;
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+
+  useEffect(() => {
+    return registerDirtyCheck(windowId, () => isDirtyRef.current);
+  }, [windowId]);
+
+  const handleSaveDraftRef = useRef<() => Promise<boolean>>(async () => false);
+  const handleEmitDdtRef = useRef<() => Promise<boolean>>(async () => false);
+
+  const promptUnsavedChanges = useCallback(async (): Promise<boolean> => {
+    if (!isDirtyRef.current) return true;
+    const choice = await new Promise<DdtCloseChoice>((resolve) => setClosePrompt(() => resolve));
+    setClosePrompt(null);
+    if (choice === "discard") return true;
+    if (choice === "draft") return await handleSaveDraftRef.current();
+    if (choice === "emit") return await handleEmitDdtRef.current();
+    return false;
+  }, []);
 
   useEffect(() => {
     savedSignature.current = signature(ddt, items, globalDiscount, globalMarkup);
@@ -442,16 +462,21 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       setGlobalDiscount("");
       setGlobalMarkup("");
       setShowMargini(false);
+      savedSignature.current = signature(detail.ddt, padded, "", "");
       setActiveView("editor");
       showToast("Preventivo convertito in bozza DDT");
     };
     window.addEventListener("quote-converted-to-ddt", handleQuoteConversion);
     return () => window.removeEventListener("quote-converted-to-ddt", handleQuoteConversion);
-  }, []);
+  }, [signature]);
 
   // Carica un DDT esistente selezionato dalla sidebar
   const handleSelectDdt = useCallback(async (id: string) => {
     if (currentDdtIdRef.current === id) return;
+    if (isDirtyRef.current) {
+      const allowed = await promptUnsavedChanges();
+      if (!allowed) return;
+    }
     const requestId = ++ddtLoadRequest.current;
     setLoadingDdtId(id);
     try {
@@ -550,15 +575,28 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     if (ddt.doc_number === null) {
       ddtRepository.getNextDocNumber(ddt.year || new Date().getFullYear(), ddt.series || "").then((num) => {
         if (active && num) {
-          setDdt((prev) => (prev.doc_number === null ? { ...prev, doc_number: num } : prev));
+          setDdt((prev) => {
+            if (prev.doc_number === null) {
+              const updated = { ...prev, doc_number: num };
+              if (savedSignature.current === signature(prev, items, globalDiscount, globalMarkup)) {
+                savedSignature.current = signature(updated, items, globalDiscount, globalMarkup);
+              }
+              return updated;
+            }
+            return prev;
+          });
         }
       });
     }
     return () => { active = false; };
-  }, []);
+  }, [signature, items, globalDiscount, globalMarkup]);
 
   // Nuovo DDT vuoto con numero progressivo già visibile
   const handleNewDdt = async () => {
+    if (isDirtyRef.current) {
+      const allowed = await promptUnsavedChanges();
+      if (!allowed) return;
+    }
     ddtLoadRequest.current += 1;
     setLoadingDdtId(null);
     const nextDdt = makeEmptyDdt();
@@ -613,6 +651,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       setIsSaving(false);
     }
   };
+  handleSaveDraftRef.current = handleSaveDraft;
 
   // Salva e Conferma DDT (Emissione con numero progressivo)
   const handleEmitDdt = async (): Promise<boolean> => {
@@ -656,6 +695,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       setIsSaving(false);
     }
   };
+  handleEmitDdtRef.current = handleEmitDdt;
 
   // The One: Salva DDT con numero progressivo e stampa immediatamente 3 copie
   const handleTheOne = async () => {
@@ -715,18 +755,16 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   };
 
   useEffect(() => registerWindowCloseGuard(windowId, async () => {
-    if (!isDirty) return true;
-    const choice = await new Promise<DdtCloseChoice>((resolve) => setClosePrompt(() => resolve));
-    setClosePrompt(null);
-    if (choice === "discard") return true;
-    if (choice === "draft") return handleSaveDraft();
-    if (choice === "emit") return handleEmitDdt();
-    return false;
-  }), [windowId, isDirty, handleSaveDraft, handleEmitDdt]);
+    return await promptUnsavedChanges();
+  }), [windowId, promptUnsavedChanges]);
 
   // Duplica DDT
   const handleDuplicateDdt = async () => {
     if (!ddt.id) return;
+    if (isDirtyRef.current) {
+      const allowed = await promptUnsavedChanges();
+      if (!allowed) return;
+    }
     setIsSaving(true);
     try {
       const dup = await ddtRepository.duplicateDdt(ddt.id);
@@ -749,6 +787,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
     try {
       await ddtRepository.deleteDdt(ddt.id);
+      savedSignature.current = currentSignature;
       handleNewDdt();
       await loadRecentDdts();
       showToast("DDT eliminato");
@@ -760,7 +799,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const handleDeleteArchivedDdt = async (id: string): Promise<boolean> => {
     try {
       await ddtRepository.deleteDdt(id);
-      if (ddt.id === id) handleNewDdt();
+      if (ddt.id === id) {
+        savedSignature.current = currentSignature;
+        handleNewDdt();
+      }
       await loadRecentDdts();
       showToast("DDT eliminato dall’archivio");
       return true;
@@ -1032,18 +1074,20 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         </div>
       )}
 
-      {closePrompt && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" role="presentation">
-        <section role="dialog" aria-modal="true" aria-labelledby="ddt-close-title" className="w-full max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 text-[var(--foreground)] shadow-2xl">
-          <h2 id="ddt-close-title" className="text-base font-semibold">DDT con modifiche non salvate</h2>
-          <p className="mt-2 text-sm text-[var(--muted-foreground)]">Scegli come conservare il lavoro prima di chiudere.</p>
-          <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <button type="button" onClick={() => closePrompt("cancel")} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm">Annulla</button>
-            <button type="button" onClick={() => closePrompt("discard")} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm">Chiudi senza salvare</button>
-            <button type="button" disabled={isSaving} onClick={() => closePrompt("draft")} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50">Salva in bozze</button>
-            <button type="button" disabled={isSaving} onClick={() => closePrompt("emit")} className="rounded-md bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50">Emetti DDT</button>
-          </div>
-        </section>
-      </div>}
+      <UnsavedChangesModal
+        isOpen={Boolean(closePrompt)}
+        title="DDT con modifiche non salvate"
+        message="Attenzione: sono presenti modifiche non salvate in questo DDT. Se prosegui senza salvare, tutte le modifiche apportate verranno cancellate definitivamente."
+        onCancel={() => closePrompt?.("cancel")}
+        onDiscard={() => closePrompt?.("discard")}
+        onSave={() => closePrompt?.("draft")}
+        onSecondaryAction={() => closePrompt?.("emit")}
+        saveLabel="Salva in bozze"
+        secondaryActionLabel="Emetti DDT"
+        discardLabel="Continua senza salvare"
+        cancelLabel="Annulla"
+        isSaving={isSaving}
+      />
 
       {/* Header Operativo DDT Studio */}
       <DDTStudioHeader

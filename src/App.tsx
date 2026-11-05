@@ -19,6 +19,8 @@ import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
 import { ShieldAlert } from "lucide-react";
+import { isTauri } from "@tauri-apps/api/core";
+import { hasAnyUnsavedChanges, runAllWindowCloseGuards } from "@/shared/stores/useWindowStore";
 
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 
@@ -36,6 +38,43 @@ export function App() {
     void ddtIncrementalSyncService.syncNewDdtsFromSupabase().catch((err) => {
       console.warn("[App] Sync incrementale all'avvio non riuscita:", err);
     });
+  }, []);
+
+  // Blocco di sicurezza chiusura browser/tab in caso di modifiche non salvate
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasAnyUnsavedChanges()) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  // Blocco di sicurezza chiusura applicazione Desktop (Tauri)
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) => {
+        return getCurrentWindow().onCloseRequested(async (event) => {
+          const allowed = await runAllWindowCloseGuards();
+          if (!allowed) {
+            event.preventDefault();
+          }
+        });
+      })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((err) => {
+        console.warn("[App] Registrazione onCloseRequested non riuscita:", err);
+      });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, []);
 
   // Renderer del contenuto delle finestre desktop in base al componentId

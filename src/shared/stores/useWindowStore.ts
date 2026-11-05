@@ -33,6 +33,7 @@ export type SnapSlotType =
 
 type WindowCloseGuard = () => Promise<boolean>;
 const windowCloseGuards = new Map<string, WindowCloseGuard>();
+const dirtyChecks = new Map<string, () => boolean>();
 
 export function registerWindowCloseGuard(id: string, guard: WindowCloseGuard): () => void {
   windowCloseGuards.set(id, guard);
@@ -41,10 +42,44 @@ export function registerWindowCloseGuard(id: string, guard: WindowCloseGuard): (
   };
 }
 
+export function registerDirtyCheck(id: string, check: () => boolean): () => void {
+  dirtyChecks.set(id, check);
+  return () => {
+    if (dirtyChecks.get(id) === check) dirtyChecks.delete(id);
+  };
+}
+
+export function hasAnyUnsavedChanges(): boolean {
+  for (const check of dirtyChecks.values()) {
+    try {
+      if (check()) return true;
+    } catch {
+      // ignore
+    }
+  }
+  return false;
+}
+
 export async function requestWindowClose(id: string): Promise<void> {
   const guard = windowCloseGuards.get(id);
   if (guard && !(await guard())) return;
   useWindowStore.getState().closeWindow(id);
+}
+
+export async function runAllWindowCloseGuards(): Promise<boolean> {
+  for (const [id, guard] of Array.from(windowCloseGuards.entries())) {
+    try {
+      useWindowStore.getState().focusWindow(id);
+      const allowed = await guard();
+      if (!allowed) {
+        return false;
+      }
+    } catch (e) {
+      console.error("[useWindowStore] Errore esecuzione window close guard:", e);
+      return false;
+    }
+  }
+  return true;
 }
 
 export function getSnapSlotBounds(slot: SnapSlotType): { x: number; y: number; width: number; height: number } {
