@@ -6,8 +6,11 @@ interface UserState {
   users: AppUser[];
   currentUser: AppUser | null;
   isLoading: boolean;
+  isSyncingCloud: boolean;
+  lastCloudSync: Date | null;
   pendingPasswordSwitch: AppUser | null;
   loadUsers: () => Promise<void>;
+  syncCloudUsers: () => Promise<void>;
   requestSwitchUser: (userId: string) => Promise<boolean>;
   cancelPasswordSwitch: () => void;
   confirmPasswordSwitch: (password: string) => Promise<boolean>;
@@ -39,11 +42,20 @@ export const useUserStore = create<UserState>((set, get) => ({
   users: [],
   currentUser: null,
   isLoading: true,
+  isSyncingCloud: false,
+  lastCloudSync: null,
   pendingPasswordSwitch: null,
 
   loadUsers: async () => {
     set({ isLoading: true });
     try {
+      // 1. Prova prima la sincronizzazione rapida da Supabase Cloud
+      try {
+        await AppUserService.syncWithCloud();
+      } catch (syncErr) {
+        console.warn("[useUserStore] Sincronizzazione Cloud non disponibile, uso cache locale:", syncErr);
+      }
+
       const list = await AppUserService.getAllUsers();
       const activeId = AppUserService.getActiveUserId();
       let active = list.find((u) => u.id === activeId);
@@ -51,7 +63,7 @@ export const useUserStore = create<UserState>((set, get) => ({
         active = list[0];
         AppUserService.setActiveUserId(active.id);
       }
-      set({ users: list, currentUser: active || null, isLoading: false });
+      set({ users: list, currentUser: active || null, isLoading: false, lastCloudSync: new Date() });
 
       // Applica il tema salvato della postazione attiva all'avvio
       if (active?.theme_preset) {
@@ -64,6 +76,25 @@ export const useUserStore = create<UserState>((set, get) => ({
     } catch (e) {
       console.error("Errore caricamento utenti:", e);
       set({ isLoading: false });
+    }
+  },
+
+  syncCloudUsers: async () => {
+    set({ isSyncingCloud: true });
+    try {
+      await AppUserService.syncWithCloud();
+      const list = await AppUserService.getAllUsers();
+      const activeId = AppUserService.getActiveUserId();
+      const active = list.find((u) => u.id === activeId) || list[0] || null;
+      set({
+        users: list,
+        currentUser: active,
+        isSyncingCloud: false,
+        lastCloudSync: new Date(),
+      });
+    } catch (err) {
+      console.error("[useUserStore] Errore sync cloud:", err);
+      set({ isSyncingCloud: false });
     }
   },
 
