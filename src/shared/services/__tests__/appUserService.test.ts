@@ -4,6 +4,8 @@ import {
   DEFAULT_ALLOWED_PAGES,
   ALL_APP_PAGE_MODULES,
   AppUser,
+  hashPassword,
+  verifyPassword,
 } from "../appUserService";
 
 describe("isPageAllowedForUser", () => {
@@ -20,6 +22,8 @@ describe("isPageAllowedForUser", () => {
     allowed_pages: DEFAULT_ALLOWED_PAGES,
     theme_preset: "grigio",
     theme_brightness: 4,
+    require_password: false,
+    password_hash: "",
     created_at: new Date().toISOString(),
   };
 
@@ -36,6 +40,8 @@ describe("isPageAllowedForUser", () => {
     allowed_pages: ["dashboard", "ddt-studio"],
     theme_preset: "avorio",
     theme_brightness: 3,
+    require_password: false,
+    password_hash: "",
     created_at: new Date().toISOString(),
   };
 
@@ -66,6 +72,16 @@ describe("isPageAllowedForUser", () => {
     };
     expect(isPageAllowedForUser(userWithSettingsInList, "settings")).toBe(false);
     expect(isPageAllowedForUser(userWithSettingsInList, "dashboard")).toBe(true);
+  });
+
+  it("hashes and correctly verifies passwords", async () => {
+    const hash = await hashPassword("segreto123");
+    expect(hash).toBeTruthy();
+    expect(hash.length).toBe(64); // SHA-256 hex string
+    const match = await verifyPassword("segreto123", hash);
+    expect(match).toBe(true);
+    const wrong = await verifyPassword("sbagliata", hash);
+    expect(wrong).toBe(false);
   });
 });
 

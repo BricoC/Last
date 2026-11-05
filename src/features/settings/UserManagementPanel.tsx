@@ -4,6 +4,7 @@ import {
   AppUser,
   ALL_APP_PAGE_MODULES,
   DEFAULT_ALLOWED_PAGES,
+  hashPassword,
 } from "@/shared/services/appUserService";
 import {
   Users,
@@ -20,6 +21,10 @@ import {
   CheckSquare,
   Square,
   X,
+  Lock,
+  Eye,
+  EyeOff,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
@@ -28,7 +33,7 @@ export const UserManagementPanel: React.FC = () => {
     users,
     currentUser,
     loadUsers,
-    switchUser,
+    requestSwitchUser,
     createUser,
     updateUser,
     deleteUser,
@@ -36,6 +41,12 @@ export const UserManagementPanel: React.FC = () => {
 
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+
+  // Form state per modifica password utente
+  const [editPassword, setEditPassword] = useState("");
+  const [editPasswordConfirm, setEditPasswordConfirm] = useState("");
+  const [editShowPassword, setEditShowPassword] = useState(false);
+  const [editRequirePassword, setEditRequirePassword] = useState(false);
 
   // Form state per nuovo utente
   const [newName, setNewName] = useState("");
@@ -45,6 +56,10 @@ export const UserManagementPanel: React.FC = () => {
   const [newCanEditOr, setNewCanEditOr] = useState(false);
   const [newTheme, setNewTheme] = useState<"grigio" | "nero-oled" | "avorio">("grigio");
   const [newAllowedPages, setNewAllowedPages] = useState<string[]>([...DEFAULT_ALLOWED_PAGES]);
+  const [newRequirePassword, setNewRequirePassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [newShowPassword, setNewShowPassword] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -63,15 +78,48 @@ export const UserManagementPanel: React.FC = () => {
     setNewCanEditOr(false);
     setNewTheme("grigio");
     setNewAllowedPages(DEFAULT_ALLOWED_PAGES.filter((p) => p !== "settings"));
+    setNewRequirePassword(false);
+    setNewPassword("");
+    setNewPasswordConfirm("");
+    setNewShowPassword(false);
     setIsCreating(true);
+  };
+
+  const handleOpenEdit = (user: AppUser) => {
+    setIsCreating(false);
+    setEditingUser({ ...user });
+    setEditRequirePassword(Boolean(user.require_password));
+    setEditPassword("");
+    setEditPasswordConfirm("");
+    setEditShowPassword(false);
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
+
+    if (newRequirePassword) {
+      if (!newPassword.trim()) {
+        setMessage({
+          type: "error",
+          text: "Se abiliti l'accesso con password, devi inserire una password valida.",
+        });
+        return;
+      }
+      if (newPassword !== newPasswordConfirm) {
+        setMessage({ type: "error", text: "Le due password inserite non coincidono." });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setMessage(null);
     try {
+      let finalHash = "";
+      if (newRequirePassword && newPassword.trim()) {
+        finalHash = await hashPassword(newPassword.trim());
+      }
+
       await createUser({
         name: newName.trim(),
         station_name: newStation.trim() || "Postazione Cassa",
@@ -83,6 +131,8 @@ export const UserManagementPanel: React.FC = () => {
         allowed_pages: newAllowedPages,
         theme_preset: newTheme,
         theme_brightness: newTheme === "nero-oled" ? 1 : newTheme === "avorio" ? 3 : 4,
+        require_password: newRequirePassword,
+        password_hash: finalHash,
       });
       setIsCreating(false);
       setMessage({ type: "success", text: `Utente / postazione "${newName.trim()}" creato con successo!` });
@@ -97,10 +147,43 @@ export const UserManagementPanel: React.FC = () => {
   const handleEditSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+
+    if (editRequirePassword) {
+      if (!editingUser.password_hash && !editPassword.trim()) {
+        setMessage({
+          type: "error",
+          text: "Devi impostare una password per poter abilitare l'accesso protetto.",
+        });
+        return;
+      }
+      if (editPassword && editPassword !== editPasswordConfirm) {
+        setMessage({ type: "error", text: "Le due password inserite non coincidono." });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setMessage(null);
     try {
-      await updateUser(editingUser);
+      let finalHash = editingUser.password_hash || "";
+      if (editRequirePassword && editPassword.trim()) {
+        finalHash = await hashPassword(editPassword.trim());
+      } else if (!editRequirePassword) {
+        finalHash = "";
+      }
+
+      const updatedUser: AppUser = {
+        ...editingUser,
+        require_password: editRequirePassword,
+        password_hash: finalHash,
+        // Garanzia amministratore: tutti i permessi sono sempre forzati a true
+        can_access_settings: editingUser.is_admin ? true : editingUser.can_access_settings,
+        can_edit_price_lists: editingUser.is_admin ? true : editingUser.can_edit_price_lists,
+        can_edit_or_numbers: editingUser.is_admin ? true : editingUser.can_edit_or_numbers,
+        allowed_pages: editingUser.is_admin ? [...DEFAULT_ALLOWED_PAGES] : editingUser.allowed_pages,
+      };
+
+      await updateUser(updatedUser);
       setEditingUser(null);
       setMessage({ type: "success", text: `Permessi e configurazione di "${editingUser.name}" salvati con successo!` });
     } catch (err: any) {
@@ -127,7 +210,7 @@ export const UserManagementPanel: React.FC = () => {
   };
 
   const togglePageInEditing = (pageId: string) => {
-    if (!editingUser) return;
+    if (!editingUser || editingUser.is_admin) return;
     const current = editingUser.allowed_pages || [];
     const next = current.includes(pageId)
       ? current.filter((p) => p !== pageId)
@@ -136,12 +219,12 @@ export const UserManagementPanel: React.FC = () => {
   };
 
   const selectAllPagesEditing = () => {
-    if (!editingUser) return;
+    if (!editingUser || editingUser.is_admin) return;
     setEditingUser({ ...editingUser, allowed_pages: [...DEFAULT_ALLOWED_PAGES] });
   };
 
   const deselectAllPagesEditing = () => {
-    if (!editingUser) return;
+    if (!editingUser || editingUser.is_admin) return;
     setEditingUser({ ...editingUser, allowed_pages: [] });
   };
 
@@ -181,6 +264,11 @@ export const UserManagementPanel: React.FC = () => {
                   <span className="font-semibold capitalize text-[var(--foreground)]">
                     {currentUser.theme_preset || "Grigio"}
                   </span>
+                  {currentUser.require_password && (
+                    <span className="ml-2 px-1.5 py-0.2 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                      Protetto da Password
+                    </span>
+                  )}
                 </p>
               )}
             </div>
@@ -191,12 +279,13 @@ export const UserManagementPanel: React.FC = () => {
             <span className="text-xs text-[var(--muted-foreground)]">Cambia Postazione:</span>
             <select
               value={currentUser?.id || ""}
-              onChange={(e) => switchUser(e.target.value)}
+              onChange={(e) => void requestSwitchUser(e.target.value)}
               className="bg-[var(--background)] border border-[var(--border)] text-xs rounded-md px-3 py-1.5 font-semibold text-[var(--foreground)] outline-none focus:border-[var(--primary)] cursor-pointer"
             >
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.name} {u.station_name ? `(${u.station_name})` : ""}
+                  {u.name} {u.station_name ? `(${u.station_name})` : ""}{" "}
+                  {u.require_password ? "🔒" : ""}
                 </option>
               ))}
             </select>
@@ -206,7 +295,7 @@ export const UserManagementPanel: React.FC = () => {
         <div className="p-3 bg-[var(--background)]/60 border border-[var(--border)] rounded-lg text-xs text-[var(--muted-foreground)] flex items-start space-x-2.5">
           <KeyRound className="w-4 h-4 text-[var(--primary)] shrink-0 mt-0.5" />
           <p className="leading-relaxed">
-            Ogni postazione/utente ha preferenze e permessi totalmente indipendenti: tema visivo personale (bianco, nero o grigio), pagine abilitate nella barra superiore e autorizzazioni per la modifica dei prezzi o degli OR Numbers.
+            Ogni postazione ha preferenze e sicurezza indipendenti: tema visivo personale (bianco, nero o grigio), pagine abilitate nella barra superiore, autorizzazioni per OR/prezzi e opzione di protezione con password all'accesso.
           </p>
         </div>
       </div>
@@ -224,7 +313,7 @@ export const UserManagementPanel: React.FC = () => {
           <button
             type="button"
             onClick={() => setMessage(null)}
-            className="text-[var(--muted-foreground)] hover:text-white ml-2"
+            className="text-[var(--muted-foreground)] hover:text-white ml-2 cursor-pointer"
           >
             ✕
           </button>
@@ -238,18 +327,25 @@ export const UserManagementPanel: React.FC = () => {
             <div className="flex items-center space-x-2.5">
               <Sliders className="w-5 h-5 text-[var(--primary)]" />
               <div>
-                <h3 className="text-sm font-bold text-[var(--foreground)]">
-                  Configura Permessi & Tema: {editingUser.name}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-[var(--foreground)]">
+                    Configura Permessi & Tema: {editingUser.name}
+                  </h3>
+                  {editingUser.is_admin && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      AMMINISTRATORE PRINCIPALE
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Personalizza quali pagine può vedere e le sue autorizzazioni operative
+                  Personalizza tema, password, moduli visibili e autorizzazioni operative
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setEditingUser(null)}
-              className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
+              className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -326,7 +422,7 @@ export const UserManagementPanel: React.FC = () => {
                       className={cn(
                         "p-3 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer relative",
                         isSelected
-                          ? "border-[var(--primary)] ring-2 ring-[var(--primary)]/30 shadow-md"
+                          ? "border-[var(--primary)] ring-2 ring-[var(--primary)]/30 shadow-md bg-[var(--card)]"
                           : "border-[var(--border)] hover:border-[var(--primary)]/50 bg-[var(--background)]/50"
                       )}
                     >
@@ -347,6 +443,75 @@ export const UserManagementPanel: React.FC = () => {
               </div>
             </div>
 
+            {/* Sezione Password di Accesso */}
+            <div className="p-4 bg-[var(--background)]/60 border border-[var(--border)] rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center space-x-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={editRequirePassword}
+                    onChange={(e) => setEditRequirePassword(e.target.checked)}
+                    className="w-4 h-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-0"
+                  />
+                  <div className="flex items-center space-x-2">
+                    <Lock className="w-4 h-4 text-blue-400" />
+                    <span className="text-xs font-bold text-[var(--foreground)]">
+                      Richiedi password per accedere con questo utente
+                    </span>
+                  </div>
+                </label>
+
+                {editingUser.password_hash ? (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 inline-flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3" />
+                    <span>Password impostata</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-[var(--muted-foreground)]">Nessuna password attiva</span>
+                )}
+              </div>
+
+              {editRequirePassword && (
+                <div className="pt-2 border-t border-[var(--border)] grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in duration-100">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[var(--foreground)] mb-1">
+                      {editingUser.password_hash ? "Cambia Password (lascia vuoto per non modificare)" : "Nuova Password *"}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={editShowPassword ? "text" : "password"}
+                        value={editPassword}
+                        onChange={(e) => setEditPassword(e.target.value)}
+                        placeholder="Inserisci password..."
+                        className="w-full px-3 py-1.5 pr-8 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] outline-none focus:border-[var(--primary)] font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditShowPassword((p) => !p)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)] hover:text-[var(--foreground)] p-1 cursor-pointer"
+                        tabIndex={-1}
+                      >
+                        {editShowPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[var(--foreground)] mb-1">
+                      Conferma Password
+                    </label>
+                    <input
+                      type={editShowPassword ? "text" : "password"}
+                      value={editPasswordConfirm}
+                      onChange={(e) => setEditPasswordConfirm(e.target.value)}
+                      placeholder="Ripeti la password..."
+                      className="w-full px-3 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] outline-none focus:border-[var(--primary)] font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Selezione Pagine Visibili per questo Utente */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -354,48 +519,62 @@ export const UserManagementPanel: React.FC = () => {
                   <LayoutGrid className="w-4 h-4 text-[var(--primary)]" />
                   <span>Pagine & Moduli Visibili nella Barra Superiore</span>
                   <span className="text-[11px] font-normal text-[var(--muted-foreground)]">
-                    ({editingUser.allowed_pages?.length || 0} su {ALL_APP_PAGE_MODULES.length})
+                    ({editingUser.is_admin ? ALL_APP_PAGE_MODULES.length : editingUser.allowed_pages?.length || 0} su {ALL_APP_PAGE_MODULES.length})
                   </span>
                 </label>
-                <div className="flex items-center space-x-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={selectAllPagesEditing}
-                    className="text-[11px] font-semibold text-[var(--primary)] hover:underline flex items-center space-x-1"
-                  >
-                    <CheckSquare className="w-3 h-3" />
-                    <span>Seleziona Tutte</span>
-                  </button>
-                  <span className="text-[var(--border)]">|</span>
-                  <button
-                    type="button"
-                    onClick={deselectAllPagesEditing}
-                    className="text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-white flex items-center space-x-1"
-                  >
-                    <Square className="w-3 h-3" />
-                    <span>Deseleziona Tutte</span>
-                  </button>
-                </div>
+
+                {!editingUser.is_admin && (
+                  <div className="flex items-center space-x-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={selectAllPagesEditing}
+                      className="text-[11px] font-semibold text-[var(--primary)] hover:underline flex items-center space-x-1 cursor-pointer"
+                    >
+                      <CheckSquare className="w-3 h-3" />
+                      <span>Seleziona Tutte</span>
+                    </button>
+                    <span className="text-[var(--border)]">|</span>
+                    <button
+                      type="button"
+                      onClick={deselectAllPagesEditing}
+                      className="text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-white flex items-center space-x-1 cursor-pointer"
+                    >
+                      <Square className="w-3 h-3" />
+                      <span>Deseleziona Tutte</span>
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {editingUser.is_admin && (
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+                  <Shield className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    L'Amministratore principale dispone permanentemente dell'accesso a tutti i moduli di sistema. Queste pagine non possono essere disabilitate.
+                  </span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 p-3 bg-[var(--background)]/70 border border-[var(--border)] rounded-xl">
                 {ALL_APP_PAGE_MODULES.map((page) => {
-                  const checked = Boolean(editingUser.allowed_pages?.includes(page.id));
+                  const checked = editingUser.is_admin || Boolean(editingUser.allowed_pages?.includes(page.id));
                   return (
                     <label
                       key={page.id}
                       className={cn(
-                        "flex items-center space-x-2 p-2 rounded-lg text-xs font-medium cursor-pointer transition-colors border select-none",
+                        "flex items-center space-x-2 p-2 rounded-lg text-xs font-medium transition-colors border select-none",
                         checked
                           ? "bg-[var(--primary)]/10 text-[var(--foreground)] border-[var(--primary)]/30 font-semibold"
-                          : "bg-transparent text-[var(--muted-foreground)] border-transparent hover:bg-[var(--card)]"
+                          : "bg-transparent text-[var(--muted-foreground)] border-transparent hover:bg-[var(--card)]",
+                        editingUser.is_admin ? "opacity-90 cursor-not-allowed" : "cursor-pointer"
                       )}
                     >
                       <input
                         type="checkbox"
                         checked={checked}
+                        disabled={editingUser.is_admin}
                         onChange={() => togglePageInEditing(page.id)}
-                        className="w-3.5 h-3.5 rounded border-[var(--border)] text-[var(--primary)] focus:ring-0"
+                        className="w-3.5 h-3.5 rounded border-[var(--border)] text-[var(--primary)] focus:ring-0 disabled:opacity-50"
                       />
                       <span className="truncate">{page.title}</span>
                     </label>
@@ -412,10 +591,15 @@ export const UserManagementPanel: React.FC = () => {
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <label className="flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 cursor-pointer select-none">
+                <label
+                  className={cn(
+                    "flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 select-none",
+                    editingUser.is_admin ? "cursor-not-allowed opacity-90" : "cursor-pointer"
+                  )}
+                >
                   <input
                     type="checkbox"
-                    checked={editingUser.can_access_settings}
+                    checked={editingUser.is_admin ? true : editingUser.can_access_settings}
                     disabled={editingUser.is_admin}
                     onChange={(e) =>
                       setEditingUser({ ...editingUser, can_access_settings: e.target.checked })
@@ -423,48 +607,81 @@ export const UserManagementPanel: React.FC = () => {
                     className="w-4 h-4 mt-0.5 rounded border-[var(--border)] text-[var(--primary)]"
                   />
                   <div>
-                    <span className="text-xs font-bold text-[var(--foreground)] block">
-                      Accesso Impostazioni
-                    </span>
-                    <span className="text-[10px] text-[var(--muted-foreground)] leading-tight block">
-                      Permette di visualizzare e cambiare le impostazioni di sistema
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-[var(--foreground)] block">
+                        Accesso Impostazioni
+                      </span>
+                      {editingUser.is_admin && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold uppercase">
+                          Sempre attivo
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-[var(--muted-foreground)] leading-tight block mt-0.5">
+                      Permette di visualizzare e modificare le impostazioni di sistema
                     </span>
                   </div>
                 </label>
 
-                <label className="flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 cursor-pointer select-none">
+                <label
+                  className={cn(
+                    "flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 select-none",
+                    editingUser.is_admin ? "cursor-not-allowed opacity-90" : "cursor-pointer"
+                  )}
+                >
                   <input
                     type="checkbox"
-                    checked={editingUser.can_edit_price_lists}
+                    checked={editingUser.is_admin ? true : editingUser.can_edit_price_lists}
+                    disabled={editingUser.is_admin}
                     onChange={(e) =>
                       setEditingUser({ ...editingUser, can_edit_price_lists: e.target.checked })
                     }
                     className="w-4 h-4 mt-0.5 rounded border-[var(--border)] text-[var(--primary)]"
                   />
                   <div>
-                    <span className="text-xs font-bold text-[var(--foreground)] block">
-                      Modifica Listini Prezzi
-                    </span>
-                    <span className="text-[10px] text-[var(--muted-foreground)] leading-tight block">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-[var(--foreground)] block">
+                        Modifica Listini Prezzi
+                      </span>
+                      {editingUser.is_admin && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold uppercase">
+                          Sempre attivo
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-[var(--muted-foreground)] leading-tight block mt-0.5">
                       Autorizza la modifica, importazione e aggiornamento dei listini articoli
                     </span>
                   </div>
                 </label>
 
-                <label className="flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 cursor-pointer select-none">
+                <label
+                  className={cn(
+                    "flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 select-none",
+                    editingUser.is_admin ? "cursor-not-allowed opacity-90" : "cursor-pointer"
+                  )}
+                >
                   <input
                     type="checkbox"
-                    checked={editingUser.can_edit_or_numbers}
+                    checked={editingUser.is_admin ? true : editingUser.can_edit_or_numbers}
+                    disabled={editingUser.is_admin}
                     onChange={(e) =>
                       setEditingUser({ ...editingUser, can_edit_or_numbers: e.target.checked })
                     }
                     className="w-4 h-4 mt-0.5 rounded border-[var(--border)] text-[var(--primary)]"
                   />
                   <div>
-                    <span className="text-xs font-bold text-[var(--foreground)] block">
-                      Modifica OR Numbers
-                    </span>
-                    <span className="text-[10px] text-[var(--muted-foreground)] leading-tight block">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-[var(--foreground)] block">
+                        Modifica OR Numbers
+                      </span>
+                      {editingUser.is_admin && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold uppercase">
+                          Sempre attivo
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-[var(--muted-foreground)] leading-tight block mt-0.5">
                       Autorizza l'assegnazione e la modifica dei numeri d'ordine e sconti
                     </span>
                   </div>
@@ -504,14 +721,14 @@ export const UserManagementPanel: React.FC = () => {
                   Crea Nuovo Utente / Nuova Postazione
                 </h3>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Assegna nome, postazione, tema e permessi personalizzati
+                  Assegna nome, postazione, tema, password e permessi personalizzati
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setIsCreating(false)}
-              className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
+              className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -588,6 +805,66 @@ export const UserManagementPanel: React.FC = () => {
               </div>
             </div>
 
+            {/* Password per il nuovo utente */}
+            <div className="p-4 bg-[var(--background)]/60 border border-[var(--border)] rounded-xl space-y-3">
+              <label className="flex items-center space-x-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={newRequirePassword}
+                  onChange={(e) => setNewRequirePassword(e.target.checked)}
+                  className="w-4 h-4 rounded border-[var(--border)] text-emerald-500 focus:ring-0"
+                />
+                <div className="flex items-center space-x-2">
+                  <Lock className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-[var(--foreground)]">
+                    Richiedi password per accedere con questo utente
+                  </span>
+                </div>
+              </label>
+
+              {newRequirePassword && (
+                <div className="pt-2 border-t border-[var(--border)] grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in duration-100">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[var(--foreground)] mb-1">
+                      Password di Accesso *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={newShowPassword ? "text" : "password"}
+                        required={newRequirePassword}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Inserisci password..."
+                        className="w-full px-3 py-1.5 pr-8 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] outline-none focus:border-emerald-500 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setNewShowPassword((p) => !p)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)] hover:text-[var(--foreground)] p-1 cursor-pointer"
+                        tabIndex={-1}
+                      >
+                        {newShowPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[var(--foreground)] mb-1">
+                      Conferma Password *
+                    </label>
+                    <input
+                      type={newShowPassword ? "text" : "password"}
+                      required={newRequirePassword}
+                      value={newPasswordConfirm}
+                      onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                      placeholder="Ripeti password..."
+                      className="w-full px-3 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] outline-none focus:border-emerald-500 font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Pagine abilitate */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -602,7 +879,7 @@ export const UserManagementPanel: React.FC = () => {
                   <button
                     type="button"
                     onClick={selectAllPagesNew}
-                    className="text-[11px] font-semibold text-[var(--primary)] hover:underline flex items-center space-x-1"
+                    className="text-[11px] font-semibold text-[var(--primary)] hover:underline flex items-center space-x-1 cursor-pointer"
                   >
                     <CheckSquare className="w-3 h-3" />
                     <span>Tutte</span>
@@ -611,7 +888,7 @@ export const UserManagementPanel: React.FC = () => {
                   <button
                     type="button"
                     onClick={deselectAllPagesNew}
-                    className="text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-white flex items-center space-x-1"
+                    className="text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-white flex items-center space-x-1 cursor-pointer"
                   >
                     <Square className="w-3 h-3" />
                     <span>Nessuna</span>
@@ -734,7 +1011,7 @@ export const UserManagementPanel: React.FC = () => {
               Elenco Utenti & Postazioni Configurate
             </h3>
             <p className="text-xs text-[var(--muted-foreground)]">
-              Clicca su "Configura" per scegliere le pagine visibili, il tema e le autorizzazioni
+              Clicca sull'icona di modifica per configurare tema, password e permessi
             </p>
           </div>
 
@@ -756,7 +1033,8 @@ export const UserManagementPanel: React.FC = () => {
               <tr className="border-b border-[var(--border)] bg-[var(--background)]/50 text-[var(--muted-foreground)] font-semibold uppercase text-[10px]">
                 <th className="py-2.5 px-3">Nome Utente</th>
                 <th className="py-2.5 px-3">Postazione PC</th>
-                <th className="py-2.5 px-3 text-center">Tema Predefinito</th>
+                <th className="py-2.5 px-3 text-center">Accesso</th>
+                <th className="py-2.5 px-3 text-center">Tema</th>
                 <th className="py-2.5 px-3 text-center">Pagine Visibili</th>
                 <th className="py-2.5 px-3 text-center">Modifica OR</th>
                 <th className="py-2.5 px-3 text-center">Modifica Listini</th>
@@ -768,7 +1046,7 @@ export const UserManagementPanel: React.FC = () => {
             <tbody className="divide-y divide-[var(--border)]">
               {users.map((u) => {
                 const isCurrent = currentUser?.id === u.id;
-                const allowedCount = u.allowed_pages?.length ?? ALL_APP_PAGE_MODULES.length;
+                const allowedCount = u.is_admin ? ALL_APP_PAGE_MODULES.length : (u.allowed_pages?.length ?? ALL_APP_PAGE_MODULES.length);
                 return (
                   <tr
                     key={u.id}
@@ -797,6 +1075,20 @@ export const UserManagementPanel: React.FC = () => {
                       {u.station_name || "—"}
                     </td>
 
+                    {/* Stato Password */}
+                    <td className="py-3 px-3 text-center">
+                      {u.require_password && u.password_hash ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-blue-500/10 text-blue-400 border-blue-500/30 inline-flex items-center space-x-1">
+                          <Lock className="w-3 h-3" />
+                          <span>PROTETTO</span>
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--background)]/60 text-[var(--muted-foreground)] border-[var(--border)]">
+                          LIBERO
+                        </span>
+                      )}
+                    </td>
+
                     <td className="py-3 px-3 text-center">
                       <span
                         className={cn(
@@ -823,12 +1115,14 @@ export const UserManagementPanel: React.FC = () => {
                       <span
                         className={cn(
                           "px-2 py-0.5 rounded text-[10px] font-bold border",
-                          u.can_edit_or_numbers || u.is_admin
+                          u.is_admin
+                            ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                            : u.can_edit_or_numbers
                             ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                             : "bg-red-500/10 text-red-400 border-red-500/30"
                         )}
                       >
-                        {u.can_edit_or_numbers || u.is_admin ? "SÌ" : "NO"}
+                        {u.is_admin ? "SEMPRE (ADMIN)" : u.can_edit_or_numbers ? "SÌ" : "NO"}
                       </span>
                     </td>
 
@@ -837,12 +1131,14 @@ export const UserManagementPanel: React.FC = () => {
                       <span
                         className={cn(
                           "px-2 py-0.5 rounded text-[10px] font-bold border",
-                          u.can_edit_price_lists || u.is_admin
+                          u.is_admin
+                            ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                            : u.can_edit_price_lists
                             ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                             : "bg-red-500/10 text-red-400 border-red-500/30"
                         )}
                       >
-                        {u.can_edit_price_lists || u.is_admin ? "SÌ" : "NO"}
+                        {u.is_admin ? "SEMPRE (ADMIN)" : u.can_edit_price_lists ? "SÌ" : "NO"}
                       </span>
                     </td>
 
@@ -851,12 +1147,14 @@ export const UserManagementPanel: React.FC = () => {
                       <span
                         className={cn(
                           "px-2 py-0.5 rounded text-[10px] font-bold border",
-                          u.can_access_settings
+                          u.is_admin
+                            ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                            : u.can_access_settings
                             ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                             : "bg-red-500/10 text-red-400 border-red-500/30"
                         )}
                       >
-                        {u.can_access_settings ? "SÌ" : "NO"}
+                        {u.is_admin ? "SEMPRE (ADMIN)" : u.can_access_settings ? "SÌ" : "NO"}
                       </span>
                     </td>
 
@@ -869,7 +1167,7 @@ export const UserManagementPanel: React.FC = () => {
                       ) : (
                         <button
                           type="button"
-                          onClick={() => switchUser(u.id)}
+                          onClick={() => void requestSwitchUser(u.id)}
                           className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--primary)] cursor-pointer"
                         >
                           Seleziona
@@ -881,12 +1179,9 @@ export const UserManagementPanel: React.FC = () => {
                       <div className="flex items-center justify-end space-x-1.5">
                         <button
                           type="button"
-                          onClick={() => {
-                            setIsCreating(false);
-                            setEditingUser({ ...u });
-                          }}
+                          onClick={() => handleOpenEdit(u)}
                           className="p-1 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 transition-colors cursor-pointer"
-                          title="Configura permessi, pagine e tema"
+                          title="Configura permessi, pagine, tema e password"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>

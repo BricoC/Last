@@ -22,12 +22,14 @@ import { ShieldAlert } from "lucide-react";
 import { isTauri } from "@tauri-apps/api/core";
 import { hasAnyUnsavedChanges, runAllWindowCloseGuards } from "@/shared/stores/useWindowStore";
 import { isPageAllowedForUser } from "@/shared/services/appUserService";
+import { UserPasswordModal } from "@/shared/components/ui/UserPasswordModal";
 
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 
 export function App() {
   const { applyToDom } = useThemeStore();
-  const { currentUser } = useUserStore();
+  const { currentUser, pendingPasswordSwitch, cancelPasswordSwitch, confirmPasswordSwitch } =
+    useUserStore();
 
   useEffect(() => {
     // Applica le variabili CSS del tema Grigio L4 all'avvio dell'applicazione
@@ -147,6 +149,14 @@ export function App() {
 
       {/* 3. Area Desktop MDI con supporto Finestre Flottanti, Ridimensionabili e Massimizzabili */}
       <DesktopWorkspace renderContent={renderWindowContent} />
+
+      {/* Modale Password Cambio Utente / Postazione */}
+      <UserPasswordModal
+        isOpen={Boolean(pendingPasswordSwitch)}
+        targetUser={pendingPasswordSwitch}
+        onCancel={cancelPasswordSwitch}
+        onConfirm={confirmPasswordSwitch}
+      />
     </div>
   );
 }

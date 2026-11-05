@@ -47,7 +47,7 @@ export const TopNavBar: React.FC = () => {
     areAllWindowsMinimized,
   } = useWindowStore();
 
-  const { users, currentUser, loadUsers, switchUser } = useUserStore();
+  const { users, currentUser, loadUsers, requestSwitchUser } = useUserStore();
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
@@ -222,7 +222,7 @@ export const TopNavBar: React.FC = () => {
           <User className="w-3.5 h-3.5 text-[var(--primary)] shrink-0" />
           <select
             value={currentUser?.id || ""}
-            onChange={(e) => switchUser(e.target.value)}
+            onChange={(e) => void requestSwitchUser(e.target.value)}
             className="bg-transparent text-xs font-semibold text-[var(--foreground)] outline-none cursor-pointer border-none p-0 pr-1 max-w-[130px] truncate"
             title="Postazione / Utente attivo su questo computer"
           >
