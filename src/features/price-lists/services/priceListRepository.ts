@@ -14,9 +14,50 @@ export class PriceListRepository {
   async getGeneralCount(): Promise<number> {
     const db = await getDatabase();
     const rows = await db.select<{ count: number }[]>(
-      "SELECT COUNT(*) as count FROM listino_generale;"
-    );
+       "SELECT COUNT(*) as count FROM listino_generale;"
+     );
     return rows[0]?.count ?? 0;
+  }
+
+  /**
+   * Restituisce la data/ora ISO più recente registrata per il listino generale
+   * confrontando listini_prezzi_log e listino_generale.updated_at.
+   */
+  async getLastModificationTime(): Promise<string | null> {
+    const db = await getDatabase();
+    let latestTimestamp: string | null = null;
+
+    try {
+      const logRows = await db.select<{ created_at: string }[]>(
+        `SELECT created_at FROM listini_prezzi_log 
+         WHERE (tipo_listino = 'generale' OR tipo_listino IS NULL) 
+           AND created_at IS NOT NULL AND created_at != ''
+         ORDER BY created_at DESC LIMIT 1;`
+      );
+      if (logRows.length > 0 && logRows[0]?.created_at) {
+        latestTimestamp = logRows[0].created_at;
+      }
+    } catch (err) {
+      console.warn("[PriceListRepository] Errore lettura ultimo log:", err);
+    }
+
+    try {
+      const genRows = await db.select<{ updated_at: string }[]>(
+        `SELECT updated_at FROM listino_generale 
+         WHERE updated_at IS NOT NULL AND updated_at != '' 
+         ORDER BY updated_at DESC LIMIT 1;`
+      );
+      if (genRows.length > 0 && genRows[0]?.updated_at) {
+        const genDate = genRows[0].updated_at;
+        if (!latestTimestamp || genDate > latestTimestamp) {
+          latestTimestamp = genDate;
+        }
+      }
+    } catch (err) {
+      console.warn("[PriceListRepository] Errore lettura ultimo updated_at:", err);
+    }
+
+    return latestTimestamp;
   }
 
   /**
