@@ -12,6 +12,7 @@ export type QuoteDraft = Omit<QuoteDraftInput, "items" | "status"> & { status?: 
 export function createEmptyQuoteDraft(): QuoteDraft {
   const now = new Date();
   return {
+    quote_number: null,
     year: now.getFullYear(),
     quote_date: localDate(),
     status: "bozza",
@@ -53,6 +54,7 @@ export function quoteToDraft(quote: Quote): QuoteDraft {
   }));
   return {
     id: quote.id,
+    quote_number: quote.quote_number,
     year: quote.year,
     quote_date: quote.quote_date,
     status: quote.status,
@@ -94,6 +96,12 @@ export function toQuoteInput(draft: QuoteDraft): QuoteDraftInput {
       forced_unit_price: item.forced_unit_price ? money(item.forced_unit_price) : null,
     })),
   };
+}
+
+export function formatQuoteCode(year?: number | null, quoteNumber?: number | null): string | null {
+  if (quoteNumber == null) return null;
+  const y = year ?? new Date().getFullYear();
+  return `${y}.${String(quoteNumber).padStart(3, "0")}`;
 }
 
 function localDate(): string {

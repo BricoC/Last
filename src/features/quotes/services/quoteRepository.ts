@@ -16,8 +16,16 @@ import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
 export class QuoteRepository {
   public async getQuotes(search = ""): Promise<Quote[]> {
     const db = await getDatabase();
+    await this.ensureQuoteNumbersAssigned();
     const searchSql = buildMultiTermSqlSearch(search, [
-      "client_name", "subject", "quote_date", "CAST(quote_number AS TEXT)", "CAST(year AS TEXT)", "status",
+      "client_name",
+      "subject",
+      "quote_date",
+      "CAST(quote_number AS TEXT)",
+      "printf('%d.%03d', year, quote_number)",
+      "printf('%03d', quote_number)",
+      "CAST(year AS TEXT)",
+      "status",
     ], { numberedParameters: false });
     const rows = await db.select<QuoteRow[]>(
       `SELECT * FROM quotes WHERE deleted_at IS NULL
@@ -36,6 +44,7 @@ export class QuoteRepository {
     const copied = {
       ...draft,
       id: undefined,
+      quote_number: null,
       status: "bozza" as const,
       year: today.getFullYear(),
       quote_date: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`,
@@ -58,12 +67,59 @@ export class QuoteRepository {
     return this.mapQuote(quotes[0], rows.map(this.mapItem));
   }
 
+  public async generateUniqueQuoteNumber(year: number): Promise<number> {
+    const db = await getDatabase();
+    const rows = await db.select<{ quote_number: number }[]>(
+      "SELECT quote_number FROM quotes WHERE year = $1 AND quote_number IS NOT NULL",
+      [year]
+    );
+    const taken = new Set<number>(rows.map((r) => r.quote_number));
+    const available: number[] = [];
+    for (let i = 1; i <= 999; i++) {
+      if (!taken.has(i)) {
+        available.push(i);
+      }
+    }
+    if (available.length === 0) {
+      let candidate = 1000;
+      while (taken.has(candidate)) candidate++;
+      return candidate;
+    }
+    const randomIndex = Math.floor(Math.random() * available.length);
+    return available[randomIndex];
+  }
+
+  private async ensureQuoteNumbersAssigned(): Promise<void> {
+    try {
+      const db = await getDatabase();
+      const unnumbered = await db.select<{ id: string; year: number }[]>(
+        "SELECT id, year FROM quotes WHERE quote_number IS NULL AND deleted_at IS NULL"
+      );
+      for (const item of unnumbered) {
+        const num = await this.generateUniqueQuoteNumber(item.year);
+        await db.execute("UPDATE quotes SET quote_number = $1 WHERE id = $2", [num, item.id]);
+      }
+    } catch (err) {
+      console.warn("[QuoteRepository] Assegnazione automatica quote_number:", err);
+    }
+  }
+
   public async saveDraft(input: QuoteDraftInput): Promise<Quote> {
     const existing = input.id ? await this.getQuoteById(input.id) : null;
     if (input.id && !existing) throw new Error("Preventivo da aggiornare non trovato.");
+    const year = input.year ?? (existing?.year ?? new Date().getFullYear());
+    let quoteNumber = existing?.quote_number ?? input.quote_number ?? null;
+    if (quoteNumber == null) {
+      quoteNumber = await this.generateUniqueQuoteNumber(year);
+    }
+    const inputWithNumber: QuoteDraftInput = {
+      ...input,
+      year,
+      quote_number: quoteNumber,
+    };
     const now = new Date().toISOString();
     const quoteId = input.id || crypto.randomUUID();
-    const payload = buildQuoteSavePayload(input, existing, now, quoteId);
+    const payload = buildQuoteSavePayload(inputWithNumber, existing, now, quoteId);
     await invoke("save_quote_transaction", { payload });
     const saved = await this.getQuoteById(quoteId);
     if (!saved) throw new Error("Errore recupero preventivo salvato.");
@@ -73,10 +129,17 @@ export class QuoteRepository {
   public async convertToDdt(input: QuoteDraftInput) {
     const now = new Date().toISOString();
     const quoteId = input.id || crypto.randomUUID();
+    const existing = input.id ? await this.getQuoteById(input.id) : null;
+    const year = input.year ?? (existing?.year ?? new Date().getFullYear());
+    let quoteNumber = existing?.quote_number ?? input.quote_number ?? null;
+    if (quoteNumber == null) {
+      quoteNumber = await this.generateUniqueQuoteNumber(year);
+    }
     const activeItems = input.items.filter((item) => item.description.trim());
     if (!activeItems.length) throw new Error("Inserisci almeno una riga descrittiva prima di convertire il preventivo.");
-    const quotePayload = buildQuoteSavePayload(input, null, now, quoteId);
-    const conversion = buildQuoteDdtConversion(input, crypto.randomUUID());
+    const inputWithNumber: QuoteDraftInput = { ...input, year, quote_number: quoteNumber };
+    const quotePayload = buildQuoteSavePayload(inputWithNumber, existing, now, quoteId);
+    const conversion = buildQuoteDdtConversion(inputWithNumber, crypto.randomUUID());
     await invoke<string>("convert_quote_to_ddt_transaction", {
       quotePayload, ddtPayload: conversion.payload,
     });

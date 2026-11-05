@@ -12,7 +12,7 @@ import { registerWindowCloseGuard, registerDirtyCheck, useWindowStore } from "@/
 import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import { useFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import type { Quote } from "./models/quote";
-import { createEmptyQuoteDraft, createEmptyQuoteItem, isQuoteDraftItemActive, quoteToDraft, toQuoteInput, type QuoteDraft, type QuoteDraftItem } from "./models/quoteDraft";
+import { createEmptyQuoteDraft, createEmptyQuoteItem, formatQuoteCode, isQuoteDraftItemActive, quoteToDraft, toQuoteInput, type QuoteDraft, type QuoteDraftItem } from "./models/quoteDraft";
 
 type QuoteCloseChoice = "save" | "discard" | "cancel";
 
@@ -31,6 +31,8 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   const getQuoteSearchText = useCallback((quote: Quote) => [
     quote.client_name, quote.subject, quote.quote_date, formatQuoteDate(quote.quote_date),
     String(quote.quote_number ?? ""), String(quote.year), quote.status,
+    formatQuoteCode(quote.year, quote.quote_number) ?? "",
+    quote.quote_number != null ? String(quote.quote_number).padStart(3, "0") : "",
   ], []);
   const filteredQuotes = useFragmentSearch(quotes, archiveSearch, getQuoteSearchText);
 
@@ -180,6 +182,7 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   return <div className="relative flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3 text-[var(--foreground)]">
     <QuoteStudioHeader status={draft.status ?? "bozza"} viewMode={viewMode} alexMode={alexMode} saving={saving}
       archiveCount={quotes.length} quoteDate={draft.quote_date ?? ""}
+      quoteCode={formatQuoteCode(draft.year, draft.quote_number)}
       onStatusChange={(status) => updateHeader({ status })} onViewChange={setViewMode}
       onAlexToggle={() => setAlexMode((value) => !value)} onArchive={() => setShowArchive((value) => !value)}
       onSave={() => void save()} onNew={() => void handleNewQuote()}
