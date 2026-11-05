@@ -356,58 +356,131 @@ export const ProductListPage: React.FC = () => {
     void loadData();
   }, [loadData]);
 
-  // Scorciatoia F4 per ricerca rapida
+  // Annulla tutte le operazioni fino all'ultimo salvataggio (Ctrl + Z)
+  const revertAllUnsavedChanges = useCallback(() => {
+    if (dirtyRows.size === 0) return;
+    if (
+      !confirm(
+        `Vuoi annullare tutte le ${dirtyRows.size} modifiche non salvate e ripristinare il listino allo stato dell'ultimo salvataggio?`
+      )
+    ) {
+      return;
+    }
+
+    // 1. Ripristina items: scarta le righe create in sessione e ripristina i valori originali
+    setItems((prev) => {
+      const restored: ListinoGeneraleRow[] = [];
+      for (const row of prev) {
+        if (row.id.startsWith("new_") || !originalRowsSnapshot.has(row.id)) {
+          continue;
+        }
+        const original = originalRowsSnapshot.get(row.id);
+        restored.push(original ? { ...original } : row);
+      }
+      return restored;
+    });
+
+    // 2. Resetta conteggio DB alle sole righe originali
+    setTotalDbCount(originalRowsSnapshot.size);
+
+    // 3. Resetta stati
+    setDirtyRows(new Map());
+    setSelectedIds(new Set());
+    setActiveCell(null);
+    setEditingCell(null);
+    setInitialEditChar(undefined);
+    setNewTopRow(createBlankRow());
+
+    // 4. Cancella eventuale timer auto-save pendente
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, [dirtyRows.size, originalRowsSnapshot]);
+
+  // Scorciatoia F4 per ricerca rapida e Ctrl+Z per annullare modifiche non salvate
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "F4") {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
+        return;
+      }
+
+      // Ctrl + Z (o Cmd + Z) per annullare tutte le modifiche fino all'ultimo salvataggio
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        const activeTag = (document.activeElement?.tagName || "").toLowerCase();
+        if (activeTag === "input" || activeTag === "textarea") {
+          return;
+        }
+        if (dirtyRows.size > 0) {
+          e.preventDefault();
+          revertAllUnsavedChanges();
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [dirtyRows.size, revertAllUnsavedChanges]);
 
   // Ricerca tokenizzata
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
 
-  // Visualizzazione elementi: filtrati per ricerca rapida, ma l'ordine rimane STABILE durante l'editing!
+  // Visualizzazione elementi: le nuove righe create rimangono SEMPRE bloccate in cima!
   const filteredItems = useMemo(() => {
-    let result = items;
+    // 1. Separa le nuove righe create in questa sessione dai record già a catalogo nel DB
+    const newItems: ListinoGeneraleRow[] = [];
+    const dbItems: ListinoGeneraleRow[] = [];
+
+    for (const item of items) {
+      if (item.id.startsWith("new_") || !originalRowsSnapshot.has(item.id)) {
+        newItems.push(item);
+      } else {
+        dbItems.push(item);
+      }
+    }
+
+    let filteredNew = newItems;
+    let filteredDb = dbItems;
 
     if (searchTokens.length > 0) {
-      result = result.filter((item) => {
+      filteredNew = filteredNew.filter((item) => {
+        const text = `${item.descrizione} ${item.codice_articolo || ""} ${item.fornitore || ""} ${item.cat || ""}`.toLowerCase();
+        return searchTokens.every((token) => text.includes(token));
+      });
+      filteredDb = filteredDb.filter((item) => {
         const text = `${item.descrizione} ${item.codice_articolo || ""} ${item.fornitore || ""} ${item.cat || ""}`.toLowerCase();
         return searchTokens.every((token) => text.includes(token));
       });
     }
 
-    if (!sortField) {
-      return result;
+    if (sortField) {
+      filteredDb = [...filteredDb].sort((a, b) => {
+        let valA: any = sortField === "costo_maggiorato" ? null : (a as any)[sortField];
+        let valB: any = sortField === "costo_maggiorato" ? null : (b as any)[sortField];
+
+        if (sortField === "costo_maggiorato") {
+          valA = a.r2 ?? calculateCostoMaggiorato(a.prezzo_acquisto, a.aumento, a.maga);
+          valB = b.r2 ?? calculateCostoMaggiorato(b.prezzo_acquisto, b.aumento, b.maga);
+        }
+
+        if (valA == null) valA = "";
+        if (valB == null) valB = "";
+
+        if (typeof valA === "number" && typeof valB === "number") {
+          return sortAsc ? valA - valB : valB - valA;
+        }
+
+        return sortAsc
+          ? String(valA).localeCompare(String(valB), "it", { numeric: true })
+          : String(valB).localeCompare(String(valA), "it", { numeric: true });
+      });
     }
 
-    return [...result].sort((a, b) => {
-      let valA: any = sortField === "costo_maggiorato" ? null : (a as any)[sortField];
-      let valB: any = sortField === "costo_maggiorato" ? null : (b as any)[sortField];
-
-      if (sortField === "costo_maggiorato") {
-        valA = a.r2 ?? calculateCostoMaggiorato(a.prezzo_acquisto, a.aumento, a.maga);
-        valB = b.r2 ?? calculateCostoMaggiorato(b.prezzo_acquisto, b.aumento, b.maga);
-      }
-
-      if (valA == null) valA = "";
-      if (valB == null) valB = "";
-
-      if (typeof valA === "number" && typeof valB === "number") {
-        return sortAsc ? valA - valB : valB - valA;
-      }
-
-      return sortAsc
-        ? String(valA).localeCompare(String(valB), "it", { numeric: true })
-        : String(valB).localeCompare(String(valA), "it", { numeric: true });
-    });
-  }, [items, searchTokens, sortField, sortAsc]);
+    // Le nuove righe inserite restano SEMPRE bloccate in cima nell'ordine in cui sono state immesse
+    return [...filteredNew, ...filteredDb];
+  }, [items, originalRowsSnapshot, searchTokens, sortField, sortAsc]);
 
   // Gestione scroll infinito
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -707,13 +780,13 @@ export const ProductListPage: React.FC = () => {
     }
   }, [dirtyRows, isSaving, originalRowsSnapshot, currentUser]);
 
-  // Gestione timer auto-save silenzioso
+  // Gestione timer auto-save silenzioso (predefinito: 30 minuti)
   const scheduleSilentAutoSaveIfNeeded = useCallback(() => {
     if (autoSaveTimerRef.current !== null) {
       return;
     }
     const savedMinStr = localStorage.getItem("price_list_autosave_minutes");
-    const intervalMin = savedMinStr ? Math.max(1, parseInt(savedMinStr, 10)) : 10;
+    const intervalMin = savedMinStr ? Math.max(1, parseInt(savedMinStr, 10)) : 30;
     const intervalMs = intervalMin * 60 * 1000;
 
     autoSaveTimerRef.current = setTimeout(() => {
@@ -736,7 +809,11 @@ export const ProductListPage: React.FC = () => {
         );
 
         if (hasData) {
-          setItems((prev) => [updatedTop, ...prev]);
+          setItems((prev) => {
+            const newOnes = prev.filter((r) => r.id.startsWith("new_") || !originalRowsSnapshot.has(r.id));
+            const dbOnes = prev.filter((r) => !r.id.startsWith("new_") && originalRowsSnapshot.has(r.id));
+            return [...newOnes, updatedTop, ...dbOnes];
+          });
           setDirtyRows((prev) => {
             const next = new Map(prev);
             next.set(updatedTop.id, updatedTop);
@@ -764,7 +841,7 @@ export const ProductListPage: React.FC = () => {
       );
       scheduleSilentAutoSaveIfNeeded();
     },
-    [newTopRow, updateRowWithField, scheduleSilentAutoSaveIfNeeded]
+    [newTopRow, updateRowWithField, scheduleSilentAutoSaveIfNeeded, originalRowsSnapshot]
   );
 
   // Selezione cella singola (click o navigazione con frecce, stile Excel)
@@ -1205,6 +1282,18 @@ export const ProductListPage: React.FC = () => {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
+
+          {canEdit && dirtyRows.size > 0 && (
+            <button
+              type="button"
+              onClick={revertAllUnsavedChanges}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-semibold shadow-sm transition-colors cursor-pointer"
+              title="Annulla tutte le modifiche non salvate (Ctrl+Z)"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Annulla ({dirtyRows.size})</span>
+            </button>
+          )}
 
           {canEdit && (
             <button
