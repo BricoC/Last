@@ -56,3 +56,8 @@ export interface PriceListLogEntry {
   operatore: string;
   motivo: string | null;
 }
+
+export interface TrashListinoRow extends ListinoGeneraleRow {
+  deleted_at: string;
+  deleted_by?: string | null;
+}

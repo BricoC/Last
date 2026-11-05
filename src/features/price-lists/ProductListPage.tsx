@@ -26,6 +26,7 @@ import { priceListSyncService } from "./services/priceListSyncService";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { ItemPriceHistoryModal } from "./components/ItemPriceHistoryModal";
+import { PriceListTrashModal } from "./components/PriceListTrashModal";
 import {
   useColumnVisibility,
   ALL_GENERAL_COLUMNS,
@@ -298,6 +299,10 @@ export const ProductListPage: React.FC = () => {
   // Modale Storico Variazioni Riga (Colonna A...)
   const [historyModalItem, setHistoryModalItem] = useState<ListinoGeneraleRow | null>(null);
 
+  // Modale Cestino Articoli Eliminati (Max 30 FIFO)
+  const [trashCount, setTrashCount] = useState<number>(0);
+  const [isTrashModalOpen, setIsTrashModalOpen] = useState(false);
+
   // Riferimento container tabella
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
@@ -313,6 +318,13 @@ export const ProductListPage: React.FC = () => {
       setTotalDbCount(count);
       const rows = await priceListRepository.searchGeneral("", 15000);
       setItems(rows);
+
+      try {
+        const tCount = await priceListRepository.getTrashCount();
+        setTrashCount(tCount);
+      } catch (e) {
+        console.warn("[ProductListPage] Errore lettura conteggio cestino:", e);
+      }
 
       try {
         const lastMod = await priceListRepository.getLastModificationTime();
@@ -969,8 +981,14 @@ export const ProductListPage: React.FC = () => {
 
     if (payload.action === "delete") {
       const idsToDelete = Array.from(selectedIds);
-      await priceListRepository.deleteGeneralRows(idsToDelete);
+      const rowsToDelete = items.filter((r) => selectedIds.has(r.id));
+      await priceListRepository.moveToTrash(rowsToDelete, currentUser?.name || "Amministratore");
       setItems((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+      setTotalDbCount((prev) => Math.max(0, prev - idsToDelete.length));
+      try {
+        const tCount = await priceListRepository.getTrashCount();
+        setTrashCount(tCount);
+      } catch {}
       setDirtyRows((prev) => {
         const next = new Map(prev);
         idsToDelete.forEach((id) => next.delete(id));
@@ -1096,17 +1114,19 @@ export const ProductListPage: React.FC = () => {
     });
   }, []);
 
-  // Eliminazione di una singola riga dal listino
+  // Spostamento di una singola riga nel Cestino (FIFO max 30)
   const handleDeleteRow = useCallback(
     async (row: ListinoGeneraleRow) => {
       if (!canEdit) return;
       const desc = row.descrizione || row.codice_articolo || "questo articolo";
-      if (!confirm(`Sei sicuro di voler eliminare "${desc}" dal listino?`)) {
+      if (!confirm(`Spostare "${desc}" nel Cestino? (Potrai ripristinarlo in qualsiasi momento dal pulsante Cestino)`)) {
         return;
       }
       try {
-        await priceListRepository.deleteGeneralRows([row.id]);
+        await priceListRepository.moveToTrash([row], currentUser?.name || "Amministratore");
         setItems((prev) => prev.filter((r) => r.id !== row.id));
+        setTotalDbCount((prev) => Math.max(0, prev - 1));
+        setTrashCount((prev) => Math.min(30, prev + 1));
         setDirtyRows((prev) => {
           const next = new Map(prev);
           next.delete(row.id);
@@ -1119,12 +1139,20 @@ export const ProductListPage: React.FC = () => {
         });
         void priceListSyncService.deleteGeneralBatchFromSupabase([row.id]);
       } catch (err: any) {
-        console.error("Errore cancellazione articolo:", err);
-        setError(`Errore cancellazione articolo: ${err?.message || err}`);
+        console.error("Errore spostamento nel cestino:", err);
+        setError(`Errore eliminazione articolo: ${err?.message || err}`);
       }
     },
-    [canEdit]
+    [canEdit, currentUser]
   );
+
+  // Ripristino di un articolo dal Cestino nel Listino Generale attivo
+  const handleItemRestored = useCallback((restoredItem: ListinoGeneraleRow) => {
+    setItems((prev) => [restoredItem, ...prev]);
+    setTotalDbCount((prev) => prev + 1);
+    setTrashCount((prev) => Math.max(0, prev - 1));
+    void priceListSyncService.pushGeneralBatchToSupabase([restoredItem]);
+  }, []);
 
   return (
     <div
@@ -1205,6 +1233,23 @@ export const ProductListPage: React.FC = () => {
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                   <span>Salvato</span>
                 </>
+              )}
+            </button>
+          )}
+
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setIsTrashModalOpen(true)}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-rose-400 transition-colors shadow-sm cursor-pointer"
+              title={`Cestino articoli eliminati (${trashCount}/30)`}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-500/80" />
+              <span className="text-xs font-semibold">Cestino</span>
+              {trashCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                  {trashCount}
+                </span>
               )}
             </button>
           )}
@@ -1805,6 +1850,12 @@ export const ProductListPage: React.FC = () => {
         item={historyModalItem}
         originalItem={historyModalItem ? originalRowsSnapshot.get(historyModalItem.id) : undefined}
         pendingItem={historyModalItem ? dirtyRows.get(historyModalItem.id) : undefined}
+      />
+
+      <PriceListTrashModal
+        isOpen={isTrashModalOpen}
+        onClose={() => setIsTrashModalOpen(false)}
+        onItemRestored={handleItemRestored}
       />
     </div>
   );
