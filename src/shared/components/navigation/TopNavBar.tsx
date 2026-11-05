@@ -24,11 +24,9 @@ import {
   User,
   Cloud,
   Loader2,
-  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
-import { TopbarOrderModal } from "./TopbarOrderModal";
 
 export interface NavModule {
   id: string;
@@ -36,6 +34,21 @@ export interface NavModule {
   componentId: string;
   icon: React.ReactNode;
 }
+
+export const ALL_TOPBAR_NAV_MODULES: NavModule[] = [
+  { id: "dashboard", title: "Dashboard", componentId: "dashboard", icon: <LayoutGrid className="w-3.5 h-3.5" /> },
+  { id: "orders", title: "Order Manager", componentId: "orders", icon: <ShoppingCart className="w-3.5 h-3.5" /> },
+  { id: "price-lists", title: "Listino Generale", componentId: "price-lists", icon: <Tag className="w-3.5 h-3.5" /> },
+  { id: "or-numbers", title: "OR Numbers", componentId: "or-numbers", icon: <Hash className="w-3.5 h-3.5" /> },
+  { id: "ddt-list", title: "DDT List", componentId: "ddt-list", icon: <FileText className="w-3.5 h-3.5" /> },
+  { id: "ddt-articles", title: "DDT Articoli", componentId: "ddt-articles", icon: <ListChecks className="w-3.5 h-3.5" /> },
+  { id: "client-lists", title: "Listini Clienti", componentId: "client-lists", icon: <UserCheck className="w-3.5 h-3.5" /> },
+  { id: "invoices", title: "Fatture Elettroniche", componentId: "invoices", icon: <Receipt className="w-3.5 h-3.5" /> },
+  { id: "ddt-studio", title: "DDT Studio (Pro)", componentId: "ddt-studio", icon: <FileSpreadsheet className="w-3.5 h-3.5" /> },
+  { id: "quotes", title: "Preventivi", componentId: "quotes", icon: <Calculator className="w-3.5 h-3.5" /> },
+  { id: "offers", title: "Offerte", componentId: "offers", icon: <ClipboardList className="w-3.5 h-3.5" /> },
+  { id: "clients", title: "Clienti", componentId: "clients", icon: <Users className="w-3.5 h-3.5" /> },
+];
 
 export const TopNavBar: React.FC = () => {
   const {
@@ -57,7 +70,6 @@ export const TopNavBar: React.FC = () => {
     updateCurrentUserTopbarOrder,
   } = useUserStore();
 
-  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
   const [dragOverModuleId, setDragOverModuleId] = useState<string | null>(null);
 
@@ -92,20 +104,7 @@ export const TopNavBar: React.FC = () => {
     void loadUsers();
   }, [loadUsers]);
 
-  const modules: NavModule[] = [
-    { id: "dashboard", title: "Dashboard", componentId: "dashboard", icon: <LayoutGrid className="w-3.5 h-3.5" /> },
-    { id: "orders", title: "Order Manager", componentId: "orders", icon: <ShoppingCart className="w-3.5 h-3.5" /> },
-    { id: "price-lists", title: "Listino Generale", componentId: "price-lists", icon: <Tag className="w-3.5 h-3.5" /> },
-    { id: "or-numbers", title: "OR Numbers", componentId: "or-numbers", icon: <Hash className="w-3.5 h-3.5" /> },
-    { id: "ddt-list", title: "DDT List", componentId: "ddt-list", icon: <FileText className="w-3.5 h-3.5" /> },
-    { id: "ddt-articles", title: "DDT Articoli", componentId: "ddt-articles", icon: <ListChecks className="w-3.5 h-3.5" /> },
-    { id: "client-lists", title: "Listini Clienti", componentId: "client-lists", icon: <UserCheck className="w-3.5 h-3.5" /> },
-    { id: "invoices", title: "Fatture Elettroniche", componentId: "invoices", icon: <Receipt className="w-3.5 h-3.5" /> },
-    { id: "ddt-studio", title: "DDT Studio (Pro)", componentId: "ddt-studio", icon: <FileSpreadsheet className="w-3.5 h-3.5" /> },
-    { id: "quotes", title: "Preventivi", componentId: "quotes", icon: <Calculator className="w-3.5 h-3.5" /> },
-    { id: "offers", title: "Offerte", componentId: "offers", icon: <ClipboardList className="w-3.5 h-3.5" /> },
-    { id: "clients", title: "Clienti", componentId: "clients", icon: <Users className="w-3.5 h-3.5" /> },
-  ];
+  const modules = ALL_TOPBAR_NAV_MODULES;
 
   const userOrder =
     currentUser?.topbar_order && currentUser.topbar_order.length > 0
@@ -170,8 +169,7 @@ export const TopNavBar: React.FC = () => {
   };
 
   return (
-    <>
-      <header className="h-11 bg-[var(--card)] border-b border-[var(--border)] px-2 flex items-center justify-between select-none text-[var(--foreground)] transition-colors gap-2">
+    <header className="h-11 bg-[var(--card)] border-b border-[var(--border)] px-2 flex items-center justify-between select-none text-[var(--foreground)] transition-colors gap-2">
         {/* Lista Moduli Navigazione Primaria (con scrollbar e supporto rotellina del mouse) */}
         <div
           onWheel={(e) => {
@@ -223,17 +221,6 @@ export const TopNavBar: React.FC = () => {
               </button>
             );
           })}
-
-          {/* Pulsante rapido per personalizzare l'ordine finestre con popup / frecce */}
-          <button
-            type="button"
-            onClick={() => setIsOrderModalOpen(true)}
-            title="Personalizza l'ordine delle finestre nella barra"
-            className="h-7 px-2 rounded-md flex items-center space-x-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors shrink-0 cursor-pointer border border-transparent hover:border-[var(--border)]"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="text-[11px] hidden xl:inline font-medium">Ordina</span>
-          </button>
         </div>
 
       {/* Sezione Destra: Strumenti Desktop Finestre + Impostazioni */}
@@ -357,24 +344,5 @@ export const TopNavBar: React.FC = () => {
         )}
       </div>
     </header>
-
-    <TopbarOrderModal
-      isOpen={isOrderModalOpen}
-      onClose={() => setIsOrderModalOpen(false)}
-      modules={visibleModules}
-      currentOrder={userOrder}
-      onSaveOrder={async (newOrder) => {
-        // Preserva i moduli non presenti nella lista visibile
-        const full = [...newOrder];
-        for (const id of userOrder) {
-          if (!full.includes(id)) full.push(id);
-        }
-        for (const m of modules) {
-          if (!full.includes(m.id)) full.push(m.id);
-        }
-        await updateCurrentUserTopbarOrder(full);
-      }}
-    />
-  </>
   );
 };
