@@ -20,6 +20,8 @@ interface UserState {
     preset: "grigio" | "nero-oled" | "avorio",
     brightness?: number
   ) => Promise<void>;
+  updateCurrentUserTopbarOrder: (order: string[]) => Promise<void>;
+  setUserTopbarOrder: (userId: string, order: string[]) => Promise<void>;
   createUser: (userData: {
     name: string;
     station_name?: string;
@@ -174,6 +176,34 @@ export const useUserStore = create<UserState>((set, get) => ({
       themeStore.setBrightness(brightness);
       themeStore.setPreset(preset);
     }
+  },
+
+  updateCurrentUserTopbarOrder: async (order: string[]) => {
+    const { currentUser, users } = get();
+    if (!currentUser) return;
+    const updatedUser: AppUser = {
+      ...currentUser,
+      topbar_order: order,
+    };
+    await AppUserService.updateUser(updatedUser);
+    const updatedList = users.map((u) => (u.id === currentUser.id ? updatedUser : u));
+    set({ users: updatedList, currentUser: updatedUser });
+  },
+
+  setUserTopbarOrder: async (userId: string, order: string[]) => {
+    const { users, currentUser } = get();
+    const target = users.find((u) => u.id === userId);
+    if (!target) return;
+    const updatedUser: AppUser = {
+      ...target,
+      topbar_order: order,
+    };
+    await AppUserService.updateUser(updatedUser);
+    const updatedList = users.map((u) => (u.id === userId ? updatedUser : u));
+    set({
+      users: updatedList,
+      currentUser: currentUser?.id === userId ? updatedUser : currentUser,
+    });
   },
 
   createUser: async (userData) => {

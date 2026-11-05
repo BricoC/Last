@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
-import { AppUser, DEFAULT_ALLOWED_PAGES } from "./appUserService";
+import { AppUser, DEFAULT_ALLOWED_PAGES, DEFAULT_TOPBAR_ORDER } from "./appUserService";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -27,6 +27,7 @@ export interface SupabaseAppUserRow {
   theme_brightness: number;
   password_hash: string;
   require_password: boolean;
+  topbar_order?: string[] | string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -74,6 +75,7 @@ export class UserSyncService {
         theme_brightness: Number(user.theme_brightness) || 4,
         password_hash: user.password_hash || "",
         require_password: Boolean(user.require_password),
+        topbar_order: user.topbar_order && user.topbar_order.length > 0 ? user.topbar_order : DEFAULT_TOPBAR_ORDER,
         created_at: user.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -177,12 +179,26 @@ export class UserSyncService {
             pages = DEFAULT_ALLOWED_PAGES;
           }
 
+          let topbarOrder: string[] = [];
+          if (Array.isArray(r.topbar_order)) {
+            topbarOrder = r.topbar_order;
+          } else if (typeof r.topbar_order === "string") {
+            try {
+              topbarOrder = JSON.parse(r.topbar_order);
+            } catch {
+              topbarOrder = [];
+            }
+          }
+          if (topbarOrder.length === 0) {
+            topbarOrder = DEFAULT_TOPBAR_ORDER;
+          }
+
           await db.execute(
             `INSERT INTO app_users (
               id, name, station_name, can_access_settings, can_access_ddt, can_access_price_lists,
               can_edit_price_lists, can_edit_or_numbers, is_admin, allowed_pages, theme_preset, theme_brightness,
-              password_hash, require_password, created_at
-            ) VALUES ($1, $2, $3, $4, 1, 1, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+              password_hash, require_password, topbar_order, created_at
+            ) VALUES ($1, $2, $3, $4, 1, 1, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
               station_name = excluded.station_name,
@@ -194,7 +210,8 @@ export class UserSyncService {
               theme_preset = excluded.theme_preset,
               theme_brightness = excluded.theme_brightness,
               password_hash = excluded.password_hash,
-              require_password = excluded.require_password`,
+              require_password = excluded.require_password,
+              topbar_order = excluded.topbar_order`,
             [
               r.id,
               r.name,
@@ -208,6 +225,7 @@ export class UserSyncService {
               Number(r.theme_brightness) || 4,
               r.password_hash || "",
               r.require_password ? 1 : 0,
+              JSON.stringify(topbarOrder),
               r.created_at || new Date().toISOString(),
             ]
           );
@@ -228,6 +246,13 @@ export class UserSyncService {
             pages = [];
           }
 
+          let topbarOrder: string[] = [];
+          try {
+            if (loc.topbar_order) topbarOrder = JSON.parse(loc.topbar_order);
+          } catch {
+            topbarOrder = [];
+          }
+
           const toPush: AppUser = {
             id: loc.id,
             name: loc.name,
@@ -243,6 +268,7 @@ export class UserSyncService {
             theme_brightness: Number(loc.theme_brightness) || 4,
             password_hash: loc.password_hash || "",
             require_password: Boolean(loc.require_password),
+            topbar_order: topbarOrder.length > 0 ? topbarOrder : DEFAULT_TOPBAR_ORDER,
             created_at: loc.created_at || new Date().toISOString(),
           };
 

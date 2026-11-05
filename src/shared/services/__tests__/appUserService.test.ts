@@ -24,6 +24,7 @@ describe("isPageAllowedForUser", () => {
     theme_brightness: 4,
     require_password: false,
     password_hash: "",
+    topbar_order: DEFAULT_ALLOWED_PAGES,
     created_at: new Date().toISOString(),
   };
 
@@ -42,6 +43,7 @@ describe("isPageAllowedForUser", () => {
     theme_brightness: 3,
     require_password: false,
     password_hash: "",
+    topbar_order: DEFAULT_ALLOWED_PAGES,
     created_at: new Date().toISOString(),
   };
 

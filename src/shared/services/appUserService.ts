@@ -25,6 +25,21 @@ export const ALL_APP_PAGE_MODULES: AppPageModule[] = [
 
 export const DEFAULT_ALLOWED_PAGES = ALL_APP_PAGE_MODULES.map((m) => m.id);
 
+export const DEFAULT_TOPBAR_ORDER: string[] = [
+  "dashboard",
+  "orders",
+  "price-lists",
+  "or-numbers",
+  "ddt-list",
+  "ddt-articles",
+  "client-lists",
+  "invoices",
+  "ddt-studio",
+  "quotes",
+  "offers",
+  "clients",
+];
+
 export function isPageAllowedForUser(user: AppUser | null | undefined, pageId: string): boolean {
   if (!user) return false;
   if (user.is_admin) return true;
@@ -52,6 +67,7 @@ export interface AppUser {
   theme_brightness: number;
   password_hash?: string;
   require_password: boolean;
+  topbar_order?: string[];
   created_at: string;
 }
 
@@ -86,6 +102,7 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     theme_brightness: 4,
     password_hash: "",
     require_password: false,
+    topbar_order: DEFAULT_TOPBAR_ORDER,
   },
   {
     id: "banco-1",
@@ -114,6 +131,7 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     theme_brightness: 3,
     password_hash: "",
     require_password: false,
+    topbar_order: DEFAULT_TOPBAR_ORDER,
   },
   {
     id: "banco-2",
@@ -142,6 +160,7 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     theme_brightness: 1,
     password_hash: "",
     require_password: false,
+    topbar_order: DEFAULT_TOPBAR_ORDER,
   },
 ];
 
@@ -168,6 +187,7 @@ export class AppUserService {
           theme_brightness INTEGER DEFAULT 4,
           password_hash TEXT DEFAULT '',
           require_password INTEGER NOT NULL DEFAULT 0,
+          topbar_order TEXT DEFAULT '',
           created_at TEXT NOT NULL
         );
       `);
@@ -181,6 +201,7 @@ export class AppUserService {
         "ALTER TABLE app_users ADD COLUMN theme_brightness INTEGER DEFAULT 4",
         "ALTER TABLE app_users ADD COLUMN password_hash TEXT DEFAULT ''",
         "ALTER TABLE app_users ADD COLUMN require_password INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE app_users ADD COLUMN topbar_order TEXT DEFAULT ''",
       ];
       for (const sql of columnsToAdd) {
         try {
@@ -248,6 +269,18 @@ export class AppUserService {
           allowedPages = DEFAULT_ALLOWED_PAGES;
         }
 
+        let topbarOrder: string[] = [];
+        try {
+          if (r.topbar_order) {
+            topbarOrder = JSON.parse(r.topbar_order);
+          }
+        } catch {
+          topbarOrder = [];
+        }
+        if (!Array.isArray(topbarOrder) || topbarOrder.length === 0) {
+          topbarOrder = DEFAULT_TOPBAR_ORDER;
+        }
+
         return {
           id: String(r.id),
           name: String(r.name),
@@ -264,6 +297,7 @@ export class AppUserService {
           theme_brightness: Number(r.theme_brightness) || 4,
           password_hash: String(r.password_hash || ""),
           require_password: Boolean(r.require_password),
+          topbar_order: topbarOrder,
           created_at: String(r.created_at || ""),
         };
       });
@@ -288,6 +322,7 @@ export class AppUserService {
     theme_brightness?: number;
     password_hash?: string;
     require_password?: boolean;
+    topbar_order?: string[];
   }): Promise<AppUser> {
     await this.ensureTable();
     const db = await getDatabase();
@@ -307,14 +342,15 @@ export class AppUserService {
     const themeBrightness = user.theme_brightness || 4;
     const passwordHash = user.password_hash || "";
     const requirePassword = user.require_password ? 1 : 0;
+    const topbarOrder = user.topbar_order && user.topbar_order.length > 0 ? user.topbar_order : DEFAULT_TOPBAR_ORDER;
     const createdAt = new Date().toISOString();
 
     await db.execute(
       `INSERT INTO app_users (
         id, name, station_name, can_access_settings, can_access_ddt, can_access_price_lists,
         can_edit_price_lists, can_edit_or_numbers, is_admin, allowed_pages, theme_preset, theme_brightness,
-        password_hash, require_password, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        password_hash, require_password, topbar_order, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         id,
         name,
@@ -330,6 +366,7 @@ export class AppUserService {
         themeBrightness,
         passwordHash,
         requirePassword,
+        JSON.stringify(topbarOrder),
         createdAt,
       ]
     );
@@ -349,6 +386,7 @@ export class AppUserService {
       theme_brightness: themeBrightness,
       password_hash: passwordHash,
       require_password: Boolean(requirePassword),
+      topbar_order: topbarOrder,
       created_at: createdAt,
     };
 
@@ -367,14 +405,15 @@ export class AppUserService {
     const canEditOr = isAdmin ? 1 : user.can_edit_or_numbers ? 1 : 0;
     const pages = isAdmin ? DEFAULT_ALLOWED_PAGES : (user.allowed_pages || []);
     const requirePassword = user.require_password ? 1 : 0;
+    const topbarOrder = user.topbar_order && user.topbar_order.length > 0 ? user.topbar_order : DEFAULT_TOPBAR_ORDER;
 
     await db.execute(
       `UPDATE app_users 
        SET name = $1, station_name = $2, can_access_settings = $3, can_access_ddt = 1,
            can_access_price_lists = 1, can_edit_price_lists = $4, can_edit_or_numbers = $5,
            is_admin = $6, allowed_pages = $7, theme_preset = $8, theme_brightness = $9,
-           password_hash = $10, require_password = $11
-       WHERE id = $12`,
+           password_hash = $10, require_password = $11, topbar_order = $12
+       WHERE id = $13`,
       [
         user.name,
         user.station_name,
@@ -387,6 +426,7 @@ export class AppUserService {
         user.theme_brightness || 4,
         user.password_hash || "",
         requirePassword,
+        JSON.stringify(topbarOrder),
         user.id,
       ]
     );
@@ -398,6 +438,7 @@ export class AppUserService {
       can_edit_price_lists: isAdmin ? true : user.can_edit_price_lists,
       can_edit_or_numbers: isAdmin ? true : user.can_edit_or_numbers,
       allowed_pages: pages,
+      topbar_order: topbarOrder,
     });
   }
 
