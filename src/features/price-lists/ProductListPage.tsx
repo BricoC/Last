@@ -532,7 +532,12 @@ export const ProductListPage: React.FC = () => {
             if (oldV !== newV) {
               const oldNum = oldV ?? 0;
               const newNum = newV ?? 0;
-              const pct = oldNum > 0 ? ((newNum - oldNum) / oldNum) * 100 : 0;
+              let pct: number | null = null;
+              if (oldNum > 0) {
+                pct = ((newNum - oldNum) / oldNum) * 100;
+              } else if (newNum > 0) {
+                pct = newNum > 2 ? newNum : newNum * 100;
+              }
               logEntries.push({
                 row_id: row.id,
                 created_at: nowIso,
@@ -545,7 +550,7 @@ export const ProductListPage: React.FC = () => {
                 nuovo_valore: newV != null ? round5(newV) : null,
                 vecchio_testo: null,
                 nuovo_testo: null,
-                variazione_pct: round5(pct),
+                variazione_pct: pct != null ? round5(pct) : null,
                 operatore: operatorName,
                 motivo: "Modifica Excel Listino Generale",
               });
