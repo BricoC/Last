@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, ArrowUp, ArrowDown, RotateCcw, Check, Move } from "lucide-react";
+import { X, ArrowUp, ArrowDown, RotateCcw, Check, Move, GripVertical } from "lucide-react";
 import { NavModule } from "./TopNavBar";
 import { DEFAULT_TOPBAR_ORDER } from "@/shared/services/appUserService";
 
@@ -20,7 +20,19 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
 }) => {
   const [order, setOrder] = useState<string[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  // Chiusura tramite tasto ESC
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   useEffect(() => {
     if (isOpen) {
@@ -33,6 +45,7 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
         }
       }
       setOrder(base.filter((id) => allModuleIds.includes(id)));
+      setDraggedId(null);
     }
   }, [isOpen, currentOrder, modules]);
 
@@ -68,35 +81,39 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setDraggedId(id);
     e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
   };
 
-  const handleDragOver = (e: React.DragEvent, id: string) => {
+  const handleDragOver = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
-    if (dragOverId !== id) setDragOverId(id);
-  };
+    e.dataTransfer.dropEffect = "move";
+    if (!draggedId || draggedId === targetId) return;
 
-  const handleDrop = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    if (!draggedId || draggedId === targetId) {
-      setDraggedId(null);
-      setDragOverId(null);
-      return;
-    }
-    const from = order.indexOf(draggedId);
-    const to = order.indexOf(targetId);
-    if (from !== -1 && to !== -1) {
-      const next = [...order];
+    // Scambio reattivo immediato durante il trascinamento
+    setOrder((prev) => {
+      const from = prev.indexOf(draggedId);
+      const to = prev.indexOf(targetId);
+      if (from === -1 || to === -1 || from === to) return prev;
+      const next = [...prev];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
-      setOrder(next);
-    }
+      return next;
+    });
+  };
+
+  const handleDragEnd = () => {
     setDraggedId(null);
-    setDragOverId(null);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-[var(--card)] border border-[var(--border)] rounded-xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
           <div className="flex items-center space-x-2.5">
@@ -108,14 +125,15 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
                 Ordine Finestre nella Barra
               </h3>
               <p className="text-xs text-[var(--muted-foreground)]">
-                Trascina o usa le frecce per posizionare i pulsanti
+                Trascina le schede o usa le frecce per posizionare i pulsanti
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] cursor-pointer"
+            title="Chiudi (ESC)"
+            className="p-1.5 rounded-lg text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -127,7 +145,6 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
             const mod = modules.find((m) => m.id === modId);
             if (!mod) return null;
             const isDragging = draggedId === modId;
-            const isOver = dragOverId === modId;
 
             return (
               <div
@@ -135,44 +152,45 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
                 draggable
                 onDragStart={(e) => handleDragStart(e, mod.id)}
                 onDragOver={(e) => handleDragOver(e, mod.id)}
-                onDragLeave={() => setDragOverId(null)}
-                onDrop={(e) => handleDrop(e, mod.id)}
-                onDragEnd={() => {
-                  setDraggedId(null);
-                  setDragOverId(null);
-                }}
+                onDragEnd={handleDragEnd}
+                onDrop={handleDragEnd}
                 className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-all select-none cursor-grab active:cursor-grabbing ${
                   isDragging
-                    ? "opacity-40 bg-[var(--background)] border-dashed border-[var(--primary)]"
-                    : isOver
-                    ? "border-[var(--primary)] bg-[var(--primary)]/10 scale-[1.01]"
-                    : "border-[var(--border)] bg-[var(--background)]/60 hover:bg-[var(--background)]"
+                    ? "opacity-50 bg-[var(--primary)]/15 border-dashed border-[var(--primary)] shadow-md"
+                    : "border-[var(--border)] bg-[var(--background)]/70 hover:bg-[var(--background)] hover:border-[var(--primary)]/40 shadow-xs"
                 }`}
               >
-                <div className="flex items-center space-x-3">
-                  <span className="w-5 text-[10px] font-mono text-[var(--muted-foreground)] text-right font-bold">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <GripVertical className="w-4 h-4 text-[var(--muted-foreground)] shrink-0 cursor-grab" />
+                  <span className="w-4 text-[11px] font-mono text-[var(--muted-foreground)] font-bold text-right shrink-0">
                     {index + 1}.
                   </span>
-                  <span className="text-[var(--primary)]">{mod.icon}</span>
-                  <span className="font-semibold text-[var(--foreground)]">{mod.title}</span>
+                  <span className="text-[var(--primary)] shrink-0">{mod.icon}</span>
+                  <span className="font-semibold text-[var(--foreground)] truncate">{mod.title}</span>
                 </div>
 
-                <div className="flex items-center space-x-1">
+                <div className="flex items-center space-x-1 shrink-0 ml-2">
                   <button
                     type="button"
                     disabled={index === 0}
-                    onClick={() => moveUp(index)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      moveUp(index);
+                    }}
                     title="Sposta su"
-                    className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+                    className="p-1.5 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed transition-colors"
                   >
                     <ArrowUp className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
                     disabled={index === order.length - 1}
-                    onClick={() => moveDown(index)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      moveDown(index);
+                    }}
                     title="Sposta giù"
-                    className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+                    className="p-1.5 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed transition-colors"
                   >
                     <ArrowDown className="w-3.5 h-3.5" />
                   </button>
@@ -215,4 +233,3 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
     </div>
   );
 };
-
