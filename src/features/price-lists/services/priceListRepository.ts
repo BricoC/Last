@@ -459,24 +459,24 @@ export class PriceListRepository {
       await db.execute("DELETE FROM listino_generale WHERE id = $1;", [row.id]);
     }
 
-    // Tronca il cestino alle ultime 30 voci (FIFO: le più vecchie vengono eliminate)
+    // Tronca il cestino alle ultime 50 voci (FIFO: le più vecchie vengono eliminate)
     await db.execute(`
       DELETE FROM listino_generale_cestino 
       WHERE id NOT IN (
         SELECT id FROM listino_generale_cestino 
         ORDER BY deleted_at DESC 
-        LIMIT 30
+        LIMIT 50
       );
     `);
   }
 
   /**
-   * Restituisce gli articoli nel cestino ordinati dal più recente al più vecchio (max 30).
+   * Restituisce gli articoli nel cestino ordinati dal più recente al più vecchio (max 50).
    */
   async getTrashItems(): Promise<TrashListinoRow[]> {
     const db = await getDatabase();
     return await db.select<TrashListinoRow[]>(
-      "SELECT * FROM listino_generale_cestino ORDER BY deleted_at DESC LIMIT 30;"
+      "SELECT * FROM listino_generale_cestino ORDER BY deleted_at DESC LIMIT 50;"
     );
   }
 
