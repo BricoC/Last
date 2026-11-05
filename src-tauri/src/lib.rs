@@ -261,6 +261,61 @@ fn send_email_with_attachments(
     Ok(())
 }
 
+#[tauri::command]
+fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use base64::{engine::general_purpose, Engine as _};
+        let paths_json = serde_json::to_string(&paths).unwrap_or_default();
+        let paths_b64 = general_purpose::STANDARD.encode(&paths_json);
+
+        let ps_script = format!(
+            r#"
+            function _d($s) {{ [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($s)) }}
+            $pathsJson = _d '{}'
+            if ($pathsJson) {{
+                $list = ConvertFrom-Json $pathsJson
+                $valid = @()
+                foreach ($p in $list) {{
+                    if (Test-Path $p) {{
+                        $valid += (Resolve-Path $p).Path
+                    }}
+                }}
+                if ($valid.Count -gt 0) {{
+                    Set-Clipboard -Path $valid
+                }}
+            }}
+            "#,
+            paths_b64
+        );
+
+        let mut cmd = Command::new("powershell");
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &ps_script,
+        ]);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Errore esecuzione comando clipboard: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Errore PowerShell clipboard: {}", stderr));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -273,6 +328,7 @@ pub fn run() {
             print_ddt_silent,
             send_order_email,
             send_email_with_attachments,
+            copy_files_to_clipboard,
             ddt_commands::save_ddt_transaction,
             ddt_delete_command::soft_delete_ddt_transaction,
             supabase_config::load_supabase_config,

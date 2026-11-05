@@ -26,6 +26,10 @@ export interface DashboardRecentDdt {
   series: string;
   docDate: string;
   clientName: string;
+  destination?: string;
+  destinationName?: string;
+  destinationAddress?: string;
+  destinationCity?: string;
   totalDocument: number;
   hasCompleteMargins: boolean;
 }
@@ -352,9 +356,12 @@ export class DashboardService {
       series: string;
       doc_date: string;
       client_name: string;
+      destination_name: string | null;
+      destination_address: string | null;
+      destination_city: string | null;
       total_document_subunits: number;
     }[]>(
-      `SELECT id, doc_number, series, doc_date, client_name, total_document_subunits
+      `SELECT id, doc_number, series, doc_date, client_name, destination_name, destination_address, destination_city, total_document_subunits
        FROM ddt_documents
        WHERE deleted_at IS NULL AND doc_number IS NOT NULL AND status <> 'bozza'
        ORDER BY doc_date DESC, doc_number DESC
@@ -376,15 +383,28 @@ export class DashboardService {
       });
     }
 
-    const recentDdts: DashboardRecentDdt[] = recentDdtRows.map((r) => ({
-      id: r.id,
-      docNumber: r.doc_number,
-      series: r.series || "",
-      docDate: r.doc_date,
-      clientName: r.client_name,
-      totalDocument: (Number(r.total_document_subunits) || 0) / 100000,
-      hasCompleteMargins: marginCheckMap.get(r.id) ?? false,
-    }));
+    const recentDdts: DashboardRecentDdt[] = recentDdtRows.map((r) => {
+      const dName = (r.destination_name || "").trim();
+      const dAddr = (r.destination_address || "").trim();
+      const dCity = (r.destination_city || "").trim();
+      const cName = (r.client_name || "").trim();
+      const meaningfulName = dName && dName.toUpperCase() !== cName.toUpperCase() ? dName : "";
+      const display = [meaningfulName, dAddr, dCity].filter(Boolean).join(" · ");
+
+      return {
+        id: r.id,
+        docNumber: r.doc_number,
+        series: r.series || "",
+        docDate: r.doc_date,
+        clientName: r.client_name,
+        destination: display,
+        destinationName: dName,
+        destinationAddress: dAddr,
+        destinationCity: dCity,
+        totalDocument: (Number(r.total_document_subunits) || 0) / 100000,
+        hasCompleteMargins: marginCheckMap.get(r.id) ?? false,
+      };
+    });
 
     // 5. Bozze attive
     const draftsRes = await db.select<{ count: number }[]>(
@@ -817,9 +837,12 @@ export class DashboardService {
       series: string;
       doc_date: string;
       client_name: string;
+      destination_name: string | null;
+      destination_address: string | null;
+      destination_city: string | null;
       total_document_subunits: number;
     }[]>(
-      `SELECT id, doc_number, series, doc_date, client_name, total_document_subunits
+      `SELECT id, doc_number, series, doc_date, client_name, destination_name, destination_address, destination_city, total_document_subunits
        FROM ddt_documents
        WHERE deleted_at IS NULL AND doc_number IS NOT NULL AND status <> 'bozza'
          AND year = $1
@@ -844,15 +867,28 @@ export class DashboardService {
       });
     }
 
-    return rows.map((r) => ({
-      id: r.id,
-      docNumber: r.doc_number,
-      series: r.series || "",
-      docDate: r.doc_date,
-      clientName: r.client_name,
-      totalDocument: (Number(r.total_document_subunits) || 0) / 100000,
-      hasCompleteMargins: marginCheckMap.get(r.id) ?? false,
-    }));
+    return rows.map((r) => {
+      const dName = (r.destination_name || "").trim();
+      const dAddr = (r.destination_address || "").trim();
+      const dCity = (r.destination_city || "").trim();
+      const cName = (r.client_name || "").trim();
+      const meaningfulName = dName && dName.toUpperCase() !== cName.toUpperCase() ? dName : "";
+      const display = [meaningfulName, dAddr, dCity].filter(Boolean).join(" · ");
+
+      return {
+        id: r.id,
+        docNumber: r.doc_number,
+        series: r.series || "",
+        docDate: r.doc_date,
+        clientName: r.client_name,
+        destination: display,
+        destinationName: dName,
+        destinationAddress: dAddr,
+        destinationCity: dCity,
+        totalDocument: (Number(r.total_document_subunits) || 0) / 100000,
+        hasCompleteMargins: marginCheckMap.get(r.id) ?? false,
+      };
+    });
   }
 
   /**

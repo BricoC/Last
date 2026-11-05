@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
+import { useEffect, useMemo, useRef, useState, useDeferredValue, useCallback } from "react";
 import { LoaderCircle, RefreshCw, Search, X, FileText, Mail, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
@@ -220,6 +220,27 @@ export function DDTListPage() {
   };
 
   const visibleRows = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
+
+  const currentQuickDdtIndex = useMemo(() => {
+    if (!selectedDdtId) return -1;
+    return sorted.findIndex((d) => d.id === selectedDdtId);
+  }, [sorted, selectedDdtId]);
+
+  const hasPrevQuickDdt = currentQuickDdtIndex > 0;
+  const hasNextQuickDdt =
+    currentQuickDdtIndex >= 0 && currentQuickDdtIndex < sorted.length - 1;
+
+  const handlePrevQuickDdt = useCallback(() => {
+    if (currentQuickDdtIndex > 0) {
+      setSelectedDdtId(sorted[currentQuickDdtIndex - 1].id);
+    }
+  }, [currentQuickDdtIndex, sorted]);
+
+  const handleNextQuickDdt = useCallback(() => {
+    if (currentQuickDdtIndex >= 0 && currentQuickDdtIndex < sorted.length - 1) {
+      setSelectedDdtId(sorted[currentQuickDdtIndex + 1].id);
+    }
+  }, [currentQuickDdtIndex, sorted]);
 
   const totals = useMemo(() => filtered.reduce((sum, row) => ({
     taxable: sum.taxable + row.taxableSubunits,
@@ -561,6 +582,12 @@ export function DDTListPage() {
           requestOpenDdt(id);
           openWindow({ id: "ddt-studio", title: "DDT Studio (Pro)", componentId: "ddt-studio" });
         }}
+        onNavigatePrev={handlePrevQuickDdt}
+        onNavigateNext={handleNextQuickDdt}
+        hasPrev={hasPrevQuickDdt}
+        hasNext={hasNextQuickDdt}
+        currentIndex={currentQuickDdtIndex}
+        totalCount={sorted.length}
       />
 
       {/* Modale invio email con DDT allegati */}

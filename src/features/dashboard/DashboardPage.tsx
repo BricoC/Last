@@ -24,9 +24,14 @@ import {
   BarChart3,
   Check,
   ChevronDown,
+  Search,
+  MapPin,
+  Copy,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { useEscClose } from "@/shared/hooks/useEscClose";
+import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
+import { copyMultipleDdtPdfsByIds } from "@/features/ddt-studio/utils/ddtPdfClipboard";
 
 const MONTH_NAMES = [
   "Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
@@ -85,6 +90,7 @@ export const DashboardPage: React.FC = () => {
   // DDT del Mese Corrente & Modale DDT Quick View (come in DDT List)
   const [selectedMonthForDdts, setSelectedMonthForDdts] = useState<number>(currentMonthNum);
   const [monthDdts, setMonthDdts] = useState<DashboardRecentDdt[]>([]);
+  const [monthDdtSearch, setMonthDdtSearch] = useState("");
   const [selectedQuickDdtId, setSelectedQuickDdtId] = useState<string | null>(null);
 
   // Modale Rendimento Mensile (12 schede) & Modale Dettaglio Giornaliero
@@ -227,6 +233,82 @@ export const DashboardPage: React.FC = () => {
     setArticleModalDesc(desc);
     setArticleModalClient(client);
     setIsArticleHistoryModalOpen(true);
+  };
+
+  // Filtro di ricerca multi-parola per numero DDT, cliente e destinazione nella tabella "DDT del Mese"
+  const filteredMonthDdts = useMemo(() => {
+    if (!monthDdtSearch.trim()) return monthDdts;
+    return monthDdts.filter((doc) => {
+      const label = `${doc.series ? `${doc.series}/` : ""}${doc.docNumber ?? "BOZ"}`;
+      const searchTargets = [
+        label,
+        doc.docNumber != null ? String(doc.docNumber) : "",
+        doc.docNumber != null ? `N° ${label}` : "",
+        doc.docNumber != null ? `N ${label}` : "",
+        doc.clientName || "",
+        doc.destination || "",
+        doc.destinationName || "",
+        doc.destinationAddress || "",
+        doc.destinationCity || "",
+        doc.docDate || "",
+      ];
+      return matchesFragmentSearch(searchTargets, monthDdtSearch);
+    });
+  }, [monthDdts, monthDdtSearch]);
+
+  // Gestione navigazione con freccia dx/sx nel popup DDT del mese
+  const currentQuickDdtIndex = useMemo(() => {
+    if (!selectedQuickDdtId) return -1;
+    return filteredMonthDdts.findIndex((d) => d.id === selectedQuickDdtId);
+  }, [filteredMonthDdts, selectedQuickDdtId]);
+
+  const hasPrevQuickDdt = currentQuickDdtIndex > 0;
+  const hasNextQuickDdt =
+    currentQuickDdtIndex >= 0 && currentQuickDdtIndex < filteredMonthDdts.length - 1;
+
+  const handlePrevQuickDdt = useCallback(() => {
+    if (currentQuickDdtIndex > 0) {
+      setSelectedQuickDdtId(filteredMonthDdts[currentQuickDdtIndex - 1].id);
+    }
+  }, [currentQuickDdtIndex, filteredMonthDdts]);
+
+  const handleNextQuickDdt = useCallback(() => {
+    if (currentQuickDdtIndex >= 0 && currentQuickDdtIndex < filteredMonthDdts.length - 1) {
+      setSelectedQuickDdtId(filteredMonthDdts[currentQuickDdtIndex + 1].id);
+    }
+  }, [currentQuickDdtIndex, filteredMonthDdts]);
+
+  // Stato copia batch PDF DDT negli appunti
+  const [isCopyingBatch, setIsCopyingBatch] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; label: string } | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  }, []);
+
+  const handleCopyFilteredPdfs = async () => {
+    if (filteredMonthDdts.length === 0 || isCopyingBatch) return;
+    setIsCopyingBatch(true);
+    setBatchProgress(null);
+    try {
+      const ids = filteredMonthDdts.map((d) => d.id);
+      const res = await copyMultipleDdtPdfsByIds(ids, (current, total, label) => {
+        setBatchProgress({ current, total, label });
+      });
+      if (res.count === 1) {
+        showToast("PDF copiato negli appunti! Ora puoi incollarlo (Ctrl+V) nell'email.");
+      } else {
+        showToast(`${res.count} PDF copiati negli appunti! Ora puoi incollarli (Ctrl+V) nell'email.`);
+      }
+    } catch (err) {
+      console.error("Errore copia PDF batch:", err);
+      showToast("Errore durante la generazione o copia dei file PDF.");
+    } finally {
+      setIsCopyingBatch(false);
+      setBatchProgress(null);
+    }
   };
 
   // Calcolo valore massimo per il grafico
@@ -1596,7 +1678,7 @@ export const DashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11px]">
-                {filteredClients.slice(0, 15).map((cli) => (
+                {filteredClients.map((cli) => (
                   <tr
                     key={cli.clientName}
                     onClick={() => handleOpenArticleHistory("", cli.clientName)}
@@ -1628,17 +1710,17 @@ export const DashboardPage: React.FC = () => {
         {/* QUADRANTE 4: DDT DEL MESE CON QUICK VIEW MODAL (col-span-5)   */}
         {/* ============================================================== */}
         <div className="col-span-5 flex flex-col rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 overflow-hidden shadow-xs">
-          {/* Header Quadrante 4 con selettore mese */}
-          <div className="flex items-center justify-between shrink-0 mb-2">
-            <div className="flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-purple-400" />
-              <span className="text-xs font-bold text-[var(--foreground)] uppercase tracking-wider">
+          {/* Header Quadrante 4 con selettore mese e ricerca */}
+          <div className="flex items-center justify-between shrink-0 mb-2 gap-2">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <Clock className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span className="text-xs font-bold text-[var(--foreground)] uppercase tracking-wider shrink-0">
                 DDT del Mese
               </span>
               <select
                 value={selectedMonthForDdts}
                 onChange={(e) => void handleSelectMonthForDdts(Number(e.target.value))}
-                className="bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-[10px] font-bold rounded px-1.5 py-0.5 outline-none cursor-pointer"
+                className="bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-[10px] font-bold rounded px-1.5 py-0.5 outline-none cursor-pointer shrink-0"
               >
                 {MONTH_NAMES.map((m, idx) => (
                   <option key={m} value={idx + 1}>
@@ -1646,33 +1728,101 @@ export const DashboardPage: React.FC = () => {
                   </option>
                 ))}
               </select>
+
+              {/* Textbox di ricerca rapida multi-parola per numero DDT, cliente e destinazione */}
+              <div className="relative flex items-center min-w-[120px] max-w-[210px] flex-1">
+                <Search className="w-3 h-3 text-[var(--muted-foreground)] absolute left-2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={monthDdtSearch}
+                  onChange={(e) => setMonthDdtSearch(e.target.value)}
+                  placeholder="Cerca N°, cliente o destinazione..."
+                  className="w-full bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-[10px] rounded pl-6 pr-5 py-0.5 outline-none focus:border-[var(--primary)] transition-colors placeholder:text-[var(--muted-foreground)]/60"
+                />
+                {monthDdtSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setMonthDdtSearch("")}
+                    className="absolute right-1 text-[var(--muted-foreground)] hover:text-white p-0.5 rounded cursor-pointer"
+                    title="Cancella ricerca"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Pulsante Copia PDF Filtrate per incollare in email */}
+              <button
+                type="button"
+                onClick={() => void handleCopyFilteredPdfs()}
+                disabled={isCopyingBatch || filteredMonthDdts.length === 0}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border transition-all shrink-0 cursor-pointer shadow-xs",
+                  isCopyingBatch
+                    ? "border-sky-500/60 bg-sky-500/20 text-sky-300"
+                    : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-sky-500 hover:text-sky-300 hover:bg-sky-500/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                )}
+                title={
+                  filteredMonthDdts.length > 0
+                    ? `Genera e copia negli appunti i PDF di tutti i ${filteredMonthDdts.length} DDT filtrati per incollarli in un'email (Ctrl+V)`
+                    : "Nessun DDT da copiare"
+                }
+              >
+                {isCopyingBatch ? (
+                  <>
+                    <span className="w-2.5 h-2.5 animate-spin rounded-full border border-sky-400 border-t-transparent" />
+                    <span>{batchProgress ? `${batchProgress.current}/${batchProgress.total}` : "Copia…"}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3 text-sky-400" />
+                    <span>Copia PDF ({filteredMonthDdts.length})</span>
+                  </>
+                )}
+              </button>
             </div>
-            <span className="text-[10px] text-[var(--muted-foreground)]">
-              {monthDdts.length} DDT
+
+            <span className="text-[10px] text-[var(--muted-foreground)] shrink-0 font-medium">
+              {monthDdtSearch.trim()
+                ? `${filteredMonthDdts.length} / ${monthDdts.length} DDT`
+                : `${monthDdts.length} DDT`}
             </span>
           </div>
 
           {/* Lista DDT del mese selezionato (Cliccabile: apre DDTQuickViewModal!) con scrollbar visibile */}
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-1.5 scrollbar-thin">
-            {monthDdts && monthDdts.length > 0 ? (
-              monthDdts.map((doc) => {
+            {filteredMonthDdts && filteredMonthDdts.length > 0 ? (
+              filteredMonthDdts.map((doc) => {
                 const label = `${doc.series ? `${doc.series}/` : ""}${doc.docNumber ?? "BOZ"}`;
+                const isSelected = selectedQuickDdtId === doc.id;
                 return (
                   <div
                     key={doc.id}
                     onClick={() => setSelectedQuickDdtId(doc.id)}
                     role="button"
                     tabIndex={0}
-                    className="flex items-center justify-between p-1.5 rounded-lg border border-[var(--border)]/60 bg-[var(--background)]/50 hover:bg-[var(--background)] hover:border-[var(--primary)] transition-all cursor-pointer group"
+                    className={cn(
+                      "flex items-center justify-between p-1.5 rounded-lg border border-[var(--border)]/60 bg-[var(--background)]/50 hover:bg-[var(--background)] hover:border-[var(--primary)] transition-all cursor-pointer group",
+                      isSelected && "ring-1 ring-[var(--primary)] border-[var(--primary)] bg-[var(--background)]"
+                    )}
                     title={`Clicca per visualizzare l'anteprima del DDT ${label}`}
                   >
-                    <div className="flex items-center gap-2 min-w-0 pr-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
                       <span className="font-mono text-[11px] font-extrabold text-[var(--primary)] shrink-0">
                         N° {label}
                       </span>
-                      <span className="text-xs font-semibold truncate text-[var(--foreground)] group-hover:text-white">
+                      <span className="text-xs font-semibold truncate text-[var(--foreground)] group-hover:text-white shrink-0 max-w-[190px]" title={doc.clientName}>
                         {doc.clientName}
                       </span>
+                      {doc.destination && (
+                        <span
+                          className="text-[10px] text-[var(--muted-foreground)] truncate max-w-[210px] flex items-center gap-1 group-hover:text-slate-300 font-sans"
+                          title={`Destinazione: ${doc.destination}`}
+                        >
+                          <MapPin className="w-2.5 h-2.5 text-sky-400 shrink-0" />
+                          <span className="truncate">{doc.destination}</span>
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
@@ -1693,6 +1843,17 @@ export const DashboardPage: React.FC = () => {
                   </div>
                 );
               })
+            ) : monthDdtSearch.trim() ? (
+              <div className="h-full flex flex-col items-center justify-center text-xs text-[var(--muted-foreground)] p-4 text-center">
+                <span>Nessun DDT trovato per &quot;{monthDdtSearch}&quot;.</span>
+                <button
+                  type="button"
+                  onClick={() => setMonthDdtSearch("")}
+                  className="text-[11px] text-[var(--primary)] underline mt-1.5 cursor-pointer hover:text-white"
+                >
+                  Azzera filtro di ricerca
+                </button>
+              </div>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-xs text-[var(--muted-foreground)] p-4 text-center">
                 <span>Nessun DDT emesso nel mese di {MONTH_NAMES_FULL[selectedMonthForDdts - 1]}.</span>
@@ -1863,6 +2024,12 @@ export const DashboardPage: React.FC = () => {
           onClose={() => setSelectedQuickDdtId(null)}
           ddtId={selectedQuickDdtId}
           onOpenInStudio={handleOpenDdtInStudio}
+          onNavigatePrev={handlePrevQuickDdt}
+          onNavigateNext={handleNextQuickDdt}
+          hasPrev={hasPrevQuickDdt}
+          hasNext={hasNextQuickDdt}
+          currentIndex={currentQuickDdtIndex}
+          totalCount={filteredMonthDdts.length}
         />
       )}
 
@@ -1881,6 +2048,14 @@ export const DashboardPage: React.FC = () => {
             setSelectedQuickDdtId(id);
           }}
         />
+      )}
+
+      {/* Toast notifica per copia PDF o altre azioni */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 bg-slate-900 border border-sky-400 text-white px-4 py-2.5 rounded-lg shadow-2xl text-xs font-semibold z-50 flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2">
+          <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+          <span>{toastMessage}</span>
+        </div>
       )}
     </div>
   );
