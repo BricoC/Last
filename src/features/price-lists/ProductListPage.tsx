@@ -606,7 +606,14 @@ export const ProductListPage: React.FC = () => {
     [newTopRow, updateRowWithField, scheduleSilentAutoSaveIfNeeded]
   );
 
-  // Apertura editor cella istantanea
+  // Selezione cella singola (click o navigazione con frecce, stile Excel)
+  const selectCell = useCallback((rowId: string, colId: string) => {
+    setActiveCell({ rowId, colId });
+    setEditingCell(null);
+    setInitialEditChar(undefined);
+  }, []);
+
+  // Apertura editor cella (doppio click, F2, Invio o digitazione di un carattere)
   const startEditing = useCallback(
     (rowId: string, colId: string, char?: string) => {
       if (!canEdit) return;
@@ -631,6 +638,30 @@ export const ProductListPage: React.FC = () => {
     setInitialEditChar(undefined);
   }, []);
 
+  // Spostamento cella attiva con le frecce (senza muovere la finestra)
+  const moveActiveCell = useCallback(
+    (direction: "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight") => {
+      if (!activeCell) return;
+      const allVisibleCols = EDITABLE_COL_ORDER.filter((c) => visibleColumns[c] !== false);
+      const colIdx = allVisibleCols.indexOf(activeCell.colId as EditableColumnKey);
+      const allRows = [newTopRow, ...filteredItems.slice(0, visibleCount)];
+      const rowIdx = allRows.findIndex((r) => r.id === activeCell.rowId);
+
+      if (rowIdx === -1 || colIdx === -1) return;
+
+      if (direction === "ArrowDown" && rowIdx < allRows.length - 1) {
+        selectCell(allRows[rowIdx + 1].id, activeCell.colId);
+      } else if (direction === "ArrowUp" && rowIdx > 0) {
+        selectCell(allRows[rowIdx - 1].id, activeCell.colId);
+      } else if (direction === "ArrowRight" && colIdx < allVisibleCols.length - 1) {
+        selectCell(activeCell.rowId, allVisibleCols[colIdx + 1]);
+      } else if (direction === "ArrowLeft" && colIdx > 0) {
+        selectCell(activeCell.rowId, allVisibleCols[colIdx - 1]);
+      }
+    },
+    [activeCell, visibleColumns, newTopRow, filteredItems, visibleCount, selectCell]
+  );
+
   // Navigazione tastiera stile Excel
   const handleCellKeyDown = useCallback(
     (
@@ -649,10 +680,16 @@ export const ProductListPage: React.FC = () => {
         e.preventDefault();
         if (isEditing) {
           commitCellEdit(rowId, colId, currentValStr);
+          if (rowIdx < allRows.length - 1) {
+            selectCell(allRows[rowIdx + 1].id, colId);
+          }
+        } else {
+          startEditing(rowId, colId);
         }
-        if (rowIdx < allRows.length - 1) {
-          const nextRow = allRows[rowIdx + 1];
-          startEditing(nextRow.id, colId);
+      } else if (e.key === "F2") {
+        e.preventDefault();
+        if (!isEditing) {
+          startEditing(rowId, colId);
         }
       } else if (e.key === "Tab") {
         e.preventDefault();
@@ -661,17 +698,17 @@ export const ProductListPage: React.FC = () => {
         }
         if (e.shiftKey) {
           if (colIdx > 0) {
-            startEditing(rowId, allVisibleCols[colIdx - 1]);
+            selectCell(rowId, allVisibleCols[colIdx - 1]);
           } else if (rowIdx > 0) {
             const prevRow = allRows[rowIdx - 1];
-            startEditing(prevRow.id, allVisibleCols[allVisibleCols.length - 1]);
+            selectCell(prevRow.id, allVisibleCols[allVisibleCols.length - 1]);
           }
         } else {
           if (colIdx < allVisibleCols.length - 1) {
-            startEditing(rowId, allVisibleCols[colIdx + 1]);
+            selectCell(rowId, allVisibleCols[colIdx + 1]);
           } else if (rowIdx < allRows.length - 1) {
             const nextRow = allRows[rowIdx + 1];
-            startEditing(nextRow.id, allVisibleCols[0]);
+            selectCell(nextRow.id, allVisibleCols[0]);
           }
         }
       } else if (e.key === "Escape") {
@@ -681,19 +718,19 @@ export const ProductListPage: React.FC = () => {
         if (e.key === "ArrowDown" && rowIdx < allRows.length - 1) {
           e.preventDefault();
           e.stopPropagation();
-          startEditing(allRows[rowIdx + 1].id, colId);
+          selectCell(allRows[rowIdx + 1].id, colId);
         } else if (e.key === "ArrowUp" && rowIdx > 0) {
           e.preventDefault();
           e.stopPropagation();
-          startEditing(allRows[rowIdx - 1].id, colId);
+          selectCell(allRows[rowIdx - 1].id, colId);
         } else if (e.key === "ArrowRight" && colIdx < allVisibleCols.length - 1) {
           e.preventDefault();
           e.stopPropagation();
-          startEditing(rowId, allVisibleCols[colIdx + 1]);
+          selectCell(rowId, allVisibleCols[colIdx + 1]);
         } else if (e.key === "ArrowLeft" && colIdx > 0) {
           e.preventDefault();
           e.stopPropagation();
-          startEditing(rowId, allVisibleCols[colIdx - 1]);
+          selectCell(rowId, allVisibleCols[colIdx - 1]);
         } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           startEditing(rowId, colId, e.key);
         }
@@ -706,6 +743,7 @@ export const ProductListPage: React.FC = () => {
       filteredItems,
       visibleCount,
       commitCellEdit,
+      selectCell,
       startEditing,
       cancelCellEdit,
     ]
@@ -1054,8 +1092,16 @@ export const ProductListPage: React.FC = () => {
 
       {/* 2. Griglia Interattiva Excel-Like */}
       <div
+        tabIndex={0}
         className="flex-1 overflow-auto bg-[var(--card)] divide-y divide-[var(--border)]/40 focus:outline-none"
         onScroll={handleScroll}
+        onKeyDown={(e) => {
+          if (!editingCell && activeCell && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+            e.preventDefault();
+            e.stopPropagation();
+            moveActiveCell(e.key as any);
+          }
+        }}
       >
         <table className="w-full border-collapse text-left text-xs whitespace-nowrap">
           <thead className="bg-[var(--background)] sticky top-0 z-20 text-[11px] uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] shadow-sm">
@@ -1222,7 +1268,7 @@ export const ProductListPage: React.FC = () => {
           <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11.5px]">
             {/* RIGA VUOTA IN CIMA SEMPRE VISIBILE PER CREARE NUOVI ARTICOLI */}
             {canEdit && (
-              <tr className="bg-emerald-500/10 hover:bg-emerald-500/15 border-b-2 border-emerald-500/40 sticky top-[33px] z-10 shadow-sm">
+              <tr className="bg-emerald-500/10 hover:bg-emerald-500/15 border-b-2 border-emerald-500/40">
                 <td className="px-2 py-1 text-center bg-[var(--card)] sticky left-0 z-10">
                   <span className="flex items-center justify-center text-emerald-400 font-bold text-[10px]">
                     <Plus className="w-3.5 h-3.5" />
@@ -1250,6 +1296,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "cat"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "cat" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1269,6 +1316,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "fornitore"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "fornitore" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1288,6 +1336,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "codice_articolo"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "codice_articolo" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1307,6 +1356,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "data_ref"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "data_ref" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1325,6 +1375,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1344,6 +1395,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "um"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "um" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1362,6 +1414,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_pub"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_pub" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1380,6 +1433,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_pubblico"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_pubblico" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1398,6 +1452,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_prof"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_prof" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1416,6 +1471,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_profess"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_profess" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1434,6 +1490,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_fatt"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_fatt" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1452,6 +1509,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_fattura"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_fattura" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1471,6 +1529,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_acquisto"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_acquisto" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1490,6 +1549,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_iva"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_iva" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1508,6 +1568,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "aumento"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "aumento" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1526,6 +1587,7 @@ export const ProductListPage: React.FC = () => {
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "maga"}
                     initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "maga" ? initialEditChar : undefined}
                     canEdit={canEdit}
+                    onSelectCell={selectCell}
                     onStartEdit={startEditing}
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
@@ -1565,6 +1627,7 @@ export const ProductListPage: React.FC = () => {
                   onToggleSelectRow={handleToggleSelectRow}
                   onOpenHistory={setHistoryModalItem}
                   onDeleteRow={handleDeleteRow}
+                  onSelectCell={selectCell}
                   onStartEdit={startEditing}
                   onCommitCell={commitCellEdit}
                   onCancelEdit={cancelCellEdit}
@@ -1627,6 +1690,7 @@ interface MemoizedProductRowProps {
   onToggleSelectRow: (id: string) => void;
   onOpenHistory: (item: ListinoGeneraleRow) => void;
   onDeleteRow: (item: ListinoGeneraleRow) => void;
+  onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
   onCommitCell: (rowId: string, colId: string, val: string) => void;
   onCancelEdit: () => void;
@@ -1646,6 +1710,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
     onToggleSelectRow,
     onOpenHistory,
     onDeleteRow,
+    onSelectCell,
     onStartEdit,
     onCommitCell,
     onCancelEdit,
@@ -1711,6 +1776,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "cat"}
             initialChar={editingColId === "cat" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1730,6 +1796,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "fornitore"}
             initialChar={editingColId === "fornitore" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1749,6 +1816,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "codice_articolo"}
             initialChar={editingColId === "codice_articolo" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1768,6 +1836,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "data_ref"}
             initialChar={editingColId === "data_ref" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1787,6 +1856,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "descrizione"}
             initialChar={editingColId === "descrizione" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1806,6 +1876,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "um"}
             initialChar={editingColId === "um" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1825,6 +1896,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "perc_pub"}
             initialChar={editingColId === "perc_pub" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1844,6 +1916,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "prezzo_pubblico"}
             initialChar={editingColId === "prezzo_pubblico" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1863,6 +1936,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "perc_prof"}
             initialChar={editingColId === "perc_prof" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1882,6 +1956,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "prezzo_profess"}
             initialChar={editingColId === "prezzo_profess" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1901,6 +1976,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "perc_fatt"}
             initialChar={editingColId === "perc_fatt" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1920,6 +1996,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "prezzo_fattura"}
             initialChar={editingColId === "prezzo_fattura" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1939,6 +2016,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "prezzo_acquisto"}
             initialChar={editingColId === "prezzo_acquisto" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1958,6 +2036,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "perc_iva"}
             initialChar={editingColId === "perc_iva" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1977,6 +2056,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "aumento"}
             initialChar={editingColId === "aumento" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -1996,6 +2076,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isEditing={editingColId === "maga"}
             initialChar={editingColId === "maga" ? initialEditChar : undefined}
             canEdit={canEdit}
+            onSelectCell={onSelectCell}
             onStartEdit={onStartEdit}
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
@@ -2068,6 +2149,12 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
             onCancel();
             return;
           }
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            e.stopPropagation();
+            onKeyDown(e, rowId, colId, localValue);
+            return;
+          }
           onKeyDown(e, rowId, colId, localValue);
         }}
         className={`w-full h-full px-2 py-1 bg-[var(--background)] text-[var(--foreground)] outline-none border-2 border-[var(--primary)] text-[11.5px] font-mono shadow-inner ${alignClass}`}
@@ -2087,6 +2174,7 @@ interface EditableCellProps {
   isEditing: boolean;
   initialChar?: string;
   canEdit: boolean;
+  onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
   onCommit: (rowId: string, colId: string, val: string) => void;
   onCancel: () => void;
@@ -2105,14 +2193,22 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     isEditing,
     initialChar,
     canEdit,
+    onSelectCell,
     onStartEdit,
     onCommit,
     onCancel,
     onKeyDown,
     className = "",
   }) => {
+    const tdRef = useRef<HTMLTableCellElement>(null);
     const alignClass =
       align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+
+    useEffect(() => {
+      if (isActive && !isEditing && tdRef.current) {
+        tdRef.current.focus({ preventScroll: true });
+      }
+    }, [isActive, isEditing]);
 
     if (isEditing) {
       return (
@@ -2131,7 +2227,8 @@ const EditableCell: React.FC<EditableCellProps> = memo(
 
     return (
       <td
-        onClick={() => onStartEdit(rowId, colId)}
+        ref={tdRef}
+        onClick={() => onSelectCell(rowId, colId)}
         onDoubleClick={() => onStartEdit(rowId, colId)}
         onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue)}
         tabIndex={canEdit ? 0 : -1}

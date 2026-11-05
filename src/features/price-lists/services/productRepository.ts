@@ -233,52 +233,44 @@ export class ProductRepository {
 
     const db = await getDatabase();
 
-    await db.execute("BEGIN TRANSACTION;");
-    try {
-      for (const p of products) {
-        await db.execute(
-          `INSERT INTO products (
-            id, code, description, unit, purchase_price_cents, sale_price_cents,
-            vat_rate, category, supplier, notes, created_at, updated_at, updated_by,
-            deleted_at, sync_status
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-          ON CONFLICT(id) DO UPDATE SET
-            code = excluded.code,
-            description = excluded.description,
-            unit = excluded.unit,
-            purchase_price_cents = excluded.purchase_price_cents,
-            sale_price_cents = excluded.sale_price_cents,
-            vat_rate = excluded.vat_rate,
-            category = excluded.category,
-            supplier = excluded.supplier,
-            notes = excluded.notes,
-            updated_at = excluded.updated_at,
-            updated_by = excluded.updated_by,
-            sync_status = excluded.sync_status`,
-          [
-            p.id,
-            p.code,
-            p.description,
-            p.unit,
-            p.purchase_price_cents,
-            p.sale_price_cents,
-            p.vat_rate,
-            p.category ?? null,
-            p.supplier ?? null,
-            p.notes ?? null,
-            p.created_at,
-            p.updated_at,
-            p.updated_by,
-            p.deleted_at,
-            p.sync_status,
-          ]
-        );
-      }
-      await db.execute("COMMIT;");
-    } catch (err) {
-      await db.execute("ROLLBACK;");
-      console.error("[ProductRepository] Errore in batchUpsert, transazione annullata:", err);
-      throw err;
+    for (const p of products) {
+      await db.execute(
+        `INSERT INTO products (
+          id, code, description, unit, purchase_price_cents, sale_price_cents,
+          vat_rate, category, supplier, notes, created_at, updated_at, updated_by,
+          deleted_at, sync_status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT(id) DO UPDATE SET
+          code = excluded.code,
+          description = excluded.description,
+          unit = excluded.unit,
+          purchase_price_cents = excluded.purchase_price_cents,
+          sale_price_cents = excluded.sale_price_cents,
+          vat_rate = excluded.vat_rate,
+          category = excluded.category,
+          supplier = excluded.supplier,
+          notes = excluded.notes,
+          updated_at = excluded.updated_at,
+          updated_by = excluded.updated_by,
+          sync_status = excluded.sync_status`,
+        [
+          p.id,
+          p.code,
+          p.description,
+          p.unit,
+          p.purchase_price_cents,
+          p.sale_price_cents,
+          p.vat_rate,
+          p.category ?? null,
+          p.supplier ?? null,
+          p.notes ?? null,
+          p.created_at,
+          p.updated_at,
+          p.updated_by,
+          p.deleted_at,
+          p.sync_status,
+        ]
+      );
     }
   }
 }

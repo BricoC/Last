@@ -253,9 +253,7 @@ export class PriceListSyncService {
     }));
 
     // Inserimento batch in SQLite
-    await db.execute("BEGIN TRANSACTION;");
-    try {
-      // 1. Pulizia e reinserimento listino generale
+    // 1. Pulizia e reinserimento listino generale
       await db.execute("DELETE FROM listino_generale;");
       const BATCH_SIZE = 100;
 
@@ -325,13 +323,6 @@ export class PriceListSyncService {
           );
         }
       }
-
-      await db.execute("COMMIT;");
-    } catch (err) {
-      await db.execute("ROLLBACK;");
-      console.error("[PriceListSyncService] Errore inserimento SQLite:", err);
-      throw err;
-    }
 
     onProgress?.({
       stage: "completed",
