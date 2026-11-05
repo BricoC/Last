@@ -20,7 +20,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { ListinoGeneraleRow, PriceListLogEntry } from "./models/priceList";
+import { ListinoGeneraleRow, PriceListLogEntry, TrashListinoRow } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
 import { priceListSyncService } from "./services/priceListSyncService";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
@@ -356,73 +356,18 @@ export const ProductListPage: React.FC = () => {
     void loadData();
   }, [loadData]);
 
-  // Annulla tutte le operazioni fino all'ultimo salvataggio (Ctrl + Z)
-  const revertAllUnsavedChanges = useCallback(() => {
-    if (dirtyRows.size === 0) return;
-    if (
-      !confirm(
-        `Vuoi annullare tutte le ${dirtyRows.size} modifiche non salvate e ripristinare il listino allo stato dell'ultimo salvataggio?`
-      )
-    ) {
-      return;
-    }
-
-    // 1. Ripristina items: scarta le righe create in sessione e ripristina i valori originali
-    setItems((prev) => {
-      const restored: ListinoGeneraleRow[] = [];
-      for (const row of prev) {
-        if (row.id.startsWith("new_") || !originalRowsSnapshot.has(row.id)) {
-          continue;
-        }
-        const original = originalRowsSnapshot.get(row.id);
-        restored.push(original ? { ...original } : row);
-      }
-      return restored;
-    });
-
-    // 2. Resetta conteggio DB alle sole righe originali
-    setTotalDbCount(originalRowsSnapshot.size);
-
-    // 3. Resetta stati
-    setDirtyRows(new Map());
-    setSelectedIds(new Set());
-    setActiveCell(null);
-    setEditingCell(null);
-    setInitialEditChar(undefined);
-    setNewTopRow(createBlankRow());
-
-    // 4. Cancella eventuale timer auto-save pendente
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-  }, [dirtyRows.size, originalRowsSnapshot]);
-
-  // Scorciatoia F4 per ricerca rapida e Ctrl+Z per annullare modifiche non salvate
+  // Scorciatoia F4 per ricerca rapida
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "F4") {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
-        return;
-      }
-
-      // Ctrl + Z (o Cmd + Z) per annullare tutte le modifiche fino all'ultimo salvataggio
-      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
-        const activeTag = (document.activeElement?.tagName || "").toLowerCase();
-        if (activeTag === "input" || activeTag === "textarea") {
-          return;
-        }
-        if (dirtyRows.size > 0) {
-          e.preventDefault();
-          revertAllUnsavedChanges();
-        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dirtyRows.size, revertAllUnsavedChanges]);
+  }, []);
 
   // Ricerca tokenizzata
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
@@ -1059,7 +1004,8 @@ export const ProductListPage: React.FC = () => {
     if (payload.action === "delete") {
       const idsToDelete = Array.from(selectedIds);
       const rowsToDelete = items.filter((r) => selectedIds.has(r.id));
-      await priceListRepository.moveToTrash(rowsToDelete, currentUser?.name || "Amministratore");
+      const opName = currentUser?.name || "Amministratore";
+      await priceListRepository.moveToTrash(rowsToDelete, opName);
       setItems((prev) => prev.filter((r) => !selectedIds.has(r.id)));
       setTotalDbCount((prev) => Math.max(0, prev - idsToDelete.length));
       try {
@@ -1073,6 +1019,13 @@ export const ProductListPage: React.FC = () => {
       });
       setSelectedIds(new Set());
       void priceListSyncService.deleteGeneralBatchFromSupabase(idsToDelete);
+      const nowStr = new Date().toISOString();
+      const trashRows: TrashListinoRow[] = rowsToDelete.map((r) => ({
+        ...r,
+        deleted_at: nowStr,
+        deleted_by: opName,
+      }));
+      void priceListSyncService.pushTrashBatchToSupabase(trashRows);
       return;
     }
 
@@ -1191,19 +1144,16 @@ export const ProductListPage: React.FC = () => {
     });
   }, []);
 
-  // Spostamento di una singola riga nel Cestino (FIFO max 30)
+  // Spostamento immediato di una singola riga nel Cestino (FIFO max 50) SENZA POPUP
   const handleDeleteRow = useCallback(
     async (row: ListinoGeneraleRow) => {
       if (!canEdit) return;
-      const desc = row.descrizione || row.codice_articolo || "questo articolo";
-      if (!confirm(`Spostare "${desc}" nel Cestino? (Potrai ripristinarlo in qualsiasi momento dal pulsante Cestino)`)) {
-        return;
-      }
       try {
-        await priceListRepository.moveToTrash([row], currentUser?.name || "Amministratore");
+        const opName = currentUser?.name || "Amministratore";
+        await priceListRepository.moveToTrash([row], opName);
         setItems((prev) => prev.filter((r) => r.id !== row.id));
         setTotalDbCount((prev) => Math.max(0, prev - 1));
-        setTrashCount((prev) => Math.min(30, prev + 1));
+        setTrashCount((prev) => Math.min(50, prev + 1));
         setDirtyRows((prev) => {
           const next = new Map(prev);
           next.delete(row.id);
@@ -1215,6 +1165,12 @@ export const ProductListPage: React.FC = () => {
           return next;
         });
         void priceListSyncService.deleteGeneralBatchFromSupabase([row.id]);
+        const trashRow: TrashListinoRow = {
+          ...row,
+          deleted_at: new Date().toISOString(),
+          deleted_by: opName,
+        };
+        void priceListSyncService.pushTrashBatchToSupabase([trashRow]);
       } catch (err: any) {
         console.error("Errore spostamento nel cestino:", err);
         setError(`Errore eliminazione articolo: ${err?.message || err}`);
@@ -1229,6 +1185,7 @@ export const ProductListPage: React.FC = () => {
     setTotalDbCount((prev) => prev + 1);
     setTrashCount((prev) => Math.max(0, prev - 1));
     void priceListSyncService.pushGeneralBatchToSupabase([restoredItem]);
+    void priceListSyncService.deleteTrashFromSupabase(restoredItem.id);
   }, []);
 
   return (
@@ -1283,18 +1240,6 @@ export const ProductListPage: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
 
-          {canEdit && dirtyRows.size > 0 && (
-            <button
-              type="button"
-              onClick={revertAllUnsavedChanges}
-              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-semibold shadow-sm transition-colors cursor-pointer"
-              title="Annulla tutte le modifiche non salvate (Ctrl+Z)"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Annulla ({dirtyRows.size})</span>
-            </button>
-          )}
-
           {canEdit && (
             <button
               type="button"
@@ -1331,7 +1276,7 @@ export const ProductListPage: React.FC = () => {
               type="button"
               onClick={() => setIsTrashModalOpen(true)}
               className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-rose-400 transition-colors shadow-sm cursor-pointer"
-              title={`Cestino articoli eliminati (${trashCount}/30)`}
+              title={`Cestino articoli eliminati (${trashCount}/50)`}
             >
               <Trash2 className="w-3.5 h-3.5 text-rose-500/80" />
               <span className="text-xs font-semibold">Cestino</span>

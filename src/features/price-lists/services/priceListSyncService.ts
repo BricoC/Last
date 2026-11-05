@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
-import { ListinoGeneraleRow, ListinoClienteRow } from "../models/priceList";
+import { ListinoGeneraleRow, ListinoClienteRow, TrashListinoRow } from "../models/priceList";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -459,6 +459,58 @@ export class PriceListSyncService {
       }
     } catch (err) {
       console.warn("[PriceListSyncService] Delete Supabase asincrono non riuscito:", err);
+    }
+  }
+
+  /**
+   * Registra gli elementi spostati nel Cestino anche su Supabase (tabella listino_generale_cestino).
+   */
+  async pushTrashBatchToSupabase(rows: TrashListinoRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    try {
+      const creds = await getSupabaseCredentials();
+      const payload = rows.map((r) => ({
+        id: r.id,
+        deleted_at: r.deleted_at,
+        deleted_by: r.deleted_by || "Operatore",
+        codice_articolo: r.codice_articolo || null,
+        descrizione: r.descrizione || "",
+        fornitore: r.fornitore || null,
+        prezzo_acquisto: r.prezzo_acquisto,
+        prezzo_fattura: r.prezzo_fattura,
+        prezzo_pubblico: r.prezzo_pubblico,
+        perc_iva: r.perc_iva,
+        um: r.um || "NR.",
+      }));
+
+      await fetch(`${creds.projectUrl}/rest/v1/listino_generale_cestino`, {
+        method: "POST",
+        headers: {
+          apikey: creds.anonKey,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      console.warn("[PriceListSyncService] Push Cestino Supabase (asincrono / offline):", err);
+    }
+  }
+
+  /**
+   * Rimuove un articolo dal Cestino su Supabase al momento del ripristino.
+   */
+  async deleteTrashFromSupabase(id: string): Promise<void> {
+    try {
+      const creds = await getSupabaseCredentials();
+      await fetch(`${creds.projectUrl}/rest/v1/listino_generale_cestino?id=eq.${id}`, {
+        method: "DELETE",
+        headers: {
+          apikey: creds.anonKey,
+        },
+      });
+    } catch (err) {
+      console.warn("[PriceListSyncService] Delete Cestino Supabase:", err);
     }
   }
 }

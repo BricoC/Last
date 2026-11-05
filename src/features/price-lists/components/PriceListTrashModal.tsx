@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Trash2, RotateCcw, X, Loader2, AlertCircle, Check } from "lucide-react";
 import { TrashListinoRow, ListinoGeneraleRow } from "../models/priceList";
 import { priceListRepository } from "../services/priceListRepository";
+import { priceListSyncService } from "../services/priceListSyncService";
 
 interface PriceListTrashModalProps {
   isOpen: boolean;
@@ -65,6 +66,7 @@ export const PriceListTrashModal: React.FC<PriceListTrashModalProps> = ({
         setTrashItems((prev) => prev.filter((item) => item.id !== row.id));
         setFeedback(`"${row.descrizione || row.codice_articolo || 'Articolo'}" ripristinato con successo nel listino!`);
         onItemRestored(restored);
+        void priceListSyncService.deleteTrashFromSupabase(row.id);
         setTimeout(() => setFeedback(null), 4000);
       }
     } catch (err: any) {
@@ -112,11 +114,11 @@ export const PriceListTrashModal: React.FC<PriceListTrashModalProps> = ({
                   Cestino Articoli Eliminati
                 </h3>
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/30">
-                  {trashItems.length} / 30 elementi
+                  {trashItems.length} / 50 elementi
                 </span>
               </div>
               <p className="text-xs text-[var(--muted-foreground)]">
-                Conservazione temporanea a rotazione automatica (FIFO). Puoi ripristinare qualsiasi elemento nel listino generale attivo.
+                Conservazione temporanea a rotazione automatica (FIFO max 50). Puoi ripristinare qualsiasi elemento nel listino generale attivo.
               </p>
             </div>
           </div>
@@ -234,7 +236,7 @@ export const PriceListTrashModal: React.FC<PriceListTrashModalProps> = ({
         {/* Footer */}
         <div className="p-3 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-xs text-[var(--muted-foreground)]">
           <span className="font-mono text-[11px]">
-            * Le voci vengono rimosse automaticamente a scorrimento solo al superamento della soglia di 30 elementi.
+            * Le voci vengono rimosse automaticamente a scorrimento solo al superamento della soglia di 50 elementi.
           </span>
           <button
             type="button"
