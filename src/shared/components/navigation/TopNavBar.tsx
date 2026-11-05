@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
+import { isPageAllowedForUser } from "@/shared/services/appUserService";
 import {
   LayoutGrid,
   ShoppingCart,
@@ -105,8 +106,10 @@ export const TopNavBar: React.FC = () => {
         }}
         className="flex-1 min-w-0 flex items-center space-x-1 overflow-x-auto py-1"
       >
-        {modules.map((mod) => {
-          const isActive = activeWindowId === mod.id;
+        {modules
+          .filter((mod) => isPageAllowedForUser(currentUser, mod.id))
+          .map((mod) => {
+            const isActive = activeWindowId === mod.id;
           return (
             <button
               key={mod.id}
@@ -231,8 +234,8 @@ export const TopNavBar: React.FC = () => {
           </select>
         </div>
 
-        {/* Pulsante Impostazioni (visibile solo se l'utente ha il permesso can_access_settings) */}
-        {currentUser?.can_access_settings && (
+        {/* Pulsante Impostazioni (visibile solo se l'utente ha il permesso) */}
+        {isPageAllowedForUser(currentUser, "settings") && (
           <button
             type="button"
             onClick={() =>

@@ -20,6 +20,7 @@ import { DDTMiniStudioModal } from "./components/DDTMiniStudioModal";
 import { ddtRepository } from "@/features/ddt-studio/services/ddtRepository";
 import { requestOpenDdt } from "@/features/ddt-studio/services/ddtNavigation";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
+import { useUserStore } from "@/shared/stores/useUserStore";
 import { DdtDocument } from "@/features/ddt-studio/models/ddt";
 import { DDTA4Document } from "@/features/ddt-studio/document/DDTA4Document";
 import { generatePdfBytesFromElements, formatDdtPdfFilename } from "@/features/ddt-studio/utils/ddtExportManager";
@@ -48,6 +49,8 @@ interface OrNumbersPageProps {
 
 export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   const { openWindow } = useWindowStore();
+  const { currentUser } = useUserStore();
+  const canEditOrNumbers = Boolean(currentUser?.is_admin || currentUser?.can_edit_or_numbers);
 
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth() + 1);
@@ -127,6 +130,10 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
 
   // Apertura modale assegnazione OR
   const handleOpenAssign = (row?: OrRow) => {
+    if (!canEditOrNumbers) {
+      showToast("Accesso negato: questa postazione non ha i permessi per modificare gli OR Numbers.", "error");
+      return;
+    }
     setAssignModalRow(row || null);
     setIsAssignModalOpen(true);
   };
@@ -533,17 +540,19 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
           </div>
         </div>
 
-        {/* Pulsante Assegna OR & Sconto */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => handleOpenAssign()}
-            className="px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-500/40 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Assegna OR & Sconto</span>
-          </button>
-        </div>
+        {/* Pulsante Assegna OR & Sconto (solo se abilitato) */}
+        {canEditOrNumbers && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleOpenAssign()}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-500/40 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Assegna OR & Sconto</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Area Notifiche o Toast */}
