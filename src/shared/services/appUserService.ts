@@ -9,16 +9,16 @@ export interface AppPageModule {
 export const ALL_APP_PAGE_MODULES: AppPageModule[] = [
   { id: "dashboard", title: "Dashboard", category: "operativo" },
   { id: "orders", title: "Order Manager", category: "operativo" },
-  { id: "price-lists", title: "Listino Generale", category: "commerciale" },
-  { id: "or-numbers", title: "OR Numbers", category: "operativo" },
-  { id: "ddt-list", title: "DDT List", category: "archivio" },
-  { id: "ddt-articles", title: "DDT Articoli", category: "archivio" },
-  { id: "client-lists", title: "Listini Clienti", category: "commerciale" },
-  { id: "invoices", title: "Fatture Elettroniche", category: "amministrazione" },
   { id: "ddt-studio", title: "DDT Studio (Pro)", category: "operativo" },
+  { id: "price-lists", title: "Listino Generale", category: "commerciale" },
+  { id: "client-lists", title: "Listini Clienti", category: "commerciale" },
   { id: "quotes", title: "Preventivi", category: "commerciale" },
   { id: "offers", title: "Offerte", category: "commerciale" },
   { id: "clients", title: "Clienti", category: "commerciale" },
+  { id: "or-numbers", title: "OR Numbers", category: "operativo" },
+  { id: "ddt-list", title: "DDT List", category: "archivio" },
+  { id: "ddt-articles", title: "DDT Articoli", category: "archivio" },
+  { id: "invoices", title: "Fatture Elettroniche", category: "amministrazione" },
   { id: "settings", title: "Impostazioni", category: "amministrazione" },
 ];
 
@@ -49,7 +49,24 @@ export interface AppUser {
   allowed_pages: string[];
   theme_preset: "grigio" | "nero-oled" | "avorio";
   theme_brightness: number;
+  password_hash?: string;
+  require_password: boolean;
   created_at: string;
+}
+
+export async function hashPassword(plain: string): Promise<string> {
+  if (!plain) return "";
+  const data = new TextEncoder().encode(plain);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export async function verifyPassword(plain: string, hash?: string): Promise<boolean> {
+  if (!hash) return false;
+  const computed = await hashPassword(plain);
+  return computed === hash;
 }
 
 const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
@@ -66,6 +83,8 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     allowed_pages: DEFAULT_ALLOWED_PAGES,
     theme_preset: "grigio",
     theme_brightness: 4,
+    password_hash: "",
+    require_password: false,
   },
   {
     id: "banco-1",
@@ -92,6 +111,8 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     ],
     theme_preset: "avorio",
     theme_brightness: 3,
+    password_hash: "",
+    require_password: false,
   },
   {
     id: "banco-2",
@@ -118,6 +139,8 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     ],
     theme_preset: "nero-oled",
     theme_brightness: 1,
+    password_hash: "",
+    require_password: false,
   },
 ];
 
@@ -142,6 +165,8 @@ export class AppUserService {
           allowed_pages TEXT,
           theme_preset TEXT DEFAULT 'grigio',
           theme_brightness INTEGER DEFAULT 4,
+          password_hash TEXT DEFAULT '',
+          require_password INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL
         );
       `);
@@ -153,6 +178,8 @@ export class AppUserService {
         "ALTER TABLE app_users ADD COLUMN allowed_pages TEXT",
         "ALTER TABLE app_users ADD COLUMN theme_preset TEXT DEFAULT 'grigio'",
         "ALTER TABLE app_users ADD COLUMN theme_brightness INTEGER DEFAULT 4",
+        "ALTER TABLE app_users ADD COLUMN password_hash TEXT DEFAULT ''",
+        "ALTER TABLE app_users ADD COLUMN require_password INTEGER NOT NULL DEFAULT 0",
       ];
       for (const sql of columnsToAdd) {
         try {
@@ -171,8 +198,9 @@ export class AppUserService {
           await db.execute(
             `INSERT INTO app_users (
               id, name, station_name, can_access_settings, can_access_ddt, can_access_price_lists,
-              can_edit_price_lists, can_edit_or_numbers, is_admin, allowed_pages, theme_preset, theme_brightness, created_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, datetime('now'))`,
+              can_edit_price_lists, can_edit_or_numbers, is_admin, allowed_pages, theme_preset, theme_brightness,
+              password_hash, require_password, created_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, datetime('now'))`,
             [
               u.id,
               u.name,
@@ -186,6 +214,8 @@ export class AppUserService {
               JSON.stringify(u.allowed_pages),
               u.theme_preset,
               u.theme_brightness,
+              u.password_hash || "",
+              u.require_password ? 1 : 0,
             ]
           );
         }
@@ -204,6 +234,7 @@ export class AppUserService {
         "SELECT * FROM app_users ORDER BY is_admin DESC, name ASC"
       );
       return rows.map((r) => {
+        const isAdmin = Boolean(r.is_admin);
         let allowedPages: string[] = [];
         try {
           if (r.allowed_pages) {
@@ -212,25 +243,26 @@ export class AppUserService {
         } catch {
           allowedPages = [];
         }
-        if (!Array.isArray(allowedPages) || allowedPages.length === 0) {
-          allowedPages = r.is_admin
-            ? DEFAULT_ALLOWED_PAGES
-            : DEFAULT_ALLOWED_PAGES.filter((p) => p !== "settings");
+        if (isAdmin || !Array.isArray(allowedPages) || allowedPages.length === 0) {
+          allowedPages = DEFAULT_ALLOWED_PAGES;
         }
 
         return {
           id: String(r.id),
           name: String(r.name),
           station_name: String(r.station_name || ""),
-          can_access_settings: Boolean(r.can_access_settings),
-          can_access_ddt: Boolean(r.can_access_ddt ?? 1),
-          can_access_price_lists: Boolean(r.can_access_price_lists ?? 1),
-          can_edit_price_lists: Boolean(r.can_edit_price_lists ?? r.is_admin),
-          can_edit_or_numbers: Boolean(r.can_edit_or_numbers ?? r.is_admin),
-          is_admin: Boolean(r.is_admin),
-          allowed_pages: allowedPages,
+          // L'amministratore ha sempre tutti i permessi abilitati al 100% senza possibilità di disabilitazione
+          can_access_settings: isAdmin ? true : Boolean(r.can_access_settings),
+          can_access_ddt: true,
+          can_access_price_lists: true,
+          can_edit_price_lists: isAdmin ? true : Boolean(r.can_edit_price_lists),
+          can_edit_or_numbers: isAdmin ? true : Boolean(r.can_edit_or_numbers),
+          is_admin: isAdmin,
+          allowed_pages: isAdmin ? DEFAULT_ALLOWED_PAGES : allowedPages,
           theme_preset: (r.theme_preset || "grigio") as "grigio" | "nero-oled" | "avorio",
           theme_brightness: Number(r.theme_brightness) || 4,
+          password_hash: String(r.password_hash || ""),
+          require_password: Boolean(r.require_password),
           created_at: String(r.created_at || ""),
         };
       });
@@ -253,28 +285,35 @@ export class AppUserService {
     allowed_pages?: string[];
     theme_preset?: "grigio" | "nero-oled" | "avorio";
     theme_brightness?: number;
+    password_hash?: string;
+    require_password?: boolean;
   }): Promise<AppUser> {
     await this.ensureTable();
     const db = await getDatabase();
     const id = user.id?.trim() || `user_${Date.now()}`;
     const name = user.name.trim();
     const station = user.station_name?.trim() || "";
-    const canSettings = user.can_access_settings ? 1 : 0;
-    const canDdt = user.can_access_ddt ?? true ? 1 : 0;
-    const canPrices = user.can_access_price_lists ?? true ? 1 : 0;
-    const canEditPrices = user.can_edit_price_lists ?? user.is_admin ?? false ? 1 : 0;
-    const canEditOr = user.can_edit_or_numbers ?? user.is_admin ?? false ? 1 : 0;
-    const isAdmin = user.is_admin ? 1 : 0;
-    const pages = user.allowed_pages || (isAdmin ? DEFAULT_ALLOWED_PAGES : DEFAULT_ALLOWED_PAGES.filter((p) => p !== "settings"));
+    const isAdmin = Boolean(user.is_admin);
+    const canSettings = isAdmin ? 1 : user.can_access_settings ? 1 : 0;
+    const canDdt = 1;
+    const canPrices = 1;
+    const canEditPrices = isAdmin ? 1 : user.can_edit_price_lists ? 1 : 0;
+    const canEditOr = isAdmin ? 1 : user.can_edit_or_numbers ? 1 : 0;
+    const pages = isAdmin
+      ? DEFAULT_ALLOWED_PAGES
+      : (user.allowed_pages || DEFAULT_ALLOWED_PAGES.filter((p) => p !== "settings"));
     const themePreset = user.theme_preset || "grigio";
     const themeBrightness = user.theme_brightness || 4;
+    const passwordHash = user.password_hash || "";
+    const requirePassword = user.require_password ? 1 : 0;
     const createdAt = new Date().toISOString();
 
     await db.execute(
       `INSERT INTO app_users (
         id, name, station_name, can_access_settings, can_access_ddt, can_access_price_lists,
-        can_edit_price_lists, can_edit_or_numbers, is_admin, allowed_pages, theme_preset, theme_brightness, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        can_edit_price_lists, can_edit_or_numbers, is_admin, allowed_pages, theme_preset, theme_brightness,
+        password_hash, require_password, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         id,
         name,
@@ -284,10 +323,12 @@ export class AppUserService {
         canPrices,
         canEditPrices,
         canEditOr,
-        isAdmin,
+        isAdmin ? 1 : 0,
         JSON.stringify(pages),
         themePreset,
         themeBrightness,
+        passwordHash,
+        requirePassword,
         createdAt,
       ]
     );
@@ -301,10 +342,12 @@ export class AppUserService {
       can_access_price_lists: Boolean(canPrices),
       can_edit_price_lists: Boolean(canEditPrices),
       can_edit_or_numbers: Boolean(canEditOr),
-      is_admin: Boolean(isAdmin),
+      is_admin: isAdmin,
       allowed_pages: pages,
       theme_preset: themePreset,
       theme_brightness: themeBrightness,
+      password_hash: passwordHash,
+      require_password: Boolean(requirePassword),
       created_at: createdAt,
     };
   }
@@ -312,24 +355,32 @@ export class AppUserService {
   public static async updateUser(user: AppUser): Promise<void> {
     await this.ensureTable();
     const db = await getDatabase();
+    const isAdmin = Boolean(user.is_admin);
+    const canSettings = isAdmin ? 1 : user.can_access_settings ? 1 : 0;
+    const canEditPrices = isAdmin ? 1 : user.can_edit_price_lists ? 1 : 0;
+    const canEditOr = isAdmin ? 1 : user.can_edit_or_numbers ? 1 : 0;
+    const pages = isAdmin ? DEFAULT_ALLOWED_PAGES : (user.allowed_pages || []);
+    const requirePassword = user.require_password ? 1 : 0;
+
     await db.execute(
       `UPDATE app_users 
-       SET name = $1, station_name = $2, can_access_settings = $3, can_access_ddt = $4,
-           can_access_price_lists = $5, can_edit_price_lists = $6, can_edit_or_numbers = $7,
-           is_admin = $8, allowed_pages = $9, theme_preset = $10, theme_brightness = $11
+       SET name = $1, station_name = $2, can_access_settings = $3, can_access_ddt = 1,
+           can_access_price_lists = 1, can_edit_price_lists = $4, can_edit_or_numbers = $5,
+           is_admin = $6, allowed_pages = $7, theme_preset = $8, theme_brightness = $9,
+           password_hash = $10, require_password = $11
        WHERE id = $12`,
       [
         user.name,
         user.station_name,
-        user.can_access_settings ? 1 : 0,
-        user.can_access_ddt ? 1 : 0,
-        user.can_access_price_lists ? 1 : 0,
-        user.can_edit_price_lists ? 1 : 0,
-        user.can_edit_or_numbers ? 1 : 0,
-        user.is_admin ? 1 : 0,
-        JSON.stringify(user.allowed_pages || []),
+        canSettings,
+        canEditPrices,
+        canEditOr,
+        isAdmin ? 1 : 0,
+        JSON.stringify(pages),
         user.theme_preset || "grigio",
         user.theme_brightness || 4,
+        user.password_hash || "",
+        requirePassword,
         user.id,
       ]
     );

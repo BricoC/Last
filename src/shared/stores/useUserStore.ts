@@ -1,12 +1,16 @@
 import { create } from "zustand";
-import { AppUser, AppUserService } from "@/shared/services/appUserService";
+import { AppUser, AppUserService, verifyPassword } from "@/shared/services/appUserService";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 
 interface UserState {
   users: AppUser[];
   currentUser: AppUser | null;
   isLoading: boolean;
+  pendingPasswordSwitch: AppUser | null;
   loadUsers: () => Promise<void>;
+  requestSwitchUser: (userId: string) => Promise<boolean>;
+  cancelPasswordSwitch: () => void;
+  confirmPasswordSwitch: (password: string) => Promise<boolean>;
   switchUser: (userId: string) => void;
   setUserTheme: (
     userId: string,
@@ -24,6 +28,8 @@ interface UserState {
     allowed_pages?: string[];
     theme_preset?: "grigio" | "nero-oled" | "avorio";
     theme_brightness?: number;
+    password_hash?: string;
+    require_password?: boolean;
   }) => Promise<AppUser>;
   updateUser: (user: AppUser) => Promise<void>;
   deleteUser: (userId: string) => Promise<void>;
@@ -33,6 +39,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   users: [],
   currentUser: null,
   isLoading: true,
+  pendingPasswordSwitch: null,
 
   loadUsers: async () => {
     set({ isLoading: true });
@@ -58,6 +65,41 @@ export const useUserStore = create<UserState>((set, get) => ({
       console.error("Errore caricamento utenti:", e);
       set({ isLoading: false });
     }
+  },
+
+  requestSwitchUser: async (userId: string): Promise<boolean> => {
+    const { users, currentUser, switchUser } = get();
+    if (currentUser?.id === userId) return true;
+    const target = users.find((u) => u.id === userId);
+    if (!target) return false;
+
+    // Se l'utente richiede password ed è presente un hash
+    if (target.require_password && target.password_hash) {
+      set({ pendingPasswordSwitch: target });
+      return false;
+    }
+
+    // Altrimenti passa subito senza password
+    switchUser(userId);
+    return true;
+  },
+
+  cancelPasswordSwitch: () => {
+    set({ pendingPasswordSwitch: null });
+  },
+
+  confirmPasswordSwitch: async (password: string): Promise<boolean> => {
+    const { pendingPasswordSwitch, switchUser } = get();
+    if (!pendingPasswordSwitch) return false;
+
+    const ok = await verifyPassword(password, pendingPasswordSwitch.password_hash);
+    if (ok) {
+      const targetId = pendingPasswordSwitch.id;
+      set({ pendingPasswordSwitch: null });
+      switchUser(targetId);
+      return true;
+    }
+    return false;
   },
 
   switchUser: (userId: string) => {
