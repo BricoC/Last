@@ -303,6 +303,12 @@ export const ProductListPage: React.FC = () => {
     ): ListinoGeneraleRow => {
       const updated: ListinoGeneraleRow = { ...prevRow };
 
+      // Aggiorna automaticamente la data ad oggi (AAAA-MM-GG) ad ogni modifica effettuata
+      const todayIso = new Date().toISOString().split("T")[0];
+      if (colId !== "data_ref") {
+        updated.data_ref = todayIso;
+      }
+
       switch (colId) {
         case "cat":
           updated.cat = rawVal ? String(rawVal).trim() : null;
