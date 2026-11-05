@@ -176,10 +176,12 @@ export class OrNumbersRepository {
         order_reference
       FROM ddt_documents
       WHERE deleted_at IS NULL
+        AND doc_number IS NOT NULL
+        AND status <> 'bozza'
         AND ${clientCondition}
         AND doc_date >= $1 AND doc_date <= $2
       ORDER BY 
-        CASE WHEN doc_number IS NULL THEN 999999 ELSE doc_number END ASC,
+        doc_number ASC,
         doc_date ASC
     `;
 
