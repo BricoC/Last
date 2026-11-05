@@ -5,7 +5,7 @@ import type { QuoteStatus } from "../models/quote";
 
 export function QuoteStudioHeader(props: {
   status: QuoteStatus; viewMode: "calculation" | "customer"; alexMode: boolean;
-  saving: boolean; archiveCount: number; quoteDate: string;
+  saving: boolean; archiveCount: number; quoteDate: string; quoteCode?: string | null;
   onStatusChange: (status: QuoteStatus) => void;
   onViewChange: (mode: "calculation" | "customer") => void;
   onAlexToggle: () => void; onArchive: () => void; onSave: () => void;
@@ -36,7 +36,7 @@ export function QuoteStudioHeader(props: {
           className="rounded-full border border-[var(--primary)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--primary)]">
           <option value="bozza">Bozza</option><option value="inviato">Inviato</option><option value="confermato">Confermato</option><option value="rifiutato">Rifiutato</option>
         </select></div>
-        <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">Preventivo {formatDate(props.quoteDate)}</p>
+        <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">Preventivo {formatDate(props.quoteDate)}{props.quoteCode ? ` • ${props.quoteCode}` : ""}</p>
       </div>
     </div>
     <div className="flex flex-wrap items-center justify-end gap-1.5">

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Copy, Folder, Search, Trash2, X } from "lucide-react";
 import type { Quote } from "../models/quote";
+import { formatQuoteCode } from "../models/quoteDraft";
 
 export function QuoteArchiveSidebar({ quotes, search, onSearch, onClose, onOpen, onCopy, onDelete }: {
   quotes: Quote[]; search: string; onSearch: (value: string) => void; onClose: () => void;
@@ -48,7 +49,10 @@ export function QuoteArchiveSidebar({ quotes, search, onSearch, onClose, onOpen,
             <span className="mt-1 block truncate text-[11px] text-[var(--muted-foreground)]">{quote.subject}</span>
           </button>
           <div className="mt-2 flex items-center justify-between border-t border-[var(--border)] pt-1.5">
-            <span className="text-[10px] text-[var(--muted-foreground)]">Preventivo {formatDate(quote.quote_date)}</span>
+            <span className="text-[10px] text-[var(--muted-foreground)]">
+              Preventivo {formatDate(quote.quote_date)}
+              {formatQuoteCode(quote.year, quote.quote_number) ? ` • ${formatQuoteCode(quote.year, quote.quote_number)}` : ""}
+            </span>
             <span className="flex gap-1">
               <button type="button" title="Copia preventivo" aria-label={`Copia preventivo di ${quote.client_name || "cliente"}`} onClick={() => onCopy(quote.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--primary)]"><Copy className="h-3.5 w-3.5" /></button>
               <button type="button" title="Cancella preventivo" aria-label={`Cancella preventivo di ${quote.client_name || "cliente"}`} onClick={() => onDelete(quote.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--destructive)]"><Trash2 className="h-3.5 w-3.5" /></button>

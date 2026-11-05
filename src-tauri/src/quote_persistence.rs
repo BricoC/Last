@@ -71,7 +71,7 @@ async fn persist_header(
     );
     query.push_values(std::iter::once(payload), |mut row, quote| {
         row.push_bind(&quote.id)
-            .push_bind(Option::<i64>::None)
+            .push_bind(quote.quote_number)
             .push_bind(quote.year)
             .push_bind(&quote.quote_date)
             .push_bind(&quote.status)
@@ -111,6 +111,7 @@ async fn persist_header(
     });
     query.push(
         " ON CONFLICT(id) DO UPDATE SET
+          quote_number = COALESCE(quotes.quote_number, excluded.quote_number),
           year = excluded.year, quote_date = excluded.quote_date, status = excluded.status,
           client_id = excluded.client_id, client_name = excluded.client_name,
           client_address = excluded.client_address, client_city = excluded.client_city,

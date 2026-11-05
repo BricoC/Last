@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { money } from "@/shared/domain/monetaryValue";
 import { calculateQuoteItem, calculateQuoteTotals } from "../quoteCalculations";
 import { QuoteItemInput } from "../../models/quote";
+import { formatQuoteCode } from "../../models/quoteDraft";
 
 function item(overrides: Partial<QuoteItemInput> = {}): QuoteItemInput {
   return {
@@ -91,5 +92,13 @@ describe("quoteCalculations", () => {
     expect(() => calculateQuoteItem(item({ quantity: "0" }), 0)).toThrow(RangeError);
     expect(() => calculateQuoteItem(item({ discount_pct: 101 }), 0)).toThrow(RangeError);
     expect(() => calculateQuoteItem(item({ vat_rate: 8 as QuoteItemInput["vat_rate"] }), 0)).toThrow(RangeError);
+  });
+
+  it("formatta il codice preventivo univoco anno.numero_a_3_cifre", () => {
+    expect(formatQuoteCode(2026, 3)).toBe("2026.003");
+    expect(formatQuoteCode(2026, 256)).toBe("2026.256");
+    expect(formatQuoteCode(2026, 999)).toBe("2026.999");
+    expect(formatQuoteCode(2026, null)).toBeNull();
+    expect(formatQuoteCode(2026, undefined)).toBeNull();
   });
 });

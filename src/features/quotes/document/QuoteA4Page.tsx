@@ -1,6 +1,6 @@
 import bricoLogo from "@/assets/logo_brico_class.jpg";
 import type { CompanySettings } from "@/features/settings/companySettingsRepository";
-import type { QuoteDraft } from "../models/quoteDraft";
+import { formatQuoteCode, type QuoteDraft } from "../models/quoteDraft";
 import type { PreparedQuoteItem } from "./quotePrintModel";
 import type { CalculatedQuoteTotals } from "../utils/quoteCalculations";
 
@@ -22,6 +22,9 @@ export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages,
           <h1 className="mb-1 text-[15px] font-black tracking-wider uppercase">OFFERTA PREVENTIVO</h1>
           <div className="text-[11px] font-semibold text-slate-600">Data: <strong className="text-slate-900">{date}</strong></div>
           <div className="text-[11px] font-semibold text-slate-600">Validità: <strong className="text-slate-900">{draft.validity_days || 30} giorni</strong></div>
+          {formatQuoteCode(draft.year, draft.quote_number) && (
+            <div className="text-[11px] font-semibold text-slate-600">Rif: <strong className="font-mono text-slate-900">{formatQuoteCode(draft.year, draft.quote_number)}</strong></div>
+          )}
         </div>
       </header>
 

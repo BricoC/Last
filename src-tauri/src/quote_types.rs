@@ -3,6 +3,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct QuoteSavePayload {
     pub(crate) id: String,
+    pub(crate) quote_number: Option<i64>,
     pub(crate) year: i64,
     pub(crate) quote_date: String,
     pub(crate) status: String,

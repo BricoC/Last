@@ -11,7 +11,7 @@ export function buildQuoteSavePayload(input: QuoteDraftInput, existing: Quote | 
   const calculations = items.map((item) => calculateQuoteItem(item, globalDiscount));
   const totals = calculateQuoteTotals(calculations);
   return {
-    id, status: input.status ?? "bozza", year: input.year ?? new Date().getFullYear(),
+    id, quote_number: input.quote_number ?? existing?.quote_number ?? null, status: input.status ?? "bozza", year: input.year ?? new Date().getFullYear(),
     quote_date: input.quote_date ?? localDate(), created_at: existing?.created_at ?? now,
     updated_at: now, updated_by: "system", client_id: input.client_id ?? null,
     client_name: input.client_name?.trim() ?? "", client_address: input.client_address ?? null,
