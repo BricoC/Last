@@ -7,18 +7,26 @@ interface ItemPriceHistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
   item: ListinoGeneraleRow | null;
+  originalItem?: ListinoGeneraleRow;
+  pendingItem?: ListinoGeneraleRow;
+}
+
+function round5(num: number): number {
+  return Math.round((num + Number.EPSILON) * 100000) / 100000;
 }
 
 export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
   isOpen,
   onClose,
   item,
+  originalItem,
+  pendingItem,
 }) => {
   const [logs, setLogs] = useState<PriceListLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!isOpen || !item || !item.codice_articolo) {
+    if (!isOpen || !item) {
       setLogs([]);
       return;
     }
@@ -28,7 +36,11 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
 
     void (async () => {
       try {
-        const history = await priceListRepository.getItemPriceHistory(item.codice_articolo!);
+        const history = await priceListRepository.getItemPriceHistory(
+          item.codice_articolo,
+          item.id,
+          item.descrizione
+        );
         if (isMounted) setLogs(history);
       } catch (e) {
         console.error("Errore lettura storico variazioni articolo:", e);
@@ -41,6 +53,85 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
       isMounted = false;
     };
   }, [isOpen, item]);
+
+  // Rileva modifiche non ancora salvate nella sessione attiva
+  const pendingDifferences = React.useMemo(() => {
+    if (!item || !originalItem) return [];
+    const sourceItem = pendingItem || item;
+
+    const diffs: PriceListLogEntry[] = [];
+    const numFields: { key: keyof ListinoGeneraleRow; label: string }[] = [
+      { key: "prezzo_acquisto", label: "Prezzo Acquisto" },
+      { key: "prezzo_fattura", label: "Prezzo Fattura" },
+      { key: "prezzo_pubblico", label: "Prezzo Pubblico" },
+      { key: "prezzo_profess", label: "Prezzo Profess" },
+      { key: "perc_pub", label: "% Pubblico" },
+      { key: "perc_prof", label: "% Profess" },
+      { key: "perc_fatt", label: "% Fattura" },
+      { key: "aumento", label: "Aumento %" },
+      { key: "maga", label: "Magazzino %" },
+      { key: "perc_iva", label: "IVA" },
+    ];
+
+    for (const f of numFields) {
+      const oldV = (originalItem[f.key] as number | null) ?? null;
+      const newV = (sourceItem[f.key] as number | null) ?? null;
+      if (oldV !== newV) {
+        const oldNum = oldV ?? 0;
+        const newNum = newV ?? 0;
+        const pct = oldNum > 0 ? ((newNum - oldNum) / oldNum) * 100 : 0;
+        diffs.push({
+          id: -Math.floor(Math.random() * 10000) - 1,
+          created_at: new Date().toISOString(),
+          tipo_listino: "generale",
+          cliente: "",
+          codice_articolo: item.codice_articolo || item.id,
+          descrizione: item.descrizione,
+          campo_modificato: f.label,
+          vecchio_valore: oldV,
+          nuovo_valore: newV,
+          variazione_pct: round5(pct),
+          operatore: "Sessione (Non salvato)",
+          motivo: "Modifica in corso non ancora salvata",
+        });
+      }
+    }
+
+    const textFields: { key: keyof ListinoGeneraleRow; label: string }[] = [
+      { key: "descrizione", label: "Descrizione" },
+      { key: "codice_articolo", label: "Codice Articolo" },
+      { key: "fornitore", label: "Fornitore" },
+      { key: "cat", label: "Categoria" },
+      { key: "um", label: "U.M." },
+    ];
+
+    for (const f of textFields) {
+      const oldT = (originalItem[f.key] as string | null) ?? "";
+      const newT = (sourceItem[f.key] as string | null) ?? "";
+      if (oldT !== newT) {
+        diffs.push({
+          id: -Math.floor(Math.random() * 10000) - 1,
+          created_at: new Date().toISOString(),
+          tipo_listino: "generale",
+          cliente: "",
+          codice_articolo: item.codice_articolo || item.id,
+          descrizione: item.descrizione,
+          campo_modificato: f.label,
+          vecchio_valore: null,
+          nuovo_valore: null,
+          variazione_pct: null,
+          operatore: "Sessione (Non salvato)",
+          motivo: `Modifica da "${oldT || '—'}" a "${newT || '—'}"`,
+        });
+      }
+    }
+
+    return diffs;
+  }, [item, originalItem, pendingItem]);
+
+  const allLogs = React.useMemo(() => {
+    return [...pendingDifferences, ...logs];
+  }, [pendingDifferences, logs]);
 
   // Gestione tasto ESC
   useEffect(() => {
@@ -68,6 +159,22 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
     } catch {
       return isoString;
     }
+  };
+
+  const formatVal = (val: number | null | undefined, campo: string) => {
+    if (val == null) return "—";
+    const c = campo.toLowerCase();
+    if (c.includes("%") || c.includes("iva") || c.includes("aumento") || c.includes("magazzino")) {
+      const pct = val > 2 ? val : val * 100;
+      return `${round5(pct)}%`;
+    }
+    if (c.includes("prezzo") || c.includes("costo") || c.includes("acquisto") || c.includes("fattura") || c.includes("pubblico") || c.includes("profess")) {
+      return `€ ${round5(val).toLocaleString("it-IT", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 5,
+      })}`;
+    }
+    return String(round5(val));
   };
 
   return (
@@ -110,7 +217,7 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
               <LoaderCircle className="w-4 h-4 animate-spin text-[var(--primary)]" />
               <span>Caricamento storico modifiche...</span>
             </div>
-          ) : logs.length === 0 ? (
+          ) : allLogs.length === 0 ? (
             <div className="p-12 text-center text-xs text-[var(--muted-foreground)] space-y-1">
               <History className="w-8 h-8 mx-auto text-[var(--muted-foreground)]/40 mb-2" />
               <p className="font-medium text-[var(--foreground)]">Nessuna modifica registrata</p>
@@ -136,26 +243,38 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
-                {logs.map((log) => {
+                {allLogs.map((log) => {
                   const isPositive = (log.variazione_pct ?? 0) > 0;
                   const isNegative = (log.variazione_pct ?? 0) < 0;
+                  const isPending = (log.id ?? 0) < 0;
 
                   return (
-                    <tr key={log.id} className="hover:bg-[var(--background)] transition-colors">
+                    <tr
+                      key={log.id}
+                      className={`transition-colors ${
+                        isPending
+                          ? "bg-amber-500/15 hover:bg-amber-500/20 text-amber-200"
+                          : "hover:bg-[var(--background)]"
+                      }`}
+                    >
                       <td className="px-3 py-2 text-[var(--muted-foreground)]">
-                        {formatDate(log.created_at)}
+                        {isPending ? (
+                          <span className="font-bold text-amber-400">ADESSO (In corso)</span>
+                        ) : (
+                          formatDate(log.created_at)
+                        )}
                       </td>
                       <td className="px-3 py-2 font-bold text-[var(--primary)] font-sans">
                         {log.campo_modificato}
                       </td>
                       <td className="px-3 py-2 text-right text-[var(--muted-foreground)]">
-                        {log.vecchio_valore ?? "—"}
+                        {formatVal(log.vecchio_valore, log.campo_modificato)}
                       </td>
                       <td className="px-2 py-2 text-center text-[var(--muted-foreground)]">
                         <ArrowRight className="w-3 h-3 inline text-[var(--muted-foreground)]" />
                       </td>
                       <td className="px-3 py-2 text-left font-bold text-[var(--foreground)]">
-                        {log.nuovo_valore ?? "—"}
+                        {formatVal(log.nuovo_valore, log.campo_modificato)}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {log.variazione_pct != null ? (

@@ -86,6 +86,55 @@ const EDITABLE_COL_ORDER = [
 
 type EditableColumnKey = (typeof EDITABLE_COL_ORDER)[number];
 
+// Helper data odierna in formato aaaa.mm.gg
+function getTodayAaaaMmGg(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}.${month}.${day}`;
+}
+
+// Helper formattazione qualsiasi data in aaaa.mm.gg
+function formatDateAaaaMmGg(rawDate: string | null | undefined): string {
+  if (!rawDate) return "—";
+  const str = String(rawDate).trim();
+  if (!str) return "—";
+
+  // Formato aaaa-mm-gg (es. 2026-11-05) -> 2026.11.05
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str.replace(/-/g, ".");
+  }
+
+  // Già aaaa.mm.gg
+  if (/^\d{4}\.\d{2}\.\d{2}$/.test(str)) {
+    return str;
+  }
+
+  // ISO string (es. 2026-11-05T12:30:00)
+  if (str.includes("T")) {
+    const p = str.split("T")[0].split("-");
+    if (p.length === 3) return `${p[0]}.${p[1]}.${p[2]}`;
+  }
+
+  // Formato gg/mm/aaaa
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    const [g, m, a] = str.split("/");
+    return `${a}.${m}.${g}`;
+  }
+
+  // Formato numerico aammgg (es. 200925 -> 2020.09.25)
+  if (/^\d{6}$/.test(str)) {
+    const yy = str.slice(0, 2);
+    const mm = str.slice(2, 4);
+    const dd = str.slice(4, 6);
+    const yyyy = Number(yy) > 50 ? `19${yy}` : `20${yy}`;
+    return `${yyyy}.${mm}.${dd}`;
+  }
+
+  return str;
+}
+
 function createBlankRow(): ListinoGeneraleRow {
   return {
     id: `new_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -93,7 +142,7 @@ function createBlankRow(): ListinoGeneraleRow {
     cat: "",
     fornitore: "",
     codice_articolo: "",
-    data_ref: new Date().toISOString().split("T")[0],
+    data_ref: getTodayAaaaMmGg(),
     descrizione: "",
     um: "NR.",
     perc_pub: null,
@@ -320,10 +369,9 @@ export const ProductListPage: React.FC = () => {
     ): ListinoGeneraleRow => {
       const updated: ListinoGeneraleRow = { ...prevRow };
 
-      // Aggiorna automaticamente la data ad oggi (AAAA-MM-GG) ad ogni modifica effettuata
-      const todayIso = new Date().toISOString().split("T")[0];
+      // Aggiorna automaticamente la data ad oggi (aaaa.mm.gg) ad ogni modifica effettuata
       if (colId !== "data_ref") {
-        updated.data_ref = todayIso;
+        updated.data_ref = getTodayAaaaMmGg();
       }
 
       switch (colId) {
@@ -460,61 +508,90 @@ export const ProductListPage: React.FC = () => {
 
       for (const row of rowsToSave) {
         const original = originalRowsSnapshot.get(row.id);
-        if (original && row.codice_articolo) {
-          if (original.prezzo_acquisto !== row.prezzo_acquisto) {
-            const oldV = original.prezzo_acquisto ?? 0;
-            const newV = row.prezzo_acquisto ?? 0;
-            const pct = oldV > 0 ? ((newV - oldV) / oldV) * 100 : 0;
-            logEntries.push({
-              created_at: nowIso,
-              tipo_listino: "generale",
-              cliente: "",
-              codice_articolo: row.codice_articolo,
-              descrizione: row.descrizione,
-              campo_modificato: "prezzo_acquisto",
-              vecchio_valore: oldV,
-              nuovo_valore: newV,
-              variazione_pct: round5(pct),
-              operatore: operatorName,
-              motivo: "Modifica Excel Listino Generale",
-            });
+        const artCode = row.codice_articolo?.trim() || row.id;
+        const artDesc = row.descrizione || "Articolo";
+
+        if (original) {
+          // Campi numerici (prezzi, percentuali, IVA)
+          const numFields: { key: keyof ListinoGeneraleRow; label: string }[] = [
+            { key: "prezzo_acquisto", label: "Prezzo Acquisto" },
+            { key: "prezzo_fattura", label: "Prezzo Fattura" },
+            { key: "prezzo_pubblico", label: "Prezzo Pubblico" },
+            { key: "prezzo_profess", label: "Prezzo Profess" },
+            { key: "perc_pub", label: "% Pubblico" },
+            { key: "perc_prof", label: "% Profess" },
+            { key: "perc_fatt", label: "% Fattura" },
+            { key: "aumento", label: "Aumento %" },
+            { key: "maga", label: "Magazzino %" },
+            { key: "perc_iva", label: "IVA" },
+          ];
+
+          for (const f of numFields) {
+            const oldV = (original[f.key] as number | null) ?? null;
+            const newV = (row[f.key] as number | null) ?? null;
+            if (oldV !== newV) {
+              const oldNum = oldV ?? 0;
+              const newNum = newV ?? 0;
+              const pct = oldNum > 0 ? ((newNum - oldNum) / oldNum) * 100 : 0;
+              logEntries.push({
+                created_at: nowIso,
+                tipo_listino: "generale",
+                cliente: "",
+                codice_articolo: artCode,
+                descrizione: artDesc,
+                campo_modificato: f.label,
+                vecchio_valore: oldV != null ? round5(oldV) : null,
+                nuovo_valore: newV != null ? round5(newV) : null,
+                variazione_pct: round5(pct),
+                operatore: operatorName,
+                motivo: "Modifica Excel Listino Generale",
+              });
+            }
           }
-          if (original.prezzo_fattura !== row.prezzo_fattura) {
-            const oldV = original.prezzo_fattura ?? 0;
-            const newV = row.prezzo_fattura ?? 0;
-            const pct = oldV > 0 ? ((newV - oldV) / oldV) * 100 : 0;
-            logEntries.push({
-              created_at: nowIso,
-              tipo_listino: "generale",
-              cliente: "",
-              codice_articolo: row.codice_articolo,
-              descrizione: row.descrizione,
-              campo_modificato: "prezzo_fattura",
-              vecchio_valore: oldV,
-              nuovo_valore: newV,
-              variazione_pct: round5(pct),
-              operatore: operatorName,
-              motivo: "Modifica Excel Listino Generale",
-            });
+
+          // Campi testuali
+          const textFields: { key: keyof ListinoGeneraleRow; label: string }[] = [
+            { key: "descrizione", label: "Descrizione" },
+            { key: "codice_articolo", label: "Codice Articolo" },
+            { key: "fornitore", label: "Fornitore" },
+            { key: "cat", label: "Categoria" },
+            { key: "um", label: "U.M." },
+          ];
+
+          for (const f of textFields) {
+            const oldT = (original[f.key] as string | null) ?? "";
+            const newT = (row[f.key] as string | null) ?? "";
+            if (oldT !== newT) {
+              logEntries.push({
+                created_at: nowIso,
+                tipo_listino: "generale",
+                cliente: "",
+                codice_articolo: artCode,
+                descrizione: artDesc,
+                campo_modificato: f.label,
+                vecchio_valore: null,
+                nuovo_valore: null,
+                variazione_pct: null,
+                operatore: operatorName,
+                motivo: `Da "${oldT || '—'}" a "${newT || '—'}"`,
+              });
+            }
           }
-          if (original.prezzo_pubblico !== row.prezzo_pubblico) {
-            const oldV = original.prezzo_pubblico ?? 0;
-            const newV = row.prezzo_pubblico ?? 0;
-            const pct = oldV > 0 ? ((newV - oldV) / oldV) * 100 : 0;
-            logEntries.push({
-              created_at: nowIso,
-              tipo_listino: "generale",
-              cliente: "",
-              codice_articolo: row.codice_articolo,
-              descrizione: row.descrizione,
-              campo_modificato: "prezzo_pubblico",
-              vecchio_valore: oldV,
-              nuovo_valore: newV,
-              variazione_pct: round5(pct),
-              operatore: operatorName,
-              motivo: "Modifica Excel Listino Generale",
-            });
-          }
+        } else {
+          // Nuovo articolo aggiunto
+          logEntries.push({
+            created_at: nowIso,
+            tipo_listino: "generale",
+            cliente: "",
+            codice_articolo: artCode,
+            descrizione: artDesc,
+            campo_modificato: "Nuovo Articolo",
+            vecchio_valore: null,
+            nuovo_valore: row.prezzo_acquisto ? round5(row.prezzo_acquisto) : null,
+            variazione_pct: null,
+            operatore: operatorName,
+            motivo: "Creazione nuovo articolo",
+          });
         }
       }
 
@@ -732,6 +809,8 @@ export const ProductListPage: React.FC = () => {
           e.stopPropagation();
           selectCell(rowId, allVisibleCols[colIdx - 1]);
         } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          e.stopPropagation();
           startEditing(rowId, colId, e.key);
         }
       }
@@ -1350,7 +1429,7 @@ export const ProductListPage: React.FC = () => {
                     rowId={newTopRow.id}
                     colId="data_ref"
                     value={newTopRow.data_ref || ""}
-                    displayValue={newTopRow.data_ref || "—"}
+                    displayValue={formatDateAaaaMmGg(newTopRow.data_ref)}
                     align="center"
                     isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "data_ref"}
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "data_ref"}
@@ -1672,6 +1751,8 @@ export const ProductListPage: React.FC = () => {
         isOpen={Boolean(historyModalItem)}
         onClose={() => setHistoryModalItem(null)}
         item={historyModalItem}
+        originalItem={historyModalItem ? originalRowsSnapshot.get(historyModalItem.id) : undefined}
+        pendingItem={historyModalItem ? dirtyRows.get(historyModalItem.id) : undefined}
       />
     </div>
   );
@@ -1830,7 +1911,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             rowId={item.id}
             colId="data_ref"
             value={item.data_ref || ""}
-            displayValue={item.data_ref || "—"}
+            displayValue={formatDateAaaaMmGg(item.data_ref)}
             align="center"
             isActive={activeColId === "data_ref"}
             isEditing={editingColId === "data_ref"}
@@ -2132,7 +2213,7 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
         inputRef.current.select();
       }
     }
-  }, [initialValue]);
+  }, []);
 
   return (
     <td className={`p-0 relative ${alignClass} ${className}`}>
