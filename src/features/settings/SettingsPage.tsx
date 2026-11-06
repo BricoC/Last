@@ -4,6 +4,7 @@ import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
 import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2, Users } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { CompanySettingsPanel } from "./CompanySettingsPanel";
+import { EmailSettingsPanel } from "./EmailSettingsPanel";
 import { DatabaseQuerySettingsPanel } from "./DatabaseQuerySettingsPanel";
 
 import { UserManagementPanel } from "./UserManagementPanel";
@@ -140,6 +141,10 @@ export const SettingsPage: React.FC = () => {
         ) : activeNav === "company" ? (
           <div className="flex-1 min-w-0">
             <CompanySettingsPanel />
+          </div>
+        ) : activeNav === "email" ? (
+          <div className="flex-1 min-w-0">
+            <EmailSettingsPanel />
           </div>
         ) : activeNav === "database" ? (
           <div className="flex-1 min-w-0 space-y-4">

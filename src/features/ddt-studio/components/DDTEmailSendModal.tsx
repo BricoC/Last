@@ -5,6 +5,8 @@ import { Mail, LoaderCircle, X, Paperclip, CheckCircle2 } from "lucide-react";
 import { DdtDocument } from "../models/ddt";
 import { ddtRepository } from "../services/ddtRepository";
 import { clientRepository } from "@/features/clients/services/clientRepository";
+import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
+import { getCompanySettings } from "@/features/settings/companySettingsRepository";
 import { DDTA4Document } from "../document/DDTA4Document";
 import { generatePdfBytesFromElements, formatDdtPdfFilename } from "../utils/ddtExportManager";
 
@@ -60,16 +62,33 @@ export const DDTEmailSendModal: React.FC<DDTEmailSendModalProps> = ({
           let destTo = "";
           let destCc = "";
 
+          const [emailConfig, companySettings] = await Promise.all([
+            getEmailSettings(),
+            getCompanySettings(),
+          ]);
+
           // Controlli speciali per clienti noti o anagrafica
           if (clientName.toUpperCase().includes("CARRARA")) {
-            destTo = "alessio.piccinini@cartierecarrara.com";
-            destCc = "federica.bianchi@cartierecarrara.com";
+            destTo = emailConfig.carrara_to;
+            destCc = emailConfig.carrara_cc;
           } else if (clientName.toUpperCase().includes("WEPA")) {
-            destTo = "alessio.piccinini@cartierecarrara.com"; // default fallback
+            const isSalanetti = loaded.some((d) =>
+              (d.destination_name || d.destination_address || "").toUpperCase().includes("SALANETTI")
+            );
+            if (isSalanetti) {
+              destTo = emailConfig.wepa_salanetti_to;
+              destCc = emailConfig.wepa_salanetti_cc;
+            } else {
+              destTo = emailConfig.wepa_ralletta_to;
+              destCc = emailConfig.wepa_ralletta_cc;
+            }
           } else if (first.client_id) {
             const clientObj = await clientRepository.getClientById(first.client_id);
             if (clientObj?.email) {
               destTo = clientObj.email;
+            }
+            if (companySettings?.email) {
+              destCc = companySettings.email;
             }
           }
 
