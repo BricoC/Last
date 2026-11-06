@@ -63,9 +63,16 @@ export function App() {
     import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
         return getCurrentWindow().onCloseRequested(async (event) => {
-          const allowed = await runAllWindowCloseGuards();
-          if (!allowed) {
-            event.preventDefault();
+          if (!hasAnyUnsavedChanges()) {
+            return;
+          }
+          try {
+            const allowed = await runAllWindowCloseGuards();
+            if (!allowed) {
+              event.preventDefault();
+            }
+          } catch (e) {
+            console.warn("[App] Errore verifica modifiche non salvate in chiusura:", e);
           }
         });
       })
