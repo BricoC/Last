@@ -3,9 +3,9 @@ import { Copy, Folder, Search, Trash2, X } from "lucide-react";
 import type { Quote } from "../models/quote";
 import { formatQuoteCode } from "../models/quoteDraft";
 
-export function QuoteArchiveSidebar({ quotes, search, onSearch, onClose, onOpen, onCopy, onDelete }: {
-  quotes: Quote[]; search: string; onSearch: (value: string) => void; onClose: () => void;
-  onOpen: (id: string) => void; onCopy: (id: string) => void; onDelete: (id: string) => void;
+export function QuoteArchiveSidebar({ quotes, search, trashCount = 0, onSearch, onClose, onOpen, onCopy, onDelete, onOpenTrash }: {
+  quotes: Quote[]; search: string; trashCount?: number; onSearch: (value: string) => void; onClose: () => void;
+  onOpen: (id: string) => void; onCopy: (id: string) => void; onDelete: (id: string) => void; onOpenTrash?: () => void;
 }) {
   const sidebarRef = useRef<HTMLElement>(null);
 
@@ -61,6 +61,18 @@ export function QuoteArchiveSidebar({ quotes, search, onSearch, onClose, onOpen,
         </article>
       )}
     </div>
+    {onOpenTrash && (
+      <footer className="border-t border-[var(--border)] p-2.5 bg-[var(--card)]">
+        <button
+          type="button"
+          onClick={onOpenTrash}
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/20 transition-colors"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          <span>Apri Cestino Preventivi ({trashCount})</span>
+        </button>
+      </footer>
+    )}
   </aside>;
 }
 

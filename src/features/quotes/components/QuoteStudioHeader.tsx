@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ChevronDown, Eye, FileText, Plus, Save, Sparkles, Truck } from "lucide-react";
+import { Archive, ChevronDown, Eye, FileText, Plus, Save, Sparkles, Trash2, Truck } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import type { QuoteStatus } from "../models/quote";
 
 export function QuoteStudioHeader(props: {
   status: QuoteStatus; viewMode: "calculation" | "customer"; alexMode: boolean;
-  saving: boolean; archiveCount: number; quoteDate: string; quoteCode?: string | null;
+  saving: boolean; archiveCount: number; trashCount?: number; quoteDate: string; quoteCode?: string | null;
   onStatusChange: (status: QuoteStatus) => void;
   onViewChange: (mode: "calculation" | "customer") => void;
-  onAlexToggle: () => void; onArchive: () => void; onSave: () => void;
+  onAlexToggle: () => void; onArchive: () => void; onOpenTrash?: () => void; onSave: () => void;
   onNew: () => void; onPdf: () => void; onConvert: () => void; onFillRandomRows: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -46,6 +46,11 @@ export function QuoteStudioHeader(props: {
       </div>
       <Button size="sm" variant={props.alexMode ? "secondary" : "outline"} onClick={props.onAlexToggle}>✦ Alex</Button>
       <Button size="sm" variant="outline" onClick={props.onArchive}><Archive className="mr-1 h-3.5 w-3.5" />Archivio <span className="ml-1 rounded-full bg-[var(--background)] px-1.5">{props.archiveCount}</span></Button>
+      {props.onOpenTrash && (
+        <Button size="sm" variant="outline" onClick={props.onOpenTrash} title="Cestino preventivi eliminati (max 5)">
+          <Trash2 className="mr-1 h-3.5 w-3.5 text-red-400" />Cestino <span className="ml-1 rounded-full bg-[var(--background)] px-1.5">{props.trashCount ?? 0}</span>
+        </Button>
+      )}
       <Button size="sm" variant="outline" onClick={props.onNew}><Plus className="mr-1 h-3.5 w-3.5" />Nuovo</Button>
       <Button size="sm" variant="outline" disabled={props.saving} onClick={props.onSave}><Save className="mr-1 h-3.5 w-3.5" />{props.saving ? "Salva…" : "Salva"}</Button>
       <Button size="sm" variant="danger" onClick={props.onPdf}>PDF</Button>

@@ -385,4 +385,254 @@ export class QuoteSyncService {
       return 0;
     }
   }
+
+  /**
+   * Sposta un preventivo nel Cestino di Supabase Cloud (tabella preventivi_cestino)
+   * e assicura il limite FIFO di massimo 5 elementi.
+   */
+  public static async pushTrashQuote(
+    quote: Quote,
+    deletedAt: string = new Date().toISOString(),
+    deletedBy: string = "system"
+  ): Promise<boolean> {
+    try {
+      const creds = await getSupabaseCredentials();
+      if (!creds) return false;
+
+      const baseRow = this.mapQuoteToSupabase(quote);
+      const trashRow = {
+        ...baseRow,
+        deleted_at: deletedAt,
+        deleted_by: deletedBy,
+      };
+
+      // 1. Inserisci o aggiorna nel cestino remoto
+      const postUrl = `${creds.projectUrl}/rest/v1/preventivi_cestino`;
+      const res = await fetch(postUrl, {
+        method: "POST",
+        headers: {
+          apikey: creds.anonKey,
+          Authorization: `Bearer ${creds.anonKey}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates",
+        },
+        body: JSON.stringify(trashRow),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        console.warn("[QuoteSyncService] Errore push preventivo nel cestino Supabase:", txt);
+      }
+
+      // 2. Rimuovi dall'elenco preventivi attivi su Supabase
+      await this.deleteQuote(quote.id);
+
+      // 3. FIFO: Mantieni al massimo 5 elementi nel cestino remoto
+      try {
+        const listUrl = `${creds.projectUrl}/rest/v1/preventivi_cestino?select=id,deleted_at&order=deleted_at.desc`;
+        const listRes = await fetch(listUrl, {
+          headers: {
+            apikey: creds.anonKey,
+            Authorization: `Bearer ${creds.anonKey}`,
+          },
+        });
+        if (listRes.ok) {
+          const allTrash = await listRes.json();
+          if (Array.isArray(allTrash) && allTrash.length > 5) {
+            const toPrune = allTrash.slice(5);
+            for (const item of toPrune) {
+              await fetch(`${creds.projectUrl}/rest/v1/preventivi_cestino?id=eq.${encodeURIComponent(item.id)}`, {
+                method: "DELETE",
+                headers: {
+                  apikey: creds.anonKey,
+                  Authorization: `Bearer ${creds.anonKey}`,
+                },
+              });
+            }
+          }
+        }
+      } catch (pruneErr) {
+        console.warn("[QuoteSyncService] Pruning cestino remoto:", pruneErr);
+      }
+
+      return res.ok;
+    } catch (err) {
+      console.warn("[QuoteSyncService] Errore salvataggio cestino Supabase:", err);
+      return false;
+    }
+  }
+
+  /**
+   * Rimuove un preventivo dal cestino remoto di Supabase
+   */
+  public static async deleteTrashFromSupabase(id: string): Promise<boolean> {
+    try {
+      const creds = await getSupabaseCredentials();
+      if (!creds) return false;
+
+      const url = `${creds.projectUrl}/rest/v1/preventivi_cestino?id=eq.${encodeURIComponent(id)}`;
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: {
+          apikey: creds.anonKey,
+          Authorization: `Bearer ${creds.anonKey}`,
+        },
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn("[QuoteSyncService] Errore rimozione da cestino Supabase:", err);
+      return false;
+    }
+  }
+
+  /**
+   * Scarica gli ultimi elementi del Cestino da Supabase (max 5) e sincronizza la tabella locale
+   */
+  public static async pullTrashQuotes(): Promise<number> {
+    try {
+      const creds = await getSupabaseCredentials();
+      if (!creds) return 0;
+
+      const url = `${creds.projectUrl}/rest/v1/preventivi_cestino?order=deleted_at.desc&limit=5`;
+      const res = await fetch(url, {
+        headers: {
+          apikey: creds.anonKey,
+          Authorization: `Bearer ${creds.anonKey}`,
+        },
+      });
+
+      if (!res.ok) return 0;
+      const remoteItems = await res.json();
+      if (!Array.isArray(remoteItems) || remoteItems.length === 0) return 0;
+
+      const db = await getDatabase();
+      for (const item of remoteItems) {
+        await db.execute(
+          `INSERT INTO quotes_trash (
+            id, quote_number, numero, year, quote_date,
+            client_name, subject, total_document_subunits, data_json,
+            deleted_at, deleted_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT(id) DO UPDATE SET
+            quote_number = excluded.quote_number,
+            numero = excluded.numero,
+            year = excluded.year,
+            quote_date = excluded.quote_date,
+            client_name = excluded.client_name,
+            subject = excluded.subject,
+            total_document_subunits = excluded.total_document_subunits,
+            data_json = excluded.data_json,
+            deleted_at = excluded.deleted_at,
+            deleted_by = excluded.deleted_by`,
+          [
+            item.id,
+            item.quote_number != null ? Number(item.quote_number) : null,
+            item.numero || "",
+            Number(item.anno) || new Date().getFullYear(),
+            item.data || "",
+            item.cliente || "",
+            item.oggetto || "",
+            Math.round((Number(item.totale_documento) || 0) * 100000),
+            typeof item.data_json === "string" ? item.data_json : JSON.stringify(item.data_json || {}),
+            item.deleted_at || new Date().toISOString(),
+            item.deleted_by || "system",
+          ]
+        );
+      }
+
+      // Prune locale a max 5
+      await db.execute(`
+        DELETE FROM quotes_trash
+        WHERE id NOT IN (
+          SELECT id FROM quotes_trash
+          ORDER BY deleted_at DESC
+          LIMIT 5
+        )
+      `);
+
+      return remoteItems.length;
+    } catch (err) {
+      console.warn("[QuoteSyncService] Errore pull cestino da Supabase:", err);
+      return 0;
+    }
+  }
+
+  /**
+   * Ottiene il massimo numero progressivo preventivi noto da Supabase (per garantire unicità anche tra postazioni)
+   */
+  public static async getRemoteMaxQuoteNumber(year: number): Promise<number> {
+    try {
+      const creds = await getSupabaseCredentials();
+      if (!creds) return 0;
+
+      let maxFound = 0;
+
+      // 1. Controlla la tabella sequenze
+      const seqUrl = `${creds.projectUrl}/rest/v1/preventivi_sequenza?anno=eq.${year}&select=ultimo_numero`;
+      const seqRes = await fetch(seqUrl, {
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      });
+      if (seqRes.ok) {
+        const rows = await seqRes.json();
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].ultimo_numero != null) {
+          maxFound = Math.max(maxFound, Number(rows[0].ultimo_numero) || 0);
+        }
+      }
+
+      // 2. Controlla max quote_number in preventivi attivi
+      const prevUrl = `${creds.projectUrl}/rest/v1/preventivi?anno=eq.${year}&select=quote_number&order=quote_number.desc&limit=1`;
+      const prevRes = await fetch(prevUrl, {
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      });
+      if (prevRes.ok) {
+        const rows = await prevRes.json();
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].quote_number != null) {
+          maxFound = Math.max(maxFound, Number(rows[0].quote_number) || 0);
+        }
+      }
+
+      // 3. Controlla max quote_number in preventivi_cestino
+      const cestUrl = `${creds.projectUrl}/rest/v1/preventivi_cestino?anno=eq.${year}&select=quote_number&order=quote_number.desc&limit=1`;
+      const cestRes = await fetch(cestUrl, {
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      });
+      if (cestRes.ok) {
+        const rows = await cestRes.json();
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].quote_number != null) {
+          maxFound = Math.max(maxFound, Number(rows[0].quote_number) || 0);
+        }
+      }
+
+      return maxFound;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Aggiorna il numero massimo nella sequenza remota su Supabase
+   */
+  public static async updateRemoteSequence(year: number, lastNumber: number): Promise<void> {
+    try {
+      const creds = await getSupabaseCredentials();
+      if (!creds) return;
+
+      const url = `${creds.projectUrl}/rest/v1/preventivi_sequenza`;
+      await fetch(url, {
+        method: "POST",
+        headers: {
+          apikey: creds.anonKey,
+          Authorization: `Bearer ${creds.anonKey}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates",
+        },
+        body: JSON.stringify({
+          anno: year,
+          ultimo_numero: lastNumber,
+        }),
+      });
+    } catch (err) {
+      console.warn("[QuoteSyncService] Errore aggiornamento sequenza remota:", err);
+    }
+  }
 }
