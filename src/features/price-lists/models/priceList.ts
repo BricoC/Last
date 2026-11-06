@@ -27,6 +27,7 @@ export interface ListinoGeneraleRow {
 export interface ListinoClienteRow {
   id: string;
   cliente: string;
+  fornitore?: string | null;
   codice_articolo: string | null;
   descrizione: string;
   prezzo_fattura: number | null;

@@ -30,3 +30,4 @@ describe("Client Price List Formulas and Calculations", () => {
     expect(acquistoBase).toBe(2.25);
   });
 });
+

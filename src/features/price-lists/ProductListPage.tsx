@@ -250,6 +250,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
 
   // Tracciamento modifiche non salvate
   const [dirtyRows, setDirtyRows] = useState<Map<string, ListinoGeneraleRow>>(new Map());
+  const [undoStack, setUndoStack] = useState<{ rowId: string; prevRow: ListinoGeneraleRow }[]>([]);
   const [originalRowsSnapshot, setOriginalRowsSnapshot] = useState<Map<string, ListinoGeneraleRow>>(new Map());
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(() => {
@@ -810,6 +811,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       setItems((prev) =>
         prev.map((r) => {
           if (r.id !== rowId) return r;
+          setUndoStack((uPrev) => [...uPrev.slice(-49), { rowId, prevRow: { ...r } }]);
           const updated = updateRowWithField(r, colId, value);
           setDirtyRows((dirtyPrev) => {
             const next = new Map(dirtyPrev);
@@ -823,6 +825,54 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     },
     [newTopRow, updateRowWithField, scheduleSilentAutoSaveIfNeeded, originalRowsSnapshot]
   );
+
+  // Annulla ultima modifica
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const lastAction = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+
+    const restoredRow = lastAction.prevRow;
+    setItems((prev) => prev.map((r) => (r.id === restoredRow.id ? restoredRow : r)));
+
+    const original = originalRowsSnapshot.get(restoredRow.id);
+    setDirtyRows((prevDirty) => {
+      const nextDirty = new Map(prevDirty);
+      if (original && JSON.stringify(original) === JSON.stringify(restoredRow)) {
+        nextDirty.delete(restoredRow.id);
+      } else {
+        nextDirty.set(restoredRow.id, restoredRow);
+      }
+      return nextDirty;
+    });
+  }, [undoStack, originalRowsSnapshot]);
+
+  // Scarta tutte le modifiche pendenti
+  const handleDiscardAllChanges = useCallback(() => {
+    if (dirtyRows.size === 0) return;
+    if (!window.confirm(`Vuoi davvero annullare tutte le ${dirtyRows.size} modifiche non salvate?`)) return;
+    setItems((prev) =>
+      prev
+        .filter((r) => !r.id.startsWith("new_") || originalRowsSnapshot.has(r.id))
+        .map((r) => originalRowsSnapshot.get(r.id) || r)
+    );
+    setDirtyRows(new Map());
+    setUndoStack([]);
+  }, [dirtyRows.size, originalRowsSnapshot]);
+
+  // Scorciatoia Ctrl+Z per annulla
+  useEffect(() => {
+    const handleUndoKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        if (!editingCell) {
+          e.preventDefault();
+          handleUndo();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleUndoKeyDown);
+    return () => window.removeEventListener("keydown", handleUndoKeyDown);
+  }, [handleUndo, editingCell]);
 
   // Selezione cella singola (click o navigazione con frecce, stile Excel)
   const selectCell = useCallback((rowId: string, colId: string) => {
@@ -1274,6 +1324,36 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
+
+          {canEdit && (
+            <div className="flex items-center space-x-1">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={undoStack.length === 0}
+                className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border text-xs font-semibold transition-colors ${
+                  undoStack.length > 0
+                    ? "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 cursor-pointer shadow-xs"
+                    : "border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-50 cursor-not-allowed"
+                }`}
+                title="Annulla ultima modifica (Ctrl+Z)"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Annulla {undoStack.length > 0 ? `(${undoStack.length})` : ""}</span>
+              </button>
+
+              {dirtyRows.size > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDiscardAllChanges}
+                  className="px-2 py-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-medium transition-colors"
+                  title="Scarta tutte le modifiche non salvate"
+                >
+                  Scarta tutto
+                </button>
+              )}
+            </div>
+          )}
 
           {canEdit && (
             <button

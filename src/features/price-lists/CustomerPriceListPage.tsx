@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Trash2,
   Plus,
+  RotateCcw,
 } from "lucide-react";
 import { ListinoClienteRow, PriceListLogEntry } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
@@ -38,18 +39,20 @@ type ClientTab = "tutti" | "duplicati" | "da_verificare";
 
 type SortField =
   | "cliente"
-  | "descrizione"
+  | "fornitore"
   | "codice_articolo"
+  | "data_ref"
+  | "descrizione"
   | "prezzo_fattura"
   | "acquisto_eur"
   | "perc_acquisto"
   | "data_acquisto"
   | "acquisto_old"
-  | "data_ref"
   | "ricarico";
 
 const EDITABLE_CLIENT_COL_ORDER = [
   "cliente",
+  "fornitore",
   "codice_articolo",
   "descrizione",
   "prezzo_fattura",
@@ -103,6 +106,7 @@ function createBlankClientRow(defaultClient?: string): ListinoClienteRow {
   return {
     id: `new_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     cliente: defaultClient || "",
+    fornitore: "",
     codice_articolo: "",
     descrizione: "",
     prezzo_fattura: null,
@@ -187,8 +191,9 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   // 1 Riga vuota sempre in cima per creazione nuovi articoli
   const [newTopRow, setNewTopRow] = useState<ListinoClienteRow>(() => createBlankClientRow());
 
-  // Tracciamento modifiche non salvate
+  // Tracciamento modifiche non salvate & Undo Stack
   const [dirtyRows, setDirtyRows] = useState<Map<string, ListinoClienteRow>>(new Map());
+  const [undoStack, setUndoStack] = useState<{ rowId: string; prevRow: ListinoClienteRow }[]>([]);
   const [originalRowsSnapshot, setOriginalRowsSnapshot] = useState<Map<string, ListinoClienteRow>>(new Map());
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(() => {
@@ -218,14 +223,20 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Aggiorna cliente predefinito su newTopRow quando cambia il filtro cliente
-  useEffect(() => {
-    if (selectedClientFilter !== "TUTTI") {
+  const handleClientFilterChange = (filter: string) => {
+    setSelectedClientFilter(filter);
+    if (filter !== "TUTTI") {
       setNewTopRow((prev) => ({
         ...prev,
-        cliente: prev.cliente || selectedClientFilter,
+        cliente: filter,
+      }));
+    } else {
+      setNewTopRow((prev) => ({
+        ...prev,
+        cliente: "",
       }));
     }
-  }, [selectedClientFilter]);
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -248,6 +259,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       }
       setOriginalRowsSnapshot(snapshot);
       setDirtyRows(new Map());
+      setUndoStack([]);
     } catch (err) {
       console.error("Errore caricamento listini clienti da SQLite:", err);
       setError(err instanceof Error ? err.message : "Errore lettura database locale.");
@@ -317,11 +329,11 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
 
     if (searchTokens.length > 0) {
       filteredNew = filteredNew.filter((item) => {
-        const text = `${item.cliente} ${item.descrizione} ${item.codice_articolo || ""} ${item.note || ""}`.toLowerCase();
+        const text = `${item.cliente} ${item.fornitore || ""} ${item.descrizione} ${item.codice_articolo || ""} ${item.note || ""}`.toLowerCase();
         return searchTokens.every((token) => text.includes(token));
       });
       filteredDb = filteredDb.filter((item) => {
-        const text = `${item.cliente} ${item.descrizione} ${item.codice_articolo || ""} ${item.note || ""}`.toLowerCase();
+        const text = `${item.cliente} ${item.fornitore || ""} ${item.descrizione} ${item.codice_articolo || ""} ${item.note || ""}`.toLowerCase();
         return searchTokens.every((token) => text.includes(token));
       });
     }
@@ -376,6 +388,9 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       switch (field) {
         case "cliente":
           updated.cliente = String(rawValue || "").trim();
+          break;
+        case "fornitore":
+          updated.fornitore = String(rawValue || "").trim() || null;
           break;
         case "codice_articolo":
           updated.codice_articolo = String(rawValue || "").trim() || null;
@@ -478,6 +493,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             { key: "acquisto_old", label: "Acquisto OLD" },
             { key: "descrizione", label: "Descrizione" },
             { key: "codice_articolo", label: "Codice Articolo" },
+            { key: "fornitore", label: "Fornitore" },
             { key: "cliente", label: "Cliente" },
             { key: "note", label: "Note" },
           ];
@@ -539,6 +555,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       });
 
       setDirtyRows(new Map());
+      setUndoStack([]);
       const now = new Date();
       setLastSavedTime(now);
       try {
@@ -571,6 +588,54 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
     }, intervalMs);
   }, [saveAllPendingChanges]);
 
+  // Annulla ultima modifica
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const lastAction = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+
+    const restoredRow = lastAction.prevRow;
+    setItems((prev) => prev.map((r) => (r.id === restoredRow.id ? restoredRow : r)));
+
+    const original = originalRowsSnapshot.get(restoredRow.id);
+    setDirtyRows((prevDirty) => {
+      const nextDirty = new Map(prevDirty);
+      if (original && JSON.stringify(original) === JSON.stringify(restoredRow)) {
+        nextDirty.delete(restoredRow.id);
+      } else {
+        nextDirty.set(restoredRow.id, restoredRow);
+      }
+      return nextDirty;
+    });
+  }, [undoStack, originalRowsSnapshot]);
+
+  // Scarta tutte le modifiche pendenti
+  const handleDiscardAllChanges = useCallback(() => {
+    if (dirtyRows.size === 0) return;
+    if (!window.confirm(`Vuoi davvero annullare tutte le ${dirtyRows.size} modifiche non salvate?`)) return;
+    setItems((prev) =>
+      prev
+        .filter((r) => !r.id.startsWith("new_") || originalRowsSnapshot.has(r.id))
+        .map((r) => originalRowsSnapshot.get(r.id) || r)
+    );
+    setDirtyRows(new Map());
+    setUndoStack([]);
+  }, [dirtyRows.size, originalRowsSnapshot]);
+
+  // Scorciatoia Ctrl+Z per annulla
+  useEffect(() => {
+    const handleUndoKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        if (!editingCell) {
+          e.preventDefault();
+          handleUndo();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleUndoKeyDown);
+    return () => window.removeEventListener("keydown", handleUndoKeyDown);
+  }, [handleUndo, editingCell]);
+
   // Blocco chiusura per modifiche non salvate
   const [closePrompt, setClosePrompt] = useState<((choice: "save" | "discard" | "cancel") => void) | null>(null);
 
@@ -580,6 +645,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
     setClosePrompt(null);
     if (choice === "discard") {
       setDirtyRows(new Map());
+      setUndoStack([]);
       return true;
     }
     if (choice === "save") {
@@ -609,6 +675,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         const hasData = Boolean(
           updatedTop.descrizione?.trim() ||
             updatedTop.codice_articolo?.trim() ||
+            updatedTop.fornitore?.trim() ||
             updatedTop.prezzo_fattura != null ||
             updatedTop.acquisto_eur != null
         );
@@ -639,6 +706,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       setItems((prev) =>
         prev.map((r) => {
           if (r.id !== rowId) return r;
+          setUndoStack((uPrev) => [...uPrev.slice(-49), { rowId, prevRow: { ...r } }]);
           const updated = updateRowWithField(r, colId, value);
           setDirtyRows((prevDirty) => new Map(prevDirty).set(rowId, updated));
           scheduleSilentAutoSaveIfNeeded();
@@ -684,9 +752,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       if (!activeCell) return;
       const { rowId, colId } = activeCell;
 
-      const visibleCols = EDITABLE_CLIENT_COL_ORDER.filter(
-        (c) => isVisible(c)
-      );
+      const visibleCols = EDITABLE_CLIENT_COL_ORDER.filter((c) => isVisible(c));
       const currentColIndex = visibleCols.indexOf(colId as any);
 
       const allDisplayRows: string[] = [newTopRow.id, ...filteredItems.map((it) => it.id)];
@@ -840,6 +906,13 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
 
   return (
     <div className="flex flex-col h-full bg-[var(--background)] text-[var(--foreground)] overflow-hidden">
+      {/* Autocomplete Datalist per Clienti */}
+      <datalist id="distinct-clients-autocomplete">
+        {distinctClients.map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
+
       {/* Barra Superiore / Toolbar */}
       <div className="p-3 border-b border-[var(--border)] bg-[var(--card)] flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
         <div className="flex items-center space-x-3">
@@ -871,7 +944,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
           </div>
         </div>
 
-        {/* Controlli Destra: Cestino, Colonne, Salva */}
+        {/* Controlli Destra: Cestino, Colonne, Annulla, Salva */}
         <div className="flex items-center space-x-2">
           {/* Cestino */}
           <button
@@ -908,6 +981,37 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
 
+          {/* Annulla Modifiche (Ctrl+Z) & Scarta Tutto */}
+          {canEdit && (
+            <div className="flex items-center space-x-1">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={undoStack.length === 0}
+                className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border text-xs font-semibold transition-colors ${
+                  undoStack.length > 0
+                    ? "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 cursor-pointer shadow-xs"
+                    : "border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-50 cursor-not-allowed"
+                }`}
+                title="Annulla ultima modifica (Ctrl+Z)"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Annulla {undoStack.length > 0 ? `(${undoStack.length})` : ""}</span>
+              </button>
+
+              {dirtyRows.size > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDiscardAllChanges}
+                  className="px-2 py-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-medium transition-colors"
+                  title="Scarta tutte le modifiche non salvate"
+                >
+                  Scarta tutto
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Salva Modifiche */}
           {canEdit && (
             <button
@@ -935,7 +1039,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             <Filter className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
             <select
               value={selectedClientFilter}
-              onChange={(e) => setSelectedClientFilter(e.target.value)}
+              onChange={(e) => handleClientFilterChange(e.target.value)}
               className="bg-transparent text-xs font-semibold text-[var(--foreground)] outline-none cursor-pointer max-w-[220px]"
             >
               <option value="TUTTI">TUTTI I CLIENTI ({distinctClients.length})</option>
@@ -993,7 +1097,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cerca cliente, descrizione, codice... (F4)"
+            placeholder="Cerca cliente, fornitore, descrizione, codice... (F4)"
             className="w-full pl-8 pr-7 py-1 text-xs bg-[var(--card)] border border-[var(--border)] rounded-md outline-none text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)]"
           />
           {search && (
@@ -1035,6 +1139,17 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   </div>
                 </th>
               )}
+              {isVisible("fornitore") && (
+                <th
+                  className="px-2.5 py-2 text-left cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-28 text-sky-400"
+                  onClick={() => handleToggleSort("fornitore")}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>FORNITORE</span>
+                    <ArrowUpDown className="w-3 h-3 ml-1" />
+                  </div>
+                </th>
+              )}
               {isVisible("codice_articolo") && (
                 <th
                   className="px-2.5 py-2 text-left cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-32"
@@ -1043,6 +1158,17 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   <div className="flex items-center justify-between">
                     <span>CODICE ART.</span>
                     <ArrowUpDown className="w-3 h-3 ml-1" />
+                  </div>
+                </th>
+              )}
+              {isVisible("data_ref") && (
+                <th
+                  className="px-2.5 py-2 text-center cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-28 text-amber-300"
+                  onClick={() => handleToggleSort("data_ref")}
+                >
+                  <div className="flex items-center justify-center space-x-1">
+                    <span>DATA</span>
+                    <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
               )}
@@ -1123,17 +1249,6 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   </div>
                 </th>
               )}
-              {isVisible("data_ref") && (
-                <th
-                  className="px-2.5 py-2 text-center cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-28"
-                  onClick={() => handleToggleSort("data_ref")}
-                >
-                  <div className="flex items-center justify-center space-x-1">
-                    <span>DATA</span>
-                    <ArrowUpDown className="w-3 h-3" />
-                  </div>
-                </th>
-              )}
               {isVisible("note") && (
                 <th className="px-2.5 py-2 text-left border-r border-[var(--border)]/40 w-36">NOTE</th>
               )}
@@ -1149,7 +1264,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             <tr className="bg-emerald-500/10 border-b-2 border-emerald-500/40 text-[var(--foreground)] font-mono text-[11px]">
               {isVisible("actions") && (
                 <td className="px-2 py-1.5 text-center border-r border-[var(--border)]/40">
-                  <span title="Nuova riga: premi Invio per salvare" className="text-emerald-400 font-bold">
+                  <span title="Nuova riga: inserisci i dati per salvare" className="text-emerald-400 font-bold">
                     <Plus className="w-4 h-4 mx-auto" />
                   </span>
                 </td>
@@ -1172,6 +1287,24 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   className="font-bold text-amber-400 border-r border-[var(--border)]/40"
                 />
               )}
+              {isVisible("fornitore") && (
+                <EditableCell
+                  rowId={newTopRow.id}
+                  colId="fornitore"
+                  value={newTopRow.fornitore}
+                  displayValue={newTopRow.fornitore || "+ Fornitore"}
+                  isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "fornitore"}
+                  isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "fornitore"}
+                  initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "fornitore" ? initialEditChar : undefined}
+                  canEdit={canEdit}
+                  onSelectCell={selectCell}
+                  onStartEdit={startEditing}
+                  onCommit={commitCellEdit}
+                  onCancel={cancelCellEdit}
+                  onKeyDown={handleCellKeyDown}
+                  className="border-r border-[var(--border)]/40 text-sky-400 font-semibold"
+                />
+              )}
               {isVisible("codice_articolo") && (
                 <EditableCell
                   rowId={newTopRow.id}
@@ -1189,6 +1322,11 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   onKeyDown={handleCellKeyDown}
                   className="border-r border-[var(--border)]/40 text-[var(--primary)]"
                 />
+              )}
+              {isVisible("data_ref") && (
+                <td className="px-2.5 py-1.5 text-center border-r border-[var(--border)]/40 text-[var(--muted-foreground)] font-mono whitespace-nowrap">
+                  {newTopRow.data_ref || getTodayAaaaMmGg()}
+                </td>
               )}
               {isVisible("descrizione") && (
                 <EditableCell
@@ -1307,11 +1445,6 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   —
                 </td>
               )}
-              {isVisible("data_ref") && (
-                <td className="px-2.5 py-1.5 text-center border-r border-[var(--border)]/40 text-[var(--muted-foreground)] font-mono">
-                  {newTopRow.data_ref || getTodayAaaaMmGg()}
-                </td>
-              )}
               {isVisible("note") && (
                 <EditableCell
                   rowId={newTopRow.id}
@@ -1379,6 +1512,24 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       className="font-bold text-amber-400 border-r border-[var(--border)]/30 max-w-[170px] truncate"
                     />
                   )}
+                  {isVisible("fornitore") && (
+                    <EditableCell
+                      rowId={item.id}
+                      colId="fornitore"
+                      value={item.fornitore}
+                      displayValue={item.fornitore || "—"}
+                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "fornitore"}
+                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "fornitore"}
+                      initialChar={editingCell?.rowId === item.id && editingCell?.colId === "fornitore" ? initialEditChar : undefined}
+                      canEdit={canEdit}
+                      onSelectCell={selectCell}
+                      onStartEdit={startEditing}
+                      onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
+                      onKeyDown={handleCellKeyDown}
+                      className="border-r border-[var(--border)]/30 text-sky-400 uppercase truncate max-w-[120px]"
+                    />
+                  )}
                   {isVisible("codice_articolo") && (
                     <EditableCell
                       rowId={item.id}
@@ -1396,6 +1547,14 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       onKeyDown={handleCellKeyDown}
                       className="border-r border-[var(--border)]/30 text-[var(--primary)] font-bold whitespace-nowrap"
                     />
+                  )}
+                  {isVisible("data_ref") && (
+                    <td
+                      className="px-2.5 py-1.5 text-center border-r border-[var(--border)]/30 text-[var(--muted-foreground)] font-mono whitespace-nowrap select-none"
+                      title="Data non modificabile manualmente (aggiornata in automatico alla modifica della riga)"
+                    >
+                      {formatDateAaaaMmGg(item.data_ref)}
+                    </td>
                   )}
                   {isVisible("descrizione") && (
                     <EditableCell
@@ -1514,14 +1673,6 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       {formatPercent(item.ricarico)}
                     </td>
                   )}
-                  {isVisible("data_ref") && (
-                    <td
-                      className="px-2.5 py-1.5 text-center border-r border-[var(--border)]/30 text-[var(--muted-foreground)] font-mono whitespace-nowrap select-none"
-                      title="Data non modificabile manualmente (aggiornata in automatico alla modifica della riga)"
-                    >
-                      {formatDateAaaaMmGg(item.data_ref)}
-                    </td>
-                  )}
                   {isVisible("note") && (
                     <EditableCell
                       rowId={item.id}
@@ -1562,7 +1713,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             <button
               type="button"
               onClick={() => setVisibleCount((prev) => prev + BATCH_SIZE)}
-              className="px-4 py-2 rounded-lg bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] text-xs font-semibold text-[var(--foreground)] transition-colors"
+              className="px-4 py-2 rounded-lg bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] text-xs font-semibold text-[var(--foreground)] transition-colors cursor-pointer"
             >
               Carica altri {Math.min(BATCH_SIZE, filteredItems.length - visibleCount)} elementi ({visibleCount} di {filteredItems.length})
             </button>
@@ -1594,7 +1745,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   );
 };
 
-// Componente Editor Input Cella
+// Componente Editor Input Cella con supporto Autocomplete
 interface CellInputEditorProps {
   rowId: string;
   colId: string;
@@ -1638,6 +1789,7 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
         ref={inputRef}
         autoFocus
         type="text"
+        list={colId === "cliente" ? "distinct-clients-autocomplete" : undefined}
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
         onBlur={() => onCommit(rowId, colId, localValue)}
