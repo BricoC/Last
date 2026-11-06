@@ -61,12 +61,12 @@ export async function fetchCurrentAppDatabaseCounts(): Promise<CurrentAppDbCount
   let ddtItemsCount = 0;
   try {
     const res = await db.select<{ count: number }[]>(
-      `SELECT COUNT(*) as count FROM ddt_documents WHERE is_deleted = 0 OR is_deleted IS NULL`
+      `SELECT COUNT(*) as count FROM ddt_documents WHERE deleted_at IS NULL`
     );
     ddtCount = res[0]?.count ?? 0;
 
     const resItems = await db.select<{ count: number }[]>(
-      `SELECT COUNT(*) as count FROM ddt_items WHERE is_deleted = 0 OR is_deleted IS NULL`
+      `SELECT COUNT(*) as count FROM ddt_items WHERE deleted_at IS NULL`
     );
     ddtItemsCount = resItems[0]?.count ?? 0;
   } catch (e) {
@@ -1091,63 +1091,11 @@ export async function uploadDdtToSupabase(
   let rowsUploaded = 0;
   let failed = 0;
 
-  const HEADER_BATCH = 200;
-  const nowIso = new Date().toISOString();
+  // 1. Recupera tutti i DDT già presenti su Supabase per sincronizzare SOLO quelli mancanti (Delta Sync)
+  if (onProgress) onProgress("Verifica DDT esistenti su Supabase", 0, headers.length);
+  const existingNumSetByYear = new Map<number, Set<number>>();
+  const ddtIdMap = new Map<string, string>(); // key: `${anno}_${numero}` -> uuid
 
-  for (let i = 0; i < headers.length; i += HEADER_BATCH) {
-    const chunk = headers.slice(i, i + HEADER_BATCH).map((h) => ({
-      numero: h.numero,
-      anno: h.anno,
-      data: h.data,
-      cliente: h.cliente,
-      indirizzo: h.indirizzo,
-      citta: h.citta,
-      pagamento: h.pagamento,
-      destinazione: h.destinazione,
-      citta_dest: h.citta_dest,
-      nr_vs_ordine: h.nr_vs_ordine,
-      causale: h.causale,
-      porto: h.porto,
-      aspetto: h.aspetto,
-      colli: h.colli,
-      peso_kg: h.peso_kg,
-      vettore: h.vettore,
-      operatore: h.operatore,
-      note: h.note,
-      totale_imponibile: h.totale_imponibile,
-      totale_iva: h.totale_iva,
-      totale_documento: h.totale_documento,
-      prezzo_acquisto_totale: h.prezzo_acquisto_totale,
-      ricavo: h.ricavo,
-      ricarico_totale: h.ricarico_totale,
-      sconto_totale: h.sconto_totale,
-      stato: h.stato || "confermato",
-      ultima_modifica: nowIso,
-    }));
-
-    try {
-      const res = await fetch(`${projectUrl}/rest/v1/ddt`, {
-        method: "POST",
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=minimal",
-        },
-        body: JSON.stringify(chunk),
-      });
-      if (res.ok) {
-        headersUploaded += chunk.length;
-      } else {
-        failed += chunk.length;
-      }
-    } catch {
-      failed += chunk.length;
-    }
-    if (onProgress) onProgress("Testate DDT", Math.min(i + HEADER_BATCH, headers.length), headers.length);
-  }
-
-  const ddtIdMap = new Map<string, number>();
   let offset = 0;
   while (true) {
     const res = await fetch(
@@ -1155,58 +1103,155 @@ export async function uploadDdtToSupabase(
       { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` } }
     );
     if (!res.ok) break;
-    const data = (await res.json()) as { id: number; anno: number; numero: number }[];
+    const data = (await res.json()) as { id: string; anno: number; numero: number }[];
     if (data.length === 0) break;
     for (const d of data) {
+      if (!existingNumSetByYear.has(d.anno)) existingNumSetByYear.set(d.anno, new Set());
+      existingNumSetByYear.get(d.anno)!.add(d.numero);
       ddtIdMap.set(`${d.anno}_${d.numero}`, d.id);
     }
     offset += data.length;
     if (data.length < 1000) break;
   }
 
-  const rowsPayload = rows.map((r) => {
-    const parentId = ddtIdMap.get(`${r.anno}_${r.numero_ddt}`);
-    return {
-      ddt_id: parentId || null,
-      anno: r.anno,
-      numero_ddt: r.numero_ddt,
-      riga_nr: r.riga_nr,
-      um: r.um,
-      quantita: r.quantita,
-      descrizione: r.descrizione,
-      prezzo: r.prezzo,
-      sconto_pct: r.sconto_pct,
-      importo: r.importo,
-      iva_pct: r.iva_pct,
-      prezzo_acquisto: r.prezzo_acquisto,
-      prezzo_scontato: r.prezzo_scontato,
-      ricavo: r.ricavo,
-    };
+  // 2. Filtra SOLO le testate DDT mancanti
+  const missingHeaders = headers.filter((h) => {
+    const set = existingNumSetByYear.get(h.anno);
+    return !set || !set.has(h.numero);
   });
 
-  const ROW_BATCH = 300;
-  for (let i = 0; i < rowsPayload.length; i += ROW_BATCH) {
-    const chunk = rowsPayload.slice(i, i + ROW_BATCH);
-    try {
-      const res = await fetch(`${projectUrl}/rest/v1/ddt_righe`, {
-        method: "POST",
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify(chunk),
-      });
-      if (res.ok) {
-        rowsUploaded += chunk.length;
-      } else {
+  if (missingHeaders.length > 0) {
+    const HEADER_BATCH = 200;
+    const nowIso = new Date().toISOString();
+
+    for (let i = 0; i < missingHeaders.length; i += HEADER_BATCH) {
+      const chunk = missingHeaders.slice(i, i + HEADER_BATCH).map((h) => ({
+        numero: h.numero,
+        anno: h.anno,
+        data: h.data,
+        cliente: h.cliente,
+        indirizzo: h.indirizzo,
+        citta: h.citta,
+        pagamento: h.pagamento,
+        destinazione: h.destinazione,
+        citta_dest: h.citta_dest,
+        nr_vs_ordine: h.nr_vs_ordine,
+        causale: h.causale,
+        porto: h.porto,
+        aspetto: h.aspetto,
+        colli: h.colli,
+        peso_kg: h.peso_kg,
+        vettore: h.vettore,
+        operatore: h.operatore,
+        note: h.note,
+        totale_imponibile: h.totale_imponibile,
+        totale_iva: h.totale_iva,
+        totale_documento: h.totale_documento,
+        prezzo_acquisto_totale: h.prezzo_acquisto_totale,
+        ricavo: h.ricavo,
+        ricarico_totale: h.ricarico_totale,
+        sconto_totale: h.sconto_totale,
+        stato: h.stato || "confermato",
+        ultima_modifica: nowIso,
+      }));
+
+      try {
+        const res = await fetch(`${projectUrl}/rest/v1/ddt?on_conflict=anno,numero`, {
+          method: "POST",
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${anonKey}`,
+            "Content-Type": "application/json",
+            Prefer: "resolution=merge-duplicates,return=representation",
+          },
+          body: JSON.stringify(chunk),
+        });
+        if (res.ok) {
+          const inserted = (await res.json()) as { id: string; anno: number; numero: number }[];
+          for (const d of inserted) {
+            ddtIdMap.set(`${d.anno}_${d.numero}`, d.id);
+          }
+          headersUploaded += chunk.length;
+        } else {
+          failed += chunk.length;
+        }
+      } catch {
         failed += chunk.length;
       }
-    } catch {
-      failed += chunk.length;
+      if (onProgress) onProgress("Invio Nuovi DDT", Math.min(i + HEADER_BATCH, missingHeaders.length), missingHeaders.length);
     }
-    if (onProgress) onProgress("Righe Articoli DDT", Math.min(i + ROW_BATCH, rowsPayload.length), rowsPayload.length);
+  }
+
+  // 3. Verifica righe articoli già presenti su Supabase per inviare solo quelle mancanti
+  if (onProgress) onProgress("Verifica righe articoli DDT su Supabase", 0, rows.length);
+  const cloudRowKeys = new Set<string>();
+  offset = 0;
+  while (true) {
+    const res = await fetch(
+      `${projectUrl}/rest/v1/ddt_righe?select=anno,numero_ddt,riga_nr,descrizione&limit=1000&offset=${offset}`,
+      { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` } }
+    );
+    if (!res.ok) break;
+    const data = (await res.json()) as { anno: number; numero_ddt: number; riga_nr: number; descrizione: string }[];
+    if (data.length === 0) break;
+    for (const d of data) {
+      const k = `${d.anno}_${d.numero_ddt}_${d.riga_nr}_${String(d.descrizione || "").trim().toLowerCase()}`;
+      cloudRowKeys.add(k);
+    }
+    offset += data.length;
+    if (data.length < 1000) break;
+  }
+
+  const missingRows = rows.filter((r) => {
+    const k = `${r.anno}_${r.numero_ddt}_${r.riga_nr}_${String(r.descrizione || "").trim().toLowerCase()}`;
+    return !cloudRowKeys.has(k);
+  });
+
+  if (missingRows.length > 0) {
+    const rowsPayload = missingRows.map((r) => {
+      const parentId = ddtIdMap.get(`${r.anno}_${r.numero_ddt}`);
+      return {
+        ddt_id: parentId || null,
+        anno: r.anno,
+        numero_ddt: r.numero_ddt,
+        riga_nr: r.riga_nr,
+        um: r.um,
+        quantita: r.quantita,
+        descrizione: r.descrizione,
+        prezzo: r.prezzo,
+        sconto_pct: r.sconto_pct,
+        importo: r.importo,
+        iva_pct: r.iva_pct,
+        prezzo_acquisto: r.prezzo_acquisto,
+        prezzo_scontato: r.prezzo_scontato,
+        ricavo: r.ricavo,
+      };
+    });
+
+    const ROW_BATCH = 300;
+    for (let i = 0; i < rowsPayload.length; i += ROW_BATCH) {
+      const chunk = rowsPayload.slice(i, i + ROW_BATCH);
+      try {
+        const res = await fetch(`${projectUrl}/rest/v1/ddt_righe`, {
+          method: "POST",
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${anonKey}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify(chunk),
+        });
+        if (res.ok) {
+          rowsUploaded += chunk.length;
+        } else {
+          failed += chunk.length;
+        }
+      } catch {
+        failed += chunk.length;
+      }
+      if (onProgress) onProgress("Invio Nuove Righe Articoli", Math.min(i + ROW_BATCH, rowsPayload.length), rowsPayload.length);
+    }
   }
 
   return { headersUploaded, rowsUploaded, failed };
