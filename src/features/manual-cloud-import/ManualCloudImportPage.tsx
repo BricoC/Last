@@ -576,9 +576,9 @@ export const ManualCloudImportPage: React.FC = () => {
   return (
     <div className="flex flex-col h-full bg-[var(--background)] text-[var(--foreground)] p-4 overflow-y-auto space-y-4">
       {/* Banner Intestazione */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 gap-3">
+      <div className="flex flex-col md:flex-row md:items-center justify-between p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 gap-3 flex-shrink-0">
         <div className="flex items-center space-x-3">
-          <div className="p-2.5 rounded-lg bg-amber-500/20 text-amber-400">
+          <div className="p-2.5 rounded-lg bg-amber-500/20 text-amber-400 flex-shrink-0">
             <CloudUpload className="w-6 h-6" />
           </div>
           <div>
@@ -586,7 +586,7 @@ export const ManualCloudImportPage: React.FC = () => {
               <h1 className="text-base font-bold text-amber-400">
                 Pannello Manuale di Migrazione Dati NoManV1 &rarr; Supabase Cloud
               </h1>
-              <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 flex-shrink-0">
                 Provvisorio Admin
               </span>
             </div>
@@ -596,12 +596,12 @@ export const ManualCloudImportPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 flex-shrink-0">
           <button
             type="button"
             onClick={loadDbCounts}
             disabled={isLoadingDbCounts}
-            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded bg-[var(--card)] border border-[var(--border)] hover:bg-[var(--background)] text-[var(--foreground)] transition-colors"
+            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded bg-[var(--card)] border border-[var(--border)] hover:bg-[var(--background)] text-[var(--foreground)] transition-colors flex-shrink-0"
             title="Ricarica conteggi dal database locale"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDbCounts ? "animate-spin text-sky-400" : ""}`} />
@@ -612,7 +612,7 @@ export const ManualCloudImportPage: React.FC = () => {
             type="button"
             onClick={handleRunFullMasterMigration}
             disabled={isProcessing}
-            className="flex items-center space-x-2 px-4 py-2 text-xs font-bold rounded-md bg-amber-500 hover:bg-amber-400 text-black shadow-lg transition-transform active:scale-95 disabled:opacity-40"
+            className="flex items-center space-x-2 px-4 py-2 text-xs font-bold rounded-md bg-amber-500 hover:bg-amber-400 text-black shadow-lg transition-transform active:scale-95 disabled:opacity-40 flex-shrink-0"
           >
             <RefreshCw className={`w-4 h-4 ${isProcessing ? "animate-spin" : ""}`} />
             <span>Sincronizza Tutto (Master Sync)</span>
@@ -622,7 +622,7 @@ export const ManualCloudImportPage: React.FC = () => {
 
       {/* Barra Progresso Globale */}
       {isProcessing && (
-        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2">
+        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2 flex-shrink-0">
           <div className="flex items-center justify-between text-xs font-semibold text-amber-400">
             <span>{progressText || "Elaborazione in corso..."}</span>
             <span>{progressPct != null ? `${progressPct}%` : ""}</span>
@@ -637,33 +637,33 @@ export const ManualCloudImportPage: React.FC = () => {
       )}
 
       {/* Schede di Navigazione Modulo */}
-      <div className="flex items-center space-x-2 border-b border-[var(--border)] pb-2 select-none overflow-x-auto">
+      <div className="flex items-center space-x-2 border-b border-[var(--border)] pb-2.5 pt-1 select-none overflow-x-auto flex-shrink-0 min-h-[46px]">
         <button
           type="button"
           onClick={() => { setActiveTab("confronto"); setPreviewPage(1); }}
-          className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+          className={`flex-shrink-0 whitespace-nowrap h-9 px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
             activeTab === "confronto"
-              ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
-              : "text-[var(--muted-foreground)] hover:text-white"
+              ? "bg-purple-600/25 text-purple-200 border-2 border-purple-500/60 shadow-sm"
+              : "bg-[var(--card)]/60 text-[var(--muted-foreground)] border border-[var(--border)] hover:bg-[var(--card)] hover:text-white"
           }`}
         >
           <Database className="w-4 h-4" />
-          <span>Riepilogo & Confronto Gestionale</span>
+          <span>Riepilogo &amp; Confronto Gestionale</span>
         </button>
 
         <button
           type="button"
           onClick={() => { setActiveTab("clienti"); setPreviewPage(1); }}
-          className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+          className={`flex-shrink-0 whitespace-nowrap h-9 px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
             activeTab === "clienti"
-              ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-              : "text-[var(--muted-foreground)] hover:text-white"
+              ? "bg-amber-600/25 text-amber-200 border-2 border-amber-500/60 shadow-sm"
+              : "bg-[var(--card)]/60 text-[var(--muted-foreground)] border border-[var(--border)] hover:bg-[var(--card)] hover:text-white"
           }`}
         >
           <UserCheck className="w-4 h-4" />
           <span>1. Listini Clienti (Modificato)</span>
           {clientAnalysis && (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200">
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/30 text-amber-200 border border-amber-500/30">
               {clientAnalysis.totalRows.toLocaleString()}
             </span>
           )}
@@ -672,16 +672,16 @@ export const ManualCloudImportPage: React.FC = () => {
         <button
           type="button"
           onClick={() => { setActiveTab("generale"); setPreviewPage(1); }}
-          className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+          className={`flex-shrink-0 whitespace-nowrap h-9 px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
             activeTab === "generale"
-              ? "bg-sky-500/20 text-sky-300 border border-sky-500/40"
-              : "text-[var(--muted-foreground)] hover:text-white"
+              ? "bg-sky-600/25 text-sky-200 border-2 border-sky-500/60 shadow-sm"
+              : "bg-[var(--card)]/60 text-[var(--muted-foreground)] border border-[var(--border)] hover:bg-[var(--card)] hover:text-white"
           }`}
         >
           <Tag className="w-4 h-4" />
-          <span>2. Listino Generale & Vari</span>
+          <span>2. Listino Generale &amp; Vari</span>
           {generalAnalysis && (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/30 text-sky-200">
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-500/30 text-sky-200 border border-sky-500/30">
               {generalAnalysis.totalCombined.toLocaleString()}
             </span>
           )}
@@ -690,16 +690,16 @@ export const ManualCloudImportPage: React.FC = () => {
         <button
           type="button"
           onClick={() => { setActiveTab("ddt"); setPreviewPage(1); }}
-          className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+          className={`flex-shrink-0 whitespace-nowrap h-9 px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
             activeTab === "ddt"
-              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-              : "text-[var(--muted-foreground)] hover:text-white"
+              ? "bg-emerald-600/25 text-emerald-200 border-2 border-emerald-500/60 shadow-sm"
+              : "bg-[var(--card)]/60 text-[var(--muted-foreground)] border border-[var(--border)] hover:bg-[var(--card)] hover:text-white"
           }`}
         >
           <FileText className="w-4 h-4" />
-          <span>3. DDT (Testate & Articoli)</span>
+          <span>3. DDT (Testate &amp; Articoli)</span>
           {ddtAnalysis && (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/30 text-emerald-200">
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-200 border border-emerald-500/30">
               {ddtAnalysis.totalHeaders.toLocaleString()} doc
             </span>
           )}
@@ -708,7 +708,7 @@ export const ManualCloudImportPage: React.FC = () => {
 
       {/* SCHEDA 0: RIEPILOGO & CONFRONTO FILE LOCALI VS GESTIONALE */}
       {activeTab === "confronto" && (
-        <div className="space-y-4">
+        <div className="space-y-4 flex-shrink-0">
           <div className="p-4 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -960,7 +960,7 @@ export const ManualCloudImportPage: React.FC = () => {
 
       {/* SCHEDA 1: LISTINI CLIENTI */}
       {activeTab === "clienti" && (
-        <div className="space-y-4">
+        <div className="space-y-4 flex-shrink-0">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="p-4 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-3">
               <h2 className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider flex items-center space-x-1.5">
@@ -1158,7 +1158,7 @@ export const ManualCloudImportPage: React.FC = () => {
 
       {/* SCHEDA 2: LISTINO GENERALE & VARI */}
       {activeTab === "generale" && (
-        <div className="space-y-4">
+        <div className="space-y-4 flex-shrink-0">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="p-4 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2">
               <h2 className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider flex items-center space-x-1.5">
@@ -1306,7 +1306,7 @@ export const ManualCloudImportPage: React.FC = () => {
 
       {/* SCHEDA 3: DDT TESTATE E ARTICOLI */}
       {activeTab === "ddt" && (
-        <div className="space-y-4">
+        <div className="space-y-4 flex-shrink-0">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="p-4 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2">
               <h2 className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider flex items-center space-x-1.5">
@@ -1454,7 +1454,7 @@ export const ManualCloudImportPage: React.FC = () => {
       )}
 
       {/* REGISTRO OPERAZIONI STRUTTURATO E LEGGIBILE */}
-      <div className="p-3.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2.5">
+      <div className="p-3.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2.5 flex-shrink-0">
         <div className="flex items-center justify-between pb-1 border-b border-[var(--border)]">
           <div className="flex items-center space-x-2">
             <Layers className="w-4 h-4 text-amber-400" />
