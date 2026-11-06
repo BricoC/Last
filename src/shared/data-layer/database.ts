@@ -13,6 +13,7 @@ import { migrateElectronicInvoicesSchemaV15 } from "./migrations/electronicInvoi
 import { migrateOrdersSchemaV16 } from "./migrations/ordersSchema";
 import { migrateOffersSchemaV17, migrateOffersSchemaV18 } from "./migrations/offersSchema";
 import { migratePriceListTrashSchemaV19 } from "./migrations/priceListTrashSchema";
+import { migrateEmailSettingsSchemaV20 } from "./migrations/emailSettingsSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -338,6 +339,13 @@ const MIGRATIONS: Migration[] = [
     name: "create_price_list_trash_table",
     up: async (db: Database) => {
       await migratePriceListTrashSchemaV19(db);
+    },
+  },
+  {
+    version: 20,
+    name: "create_email_settings_table",
+    up: async (db: Database) => {
+      await migrateEmailSettingsSchemaV20(db);
     },
   },
 ];

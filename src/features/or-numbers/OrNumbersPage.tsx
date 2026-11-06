@@ -24,6 +24,9 @@ import { useUserStore } from "@/shared/stores/useUserStore";
 import { DdtDocument } from "@/features/ddt-studio/models/ddt";
 import { DDTA4Document } from "@/features/ddt-studio/document/DDTA4Document";
 import { generatePdfBytesFromElements, formatDdtPdfFilename } from "@/features/ddt-studio/utils/ddtExportManager";
+import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
+import { getCompanySettings } from "@/features/settings/companySettingsRepository";
+import { clientRepository } from "@/features/clients/services/clientRepository";
 import { cn } from "@/shared/utils/cn";
 
 const MESI = [
@@ -235,11 +238,17 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       return;
     }
 
+    const emailConfig = await getEmailSettings();
+    if (!emailConfig.carrara_to) {
+      showToast("Configura l'indirizzo email di Cartiere Carrara nelle Impostazioni.", "error");
+      return;
+    }
+
     const today = getTodayFormattedIt();
     const success = await sendEmailGroup(
       redRows,
-      "alessio.piccinini@cartierecarrara.com",
-      "federica.bianchi@cartierecarrara.com",
+      emailConfig.carrara_to,
+      emailConfig.carrara_cc,
       "Invio DDT Multiplo (Nuovi)",
       `${getGreeting()}<br><br>In allegato i nuovi DDT.<br><br>Saluti,<br>Brico Class`,
       `Email Multipla ${today}`
@@ -258,11 +267,17 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       return;
     }
 
+    const emailConfig = await getEmailSettings();
+    if (!emailConfig.carrara_to) {
+      showToast("Configura l'indirizzo email di Cartiere Carrara nelle Impostazioni.", "error");
+      return;
+    }
+
     const today = getTodayFormattedIt();
     const success = await sendEmailGroup(
       yellowRows,
-      "alessio.piccinini@cartierecarrara.com",
-      "federica.bianchi@cartierecarrara.com",
+      emailConfig.carrara_to,
+      emailConfig.carrara_cc,
       "DDT in attesa di numero d'ordine",
       `${getGreeting()}<br><br>In allegato i DDT ancora in attesa di numero d'ordine.<br><br>Saluti,<br>Brico Class`,
       `Email Multi Gialli ${today}`
@@ -281,11 +296,17 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       return;
     }
 
+    const emailConfig = await getEmailSettings();
+    if (!emailConfig.carrara_to) {
+      showToast("Configura l'indirizzo email di Cartiere Carrara nelle Impostazioni.", "error");
+      return;
+    }
+
     const today = getTodayFormattedIt();
     const success = await sendEmailGroup(
       selected,
-      "alessio.piccinini@cartierecarrara.com",
-      "federica.bianchi@cartierecarrara.com",
+      emailConfig.carrara_to,
+      emailConfig.carrara_cc,
       `Invio DDT Cartiere Carrara (${selected.length} documenti)`,
       `${getGreeting()}<br><br>In allegato i DDT selezionati:<br><br>Saluti,<br>Brico Class`,
       `Email Multipla ${today}`
@@ -314,14 +335,15 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
         (!r.destination.toUpperCase().includes("SALANETTI") && !r.destination.toUpperCase().includes("RALLETTA"))
     );
 
+    const emailConfig = await getEmailSettings();
     const today = getTodayFormattedIt();
     let sentCount = 0;
 
     if (salanetti.length > 0) {
       const ok = await sendEmailGroup(
         salanetti,
-        "d.gori@wepa.it",
-        "m.rossi@wepa.it",
+        emailConfig.wepa_salanetti_to,
+        emailConfig.wepa_salanetti_cc,
         "DDT Wepa Salanetti",
         `${getGreeting()}<br><br>In allegato i DDT richiesti:<br><br>Saluti,<br>Brico Class`,
         `Email Multipla ${today}`
@@ -332,8 +354,8 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
     if (ralletta.length > 0) {
       const ok = await sendEmailGroup(
         ralletta,
-        "m.rossi@wepa.it",
-        "d.gori@wepa.it",
+        emailConfig.wepa_ralletta_to,
+        emailConfig.wepa_ralletta_cc,
         "DDT Wepa Ralletta",
         `${getGreeting()}<br><br>In allegato i DDT richiesti:<br><br>Saluti,<br>Brico Class`,
         `Email Multipla ${today}`
@@ -361,13 +383,14 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       (r) => !r.destination.toUpperCase().includes("SALANETTI")
     );
 
+    const emailConfig = await getEmailSettings();
     const today = getTodayFormattedIt();
 
     if (salanetti.length > 0) {
       await sendEmailGroup(
         salanetti,
-        "d.gori@wepa.it",
-        "m.rossi@wepa.it",
+        emailConfig.wepa_salanetti_to,
+        emailConfig.wepa_salanetti_cc,
         `DDT Wepa Salanetti (${salanetti.length} documenti)`,
         `${getGreeting()}<br><br>In allegato i DDT Wepa selezionati:<br><br>Saluti,<br>Brico Class`,
         `Email Multipla ${today}`
@@ -377,8 +400,8 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
     if (other.length > 0) {
       await sendEmailGroup(
         other,
-        "m.rossi@wepa.it",
-        "d.gori@wepa.it",
+        emailConfig.wepa_ralletta_to,
+        emailConfig.wepa_ralletta_cc,
         `DDT Wepa (${other.length} documenti)`,
         `${getGreeting()}<br><br>In allegato i DDT Wepa selezionati:<br><br>Saluti,<br>Brico Class`,
         `Email Multipla ${today}`
@@ -391,16 +414,34 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
 
   // Invio singolo DDT
   const handleSendSingle = async (row: OrRow) => {
+    const [emailConfig, companySettings] = await Promise.all([
+      getEmailSettings(),
+      getCompanySettings(),
+    ]);
     const isCarrara = row.client.toUpperCase().includes("CARRARA");
-    const to = isCarrara
-      ? "alessio.piccinini@cartierecarrara.com"
-      : row.destination.toUpperCase().includes("SALANETTI")
-      ? "d.gori@wepa.it"
-      : "m.rossi@wepa.it";
+    const isWepa = row.client.toUpperCase().includes("WEPA");
 
-    const cc = isCarrara
-      ? "federica.bianchi@cartierecarrara.com"
-      : "info@bricoclass.com";
+    let to = "";
+    let cc = companySettings?.email || "";
+
+    if (isCarrara) {
+      to = emailConfig.carrara_to;
+      cc = emailConfig.carrara_cc;
+    } else if (isWepa) {
+      if (row.destination.toUpperCase().includes("SALANETTI")) {
+        to = emailConfig.wepa_salanetti_to;
+        cc = emailConfig.wepa_salanetti_cc;
+      } else {
+        to = emailConfig.wepa_ralletta_to;
+        cc = emailConfig.wepa_ralletta_cc;
+      }
+    } else {
+      const doc = await ddtRepository.getDdtById(row.id);
+      if (doc?.client_id) {
+        const clientObj = await clientRepository.getClientById(doc.client_id);
+        if (clientObj?.email) to = clientObj.email;
+      }
+    }
 
     const subject = `DDT ${row.docNumber ?? "Bozza"}`;
     const body = `${getGreeting()}<br><br>In allegato DDT ${row.docNumber ?? "Bozza"} del ${row.date}<br><br>Saluti,<br>Brico Class`;
