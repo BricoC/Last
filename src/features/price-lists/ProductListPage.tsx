@@ -250,7 +250,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
 
   // Tracciamento modifiche non salvate
   const [dirtyRows, setDirtyRows] = useState<Map<string, ListinoGeneraleRow>>(new Map());
-  const [undoStack, setUndoStack] = useState<{ rowId: string; prevRow: ListinoGeneraleRow }[]>([]);
+  const [undoStack, setUndoStack] = useState<{ rowId: string; prevRow?: ListinoGeneraleRow; isNewRow?: boolean }[]>([]);
   const [originalRowsSnapshot, setOriginalRowsSnapshot] = useState<Map<string, ListinoGeneraleRow>>(new Map());
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(() => {
@@ -800,6 +800,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
             next.set(updatedTop.id, updatedTop);
             return next;
           });
+          setUndoStack((uPrev) => [...uPrev.slice(-49), { rowId: updatedTop.id, isNewRow: true }]);
           setNewTopRow(createBlankRow());
           scheduleSilentAutoSaveIfNeeded();
         } else {
@@ -832,7 +833,18 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     const lastAction = undoStack[undoStack.length - 1];
     setUndoStack((prev) => prev.slice(0, -1));
 
+    if (lastAction.isNewRow) {
+      setItems((prev) => prev.filter((r) => r.id !== lastAction.rowId));
+      setDirtyRows((prevDirty) => {
+        const next = new Map(prevDirty);
+        next.delete(lastAction.rowId);
+        return next;
+      });
+      return;
+    }
+
     const restoredRow = lastAction.prevRow;
+    if (!restoredRow) return;
     setItems((prev) => prev.map((r) => (r.id === restoredRow.id ? restoredRow : r)));
 
     const original = originalRowsSnapshot.get(restoredRow.id);

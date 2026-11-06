@@ -20,10 +20,13 @@ import {
   Trash2,
   Plus,
   RotateCcw,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 import { ListinoClienteRow, PriceListLogEntry } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
 import { priceListSyncService } from "./services/priceListSyncService";
+import { orderRepository } from "@/features/orders/services/orderRepository";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
@@ -44,8 +47,8 @@ type SortField =
   | "data_ref"
   | "descrizione"
   | "prezzo_fattura"
-  | "acquisto_eur"
   | "perc_acquisto"
+  | "acquisto_eur"
   | "data_acquisto"
   | "acquisto_old"
   | "ricarico";
@@ -56,8 +59,8 @@ const EDITABLE_CLIENT_COL_ORDER = [
   "codice_articolo",
   "descrizione",
   "prezzo_fattura",
-  "acquisto_eur",
   "perc_acquisto",
+  "acquisto_eur",
   "data_acquisto",
   "acquisto_old",
   "note",
@@ -182,8 +185,32 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const [items, setItems] = useState<ListinoClienteRow[]>([]);
   const [totalDbCount, setTotalDbCount] = useState<number>(0);
   const [distinctClients, setDistinctClients] = useState<string[]>([]);
+  const [orderSuppliers, setOrderSuppliers] = useState<string[]>([]);
   const [selectedClientFilter, setSelectedClientFilter] = useState<string>("TUTTI");
   const [activeTab, setActiveTab] = useState<ClientTab>("tutti");
+
+  // Dropdown Clienti personalizzato (tema scuro coordinato e ricerca)
+  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
+  const [clientDropdownSearch, setClientDropdownSearch] = useState("");
+  const clientDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(e.target as Node)) {
+        setIsClientDropdownOpen(false);
+      }
+    };
+    if (isClientDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isClientDropdownOpen]);
+
+  const filteredDropdownClients = useMemo(() => {
+    if (!clientDropdownSearch.trim()) return distinctClients;
+    const term = clientDropdownSearch.toLowerCase();
+    return distinctClients.filter((c) => c.toLowerCase().includes(term));
+  }, [distinctClients, clientDropdownSearch]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -193,7 +220,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
 
   // Tracciamento modifiche non salvate & Undo Stack
   const [dirtyRows, setDirtyRows] = useState<Map<string, ListinoClienteRow>>(new Map());
-  const [undoStack, setUndoStack] = useState<{ rowId: string; prevRow: ListinoClienteRow }[]>([]);
+  const [undoStack, setUndoStack] = useState<{ rowId: string; prevRow?: ListinoClienteRow; isNewRow?: boolean }[]>([]);
   const [originalRowsSnapshot, setOriginalRowsSnapshot] = useState<Map<string, ListinoClienteRow>>(new Map());
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(() => {
@@ -242,16 +269,22 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
     setLoading(true);
     setError(null);
     try {
-      const [count, clients, rows, tCount] = await Promise.all([
+      const [count, clients, rows, tCount, supps] = await Promise.all([
         priceListRepository.getClientPriceCount(),
         priceListRepository.getDistinctClients(),
         priceListRepository.searchClientPrices("", undefined, 20000),
         priceListRepository.getClientTrashCount().catch(() => 0),
+        orderRepository.getSuppliers().catch(() => []),
       ]);
       setTotalDbCount(count);
       setDistinctClients(clients);
       setItems(rows);
       setTrashCount(tCount);
+
+      const supplierNames = Array.from(
+        new Set(supps.map((s) => s.name?.trim()).filter(Boolean))
+      ).sort();
+      setOrderSuppliers(supplierNames);
 
       const snapshot = new Map<string, ListinoClienteRow>();
       for (const r of rows) {
@@ -487,8 +520,8 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         if (original) {
           const checkFields: { key: keyof ListinoClienteRow; label: string }[] = [
             { key: "prezzo_fattura", label: "Prezzo Vendita" },
-            { key: "acquisto_eur", label: "Acquisto (€)" },
             { key: "perc_acquisto", label: "% Acquisto" },
+            { key: "acquisto_eur", label: "Acquisto (€)" },
             { key: "data_acquisto", label: "Data Acquisto" },
             { key: "acquisto_old", label: "Acquisto OLD" },
             { key: "descrizione", label: "Descrizione" },
@@ -588,13 +621,24 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
     }, intervalMs);
   }, [saveAllPendingChanges]);
 
-  // Annulla ultima modifica
+  // Annulla ultima modifica (inclusa la creazione di nuove righe)
   const handleUndo = useCallback(() => {
     if (undoStack.length === 0) return;
     const lastAction = undoStack[undoStack.length - 1];
     setUndoStack((prev) => prev.slice(0, -1));
 
+    if (lastAction.isNewRow) {
+      setItems((prev) => prev.filter((r) => r.id !== lastAction.rowId));
+      setDirtyRows((prevDirty) => {
+        const next = new Map(prevDirty);
+        next.delete(lastAction.rowId);
+        return next;
+      });
+      return;
+    }
+
     const restoredRow = lastAction.prevRow;
+    if (!restoredRow) return;
     setItems((prev) => prev.map((r) => (r.id === restoredRow.id ? restoredRow : r)));
 
     const original = originalRowsSnapshot.get(restoredRow.id);
@@ -691,6 +735,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
 
           setItems((prev) => [completedRow, ...prev]);
           setDirtyRows((prev) => new Map(prev).set(completedRow.id, completedRow));
+          setUndoStack((uPrev) => [...uPrev.slice(-49), { rowId: completedRow.id, isNewRow: true }]);
           setNewTopRow(
             createBlankClientRow(
               selectedClientFilter !== "TUTTI" ? selectedClientFilter : undefined
@@ -913,6 +958,13 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         ))}
       </datalist>
 
+      {/* Autocomplete Datalist per Fornitori (da Order Manager) */}
+      <datalist id="order-suppliers-autocomplete">
+        {orderSuppliers.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+
       {/* Barra Superiore / Toolbar */}
       <div className="p-3 border-b border-[var(--border)] bg-[var(--card)] flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
         <div className="flex items-center space-x-3">
@@ -1003,7 +1055,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                 <button
                   type="button"
                   onClick={handleDiscardAllChanges}
-                  className="px-2 py-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-medium transition-colors"
+                  className="px-2 py-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-medium transition-colors cursor-pointer"
                   title="Scarta tutte le modifiche non salvate"
                 >
                   Scarta tutto
@@ -1031,24 +1083,93 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         </div>
       </div>
 
-      {/* Barra Filtri: Selezione Cliente + Ricerca F4 + Tab */}
+      {/* Barra Filtri: Selezione Cliente (con Dark Mode compatibile) + Ricerca F4 + Tab */}
       <div className="p-2.5 border-b border-[var(--border)] bg-[var(--background)] flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
         <div className="flex items-center space-x-2">
-          {/* Tendina Clienti */}
-          <div className="flex items-center space-x-1.5 bg-[var(--card)] px-2 py-1 rounded-md border border-[var(--border)]">
-            <Filter className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
-            <select
-              value={selectedClientFilter}
-              onChange={(e) => handleClientFilterChange(e.target.value)}
-              className="bg-transparent text-xs font-semibold text-[var(--foreground)] outline-none cursor-pointer max-w-[220px]"
+          {/* Tendina Clienti Custom con tema scuro e ricerca integrata */}
+          <div className="relative" ref={clientDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setIsClientDropdownOpen((prev) => !prev);
+                setClientDropdownSearch("");
+              }}
+              className="flex items-center space-x-2 bg-[#181a20] hover:bg-[#20242c] px-2.5 py-1.5 rounded-md border border-[var(--border)] shadow-xs text-xs font-semibold text-gray-200 transition-colors"
             >
-              <option value="TUTTI">TUTTI I CLIENTI ({distinctClients.length})</option>
-              {distinctClients.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+              <Filter className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span className="truncate max-w-[200px]">
+                {selectedClientFilter === "TUTTI"
+                  ? `TUTTI I CLIENTI (${distinctClients.length})`
+                  : selectedClientFilter}
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0 ml-1" />
+            </button>
+
+            {isClientDropdownOpen && (
+              <div className="absolute left-0 mt-1 w-80 bg-[#16181e] border border-[var(--border)] rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
+                {/* Input di ricerca rapida */}
+                <div className="p-2 border-b border-[var(--border)]/70 bg-[#121418]">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      autoFocus
+                      type="text"
+                      value={clientDropdownSearch}
+                      onChange={(e) => setClientDropdownSearch(e.target.value)}
+                      placeholder="Cerca cliente..."
+                      className="w-full pl-8 pr-2.5 py-1 text-xs bg-[#1a1d24] border border-[var(--border)]/70 rounded text-gray-100 placeholder:text-gray-500 focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Lista opzioni */}
+                <div className="max-h-72 overflow-y-auto p-1 text-xs space-y-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleClientFilterChange("TUTTI");
+                      setIsClientDropdownOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between font-semibold transition-colors ${
+                      selectedClientFilter === "TUTTI"
+                        ? "bg-sky-500/20 text-sky-300 font-bold"
+                        : "text-gray-300 hover:bg-white/5 hover:text-white"
+                    }`}
+                  >
+                    <span>TUTTI I CLIENTI ({distinctClients.length})</span>
+                    {selectedClientFilter === "TUTTI" && <Check className="w-3.5 h-3.5 text-sky-400" />}
+                  </button>
+
+                  {filteredDropdownClients.map((client) => {
+                    const isSelected = selectedClientFilter.toLowerCase() === client.toLowerCase();
+                    return (
+                      <button
+                        key={client}
+                        type="button"
+                        onClick={() => {
+                          handleClientFilterChange(client);
+                          setIsClientDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between transition-colors ${
+                          isSelected
+                            ? "bg-sky-500/20 text-sky-300 font-bold"
+                            : "text-gray-300 hover:bg-white/5 hover:text-white"
+                        }`}
+                      >
+                        <span className="truncate">{client}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-sky-400 shrink-0 ml-2" />}
+                      </button>
+                    );
+                  })}
+
+                  {filteredDropdownClients.length === 0 && (
+                    <div className="px-3 py-3 text-center text-xs text-gray-500 italic">
+                      Nessun cliente trovato per "{clientDropdownSearch}"
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Tab */}
@@ -1194,17 +1315,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   </div>
                 </th>
               )}
-              {isVisible("acquisto_eur") && (
-                <th
-                  className="px-2.5 py-2 text-right cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-28 bg-blue-950/15 text-blue-400"
-                  onClick={() => handleToggleSort("acquisto_eur")}
-                >
-                  <div className="flex items-center justify-end space-x-1">
-                    <span>ACQUISTO (€)</span>
-                    <ArrowUpDown className="w-3 h-3" />
-                  </div>
-                </th>
-              )}
+              {/* Inversione richiesta: PRIMA % Acquisto, POI Acquisto (€) */}
               {isVisible("perc_acquisto") && (
                 <th
                   className="px-2.5 py-2 text-right cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-24 bg-sky-950/15 text-sky-400"
@@ -1212,6 +1323,17 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                 >
                   <div className="flex items-center justify-end space-x-1">
                     <span>% ACQUISTO</span>
+                    <ArrowUpDown className="w-3 h-3" />
+                  </div>
+                </th>
+              )}
+              {isVisible("acquisto_eur") && (
+                <th
+                  className="px-2.5 py-2 text-right cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-28 bg-blue-950/15 text-blue-400"
+                  onClick={() => handleToggleSort("acquisto_eur")}
+                >
+                  <div className="flex items-center justify-end space-x-1">
+                    <span>ACQUISTO (€)</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
@@ -1240,11 +1362,11 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
               )}
               {isVisible("ricarico") && (
                 <th
-                  className="px-2.5 py-2 text-right cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-24"
+                  className="px-2.5 py-2 text-right cursor-pointer hover:text-[var(--foreground)] border-r border-[var(--border)]/40 w-28"
                   onClick={() => handleToggleSort("ricarico")}
                 >
                   <div className="flex items-center justify-end space-x-1">
-                    <span>RICARICO (%)</span>
+                    <span>RICARICO (%) OLD</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
@@ -1365,25 +1487,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   className="border-r border-[var(--border)]/40 text-emerald-400 font-bold"
                 />
               )}
-              {isVisible("acquisto_eur") && (
-                <EditableCell
-                  rowId={newTopRow.id}
-                  colId="acquisto_eur"
-                  value={newTopRow.acquisto_eur}
-                  displayValue={newTopRow.acquisto_eur != null ? formatEuro(newTopRow.acquisto_eur) : "—"}
-                  align="right"
-                  isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "acquisto_eur"}
-                  isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "acquisto_eur"}
-                  initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "acquisto_eur" ? initialEditChar : undefined}
-                  canEdit={canEdit}
-                  onSelectCell={selectCell}
-                  onStartEdit={startEditing}
-                  onCommit={commitCellEdit}
-                  onCancel={cancelCellEdit}
-                  onKeyDown={handleCellKeyDown}
-                  className="border-r border-[var(--border)]/40 text-blue-400 font-bold"
-                />
-              )}
+              {/* Inversione: % Acquisto prima di Acquisto (€) */}
               {isVisible("perc_acquisto") && (
                 <EditableCell
                   rowId={newTopRow.id}
@@ -1401,6 +1505,25 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   onCancel={cancelCellEdit}
                   onKeyDown={handleCellKeyDown}
                   className="border-r border-[var(--border)]/40 text-sky-400"
+                />
+              )}
+              {isVisible("acquisto_eur") && (
+                <EditableCell
+                  rowId={newTopRow.id}
+                  colId="acquisto_eur"
+                  value={newTopRow.acquisto_eur}
+                  displayValue={newTopRow.acquisto_eur != null ? formatEuro(newTopRow.acquisto_eur) : "—"}
+                  align="right"
+                  isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "acquisto_eur"}
+                  isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "acquisto_eur"}
+                  initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "acquisto_eur" ? initialEditChar : undefined}
+                  canEdit={canEdit}
+                  onSelectCell={selectCell}
+                  onStartEdit={startEditing}
+                  onCommit={commitCellEdit}
+                  onCancel={cancelCellEdit}
+                  onKeyDown={handleCellKeyDown}
+                  className="border-r border-[var(--border)]/40 text-blue-400 font-bold"
                 />
               )}
               {isVisible("data_acquisto") && (
@@ -1593,25 +1716,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       className="border-r border-[var(--border)]/30 font-bold text-emerald-400 bg-emerald-950/10"
                     />
                   )}
-                  {isVisible("acquisto_eur") && (
-                    <EditableCell
-                      rowId={item.id}
-                      colId="acquisto_eur"
-                      value={item.acquisto_eur}
-                      displayValue={formatEuro(item.acquisto_eur)}
-                      align="right"
-                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "acquisto_eur"}
-                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "acquisto_eur"}
-                      initialChar={editingCell?.rowId === item.id && editingCell?.colId === "acquisto_eur" ? initialEditChar : undefined}
-                      canEdit={canEdit}
-                      onSelectCell={selectCell}
-                      onStartEdit={startEditing}
-                      onCommit={commitCellEdit}
-                      onCancel={cancelCellEdit}
-                      onKeyDown={handleCellKeyDown}
-                      className="border-r border-[var(--border)]/30 font-bold text-blue-400 bg-blue-950/10"
-                    />
-                  )}
+                  {/* Inversione: % Acquisto prima di Acquisto (€) */}
                   {isVisible("perc_acquisto") && (
                     <EditableCell
                       rowId={item.id}
@@ -1629,6 +1734,25 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       onCancel={cancelCellEdit}
                       onKeyDown={handleCellKeyDown}
                       className="border-r border-[var(--border)]/30 text-sky-400 bg-sky-950/10"
+                    />
+                  )}
+                  {isVisible("acquisto_eur") && (
+                    <EditableCell
+                      rowId={item.id}
+                      colId="acquisto_eur"
+                      value={item.acquisto_eur}
+                      displayValue={formatEuro(item.acquisto_eur)}
+                      align="right"
+                      isActive={activeCell?.rowId === item.id && activeCell?.colId === "acquisto_eur"}
+                      isEditing={editingCell?.rowId === item.id && editingCell?.colId === "acquisto_eur"}
+                      initialChar={editingCell?.rowId === item.id && editingCell?.colId === "acquisto_eur" ? initialEditChar : undefined}
+                      canEdit={canEdit}
+                      onSelectCell={selectCell}
+                      onStartEdit={startEditing}
+                      onCommit={commitCellEdit}
+                      onCancel={cancelCellEdit}
+                      onKeyDown={handleCellKeyDown}
+                      className="border-r border-[var(--border)]/30 font-bold text-blue-400 bg-blue-950/10"
                     />
                   )}
                   {isVisible("data_acquisto") && (
@@ -1745,7 +1869,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   );
 };
 
-// Componente Editor Input Cella con supporto Autocomplete
+// Componente Editor Input Cella con supporto Autocomplete (Clienti & Fornitori)
 interface CellInputEditorProps {
   rowId: string;
   colId: string;
@@ -1783,13 +1907,20 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
     }
   }, [isInitialCharTyped]);
 
+  const datalistId =
+    colId === "cliente"
+      ? "distinct-clients-autocomplete"
+      : colId === "fornitore"
+      ? "order-suppliers-autocomplete"
+      : undefined;
+
   return (
     <td className={`p-0 relative ${alignClass} ${className}`}>
       <input
         ref={inputRef}
         autoFocus
         type="text"
-        list={colId === "cliente" ? "distinct-clients-autocomplete" : undefined}
+        list={datalistId}
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
         onBlur={() => onCommit(rowId, colId, localValue)}
