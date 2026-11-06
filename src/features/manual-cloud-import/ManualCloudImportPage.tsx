@@ -24,6 +24,11 @@ import {
   scanAndParseLocalDdt,
   uploadDdtToSupabase,
   syncClientRowsToLocalSqlite,
+  backupLocalSqliteTable,
+  restoreLocalSqliteTable,
+  downloadSupabaseSnapshot,
+  saveJsonToFileLocally,
+  restoreSupabaseSnapshot,
   getSupabaseConfig,
   fetchCurrentAppDatabaseCounts,
   CurrentAppDbCounts,
@@ -69,6 +74,9 @@ export const ManualCloudImportPage: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressText, setProgressText] = useState<string | null>(null);
   const [progressPct, setProgressPct] = useState<number | null>(null);
+
+  // Backup e Snapshot di Sicurezza
+  const [cloudClientSnapshot, setCloudClientSnapshot] = useState<Record<string, unknown>[] | null>(null);
 
   // Registro Operazioni Strutturato
   const [logs, setLogs] = useState<LogItem[]>([]);
@@ -167,13 +175,26 @@ export const ManualCloudImportPage: React.FC = () => {
       alert("Nessun dato analizzato. Clicca prima su '1. Analizza File Locali'.");
       return;
     }
-    if (!window.confirm(`Vuoi caricare ${clientAnalysis.totalRows} righe di Listini Clienti su Supabase?`)) return;
+    if (!window.confirm(`Vuoi caricare ${clientAnalysis.totalRows} righe di Listini Clienti su Supabase?\n\nNOTA: Prima della scrittura verrà automaticamente creato un backup congelato di SQLite e uno snapshot salvato di Supabase per permetterti il rollback istantaneo in caso di imprevisti.`)) return;
 
     setIsProcessing(true);
-    addStructuredLog("phase", "Invio Listini Clienti su Supabase Avviato", `${clientAnalysis.totalRows} righe da processare in blocchi da 200`);
+    addStructuredLog("phase", "Invio Listini Clienti su Supabase Avviato", `${clientAnalysis.totalRows} righe da processare`);
 
     try {
+      // 1. Backup SQLite Locale di sicurezza
+      addStructuredLog("info", "Sicurezza: Backup Preventivo SQLite", "Creazione copia di sicurezza locale per listini_clienti...");
+      await backupLocalSqliteTable("listini_clienti");
+
+      // 2. Snapshot Preventivo Supabase Cloud
       const cfg = await getSupabaseConfig();
+      addStructuredLog("info", "Sicurezza: Snapshot Cloud Preventivo", "Download e memorizzazione dello stato attuale di Supabase per eventuale rollback...");
+      const snapshot = await downloadSupabaseSnapshot(cfg.projectUrl, cfg.anonKey, "listini_clienti", (cnt) => {
+        setProgressText(`Salvataggio snapshot di sicurezza: ${cnt} record scaricati`);
+      });
+      setCloudClientSnapshot(snapshot);
+      addStructuredLog("success", "Backup Preventivo Pronto", `${snapshot.length} record memorizzati nello snapshot di sicurezza.`);
+
+      // 3. Invio a Supabase
       const res = await uploadClientPriceListsToSupabase(
         clientAnalysis.rows,
         cfg.projectUrl,
@@ -196,11 +217,61 @@ export const ManualCloudImportPage: React.FC = () => {
         addStructuredLog("success", "SQLite Locale Sincronizzato con Successo");
       }
       await loadDbCounts();
-      alert("Caricamento Listini Clienti terminato con successo!");
+      alert("Caricamento Listini Clienti terminato con successo! È disponibile lo snapshot per il ripristino se necessario.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       addStructuredLog("error", "Errore Caricamento Listini Clienti", msg);
       alert(`Errore: ${msg}`);
+    } finally {
+      setIsProcessing(false);
+      setProgressText(null);
+      setProgressPct(null);
+    }
+  };
+
+  const handleDownloadSnapshot = () => {
+    if (!cloudClientSnapshot || cloudClientSnapshot.length === 0) return;
+    const nowIso = new Date().toISOString().replace(/[:.]/g, "-");
+    saveJsonToFileLocally(cloudClientSnapshot, `backup_supabase_listini_clienti_${nowIso}.json`);
+    addStructuredLog("success", "File Backup Scaricato", "Snapshot esportato con successo nei Download.");
+  };
+
+  const handleRestoreSnapshot = async () => {
+    if (!cloudClientSnapshot || cloudClientSnapshot.length === 0) {
+      alert("Nessun backup memorizzato da ripristinare.");
+      return;
+    }
+    if (!window.confirm(`ATTENZIONE: Vuoi davvero ripristinare i ${cloudClientSnapshot.length} record salvati precedentemente su Supabase e ripristinare il database SQLite locale?`)) return;
+
+    setIsProcessing(true);
+    setProgressText("Ripristino dati precedenti su Supabase...");
+    addStructuredLog("phase", "Rollback da Backup Avviato", `Ripristino di ${cloudClientSnapshot.length} record originali...`);
+
+    try {
+      const cfg = await getSupabaseConfig();
+      const res = await restoreSupabaseSnapshot(
+        cfg.projectUrl,
+        cfg.anonKey,
+        "listini_clienti",
+        cloudClientSnapshot,
+        (cur, tot) => {
+          setProgressText(`Ripristino Supabase ${cur} di ${tot}`);
+          setProgressPct(Math.round((cur / tot) * 100));
+        }
+      );
+
+      addStructuredLog("success", "Ripristino Supabase Completato", `Ripristinati ${res.restored} record nello stato originale.`);
+
+      addStructuredLog("info", "Ripristino SQLite Locale", "Ripristino tabella locale dal backup di sicurezza...");
+      await restoreLocalSqliteTable("listini_clienti");
+      addStructuredLog("success", "SQLite Locale Ripristinato al 100%");
+
+      await loadDbCounts();
+      alert("Rollback completato con successo! Tutti i dati sono tornati allo stato iniziale.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addStructuredLog("error", "Errore nel Rollback", msg);
+      alert(`Errore nel rollback: ${msg}`);
     } finally {
       setIsProcessing(false);
       setProgressText(null);
@@ -970,8 +1041,34 @@ export const ManualCloudImportPage: React.FC = () => {
                   disabled={isProcessing || !clientAnalysis}
                   className="w-full py-2 text-xs font-bold rounded bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-40 transition-colors"
                 >
-                  2. Carica su Supabase Cloud
+                  2. Carica su Supabase Cloud (con Backup Automatico)
                 </button>
+                {cloudClientSnapshot && cloudClientSnapshot.length > 0 && (
+                  <div className="pt-2 border-t border-[var(--border)] space-y-1.5">
+                    <div className="text-[11px] text-emerald-400 font-semibold flex items-center justify-between">
+                      <span>🛡️ Backup preventivo pronto ({cloudClientSnapshot.length.toLocaleString()} voci)</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleDownloadSnapshot}
+                        className="py-1 px-2 text-[11px] font-medium rounded bg-zinc-700 hover:bg-zinc-600 text-white transition-colors text-center"
+                        title="Scarica lo stato originale in un file .json"
+                      >
+                        💾 Scarica JSON
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRestoreSnapshot}
+                        disabled={isProcessing}
+                        className="py-1 px-2 text-[11px] font-bold rounded bg-rose-700 hover:bg-rose-600 text-white transition-colors text-center"
+                        title="Annulla le modifiche e rimetti i dati com'erano prima"
+                      >
+                        ↩️ Rollback (Ripristina)
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
