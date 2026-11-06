@@ -39,13 +39,19 @@ pub struct ExcelFileInfo {
 }
 
 #[tauri::command]
-fn list_excel_files_in_folder(folder_path: Option<String>) -> Result<Vec<ExcelFileInfo>, String> {
+fn list_files_in_folder(folder_path: Option<String>, extensions: Option<Vec<String>>) -> Result<Vec<ExcelFileInfo>, String> {
     use std::path::Path;
     let target_dir = folder_path.unwrap_or_else(|| r"D:\BricoClassFiles\Offline\ListiniClienti".to_string());
     let path = Path::new(&target_dir);
     if !path.exists() || !path.is_dir() {
         return Err(format!("La cartella non esiste o non è valida: {}", target_dir));
     }
+
+    let exts: Vec<String> = extensions
+        .unwrap_or_else(|| vec!["xls".to_string(), "xlsx".to_string(), "xlsm".to_string(), "csv".to_string()])
+        .into_iter()
+        .map(|e| e.to_lowercase())
+        .collect();
 
     let mut results = Vec::new();
     let entries = fs::read_dir(path).map_err(|e| format!("Errore lettura cartella: {}", e))?;
@@ -54,7 +60,7 @@ fn list_excel_files_in_folder(folder_path: Option<String>) -> Result<Vec<ExcelFi
         let file_path = entry.path();
         if file_path.is_file() {
             let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-            if ext == "xls" || ext == "xlsx" {
+            if exts.contains(&ext) {
                 let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
                 if filename.starts_with("~$") {
                     continue;
@@ -71,6 +77,11 @@ fn list_excel_files_in_folder(folder_path: Option<String>) -> Result<Vec<ExcelFi
 
     results.sort_by(|a, b| a.filename.to_lowercase().cmp(&b.filename.to_lowercase()));
     Ok(results)
+}
+
+#[tauri::command]
+fn list_excel_files_in_folder(folder_path: Option<String>) -> Result<Vec<ExcelFileInfo>, String> {
+    list_files_in_folder(folder_path, Some(vec!["xls".to_string(), "xlsx".to_string(), "xlsm".to_string()]))
 }
 
 #[tauri::command]
@@ -388,6 +399,7 @@ pub fn run() {
             quote_commands::soft_delete_quote_transaction,
             quote_commands::convert_quote_to_ddt_transaction,
             list_excel_files_in_folder,
+            list_files_in_folder,
             read_single_excel_file_base64
         ])
         .run(tauri::generate_context!())
