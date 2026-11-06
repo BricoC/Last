@@ -12,10 +12,16 @@ import { buildQuoteDdtConversion } from "./quoteDdtConversion";
 import { buildQuoteSavePayload } from "./quotePayload";
 import { quoteToDraft, toQuoteInput } from "../models/quoteDraft";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
+import { QuoteSyncService } from "./quoteSyncService";
 
 export class QuoteRepository {
   public async getQuotes(search = ""): Promise<Quote[]> {
     const db = await getDatabase();
+    try {
+      await QuoteSyncService.pullQuotes();
+    } catch (err) {
+      console.warn("[QuoteRepository] Sync pullQuotes non riuscito:", err);
+    }
     await this.ensureQuoteNumbersAssigned();
     const searchSql = buildMultiTermSqlSearch(search, [
       "client_name",
@@ -130,6 +136,11 @@ export class QuoteRepository {
     await invoke("save_quote_transaction", { payload });
     const saved = await this.getQuoteById(quoteId);
     if (!saved) throw new Error("Errore recupero preventivo salvato.");
+    try {
+      await QuoteSyncService.pushQuote(saved);
+    } catch (err) {
+      console.warn("[QuoteRepository] Sync pushQuote su Supabase non riuscito:", err);
+    }
     return saved;
   }
 
@@ -159,6 +170,11 @@ export class QuoteRepository {
       deletedAt: new Date().toISOString(),
       updatedBy: "system",
     });
+    try {
+      await QuoteSyncService.deleteQuote(id);
+    } catch (err) {
+      console.warn("[QuoteRepository] Sync deleteQuote su Supabase non riuscito:", err);
+    }
   }
 
   private mapQuote(row: QuoteRow, items: QuoteItem[]): Quote {
