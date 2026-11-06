@@ -165,6 +165,9 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
   const [isTrashModalOpen, setIsTrashModalOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
 
+  // Ref container per scroll infinito progressivo
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+
   // Timer salvataggio automatico (5 secondi)
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -298,6 +301,36 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
     sortAsc,
     originalRowsSnapshot,
   ]);
+
+  // Gestione scroll infinito (caricamento progressivo automatico seamless)
+  const handleScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight < 500) {
+        setVisibleCount((prev) =>
+          prev < filteredItems.length ? Math.min(prev + BATCH_SIZE, filteredItems.length) : prev
+        );
+      }
+    },
+    [filteredItems.length]
+  );
+
+  // Reset del conteggio visibile e scroll in cima al cambio di filtri
+  useEffect(() => {
+    setVisibleCount(BATCH_SIZE);
+    if (tableContainerRef.current) {
+      tableContainerRef.current.scrollTop = 0;
+    }
+  }, [globalSearch, clientFilter, currentClientName]);
+
+  // Pre-carica elementi successivi se lo schermo è ampio e non c'è scrollbar
+  useEffect(() => {
+    const el = tableContainerRef.current;
+    if (!el) return;
+    if (el.scrollHeight <= el.clientHeight && visibleCount < filteredItems.length) {
+      setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, filteredItems.length));
+    }
+  }, [visibleCount, filteredItems.length]);
 
   // Aggiornamento campi con formule dinamiche bidirezionali e data automatica
   const updateRowWithField = useCallback(
@@ -855,8 +888,12 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
         ))}
       </datalist>
 
-      {/* TABELLA EDITABILE STILE EXCEL */}
-      <div className="flex-1 overflow-auto bg-[var(--background)]">
+      {/* TABELLA EDITABILE STILE EXCEL CON VIRTUAL SCROLL */}
+      <div
+        ref={tableContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-auto bg-[var(--background)]"
+      >
         <table className="w-full text-xs text-left border-collapse border-spacing-0">
           <thead className="bg-[var(--card)] border-b border-[var(--border)] text-[var(--muted-foreground)] font-mono text-[11px] sticky top-0 z-20 select-none shadow-sm">
             <tr>
@@ -1518,17 +1555,25 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
           </tbody>
         </table>
 
-        {/* Paginazione progressiva */}
+        {/* Caricamento progressivo automatico allo scroll */}
         {filteredItems.length > visibleCount && (
-          <div className="p-3 text-center border-t border-[var(--border)]">
-            <button
-              type="button"
-              onClick={() => setVisibleCount((prev) => prev + BATCH_SIZE)}
-              className="px-3 py-1.5 rounded-lg bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] text-xs font-semibold text-[var(--foreground)] transition-colors cursor-pointer"
-            >
-              Carica altri {Math.min(BATCH_SIZE, filteredItems.length - visibleCount)} elementi ({visibleCount} di {filteredItems.length})
-            </button>
+          <div className="py-2.5 text-center border-t border-[var(--border)]/40 text-xs text-[var(--muted-foreground)] flex items-center justify-center gap-2 select-none">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span>Caricamento automatico voci successive... ({visibleCount} di {filteredItems.length})</span>
           </div>
+        )}
+      </div>
+
+      {/* Barra di Stato / Footer */}
+      <div className="px-3 py-1.5 bg-[var(--card)] border-t border-[var(--border)] text-xs text-[var(--muted-foreground)] flex items-center justify-between flex-shrink-0 select-none">
+        <span>
+          Visualizzati: <strong className="text-[var(--foreground)]">{Math.min(visibleCount, filteredItems.length)}</strong> su <strong className="text-[var(--foreground)]">{filteredItems.length}</strong> voci
+        </span>
+        {filteredItems.length > visibleCount && (
+          <span className="text-[11px] text-amber-400 font-medium flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+            Scorri verso il basso per caricare automaticamente
+          </span>
         )}
       </div>
 
