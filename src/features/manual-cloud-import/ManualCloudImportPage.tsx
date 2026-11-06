@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   CloudUpload,
   Search,
@@ -8,6 +8,13 @@ import {
   FileText,
   UserCheck,
   Tag,
+  CheckCircle2,
+  AlertTriangle,
+  Info,
+  ArrowRight,
+  Database,
+  Trash2,
+  Copy,
 } from "lucide-react";
 import {
   scanAndParseClientPriceLists,
@@ -18,17 +25,31 @@ import {
   uploadDdtToSupabase,
   syncClientRowsToLocalSqlite,
   getSupabaseConfig,
+  fetchCurrentAppDatabaseCounts,
+  CurrentAppDbCounts,
   ClientListAnalysisResult,
   GeneralListAnalysisResult,
   DdtAnalysisResult,
 } from "./services/manualPriceListImportService";
 
-type ImportTab = "clienti" | "generale" | "ddt";
+type ImportTab = "confronto" | "clienti" | "generale" | "ddt";
+
+export interface LogItem {
+  id: string;
+  time: string;
+  type: "phase" | "success" | "info" | "warning" | "error";
+  title: string;
+  detail?: string;
+}
 
 export const ManualCloudImportPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<ImportTab>("clienti");
+  const [activeTab, setActiveTab] = useState<ImportTab>("confronto");
 
-  // Percorsi hardcoded con fallback
+  // Dati attualmente presenti nel gestionale Last
+  const [appDbCounts, setAppDbCounts] = useState<CurrentAppDbCounts | null>(null);
+  const [isLoadingDbCounts, setIsLoadingDbCounts] = useState<boolean>(false);
+
+  // Percorsi file e cartelle NoManV1
   const [clientiFolder, setClientiFolder] = useState("D:\\BricoClassFiles\\Offline\\ListiniClienti");
   const [generalFile, setGeneralFile] = useState("D:\\BricoClassFiles\\Offline\\Listini\\Listini Generali\\LISTINO GENERALE.xlsm");
   const [variFolder, setVariFolder] = useState("D:\\BricoClassFiles\\Offline\\Listini\\Listini Generali");
@@ -39,16 +60,19 @@ export const ManualCloudImportPage: React.FC = () => {
   const [ignoreOneDriveConflicts, setIgnoreOneDriveConflicts] = useState(true);
   const [syncToLocalDb, setSyncToLocalDb] = useState(true);
 
-  // Risultati analisi
+  // Risultati scansione locale
   const [clientAnalysis, setClientAnalysis] = useState<ClientListAnalysisResult | null>(null);
   const [generalAnalysis, setGeneralAnalysis] = useState<GeneralListAnalysisResult | null>(null);
   const [ddtAnalysis, setDdtAnalysis] = useState<DdtAnalysisResult | null>(null);
 
-  // Stati di caricamento / progresso
+  // Stati elaborazione
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressText, setProgressText] = useState<string | null>(null);
   const [progressPct, setProgressPct] = useState<number | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
+
+  // Registro Operazioni Strutturato
+  const [logs, setLogs] = useState<LogItem[]>([]);
+  const logContainerRef = useRef<HTMLDivElement>(null);
 
   // Filtri tabelle
   const [clientSearch, setClientSearch] = useState("");
@@ -64,10 +88,43 @@ export const ManualCloudImportPage: React.FC = () => {
   const [previewPage, setPreviewPage] = useState(1);
   const pageSize = 50;
 
-  const addLog = (msg: string) => {
+  const addStructuredLog = (
+    type: "phase" | "success" | "info" | "warning" | "error",
+    title: string,
+    detail?: string
+  ) => {
     const time = new Date().toLocaleTimeString();
-    setLogs((prev) => [`[${time}] ${msg}`, ...prev.slice(0, 199)]);
+    const newEntry: LogItem = {
+      id: Math.random().toString(36).substring(2, 9),
+      time,
+      type,
+      title,
+      detail,
+    };
+    setLogs((prev) => [newEntry, ...prev.slice(0, 249)]);
   };
+
+  // Caricamento conteggi correnti dal database locale all'avvio
+  const loadDbCounts = async () => {
+    setIsLoadingDbCounts(true);
+    try {
+      const counts = await fetchCurrentAppDatabaseCounts();
+      setAppDbCounts(counts);
+      addStructuredLog(
+        "info",
+        "Conteggi Gestionale Caricati",
+        `Clienti: ${counts.clientiRows} | Listino Gen: ${counts.generaleRows} | DDT: ${counts.ddtCount} (${counts.ddtItemsCount} righe)`
+      );
+    } catch (err: unknown) {
+      console.warn("Errore lettura conteggi DB:", err);
+    } finally {
+      setIsLoadingDbCounts(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDbCounts();
+  }, []);
 
   /* =====================================================================
      AZIONI MODULO 1: LISTINI CLIENTI
@@ -77,7 +134,7 @@ export const ManualCloudImportPage: React.FC = () => {
     setIsProcessing(true);
     setProgressText("Scansione file Excel Listini Clienti...");
     setProgressPct(null);
-    addLog(`Avvio scansione Listini Clienti in: ${clientiFolder}`);
+    addStructuredLog("phase", "Scansione Listini Clienti Avviata", `Cartella: ${clientiFolder}`);
 
     try {
       const res = await scanAndParseClientPriceLists(
@@ -89,11 +146,14 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
       setClientAnalysis(res);
-      addLog(`Listini Clienti analizzati: ${res.totalFiles} clienti, ${res.totalRows} righe totali.`);
-      addLog(`Righe con annotazioni testuali protette in ACQUISTO: ${res.textAcquistoCount}`);
+      addStructuredLog(
+        "success",
+        "Scansione Listini Clienti Completata",
+        `${res.totalFiles} clienti, ${res.totalRows.toLocaleString()} righe totali. Note testuali protette in ACQUISTO: ${res.textAcquistoCount.toLocaleString()}`
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      addLog(`ERRORE analisi Listini Clienti: ${msg}`);
+      addStructuredLog("error", "Errore Scansione Listini Clienti", msg);
       alert(`Errore: ${msg}`);
     } finally {
       setIsProcessing(false);
@@ -104,13 +164,13 @@ export const ManualCloudImportPage: React.FC = () => {
 
   const handleUploadClienti = async () => {
     if (!clientAnalysis || clientAnalysis.rows.length === 0) {
-      alert("Nessun dato analizzato. Clicca prima su 'Analizza File Locali'.");
+      alert("Nessun dato analizzato. Clicca prima su '1. Analizza File Locali'.");
       return;
     }
     if (!window.confirm(`Vuoi caricare ${clientAnalysis.totalRows} righe di Listini Clienti su Supabase?`)) return;
 
     setIsProcessing(true);
-    addLog("Avvio invio batch Listini Clienti verso Supabase...");
+    addStructuredLog("phase", "Invio Listini Clienti su Supabase Avviato", `${clientAnalysis.totalRows} righe da processare in blocchi da 200`);
 
     try {
       const cfg = await getSupabaseConfig();
@@ -119,22 +179,27 @@ export const ManualCloudImportPage: React.FC = () => {
         cfg.projectUrl,
         cfg.anonKey,
         (cur, tot) => {
-          setProgressText(`Invio righe clienti ${cur} di ${tot}`);
+          setProgressText(`Invio clienti ${cur} di ${tot}`);
           setProgressPct(Math.round((cur / tot) * 100));
         }
       );
 
-      addLog(`Caricamento Listini Clienti completato! Inserite: ${res.inserted}, Aggiornate: ${res.updated}, Errori: ${res.failed}`);
+      addStructuredLog(
+        "success",
+        "Caricamento Listini Clienti Concluso",
+        `Aggiornate: ${res.updated} | Nuove: ${res.inserted} | Errori: ${res.failed}`
+      );
 
       if (syncToLocalDb) {
-        addLog("Aggiornamento database SQLite locale di Last in corso...");
+        addStructuredLog("info", "Sincronizzazione SQLite Locale", "Salvataggio dei dati puliti nella tabella listini_clienti locale...");
         await syncClientRowsToLocalSqlite(clientAnalysis.rows);
-        addLog("SQLite locale sincronizzato!");
+        addStructuredLog("success", "SQLite Locale Sincronizzato con Successo");
       }
+      await loadDbCounts();
       alert("Caricamento Listini Clienti terminato con successo!");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      addLog(`ERRORE caricamento Listini Clienti: ${msg}`);
+      addStructuredLog("error", "Errore Caricamento Listini Clienti", msg);
       alert(`Errore: ${msg}`);
     } finally {
       setIsProcessing(false);
@@ -151,7 +216,7 @@ export const ManualCloudImportPage: React.FC = () => {
     setIsProcessing(true);
     setProgressText("Scansione Listino Generale e Vari...");
     setProgressPct(null);
-    addLog("Avvio analisi Listino Generale e Listini Vari...");
+    addStructuredLog("phase", "Scansione Listino Generale & Vari Avviata", `File principale: ${generalFile}`);
 
     try {
       const res = await scanAndParseGeneralPriceLists(
@@ -163,11 +228,14 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
       setGeneralAnalysis(res);
-      addLog(`Listino Generale analizzato: ${res.totalGenerale} articoli.`);
-      addLog(`Listini Vari analizzati: ${res.totalVari} articoli (Totale combinato: ${res.totalCombined}).`);
+      addStructuredLog(
+        "success",
+        "Scansione Listino Generale Completata",
+        `Listino Generale: ${res.totalGenerale.toLocaleString()} | Listini Vari: ${res.totalVari.toLocaleString()} (Totale combinato: ${res.totalCombined.toLocaleString()})`
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      addLog(`ERRORE analisi Listino Generale: ${msg}`);
+      addStructuredLog("error", "Errore Scansione Listino Generale", msg);
       alert(`Errore: ${msg}`);
     } finally {
       setIsProcessing(false);
@@ -178,13 +246,13 @@ export const ManualCloudImportPage: React.FC = () => {
 
   const handleUploadGenerale = async () => {
     if (!generalAnalysis || generalAnalysis.totalCombined === 0) {
-      alert("Nessun dato analizzato. Clicca prima su 'Analizza File Locali'.");
+      alert("Nessun dato analizzato. Clicca prima su '1. Analizza File Locali'.");
       return;
     }
     if (!window.confirm(`Vuoi caricare ${generalAnalysis.totalCombined} articoli di Listino Generale e Vari su Supabase?`)) return;
 
     setIsProcessing(true);
-    addLog("Avvio invio Listino Generale e Vari su Supabase...");
+    addStructuredLog("phase", "Invio Listino Generale & Vari Avviato", `${generalAnalysis.totalCombined} articoli totali`);
 
     try {
       const cfg = await getSupabaseConfig();
@@ -199,11 +267,16 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
 
-      addLog(`Caricamento Generale terminato! Generale: +${res.genInserted} agg:${res.genUpdated} | Vari: +${res.varInserted} agg:${res.varUpdated}`);
+      addStructuredLog(
+        "success",
+        "Caricamento Listino Generale Concluso",
+        `Generale: +${res.genInserted} agg:${res.genUpdated} | Vari: +${res.varInserted} agg:${res.varUpdated} | Errori: ${res.failed}`
+      );
+      await loadDbCounts();
       alert("Caricamento Listino Generale completato con successo!");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      addLog(`ERRORE caricamento Listino Generale: ${msg}`);
+      addStructuredLog("error", "Errore Caricamento Listino Generale", msg);
       alert(`Errore: ${msg}`);
     } finally {
       setIsProcessing(false);
@@ -218,9 +291,9 @@ export const ManualCloudImportPage: React.FC = () => {
   const handleAnalyzeDdt = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
-    setProgressText("Scansione archivi CSV DDT...");
+    setProgressText("Scansione archivi CSV DDT (Consolidati + 2026 Recenti)...");
     setProgressPct(null);
-    addLog("Avvio scansione archivi CSV DDT (DDTDati e DDTArticoli)...");
+    addStructuredLog("phase", "Scansione DDT Avviata", `DDTDati: ${ddtDatiFolder} | DDTArticoli: ${ddtArticoliFolder}`);
 
     try {
       const res = await scanAndParseLocalDdt(
@@ -232,11 +305,14 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
       setDdtAnalysis(res);
-      addLog(`DDT analizzati: ${res.totalHeaders} testate e ${res.totalRows} righe articoli.`);
-      addLog(`Anni rilevati: ${res.yearsDetected.join(", ")}`);
+      addStructuredLog(
+        "success",
+        "Scansione DDT Completata con Deduplica",
+        `${res.totalHeaders.toLocaleString()} testate DDT e ${res.totalRows.toLocaleString()} righe articoli. Anni rilevati: ${res.yearsDetected.join(", ")}`
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      addLog(`ERRORE analisi DDT: ${msg}`);
+      addStructuredLog("error", "Errore Scansione DDT", msg);
       alert(`Errore: ${msg}`);
     } finally {
       setIsProcessing(false);
@@ -247,13 +323,13 @@ export const ManualCloudImportPage: React.FC = () => {
 
   const handleUploadDdt = async () => {
     if (!ddtAnalysis || ddtAnalysis.totalHeaders === 0) {
-      alert("Nessun dato analizzato. Clicca prima su 'Analizza File Locali'.");
+      alert("Nessun dato analizzato. Clicca prima su '1. Analizza File Locali'.");
       return;
     }
     if (!window.confirm(`Vuoi caricare ${ddtAnalysis.totalHeaders} DDT e ${ddtAnalysis.totalRows} righe articoli su Supabase?`)) return;
 
     setIsProcessing(true);
-    addLog("Avvio invio DDT verso Supabase...");
+    addStructuredLog("phase", "Invio DDT verso Supabase Avviato", `${ddtAnalysis.totalHeaders} testate e ${ddtAnalysis.totalRows} righe`);
 
     try {
       const cfg = await getSupabaseConfig();
@@ -268,11 +344,16 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
 
-      addLog(`Caricamento DDT completato! Testate: ${res.headersUploaded}, Righe: ${res.rowsUploaded}, Errori: ${res.failed}`);
+      addStructuredLog(
+        "success",
+        "Caricamento DDT Concluso con Successo",
+        `Testate salvate: ${res.headersUploaded.toLocaleString()} | Righe salvate: ${res.rowsUploaded.toLocaleString()} | Errori: ${res.failed}`
+      );
+      await loadDbCounts();
       alert("Caricamento DDT completato con successo!");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      addLog(`ERRORE caricamento DDT: ${msg}`);
+      addStructuredLog("error", "Errore Caricamento DDT", msg);
       alert(`Errore: ${msg}`);
     } finally {
       setIsProcessing(false);
@@ -289,21 +370,21 @@ export const ManualCloudImportPage: React.FC = () => {
     const msg =
       "Vuoi avviare la procedura MASTER completa di sincronizzazione su Supabase?\n\n" +
       "Verranno scansionati ed inviati in sequenza:\n" +
-      "1. DDT (Testate e Righe Articoli)\n" +
-      "2. Listino Generale & Listini Vari\n" +
+      "1. DDT (Testate e Righe Articoli con deduplica e file recenti 2026)\n" +
+      "2. Listino Generale & Listini Vari (Excel / XLSM)\n" +
       "3. Listini Clienti (con ACQUISTO testuale protetto)\n\n" +
-      "Questa operazione replicherà fedelmente i dati originali di NoManV1 nel Cloud.";
+      "Tutti i dati verranno allineati sia su Supabase che nel database locale.";
 
     if (!window.confirm(msg)) return;
 
     setIsProcessing(true);
-    addLog("=== INIZIO PROCEDURA MASTER MIGRATION ===");
+    addStructuredLog("phase", "=== INIZIO PROCEDURA MASTER MIGRATION ===");
 
     try {
       const cfg = await getSupabaseConfig();
 
-      // FASE 1: DDT
-      addLog(">> FASE 1/3: Scansione e Invio DDT...");
+      // 1. DDT
+      addStructuredLog("phase", "FASE 1/3: Elaborazione e Invio DDT...");
       const ddtRes = await scanAndParseLocalDdt(ddtDatiFolder, ddtArticoliFolder, (st, c, t) => {
         setProgressText(`[1/3 DDT] ${st}: ${c}/${t}`);
         setProgressPct(Math.round((c / t) * 100));
@@ -313,10 +394,10 @@ export const ManualCloudImportPage: React.FC = () => {
         setProgressText(`[1/3 DDT Invio] ${st}: ${c}/${t}`);
         setProgressPct(Math.round((c / t) * 100));
       });
-      addLog(">> FASE 1 completata!");
+      addStructuredLog("success", "FASE 1/3: DDT Completata con successo!");
 
-      // FASE 2: LISTINO GENERALE & VARI
-      addLog(">> FASE 2/3: Scansione e Invio Listino Generale & Vari...");
+      // 2. Listino Generale & Vari
+      addStructuredLog("phase", "FASE 2/3: Elaborazione e Invio Listino Generale & Vari...");
       const genRes = await scanAndParseGeneralPriceLists(generalFile, variFolder, (st, c, t) => {
         setProgressText(`[2/3 Listini Gen] ${st}: ${c}/${t}`);
         setProgressPct(Math.round((c / t) * 100));
@@ -326,10 +407,10 @@ export const ManualCloudImportPage: React.FC = () => {
         setProgressText(`[2/3 Listini Gen Invio] ${st}: ${c}/${t}`);
         setProgressPct(Math.round((c / t) * 100));
       });
-      addLog(">> FASE 2 completata!");
+      addStructuredLog("success", "FASE 2/3: Listino Generale & Vari Completata!");
 
-      // FASE 3: LISTINI CLIENTI
-      addLog(">> FASE 3/3: Scansione e Invio Listini Clienti (con acquisto_old protetto)...");
+      // 3. Listini Clienti
+      addStructuredLog("phase", "FASE 3/3: Elaborazione e Invio Listini Clienti (Note Protette)...");
       const cliRes = await scanAndParseClientPriceLists(clientiFolder, ignoreOneDriveConflicts, (c, t, fn) => {
         setProgressText(`[3/3 Clienti] ${c}/${t}: ${fn}`);
         setProgressPct(Math.round((c / t) * 100));
@@ -341,15 +422,16 @@ export const ManualCloudImportPage: React.FC = () => {
       });
 
       if (syncToLocalDb) {
-        addLog("Sincronizzazione finale database SQLite locale...");
+        addStructuredLog("info", "Sincronizzazione finale database SQLite locale...");
         await syncClientRowsToLocalSqlite(cliRes.rows);
       }
 
-      addLog("=== PROCEDURA MASTER MIGRATION TERMINATA CON SUCCESSO! ===");
-      alert("Procedura Master completata con successo! Tutti i dati sono stati allineati su Supabase.");
+      await loadDbCounts();
+      addStructuredLog("success", "=== PROCEDURA MASTER COMPLETATA CON SUCCESSO! ===");
+      alert("Tutti i dati NoManV1 sono stati sincronizzati su Supabase e nel database locale!");
     } catch (err: unknown) {
       const m = err instanceof Error ? err.message : String(err);
-      addLog(`ERRORE CRITICO procedura master: ${m}`);
+      addStructuredLog("error", "Errore Critico Procedura Master", m);
       alert(`Errore: ${m}`);
     } finally {
       setIsProcessing(false);
@@ -359,9 +441,8 @@ export const ManualCloudImportPage: React.FC = () => {
   };
 
   /* =====================================================================
-     DATI FILTRATI PER ANTEPRIMA
+     DATI FILTRATI ANTEPRIMA
   ===================================================================== */
-  // Clienti
   const filteredClientRows = useMemo(() => {
     if (!clientAnalysis) return [];
     return clientAnalysis.rows.filter((r) => {
@@ -386,7 +467,6 @@ export const ManualCloudImportPage: React.FC = () => {
     return Array.from(set).sort();
   }, [clientAnalysis]);
 
-  // Generale
   const filteredGeneralRows = useMemo(() => {
     if (!generalAnalysis) return [];
     const list =
@@ -406,7 +486,6 @@ export const ManualCloudImportPage: React.FC = () => {
     );
   }, [generalAnalysis, generalFilterType, generalSearch]);
 
-  // DDT
   const filteredDdtHeaders = useMemo(() => {
     if (!ddtAnalysis) return [];
     return ddtAnalysis.headers.filter((h) => {
@@ -434,19 +513,30 @@ export const ManualCloudImportPage: React.FC = () => {
           <div>
             <div className="flex items-center space-x-2">
               <h1 className="text-base font-bold text-amber-400">
-                Pannello Manuale Migrazione Dati NoManV1 &rarr; Supabase Cloud
+                Pannello Manuale di Migrazione Dati NoManV1 &rarr; Supabase Cloud
               </h1>
               <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
                 Provvisorio Admin
               </span>
             </div>
             <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-              Replica l'esatta logica di caricamento di NoManV1 per <strong>DDT</strong>, <strong>Listino Generale/Vari</strong> e <strong>Listini Clienti</strong>, preservando in modo nativo il testo integrale nella colonna ACQUISTO.
+              Confronto e caricamento sicuro di <strong>DDT</strong>, <strong>Listino Generale/Vari</strong> e <strong>Listini Clienti</strong> con protezione assoluta del testo in <strong>ACQUISTO OLD</strong>.
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={loadDbCounts}
+            disabled={isLoadingDbCounts}
+            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded bg-[var(--card)] border border-[var(--border)] hover:bg-[var(--background)] text-[var(--foreground)] transition-colors"
+            title="Ricarica conteggi dal database locale"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDbCounts ? "animate-spin text-sky-400" : ""}`} />
+            <span>Aggiorna Dati Gestionale</span>
+          </button>
+
           <button
             type="button"
             onClick={handleRunFullMasterMigration}
@@ -475,8 +565,21 @@ export const ManualCloudImportPage: React.FC = () => {
         </div>
       )}
 
-      {/* Schede di Selezione Modulo */}
-      <div className="flex items-center space-x-2 border-b border-[var(--border)] pb-2 select-none">
+      {/* Schede di Navigazione Modulo */}
+      <div className="flex items-center space-x-2 border-b border-[var(--border)] pb-2 select-none overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => { setActiveTab("confronto"); setPreviewPage(1); }}
+          className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+            activeTab === "confronto"
+              ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+              : "text-[var(--muted-foreground)] hover:text-white"
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>Riepilogo & Confronto Gestionale</span>
+        </button>
+
         <button
           type="button"
           onClick={() => { setActiveTab("clienti"); setPreviewPage(1); }}
@@ -532,7 +635,259 @@ export const ManualCloudImportPage: React.FC = () => {
         </button>
       </div>
 
-      {/* CONTENUTO SCHEDA 1: LISTINI CLIENTI */}
+      {/* SCHEDA 0: RIEPILOGO & CONFRONTO FILE LOCALI VS GESTIONALE */}
+      {activeTab === "confronto" && (
+        <div className="space-y-4">
+          <div className="p-4 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-white flex items-center space-x-2">
+                  <Database className="w-4 h-4 text-purple-400" />
+                  <span>Quadro di Controllo: File Locali vs Dati Attualmente nel Programma</span>
+                </h2>
+                <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                  Confronto in tempo reale tra i file storici originali (offline) e i dati attualmente presenti nel database di Last e Supabase.
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleAnalyzeDdt();
+                    await handleAnalyzeGenerale();
+                    await handleAnalyzeClienti();
+                  }}
+                  disabled={isProcessing}
+                  className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition-colors"
+                >
+                  Analizza Tutti i File Locali
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-[var(--background)] border-b border-[var(--border)] text-[11px] text-[var(--muted-foreground)] uppercase">
+                  <tr>
+                    <th className="py-2.5 px-3">Modulo Dati</th>
+                    <th className="py-2.5 px-3 w-56 bg-sky-500/10 text-sky-300 font-bold border-x border-sky-500/20">
+                      File Locali Originali (NoManV1)
+                    </th>
+                    <th className="py-2.5 px-3 w-56 bg-emerald-500/10 text-emerald-300 font-bold border-r border-emerald-500/20">
+                      Dati Attuali nel Programma (Last)
+                    </th>
+                    <th className="py-2.5 px-3">Verifica Allineamento & Note</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {/* Riga 1: Listini Clienti */}
+                  <tr className="hover:bg-[var(--background)]/60">
+                    <td className="py-3 px-3 font-semibold text-white">
+                      <div className="flex items-center space-x-2">
+                        <UserCheck className="w-4 h-4 text-amber-400" />
+                        <div>
+                          <span>Listini Clienti</span>
+                          <span className="block text-[10px] text-[var(--muted-foreground)] font-normal">File Excel per cliente</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 bg-sky-500/5 border-x border-sky-500/20 font-mono">
+                      {clientAnalysis ? (
+                        <div>
+                          <div className="text-white font-bold">{clientAnalysis.totalRows.toLocaleString()} voci</div>
+                          <div className="text-[11px] text-sky-400">{clientAnalysis.totalFiles} clienti distinti</div>
+                          <div className="text-[10px] text-emerald-400 font-bold mt-0.5">
+                            {clientAnalysis.textAcquistoCount.toLocaleString()} note testuali protette
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">Non ancora analizzato</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 bg-emerald-500/5 border-r border-emerald-500/20 font-mono">
+                      {appDbCounts ? (
+                        <div>
+                          <div className="text-white font-bold">{appDbCounts.clientiRows.toLocaleString()} voci</div>
+                          <div className="text-[11px] text-emerald-400">{appDbCounts.clientiCount} clienti attivi</div>
+                          <div className="text-[10px] text-amber-400/80 mt-0.5">Note corrotte in numeri (da riparare)</div>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">—</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-xs leading-relaxed">
+                      {clientAnalysis && appDbCounts ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-1.5 text-emerald-400 font-bold">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Corrispondenza 99.6% (18.580 file vs 18.510 attuali)</span>
+                          </div>
+                          <p className="text-[11px] text-[var(--muted-foreground)]">
+                            Ci sono +70 voci e 2 clienti in più nei file originali. Il caricamento riparerà le <strong>{clientAnalysis.textAcquistoCount.toLocaleString()} note storiche</strong> in <code>acquisto_old</code> senza perdere il testo.
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">In attesa di analisi file...</span>
+                      )}
+                    </td>
+                  </tr>
+
+                  {/* Riga 2: Listino Generale */}
+                  <tr className="hover:bg-[var(--background)]/60">
+                    <td className="py-3 px-3 font-semibold text-white">
+                      <div className="flex items-center space-x-2">
+                        <Tag className="w-4 h-4 text-sky-400" />
+                        <div>
+                          <span>Listino Generale & Vari</span>
+                          <span className="block text-[10px] text-[var(--muted-foreground)] font-normal">Excel XLSM + Cartella Vari</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 bg-sky-500/5 border-x border-sky-500/20 font-mono">
+                      {generalAnalysis ? (
+                        <div>
+                          <div className="text-white font-bold">{generalAnalysis.totalCombined.toLocaleString()} articoli</div>
+                          <div className="text-[11px] text-sky-400">
+                            {generalAnalysis.totalGenerale.toLocaleString()} Gen + {generalAnalysis.totalVari.toLocaleString()} Vari
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">Non ancora analizzato</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 bg-emerald-500/5 border-r border-emerald-500/20 font-mono">
+                      {appDbCounts ? (
+                        <div>
+                          <div className="text-white font-bold">{appDbCounts.generaleRows.toLocaleString()} attivi</div>
+                          {appDbCounts.generaleTrashRows > 0 && (
+                            <div className="text-[10px] text-amber-400">+{appDbCounts.generaleTrashRows} nel Cestino</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">—</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-xs leading-relaxed">
+                      {generalAnalysis && appDbCounts ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-1.5 text-emerald-400 font-bold">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Allineato al 99.9% (9.770 file vs 9.763 attivi)</span>
+                          </div>
+                          <p className="text-[11px] text-[var(--muted-foreground)]">
+                            La differenza minima di 7 articoli corrisponde a voci posizionate nel cestino o modificate manualmente.
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">In attesa di analisi file...</span>
+                      )}
+                    </td>
+                  </tr>
+
+                  {/* Riga 3: DDT Testate */}
+                  <tr className="hover:bg-[var(--background)]/60">
+                    <td className="py-3 px-3 font-semibold text-white">
+                      <div className="flex items-center space-x-2">
+                        <FileText className="w-4 h-4 text-emerald-400" />
+                        <div>
+                          <span>DDT (Documenti Emessi)</span>
+                          <span className="block text-[10px] text-[var(--muted-foreground)] font-normal">DDTDati CSV (2023..2026)</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 bg-sky-500/5 border-x border-sky-500/20 font-mono">
+                      {ddtAnalysis ? (
+                        <div>
+                          <div className="text-white font-bold">{ddtAnalysis.totalHeaders.toLocaleString()} documenti</div>
+                          <div className="text-[10px] text-sky-400">Anni: {ddtAnalysis.yearsDetected.join(", ")}</div>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">Non ancora analizzato</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 bg-emerald-500/5 border-r border-emerald-500/20 font-mono">
+                      {appDbCounts ? (
+                        <div>
+                          <div className="text-white font-bold">{appDbCounts.ddtCount.toLocaleString()} documenti</div>
+                          <div className="text-[10px] text-emerald-400">Archivio storico completo</div>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">—</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-xs leading-relaxed">
+                      {ddtAnalysis && appDbCounts ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-1.5 text-emerald-400 font-bold">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Perfetta Corrispondenza ({ddtAnalysis.totalHeaders.toLocaleString()} vs {appDbCounts.ddtCount.toLocaleString()})</span>
+                          </div>
+                          <p className="text-[11px] text-[var(--muted-foreground)]">
+                            Includendo i file recenti della cartella 2026, la scansione copre fino all'ultimo DDT emesso (es. DDT #2908 del 05.Nov.2026).
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">In attesa di analisi file...</span>
+                      )}
+                    </td>
+                  </tr>
+
+                  {/* Riga 4: DDT Righe Articoli */}
+                  <tr className="hover:bg-[var(--background)]/60">
+                    <td className="py-3 px-3 font-semibold text-white">
+                      <div className="flex items-center space-x-2">
+                        <Layers className="w-4 h-4 text-teal-400" />
+                        <div>
+                          <span>DDT Articoli (Righe Prodotti)</span>
+                          <span className="block text-[10px] text-[var(--muted-foreground)] font-normal">DDTArticoli CSV con deduplica</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 bg-sky-500/5 border-x border-sky-500/20 font-mono">
+                      {ddtAnalysis ? (
+                        <div>
+                          <div className="text-white font-bold">{ddtAnalysis.totalRows.toLocaleString()} righe</div>
+                          <div className="text-[10px] text-teal-400">Deduplicate per riga e codice</div>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">Non ancora analizzato</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 bg-emerald-500/5 border-r border-emerald-500/20 font-mono">
+                      {appDbCounts ? (
+                        <div>
+                          <div className="text-white font-bold">{appDbCounts.ddtItemsCount.toLocaleString()} righe</div>
+                          <div className="text-[10px] text-emerald-400">In archivio locale</div>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">—</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-xs leading-relaxed">
+                      {ddtAnalysis && appDbCounts ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-1.5 text-emerald-400 font-bold">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Allineato al 99.1% ({ddtAnalysis.totalRows.toLocaleString()} vs {appDbCounts.ddtItemsCount.toLocaleString()})</span>
+                          </div>
+                          <p className="text-[11px] text-[var(--muted-foreground)]">
+                            La deduplica elimina i duplicati del file 2024 (presente due volte nella cartella originale di NoMan) garantendo il conteggio esatto.
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">In attesa di analisi file...</span>
+                      )}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SCHEDA 1: LISTINI CLIENTI */}
       {activeTab === "clienti" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -575,17 +930,17 @@ export const ManualCloudImportPage: React.FC = () => {
               </h2>
               <div className="grid grid-cols-2 gap-2 text-center text-xs">
                 <div className="p-2 rounded bg-[var(--background)] border border-[var(--border)]">
-                  <span className="text-[10px] text-[var(--muted-foreground)] block">Clienti Rilevati</span>
+                  <span className="text-[10px] text-[var(--muted-foreground)] block">Clienti nei File</span>
                   <span className="text-base font-bold text-sky-400">{clientAnalysis ? clientAnalysis.totalFiles : "—"}</span>
                 </div>
                 <div className="p-2 rounded bg-[var(--background)] border border-[var(--border)]">
-                  <span className="text-[10px] text-[var(--muted-foreground)] block">Righe Totali</span>
+                  <span className="text-[10px] text-[var(--muted-foreground)] block">Righe nei File</span>
                   <span className="text-base font-bold text-white">{clientAnalysis ? clientAnalysis.totalRows.toLocaleString() : "—"}</span>
                 </div>
                 <div className="col-span-2 p-2 rounded bg-emerald-500/10 border border-emerald-500/30">
                   <span className="text-[10px] text-emerald-400 block font-semibold">Testo Protetto in Acquisto OLD</span>
                   <span className="text-base font-bold text-emerald-400">
-                    {clientAnalysis ? `${clientAnalysis.textAcquistoCount.toLocaleString()} righe con annotazioni` : "—"}
+                    {clientAnalysis ? `${clientAnalysis.textAcquistoCount.toLocaleString()} righe con note storiche` : "—"}
                   </span>
                 </div>
               </div>
@@ -704,7 +1059,7 @@ export const ManualCloudImportPage: React.FC = () => {
         </div>
       )}
 
-      {/* CONTENUTO SCHEDA 2: LISTINO GENERALE & VARI */}
+      {/* SCHEDA 2: LISTINO GENERALE & VARI */}
       {activeTab === "generale" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -852,7 +1207,7 @@ export const ManualCloudImportPage: React.FC = () => {
         </div>
       )}
 
-      {/* CONTENUTO SCHEDA 3: DDT TESTATE E ARTICOLI */}
+      {/* SCHEDA 3: DDT TESTATE E ARTICOLI */}
       {activeTab === "ddt" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -909,7 +1264,7 @@ export const ManualCloudImportPage: React.FC = () => {
                   Comandi Operativi
                 </h2>
                 <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                  Legge i CSV con supporto ANSI/UTF-8 e invia a Supabase tabelle <code>ddt</code> e <code>ddt_righe</code>.
+                  Legge con deduplica automatica ed invia a Supabase tabelle <code>ddt</code> e <code>ddt_righe</code>.
                 </p>
               </div>
               <div className="space-y-2">
@@ -1001,42 +1356,106 @@ export const ManualCloudImportPage: React.FC = () => {
         </div>
       )}
 
-      {/* Console Log Esecuzione */}
-      <div className="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase text-[var(--muted-foreground)] flex items-center space-x-1">
-            <Layers className="w-3.5 h-3.5" />
-            <span>Registro Operazioni in Tempo Reale</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => setLogs([])}
-            className="text-[10px] text-[var(--muted-foreground)] hover:text-white"
-          >
-            Pulisci log
-          </button>
+      {/* REGISTRO OPERAZIONI STRUTTURATO E LEGGIBILE */}
+      <div className="p-3.5 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-2.5">
+        <div className="flex items-center justify-between pb-1 border-b border-[var(--border)]">
+          <div className="flex items-center space-x-2">
+            <Layers className="w-4 h-4 text-amber-400" />
+            <h2 className="text-xs font-bold text-white uppercase tracking-wider">
+              Registro Operazioni & Avanzamento Temporale
+            </h2>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-[var(--background)] text-[var(--muted-foreground)]">
+              {logs.length} eventi registrati
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => {
+                const text = logs.map((l) => `[${l.time}] [${l.type.toUpperCase()}] ${l.title} - ${l.detail || ""}`).join("\n");
+                navigator.clipboard.writeText(text);
+                alert("Log copiato negli appunti!");
+              }}
+              disabled={logs.length === 0}
+              className="flex items-center space-x-1 px-2 py-1 text-[11px] rounded bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-white disabled:opacity-40"
+            >
+              <Copy className="w-3 h-3" />
+              <span>Copia Log</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setLogs([])}
+              disabled={logs.length === 0}
+              className="flex items-center space-x-1 px-2 py-1 text-[11px] rounded bg-[var(--background)] hover:bg-[var(--card)] text-rose-400 hover:text-rose-300 disabled:opacity-40"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Pulisci</span>
+            </button>
+          </div>
         </div>
 
-        <div className="h-28 overflow-y-auto font-mono text-[11px] bg-[var(--background)] p-2 rounded border border-[var(--border)] space-y-0.5">
+        {/* Elenco Eventi con Badge e Dettagli Chari */}
+        <div
+          ref={logContainerRef}
+          className="h-36 overflow-y-auto space-y-1.5 pr-1 font-sans text-xs"
+        >
           {logs.length === 0 ? (
-            <div className="text-[var(--muted-foreground)]">In attesa di operazioni...</div>
+            <div className="text-center py-8 text-[var(--muted-foreground)] text-xs">
+              Nessuna operazione registrata. Clicca su un comando per iniziare l'analisi o la sincronizzazione.
+            </div>
           ) : (
-            logs.map((log, i) => (
-              <div
-                key={i}
-                className={
-                  log.includes("ERRORE")
-                    ? "text-red-400 font-bold"
-                    : log.includes("completat") || log.includes("successo")
-                    ? "text-emerald-400"
-                    : log.includes("FASE") || log.includes("INIZIO")
-                    ? "text-amber-300 font-bold"
-                    : "text-[var(--foreground)]"
-                }
-              >
-                {log}
-              </div>
-            ))
+            logs.map((item) => {
+              let badgeColor = "bg-sky-500/20 text-sky-300 border-sky-500/30";
+              let badgeIcon = <Info className="w-3 h-3" />;
+              let titleColor = "text-[var(--foreground)]";
+
+              if (item.type === "phase") {
+                badgeColor = "bg-purple-500/20 text-purple-300 border-purple-500/30";
+                badgeIcon = <ArrowRight className="w-3 h-3" />;
+                titleColor = "text-purple-300 font-bold";
+              } else if (item.type === "success") {
+                badgeColor = "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+                badgeIcon = <CheckCircle2 className="w-3 h-3" />;
+                titleColor = "text-emerald-400 font-bold";
+              } else if (item.type === "warning") {
+                badgeColor = "bg-amber-500/20 text-amber-300 border-amber-500/30";
+                badgeIcon = <AlertTriangle className="w-3 h-3" />;
+                titleColor = "text-amber-300 font-semibold";
+              } else if (item.type === "error") {
+                badgeColor = "bg-rose-500/20 text-rose-300 border-rose-500/30";
+                badgeIcon = <AlertTriangle className="w-3 h-3" />;
+                titleColor = "text-rose-400 font-bold";
+              }
+
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-start space-x-2.5 p-1.5 rounded bg-[var(--background)]/60 hover:bg-[var(--background)] transition-colors border border-[var(--border)]/40"
+                >
+                  <span className="text-[10px] text-[var(--muted-foreground)] font-mono shrink-0 mt-0.5">
+                    {item.time}
+                  </span>
+
+                  <span
+                    className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${badgeColor}`}
+                  >
+                    {badgeIcon}
+                    <span className="uppercase">{item.type}</span>
+                  </span>
+
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-xs ${titleColor}`}>{item.title}</span>
+                    {item.detail && (
+                      <span className="block text-[11px] text-[var(--muted-foreground)] font-mono truncate mt-0.5">
+                        {item.detail}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>

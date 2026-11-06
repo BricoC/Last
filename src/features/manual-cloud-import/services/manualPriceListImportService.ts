@@ -17,6 +17,72 @@ export interface SupabaseConfigStatus {
   configPath: string;
 }
 
+export interface CurrentAppDbCounts {
+  clientiCount: number;
+  clientiRows: number;
+  generaleRows: number;
+  generaleTrashRows: number;
+  ddtCount: number;
+  ddtItemsCount: number;
+}
+
+export async function fetchCurrentAppDatabaseCounts(): Promise<CurrentAppDbCounts> {
+  const db = await getDatabase();
+
+  let clientiRows = 0;
+  let clientiCount = 0;
+  try {
+    const res = await db.select<{ count: number }[]>(
+      `SELECT COUNT(*) as count FROM listini_clienti WHERE cliente NOT LIKE 'LIST_000%' AND cliente != 'LIST_' AND TRIM(REPLACE(cliente, 'LIST_', '')) != ''`
+    );
+    clientiRows = res[0]?.count ?? 0;
+
+    const resCli = await db.select<{ count: number }[]>(
+      `SELECT COUNT(DISTINCT cliente) as count FROM listini_clienti WHERE cliente NOT LIKE 'LIST_000%' AND cliente != 'LIST_' AND TRIM(REPLACE(cliente, 'LIST_', '')) != ''`
+    );
+    clientiCount = resCli[0]?.count ?? 0;
+  } catch (e) {
+    console.warn("[AppDbCounts] Errore listini_clienti:", e);
+  }
+
+  let generaleRows = 0;
+  let generaleTrashRows = 0;
+  try {
+    const res = await db.select<{ count: number }[]>(`SELECT COUNT(*) as count FROM listino_generale`);
+    generaleRows = res[0]?.count ?? 0;
+
+    const resTrash = await db.select<{ count: number }[]>(`SELECT COUNT(*) as count FROM listino_generale_cestino`);
+    generaleTrashRows = resTrash[0]?.count ?? 0;
+  } catch (e) {
+    console.warn("[AppDbCounts] Errore listino_generale:", e);
+  }
+
+  let ddtCount = 0;
+  let ddtItemsCount = 0;
+  try {
+    const res = await db.select<{ count: number }[]>(
+      `SELECT COUNT(*) as count FROM ddt_documents WHERE is_deleted = 0 OR is_deleted IS NULL`
+    );
+    ddtCount = res[0]?.count ?? 0;
+
+    const resItems = await db.select<{ count: number }[]>(
+      `SELECT COUNT(*) as count FROM ddt_items WHERE is_deleted = 0 OR is_deleted IS NULL`
+    );
+    ddtItemsCount = resItems[0]?.count ?? 0;
+  } catch (e) {
+    console.warn("[AppDbCounts] Errore ddt:", e);
+  }
+
+  return {
+    clientiCount,
+    clientiRows,
+    generaleRows,
+    generaleTrashRows,
+    ddtCount,
+    ddtItemsCount,
+  };
+}
+
 export async function getSupabaseConfig(): Promise<{ projectUrl: string; anonKey: string }> {
   const status = await invoke<SupabaseConfigStatus>("load_supabase_config");
   if (!status.config || !status.config.projectUrl || !status.config.anonKey) {
@@ -25,9 +91,6 @@ export async function getSupabaseConfig(): Promise<{ projectUrl: string; anonKey
   return status.config;
 }
 
-/**
- * Legge un file in base64 e lo decodifica in testo con supporto trasparente a UTF-8 o Windows-1252
- */
 export async function readTextFileLossless(filePath: string): Promise<string> {
   const base64Str = await invoke<string>("read_single_excel_file_base64", { filePath });
   const binary = atob(base64Str);
@@ -43,9 +106,6 @@ export async function readTextFileLossless(filePath: string): Promise<string> {
   }
 }
 
-/**
- * Normalizza un valore numerico in modo sicuro per Postgres (identico a NoManV1)
- */
 export function parseSafeNum(val: unknown, defaultVal: number = 0): number {
   if (val === null || val === undefined || val === "") return defaultVal;
   if (typeof val === "number") return isNaN(val) ? defaultVal : val;
@@ -59,9 +119,6 @@ export function normalizeArtCode(val: unknown): string {
   return String(val).trim();
 }
 
-/**
- * Parser universale per date (ISO, IT, USA, con/senza separatori) identico a NoManV1 ddtUtils
- */
 export function parseAnyDate(dateVal: unknown, annoFallback: number = 2026): {
   year: number;
   month: number;
@@ -114,7 +171,6 @@ export function parseAnyDate(dateVal: unknown, annoFallback: number = 2026): {
         const p1 = parseInt(parts[1], 10);
         const p2 = parseInt(parts[2], 10);
         y = p2;
-        // In NoMan format is M/D/YYYY from Excel or D/M/YYYY
         if (p0 <= 12 && p1 <= 31) {
           m = p0;
           d = p1;
@@ -141,7 +197,7 @@ export function parseAnyDate(dateVal: unknown, annoFallback: number = 2026): {
 }
 
 /* =====================================================================
-   1. SEZIONE: LISTINI CLIENTI (MODIFICATO CON TESTO ACQUISTO PROTETTO)
+   1. LISTINI CLIENTI (ACQUISTO TESTO PROTETTO)
 ===================================================================== */
 
 export interface ParsedListinoClienteRow {
@@ -225,14 +281,12 @@ export async function scanAndParseClientPriceLists(
         const desc = String(descRaw).trim();
         if (!desc || desc === "0") continue;
 
-        // FATTURA
         let prezzoFattura = 0;
         const fatRaw = r.FATTURA ?? r.prezzo_fattura;
         if (fatRaw != null && fatRaw !== "") {
           prezzoFattura = parseSafeNum(fatRaw);
         }
 
-        // ACQUISTO (Preservato al 100% come testo in acquisto_old)
         const acqRaw = r.ACQUISTO ?? r.acquisto;
         const acquistoOldText = acqRaw != null ? String(acqRaw).trim() : "";
         const hasText = acquistoOldText !== "" && /[a-zA-Z]/.test(acquistoOldText);
@@ -286,7 +340,6 @@ export async function uploadClientPriceListsToSupabase(
   anonKey: string,
   onProgress?: (processed: number, total: number) => void
 ): Promise<{ inserted: number; updated: number; failed: number }> {
-  // 1. Fetch cloud map by key
   const cloudMap = new Map<string, { id: number }>();
   let offset = 0;
   const PAGE_SIZE = 1000;
@@ -363,7 +416,7 @@ export async function uploadClientPriceListsToSupabase(
 }
 
 /* =====================================================================
-   2. SEZIONE: LISTINO GENERALE & LISTINI VARI (STESSA LOGICA NOMANV1)
+   2. LISTINO GENERALE & VARI
 ===================================================================== */
 
 export interface ParsedListinoGeneraleRow {
@@ -408,7 +461,6 @@ export async function scanAndParseGeneralPriceLists(
   const rowsVari: ParsedListinoGeneraleRow[] = [];
   const errors: string[] = [];
 
-  // 1. Lettura Listino Generale
   try {
     if (onProgress) onProgress("Listino Generale", 0, 1);
     const b64 = await invoke<string>("read_single_excel_file_base64", { filePath: generalFilePath });
@@ -420,7 +472,7 @@ export async function scanAndParseGeneralPriceLists(
       const desc = String(r.DESCRIZIONE ?? r.descrizione ?? "").trim();
       if (!desc || desc === "0") continue;
       const cat = r.CAT ? String(r.CAT).trim() : null;
-      if (cat && cat.startsWith("LIST_")) continue; // Esclude righe non-generali
+      if (cat && cat.startsWith("LIST_")) continue;
 
       rowsGenerale.push({
         cat,
@@ -447,10 +499,9 @@ export async function scanAndParseGeneralPriceLists(
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    errors.push(`Errore lettura Listino Generale (${generalFilePath}): ${msg}`);
+    errors.push(`Errore lettura Listino Generale: ${msg}`);
   }
 
-  // 2. Lettura Listini Vari (altri file nella cartella)
   try {
     const files = await invoke<FileItemInfo[]>("list_files_in_folder", {
       folderPath: variFolderPath,
@@ -534,7 +585,6 @@ export async function uploadGeneralListsToSupabase(
   let varUpdated = 0;
   let failed = 0;
 
-  // 1. Invio Listino Generale
   if (rowsGenerale.length > 0) {
     const cloudMapGen = new Map<string, { id: number }>();
     let offset = 0;
@@ -614,7 +664,6 @@ export async function uploadGeneralListsToSupabase(
     }
   }
 
-  // 2. Invio Listini Vari
   if (rowsVari.length > 0) {
     const cloudMapVar = new Map<string, { id: number }>();
     let offset = 0;
@@ -698,7 +747,7 @@ export async function uploadGeneralListsToSupabase(
 }
 
 /* =====================================================================
-   3. SEZIONE: DDT TESTATE E RIGHE ARTICOLI (STESSA LOGICA NOMANV1)
+   3. DDT TESTATE E RIGHE ARTICOLI (CON DEDUPLICA E FILE RECENTI 2026)
 ===================================================================== */
 
 export interface ParsedDdtHeader {
@@ -767,10 +816,10 @@ export async function scanAndParseLocalDdt(
   onProgress?: (stage: string, current: number, total: number) => void
 ): Promise<DdtAnalysisResult> {
   const headerMap = new Map<string, ParsedDdtHeader>();
-  const rowsList: ParsedDdtRow[] = [];
+  const rowsMap = new Map<string, ParsedDdtRow>();
   const errors: string[] = [];
 
-  // 1. Scansione Testate DDT
+  // 1. Lettura Testate Consolidate (2023, 2024, 2025, 2026)
   try {
     const datiFiles = await invoke<FileItemInfo[]>("list_files_in_folder", {
       folderPath: datiFolderPath,
@@ -779,7 +828,7 @@ export async function scanAndParseLocalDdt(
 
     for (let i = 0; i < datiFiles.length; i++) {
       const f = datiFiles[i];
-      if (onProgress) onProgress(`Lettura CSV Testate (${f.filename})`, i + 1, datiFiles.length);
+      if (onProgress) onProgress(`CSV Testate Consolidate (${f.filename})`, i + 1, datiFiles.length);
 
       try {
         const text = await readTextFileLossless(f.path);
@@ -788,7 +837,6 @@ export async function scanAndParseLocalDdt(
           skipEmptyLines: true,
         });
 
-        // Estrai anno di default dal nome file (es. "2026 DDTDati.csv" o "1 2026.01.02 ...")
         let fileYearFallback = 2026;
         const ym = f.filename.match(/(\d{4})/);
         if (ym) fileYearFallback = parseInt(ym[1], 10);
@@ -834,15 +882,79 @@ export async function scanAndParseLocalDdt(
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`Errore nel file DDT ${f.filename}: ${msg}`);
+        errors.push(`Errore testate ${f.filename}: ${msg}`);
       }
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    errors.push(`Errore lettura cartella DDTDati: ${msg}`);
+    errors.push(`Errore cartella DDTDati: ${msg}`);
   }
 
-  // 2. Scansione Righe DDTArticoli
+  // 2. Lettura File Singoli 2026\DDTDati (Aggiorna gli ultimi DDT emessi)
+  try {
+    const dati2026Folder = "D:\\BricoClassFiles\\Offline\\Database\\2026\\DDTDati";
+    const files2026 = await invoke<FileItemInfo[]>("list_files_in_folder", {
+      folderPath: dati2026Folder,
+      extensions: ["csv"],
+    }).catch(() => [] as FileItemInfo[]);
+
+    if (files2026.length > 0) {
+      if (onProgress) onProgress("Scansione DDT Recenti 2026", 1, files2026.length);
+      for (const f of files2026) {
+        const match = f.filename.match(/^(\d+)\s+(\d{4})\.(\d{2})\.(\d{2})/);
+        if (!match) continue;
+        const num = parseInt(match[1], 10);
+        const yr = parseInt(match[2], 10);
+        const key = `${yr}_${num}`;
+
+        // Se non presente nel consolidato o più recente, leggiamo il dettaglio
+        if (!headerMap.has(key)) {
+          try {
+            const text = await readTextFileLossless(f.path);
+            const p = Papa.parse<Record<string, unknown>>(text, { header: true, skipEmptyLines: true });
+            const r = p.data[0];
+            if (r) {
+              const iso = `${yr}-${match[3]}-${match[4]}`;
+              headerMap.set(key, {
+                numero: num,
+                anno: yr,
+                data: iso,
+                cliente: String(r.Cliente ?? r.cliente ?? "").trim(),
+                indirizzo: String(r.Indirizzo ?? r.indirizzo ?? "").trim(),
+                citta: String(r.Citta ?? r.citta ?? "").trim(),
+                pagamento: String(r.Pagamento ?? r.pagamento ?? "").trim(),
+                destinazione: String(r.Destinazione ?? r.destinazione ?? "").trim(),
+                citta_dest: String(r.CittaDest ?? r.citta_dest ?? "").trim(),
+                nr_vs_ordine: String(r.OR ?? r.OrdineNumero ?? r.nr_vs_ordine ?? "").trim(),
+                causale: String(r.Causale ?? r.CausaleTrasporto ?? r.causale ?? "Vendita").trim(),
+                porto: String(r.Porto ?? r.porto ?? "").trim(),
+                aspetto: String(r.Aspetto ?? r.AspettoBeni ?? r.aspetto ?? "").trim(),
+                colli: String(r.Colli ?? r.colli ?? ""),
+                peso_kg: parseSafeNum(r.PesoKg ?? r.peso_kg),
+                vettore: String(r.Vettore ?? r.vettore ?? "").trim(),
+                operatore: String(r.OP ?? r.Operatore ?? r.operatore ?? "").trim(),
+                note: String(r.Note ?? r.note ?? "").trim(),
+                totale_imponibile: parseSafeNum(r.TotaleImponibile ?? r.totale_imponibile),
+                totale_iva: parseSafeNum(r.Imposta ?? r.totale_iva),
+                totale_documento: parseSafeNum(r.TotaleDocumento ?? r.totale_documento),
+                prezzo_acquisto_totale: parseSafeNum(r.PrezzoAcquistoTotale ?? r.prezzo_acquisto_totale),
+                ricavo: parseSafeNum(r.Ricavo ?? r.ricavo),
+                ricarico_totale: parseSafeNum(r.RicaricoTotale ?? r.ricarico_totale),
+                sconto_totale: parseSafeNum(r.Sconto ?? r.sconto_totale),
+                stato: "confermato",
+              });
+            }
+          } catch {
+            // Ignora singolo file se illeggibile
+          }
+        }
+      }
+    }
+  } catch {
+    // 2026 folder opzionale
+  }
+
+  // 3. Lettura Righe Consolidate con Deduplica automatica su chiave `${anno}_${num}_${row}_${desc}`
   try {
     const artFiles = await invoke<FileItemInfo[]>("list_files_in_folder", {
       folderPath: articoliFolderPath,
@@ -851,7 +963,7 @@ export async function scanAndParseLocalDdt(
 
     for (let i = 0; i < artFiles.length; i++) {
       const f = artFiles[i];
-      if (onProgress) onProgress(`Lettura CSV Articoli (${f.filename})`, i + 1, artFiles.length);
+      if (onProgress) onProgress(`CSV Righe Articoli Consolidate (${f.filename})`, i + 1, artFiles.length);
 
       try {
         const text = await readTextFileLossless(f.path);
@@ -875,7 +987,9 @@ export async function scanAndParseLocalDdt(
           const yr = r.Anno ? parseInt(String(r.Anno), 10) : dateObj.year;
           const rigaNr = parseInt(String(r.Row ?? r.riga_nr ?? 1), 10) || 1;
 
-          rowsList.push({
+          // Deduplica fedele a NoManV1 updateMergedArt
+          const rowKey = `${yr}_${num}_${rigaNr}_${desc.toLowerCase()}`;
+          rowsMap.set(rowKey, {
             anno: yr,
             numero_ddt: num,
             riga_nr: rigaNr,
@@ -893,24 +1007,75 @@ export async function scanAndParseLocalDdt(
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`Errore nel file DDTArticoli ${f.filename}: ${msg}`);
+        errors.push(`Errore righe ${f.filename}: ${msg}`);
       }
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    errors.push(`Errore lettura cartella DDTArticoli: ${msg}`);
+    errors.push(`Errore cartella DDTArticoli: ${msg}`);
+  }
+
+  // 4. Lettura Righe Singole 2026\DDTArticoli (ultimi DDT emessi)
+  try {
+    const art2026Folder = "D:\\BricoClassFiles\\Offline\\Database\\2026\\DDTArticoli";
+    const filesArt2026 = await invoke<FileItemInfo[]>("list_files_in_folder", {
+      folderPath: art2026Folder,
+      extensions: ["csv"],
+    }).catch(() => [] as FileItemInfo[]);
+
+    if (filesArt2026.length > 0) {
+      if (onProgress) onProgress("Scansione Righe Recenti 2026", 1, filesArt2026.length);
+      for (const f of filesArt2026) {
+        const match = f.filename.match(/^(\d+)\s+(\d{4})\.(\d{2})\.(\d{2})/);
+        if (!match) continue;
+        const num = parseInt(match[1], 10);
+        const yr = parseInt(match[2], 10);
+
+        try {
+          const text = await readTextFileLossless(f.path);
+          const p = Papa.parse<Record<string, unknown>>(text, { header: true, skipEmptyLines: true });
+          for (const r of p.data) {
+            const desc = String(r.Descrizione ?? r.descrizione ?? "").trim();
+            if (!desc) continue;
+            const rigaNr = parseInt(String(r.Row ?? r.riga_nr ?? 1), 10) || 1;
+            const rowKey = `${yr}_${num}_${rigaNr}_${desc.toLowerCase()}`;
+
+            rowsMap.set(rowKey, {
+              anno: yr,
+              numero_ddt: num,
+              riga_nr: rigaNr,
+              um: String(r.UM ?? r.UnitaMisura ?? r.um ?? "NR.").trim(),
+              quantita: parseSafeNum(r.Quantita ?? r.quantita, 1),
+              descrizione: desc,
+              prezzo: parseSafeNum(r.PrezzoUnit ?? r.Prezzo ?? r.prezzo),
+              sconto_pct: parseSafeNum(r.Sconto ?? r.Sconto1 ?? r.sconto_pct),
+              importo: parseSafeNum(r.Importo ?? r.importo),
+              iva_pct: parseSafeNum(r.IVA ?? r.iva ?? r.iva_pct, 22),
+              prezzo_acquisto: parseSafeNum(r.PrezzoAcquisto ?? r.prezzo_acquisto),
+              prezzo_scontato: parseSafeNum(r.PrezzoScontato ?? r.prezzo_scontato),
+              ricavo: parseSafeNum(r.Ricavo ?? r.ricavo),
+            });
+          }
+        } catch {
+          // Ignora singolo file se illeggibile
+        }
+      }
+    }
+  } catch {
+    // 2026 folder opzionale
   }
 
   const allHeaders = Array.from(headerMap.values());
+  const allRows = Array.from(rowsMap.values());
   const yearsSet = new Set<number>();
   for (const h of allHeaders) yearsSet.add(h.anno);
 
   return {
     totalHeaders: allHeaders.length,
-    totalRows: rowsList.length,
+    totalRows: allRows.length,
     yearsDetected: Array.from(yearsSet).sort(),
     headers: allHeaders,
-    rows: rowsList,
+    rows: allRows,
     errors,
   };
 }
@@ -926,7 +1091,6 @@ export async function uploadDdtToSupabase(
   let rowsUploaded = 0;
   let failed = 0;
 
-  // 1. Invio Testate DDT con onConflict(anno, numero)
   const HEADER_BATCH = 200;
   const nowIso = new Date().toISOString();
 
@@ -983,7 +1147,6 @@ export async function uploadDdtToSupabase(
     if (onProgress) onProgress("Testate DDT", Math.min(i + HEADER_BATCH, headers.length), headers.length);
   }
 
-  // 2. Fetch ddt_id map from Supabase to attach ddt_id to rows
   const ddtIdMap = new Map<string, number>();
   let offset = 0;
   while (true) {
@@ -1001,7 +1164,6 @@ export async function uploadDdtToSupabase(
     if (data.length < 1000) break;
   }
 
-  // 3. Invio Righe Articoli DDT
   const rowsPayload = rows.map((r) => {
     const parentId = ddtIdMap.get(`${r.anno}_${r.numero_ddt}`);
     return {
@@ -1051,7 +1213,7 @@ export async function uploadDdtToSupabase(
 }
 
 /* =====================================================================
-   4. SINCRONIZZAZIONE LOCALE SQLITE PER TUTTI I LISTINI
+   4. SINCRONIZZAZIONE LOCALE SQLITE LISTINI CLIENTI
 ===================================================================== */
 
 export async function syncClientRowsToLocalSqlite(
