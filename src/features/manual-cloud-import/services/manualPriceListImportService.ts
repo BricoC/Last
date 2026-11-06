@@ -1258,8 +1258,95 @@ export async function uploadDdtToSupabase(
 }
 
 /* =====================================================================
-   4. SINCRONIZZAZIONE LOCALE SQLITE LISTINI CLIENTI
+   4. SINCRONIZZAZIONE LOCALE SQLITE LISTINI CLIENTI & SICUREZZA ROLLBACK
 ===================================================================== */
+
+export async function backupLocalSqliteTable(table: string = "listini_clienti"): Promise<number> {
+  const db = await getDatabase();
+  // Crea o aggiorna una tabella di backup congelata
+  await db.execute(`DROP TABLE IF EXISTS ${table}_migration_safety_backup;`);
+  await db.execute(`CREATE TABLE ${table}_migration_safety_backup AS SELECT * FROM ${table};`);
+  const res = await db.select<{ count: number }[]>(`SELECT COUNT(*) as count FROM ${table}_migration_safety_backup;`);
+  return res[0]?.count ?? 0;
+}
+
+export async function restoreLocalSqliteTable(table: string = "listini_clienti"): Promise<void> {
+  const db = await getDatabase();
+  await db.execute(`DELETE FROM ${table};`);
+  await db.execute(`INSERT INTO ${table} SELECT * FROM ${table}_migration_safety_backup;`);
+}
+
+export async function downloadSupabaseSnapshot(
+  projectUrl: string,
+  anonKey: string,
+  table: string,
+  onProgress?: (count: number) => void
+): Promise<Record<string, unknown>[]> {
+  const records: Record<string, unknown>[] = [];
+  let offset = 0;
+  const limit = 1000;
+  while (true) {
+    const res = await fetch(`${projectUrl}/rest/v1/${table}?select=*&limit=${limit}&offset=${offset}`, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    });
+    if (!res.ok) break;
+    const batch = (await res.json()) as Record<string, unknown>[];
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    records.push(...batch);
+    offset += batch.length;
+    if (onProgress) onProgress(records.length);
+    if (batch.length < limit) break;
+  }
+  return records;
+}
+
+export function saveJsonToFileLocally(data: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function restoreSupabaseSnapshot(
+  projectUrl: string,
+  anonKey: string,
+  table: string,
+  records: Record<string, unknown>[],
+  onProgress?: (current: number, total: number) => void
+): Promise<{ restored: number; failed: number }> {
+  let restored = 0;
+  let failed = 0;
+  const BATCH_SIZE = 200;
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    const chunk = records.slice(i, i + BATCH_SIZE);
+    try {
+      const res = await fetch(`${projectUrl}/rest/v1/${table}`, {
+        method: "POST",
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(chunk),
+      });
+      if (res.ok) {
+        restored += chunk.length;
+      } else {
+        failed += chunk.length;
+      }
+    } catch {
+      failed += chunk.length;
+    }
+    if (onProgress) onProgress(Math.min(i + BATCH_SIZE, records.length), records.length);
+  }
+  return { restored, failed };
+}
 
 export async function syncClientRowsToLocalSqlite(
   rows: ParsedListinoClienteRow[],
