@@ -68,36 +68,43 @@ export class QuoteRepository {
   }
 
   public async generateUniqueQuoteNumber(year: number): Promise<number> {
+    return this.generateNextQuoteNumber(year);
+  }
+
+  public async generateNextQuoteNumber(year: number): Promise<number> {
     const db = await getDatabase();
-    const rows = await db.select<{ quote_number: number }[]>(
-      "SELECT quote_number FROM quotes WHERE year = $1 AND quote_number IS NOT NULL",
+    const rows = await db.select<{ max_num: number | null }[]>(
+      "SELECT MAX(quote_number) as max_num FROM quotes WHERE year = $1 AND deleted_at IS NULL",
       [year]
     );
-    const taken = new Set<number>(rows.map((r) => r.quote_number));
-    const available: number[] = [];
-    for (let i = 1; i <= 999; i++) {
-      if (!taken.has(i)) {
-        available.push(i);
-      }
-    }
-    if (available.length === 0) {
-      let candidate = 1000;
-      while (taken.has(candidate)) candidate++;
-      return candidate;
-    }
-    const randomIndex = Math.floor(Math.random() * available.length);
-    return available[randomIndex];
+    const maxNum = rows[0]?.max_num ?? 0;
+    return Math.max(0, maxNum) + 1;
   }
 
   private async ensureQuoteNumbersAssigned(): Promise<void> {
     try {
       const db = await getDatabase();
-      const unnumbered = await db.select<{ id: string; year: number }[]>(
-        "SELECT id, year FROM quotes WHERE quote_number IS NULL AND deleted_at IS NULL"
+      const rows = await db.select<{ id: string; year: number; quote_number: number | null }[]>(
+        "SELECT id, year, quote_number FROM quotes WHERE deleted_at IS NULL ORDER BY year ASC, created_at ASC"
       );
-      for (const item of unnumbered) {
-        const num = await this.generateUniqueQuoteNumber(item.year);
-        await db.execute("UPDATE quotes SET quote_number = $1 WHERE id = $2", [num, item.id]);
+
+      const byYear = new Map<number, typeof rows>();
+      for (const r of rows) {
+        const list = byYear.get(r.year) || [];
+        list.push(r);
+        byYear.set(r.year, list);
+      }
+
+      for (const [, quoteList] of byYear.entries()) {
+        const hasIrregular = quoteList.some(
+          (q) => q.quote_number == null || q.quote_number > quoteList.length * 2
+        );
+        if (hasIrregular) {
+          for (let i = 0; i < quoteList.length; i++) {
+            const nextSeq = i + 1;
+            await db.execute("UPDATE quotes SET quote_number = $1 WHERE id = $2", [nextSeq, quoteList[i].id]);
+          }
+        }
       }
     } catch (err) {
       console.warn("[QuoteRepository] Assegnazione automatica quote_number:", err);

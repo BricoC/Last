@@ -99,7 +99,7 @@ export function toQuoteInput(draft: QuoteDraft): QuoteDraftInput {
 }
 
 export function formatQuoteCode(year?: number | null, quoteNumber?: number | null): string | null {
-  if (quoteNumber == null) return null;
+  if (quoteNumber == null || quoteNumber <= 0) return null;
   const y = year ?? new Date().getFullYear();
   return `${y}.${String(quoteNumber).padStart(3, "0")}`;
 }

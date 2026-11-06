@@ -95,10 +95,17 @@ describe("quoteCalculations", () => {
   });
 
   it("formatta il codice preventivo univoco anno.numero_a_3_cifre", () => {
+    expect(formatQuoteCode(2026, 1)).toBe("2026.001");
+    expect(formatQuoteCode(2026, 2)).toBe("2026.002");
     expect(formatQuoteCode(2026, 3)).toBe("2026.003");
+    expect(formatQuoteCode(2026, 10)).toBe("2026.010");
     expect(formatQuoteCode(2026, 256)).toBe("2026.256");
     expect(formatQuoteCode(2026, 999)).toBe("2026.999");
+    expect(formatQuoteCode(2026, 1000)).toBe("2026.1000");
+    expect(formatQuoteCode(2026, 9999)).toBe("2026.9999");
+    expect(formatQuoteCode(2027, 1)).toBe("2027.001");
     expect(formatQuoteCode(2026, null)).toBeNull();
     expect(formatQuoteCode(2026, undefined)).toBeNull();
+    expect(formatQuoteCode(2026, 0)).toBeNull();
   });
 });
