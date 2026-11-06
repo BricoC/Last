@@ -11,16 +11,6 @@ export interface DDTClienteCardProps {
   setDdt: React.Dispatch<React.SetStateAction<Partial<DdtDocument>>>;
 }
 
-/** Formatta la data YYYY-MM-DD nel formato italiano gg/mm/aaaa */
-function formatItDate(dateStr?: string): string {
-  if (!dateStr) return "";
-  const parts = dateStr.split("-");
-  if (parts.length === 3) {
-    return `${parts[2]}/${parts[1]}/${parts[0]}`;
-  }
-  return dateStr;
-}
-
 export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
   ddt,
   setDdt,
@@ -381,14 +371,41 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
       <div className="px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shadow-xs">
         {/* Sinistra: N° DDT, Ricerca Cliente, Destinazione, Rif. Ordine, In Conto / A Saldo */}
         <div className="flex flex-wrap items-center gap-2.5 text-xs">
-          {/* Numero DDT e Data compatti */}
-          <div className="flex items-center gap-1 font-mono shrink-0">
-            <span className="font-bold text-[var(--foreground)] text-sm tracking-tight">
-              DDT {ddt.doc_number ?? "Bozza"}
+          {/* Numero DDT e Data editabili */}
+          <div className="flex items-center gap-1.5 font-mono shrink-0">
+            <span className="font-bold text-[var(--foreground)] text-xs tracking-tight">
+              DDT
             </span>
+            <input
+              type="text"
+              value={ddt.doc_number !== null && ddt.doc_number !== undefined ? String(ddt.doc_number) : ""}
+              onChange={(e) => {
+                const val = e.target.value.trim();
+                const num = val === "" ? null : parseInt(val, 10);
+                setDdt((p) => ({ ...p, doc_number: isNaN(num as number) ? null : num }));
+              }}
+              placeholder="Bozza"
+              className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] text-center focus:border-[var(--primary)] outline-none"
+              title="Numero progressivo DDT (modificabile liberamente)"
+            />
             <span className="text-[var(--muted-foreground)] text-xs">
-              del {formatItDate(ddt.doc_date)}
+              del
             </span>
+            <input
+              type="date"
+              value={ddt.doc_date || ""}
+              onChange={(e) => {
+                const newDate = e.target.value;
+                const newYear = newDate ? parseInt(newDate.split("-")[0], 10) : ddt.year;
+                setDdt((p) => ({
+                  ...p,
+                  doc_date: newDate,
+                  year: isNaN(newYear as number) ? p.year : newYear,
+                }));
+              }}
+              className="w-32 px-1.5 py-0.5 text-xs font-mono bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] focus:border-[var(--primary)] outline-none cursor-pointer"
+              title="Data emissione DDT (modificabile liberamente)"
+            />
           </div>
 
           <div className="h-4 w-px bg-[var(--border)] shrink-0" />
@@ -733,13 +750,53 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
       {isExpanded && (
         <div className="border-t border-[var(--border)] bg-[var(--card)] p-3.5 shadow-inner animate-in slide-in-from-top-1 duration-150">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            {/* Blocco 1: Dati Cliente & Sede Legale */}
+            {/* Blocco 1: Dati Documento, Cliente & Sede Legale */}
             <div className="space-y-2 p-3 bg-[var(--background)] rounded-lg border border-[var(--border)]">
               <div className="flex items-center justify-between border-b border-[var(--border)] pb-1.5">
                 <span className="font-bold text-[var(--foreground)] flex items-center gap-1.5">
                   <Building2 className="w-3.5 h-3.5 text-blue-400" />
-                  Dati Anagrafici & Sede Legale
+                  Dati Documento & Anagrafica
                 </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] uppercase font-semibold text-[var(--muted-foreground)]">
+                    Numero DDT
+                  </label>
+                  <input
+                    type="text"
+                    value={ddt.doc_number !== null && ddt.doc_number !== undefined ? String(ddt.doc_number) : ""}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      const num = val === "" ? null : parseInt(val, 10);
+                      setDdt((p) => ({ ...p, doc_number: isNaN(num as number) ? null : num }));
+                    }}
+                    placeholder="Bozza"
+                    className="w-full mt-0.5 px-2 py-1 bg-[var(--card)] border border-[var(--border)] rounded text-[var(--foreground)] font-mono font-bold focus:border-[var(--primary)] outline-none"
+                    title="Numero progressivo DDT (modificabile)"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-semibold text-[var(--muted-foreground)]">
+                    Data DDT
+                  </label>
+                  <input
+                    type="date"
+                    value={ddt.doc_date || ""}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      const newYear = newDate ? parseInt(newDate.split("-")[0], 10) : ddt.year;
+                      setDdt((p) => ({
+                        ...p,
+                        doc_date: newDate,
+                        year: isNaN(newYear as number) ? p.year : newYear,
+                      }));
+                    }}
+                    className="w-full mt-0.5 px-2 py-1 bg-[var(--card)] border border-[var(--border)] rounded text-[var(--foreground)] font-mono focus:border-[var(--primary)] outline-none cursor-pointer"
+                    title="Data emissione DDT (modificabile)"
+                  />
+                </div>
               </div>
 
               <div>
