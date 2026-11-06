@@ -13,7 +13,7 @@ import {
   CheckCircle2,
   Check,
 } from "lucide-react";
-import { ListinoGeneraleRow, ListinoClienteRow } from "@/features/price-lists/models/priceList";
+import { ListinoGeneraleRow } from "@/features/price-lists/models/priceList";
 import { priceListRepository } from "@/features/price-lists/services/priceListRepository";
 import { getDdtArticleViewRows, DdtArticleViewRow } from "../services/ddtReadModelsRepository";
 import { DdtItem } from "../models/ddt";
@@ -21,7 +21,8 @@ import { formatDdtViewDate } from "../services/ddtViewFormatting";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { calculateRowAmounts } from "../utils/ddtCalculations";
-import { isClientMatching, resolveClientPriceLists } from "../utils/clientPriceListMatcher";
+import { resolveClientPriceLists } from "../utils/clientPriceListMatcher";
+import { CustomerPriceListEmbeddedSection } from "@/features/price-lists/components/CustomerPriceListEmbeddedSection";
 
 export interface DDTMultiListinoModalProps {
   isOpen: boolean;
@@ -73,13 +74,10 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
   const [showHistory, setShowHistory] = useState(true);
   const [showCurrentDdt, setShowCurrentDdt] = useState(true);
 
-  // Filtro cliente dedicato per Listini Clienti (supporta ricerca multi-parola!)
-  const [clientFilter, setClientFilter] = useState<string>("");
   const [currentClientPls, setCurrentClientPls] = useState<Set<string>>(new Set());
 
-  // Dati delle 4 finestre
+  // Dati delle finestre
   const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>([]);
-  const [clientItems, setClientItems] = useState<ListinoClienteRow[]>([]);
   const [historyRows, setHistoryRows] = useState<DdtArticleViewRow[]>([]);
 
   // Grid ref per tabella Articoli nel DDT (Finestra 4 - AG Grid puro come la tabella DDT principale)
@@ -100,14 +98,12 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [gen, cli, hist] = await Promise.all([
+      const [gen, hist] = await Promise.all([
         priceListRepository.searchGeneral("", 10000),
-        priceListRepository.searchClientPrices("", undefined, 20000),
         getDdtArticleViewRows(),
       ]);
 
       setGeneralItems(gen);
-      setClientItems(cli);
       setHistoryRows(hist);
 
       if (currentClientName && currentClientName.trim()) {
@@ -121,7 +117,6 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
       } else {
         setCurrentClientPls(new Set());
       }
-      setClientFilter("");
     } catch (err) {
       console.error("Errore caricamento dati Alex Multi-Listino:", err);
     } finally {
@@ -221,48 +216,6 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
       return searchTokens.every((token) => text.includes(token));
     });
   }, [generalItems, searchTokens]);
-
-  // 2. Filtraggio Finestra Listini Clienti (Fedele a NoManV1: default su cliente DDT, override su filtro manuale)
-  const filteredClients = useMemo(() => {
-    let result = clientItems;
-
-    // Se l'utente ha digitato un filtro manuale
-    if (clientFilter.trim()) {
-      const filterClean = clientFilter.trim();
-      const matchesCurrentClient = currentClientName && isClientMatching(filterClean, currentClientName);
-
-      result = result.filter((item) => {
-        if (matchesCurrentClient && currentClientPls.has(item.cliente.toUpperCase())) {
-          return true;
-        }
-        if (isClientMatching(filterClean, item.cliente)) {
-          return true;
-        }
-        const rawCli = item.cliente.toLowerCase();
-        const cleanCli = item.cliente.replace(/^LIST_/, "").toLowerCase();
-        const normCli = `${rawCli} ${cleanCli} ${rawCli.replace(/[^a-z0-9]/g, " ")} ${cleanCli.replace(/[^a-z0-9]/g, " ")}`;
-        const clientTokens = tokenizeSearch(filterClean);
-        return clientTokens.every((tok) => normCli.includes(tok));
-      });
-    } else if (currentClientName && currentClientName.trim()) {
-      // Nessun filtro manuale: mostra automaticamente il listino associato al cliente del DDT
-      result = result.filter((item) => {
-        if (currentClientPls.has(item.cliente.toUpperCase())) {
-          return true;
-        }
-        return isClientMatching(currentClientName, item.cliente);
-      });
-    }
-
-    // Filtro globale
-    if (searchTokens.length > 0) {
-      result = result.filter((item) => {
-        const text = `${item.cliente} ${item.descrizione} ${item.codice_articolo || ""}`.toLowerCase();
-        return searchTokens.every((token) => text.includes(token));
-      });
-    }
-    return result;
-  }, [clientItems, clientFilter, currentClientName, currentClientPls, searchTokens]);
 
   // 3. Filtraggio Finestra Storico DDT (~31k vendite)
   const filteredHistory = useMemo(() => {
@@ -1034,86 +987,15 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
               </div>
             )}
 
-            {/* FINESTRA 2: Listino Clienti (Giallo/Ambra) */}
+            {/* FINESTRA 2: Listino Clienti (Giallo/Ambra - Editabile stile Excel con pulsanti e cestino) */}
             {showCli && (
-              <div
-                className={`flex flex-col overflow-hidden bg-[var(--card)] ${
-                  layoutMode === "horizontal" ? "flex-1 min-h-[140px]" : "flex-1 min-w-[280px]"
-                }`}
-              >
-                <div className="px-3 py-1.5 bg-amber-950/40 border-b border-amber-500/30 flex items-center justify-between text-xs text-amber-300 shrink-0 gap-2">
-                  <span className="font-bold whitespace-nowrap flex items-center space-x-1.5">
-                    <span className="text-sm">Listino Clienti</span>
-                    <span className="text-[11px] opacity-80 font-normal">({filteredClients.length} voci)</span>
-                  </span>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="text-xs text-[var(--muted-foreground)] font-semibold">Filtro:</span>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={clientFilter}
-                        onChange={(e) => setClientFilter(e.target.value)}
-                        placeholder={currentClientName ? `Filtro: ${currentClientName}` : "Cerca cliente (multi-parola)..."}
-                        className="pl-2.5 pr-6 py-0.5 text-xs bg-[var(--background)] border border-amber-500/40 rounded text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none w-52 font-medium"
-                      />
-                      {clientFilter && (
-                        <button
-                          type="button"
-                          onClick={() => setClientFilter("")}
-                          className="absolute right-1.5 top-1 text-[var(--muted-foreground)] hover:text-white"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-auto">
-                  <table className="w-full border-collapse text-xs whitespace-nowrap">
-                    <thead className="bg-[var(--background)] sticky top-0 text-[11.5px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-bold">
-                      <tr>
-                        <th className="px-3 py-1.5 text-left w-40">Cliente</th>
-                        <th className="px-3 py-1.5 text-left">Descrizione</th>
-                        <th className="px-3 py-1.5 text-right w-24">Fattura</th>
-                        <th className="px-3 py-1.5 text-right w-24">Acquisto</th>
-                        <th className="px-2.5 py-1.5 text-right w-20">Ricarico</th>
-                        <th className="px-3 py-1.5 text-left w-28">Note</th>
-                        <th className="px-3 py-1.5 text-left w-24">Note1</th>
-                        <th className="px-3 py-1.5 text-left w-24">Note2</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-xs">
-                      {filteredClients.slice(0, 200).map((item) => (
-                        <tr
-                          key={item.id}
-                          onDoubleClick={() => {
-                            handleOpenInsert({
-                              code: item.codice_articolo || undefined,
-                              description: item.descrizione,
-                              unit: "NR.",
-                              unit_price: item.prezzo_fattura || 0,
-                              purchase_price: item.prezzo_acquisto || 0,
-                              vat_rate: 22,
-                            });
-                          }}
-                          className="hover:bg-amber-500/15 cursor-pointer transition-colors group"
-                          title="Doppio clic per inserire nel DDT"
-                        >
-                          <td className="px-3 py-1.5 font-bold text-amber-400 truncate max-w-[140px]" title={item.cliente}>{item.cliente}</td>
-                          <td className="px-3 py-1.5 font-sans text-[var(--foreground)] truncate max-w-[340px] text-[12.5px] font-medium" title={item.descrizione}>{item.descrizione}</td>
-                          <td className="px-3 py-1.5 text-right font-bold text-[var(--foreground)]">{formatEuro(item.prezzo_fattura, 2)}</td>
-                          <td className="px-3 py-1.5 text-right text-[var(--muted-foreground)]">{formatEuro(item.prezzo_acquisto, 2)}</td>
-                          <td className="px-2.5 py-1.5 text-right text-[var(--muted-foreground)]">{item.ricarico ? `${item.ricarico.toFixed(1)}%` : "—"}</td>
-                          <td className="px-3 py-1.5 font-sans text-xs text-[var(--muted-foreground)] truncate max-w-[120px]">{item.note || ""}</td>
-                          <td className="px-3 py-1.5 font-sans text-xs text-[var(--muted-foreground)] truncate max-w-[100px]">{item.note1 || ""}</td>
-                          <td className="px-3 py-1.5 font-sans text-xs text-[var(--muted-foreground)] truncate max-w-[100px]">{item.note2 || ""}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <CustomerPriceListEmbeddedSection
+                currentClientName={currentClientName}
+                currentClientPls={currentClientPls}
+                globalSearch={globalSearch}
+                layoutMode={layoutMode}
+                onSelectArticle={handleOpenInsert}
+              />
             )}
 
             {/* FINESTRA 3: Storico Articoli Già Dati (Smeraldo) */}
