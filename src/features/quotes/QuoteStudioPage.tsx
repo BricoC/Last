@@ -164,13 +164,18 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     } catch (error) { setMessage(errorMessage(error)); }
   };
   const deleteQuote = async (quoteId: string) => {
-    const quote = quotes.find((item) => item.id === quoteId);
-    if (!window.confirm(`Vuoi cancellare il preventivo di ${quote?.client_name || "questo cliente"}?`)) return;
     try {
       await quoteRepository.softDeleteQuote(quoteId);
-      if (draft.id === quoteId) { const next = createEmptyQuoteDraft(); setDraft(next); savedSignature.current = signature(next); }
-      setMessage("Preventivo cancellato."); await refreshQuotes();
-    } catch (error) { setMessage(errorMessage(error)); }
+      if (draft.id === quoteId) {
+        const next = createEmptyQuoteDraft();
+        setDraft(next);
+        savedSignature.current = signature(next);
+      }
+      setMessage("Preventivo spostato nel cestino.");
+      await refreshQuotes();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
   };
   const printPdf = async () => {
     setMessage("");

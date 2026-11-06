@@ -41,3 +41,4 @@ export async function migrateQuoteTrashSchemaV21(db: Database): Promise<void> {
     console.warn("[migrateQuoteTrashSchemaV21] Inizializzazione quote_sequences:", err);
   }
 }
+

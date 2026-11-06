@@ -234,3 +234,4 @@ export const QuoteTrashModal: React.FC<QuoteTrashModalProps> = ({
     </div>
   );
 };
+
