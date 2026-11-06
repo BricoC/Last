@@ -7,10 +7,11 @@ import type {
   QuoteItem,
   QuoteStatus,
   QuoteVatRate,
+  TrashQuoteRow,
 } from "../models/quote";
 import { buildQuoteDdtConversion } from "./quoteDdtConversion";
 import { buildQuoteSavePayload } from "./quotePayload";
-import { quoteToDraft, toQuoteInput } from "../models/quoteDraft";
+import { formatQuoteCode, quoteToDraft, toQuoteInput } from "../models/quoteDraft";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
 import { QuoteSyncService } from "./quoteSyncService";
 
@@ -77,40 +78,89 @@ export class QuoteRepository {
     return this.generateNextQuoteNumber(year);
   }
 
+  /**
+   * Genera il prossimo numero progressivo per l'anno specificato.
+   * Il numero è STRETTAMENTE univoco: se un preventivo viene cancellato o eliminato,
+   * quel numero è perso per sempre e la sequenza avanza al successivo senza mai riutilizzarlo.
+   */
   public async generateNextQuoteNumber(year: number): Promise<number> {
     const db = await getDatabase();
-    const rows = await db.select<{ max_num: number | null }[]>(
-      "SELECT MAX(quote_number) as max_num FROM quotes WHERE year = $1 AND deleted_at IS NULL",
-      [year]
-    );
-    const maxNum = rows[0]?.max_num ?? 0;
-    return Math.max(0, maxNum) + 1;
+
+    // 1. Leggi l'ultimo numero registrato nella tabella sequenze persistente
+    let seqMax = 0;
+    try {
+      const seqRows = await db.select<{ last_number: number }[]>(
+        "SELECT last_number FROM quote_sequences WHERE year = $1",
+        [year]
+      );
+      seqMax = seqRows[0]?.last_number ?? 0;
+    } catch (err) {
+      console.warn("[QuoteRepository] Lettura quote_sequences:", err);
+    }
+
+    // 2. Leggi il massimo quote_number da tutti i preventivi locali (compresi quelli cancellati/soft-deleted)
+    let quotesMax = 0;
+    try {
+      const rows = await db.select<{ max_num: number | null }[]>(
+        "SELECT MAX(quote_number) as max_num FROM quotes WHERE year = $1",
+        [year]
+      );
+      quotesMax = rows[0]?.max_num ?? 0;
+    } catch (err) {
+      console.warn("[QuoteRepository] Lettura MAX quotes:", err);
+    }
+
+    // 3. Leggi il massimo quote_number dal cestino locale
+    let trashMax = 0;
+    try {
+      const trashRows = await db.select<{ max_num: number | null }[]>(
+        "SELECT MAX(quote_number) as max_num FROM quotes_trash WHERE year = $1",
+        [year]
+      );
+      trashMax = trashRows[0]?.max_num ?? 0;
+    } catch (err) {
+      console.warn("[QuoteRepository] Lettura MAX quotes_trash:", err);
+    }
+
+    // 4. Leggi la sequenza remota da Supabase Cloud (se online)
+    let remoteMax = 0;
+    try {
+      remoteMax = await QuoteSyncService.getRemoteMaxQuoteNumber(year);
+    } catch (err) {
+      console.warn("[QuoteRepository] Lettura remoteMax da Supabase:", err);
+    }
+
+    const currentMax = Math.max(seqMax, quotesMax, trashMax, remoteMax, 0);
+    const nextNumber = currentMax + 1;
+
+    // Registra subito il nuovo numero nella sequenza locale persistente
+    try {
+      await db.execute(
+        `INSERT INTO quote_sequences (year, last_number) VALUES ($1, $2)
+         ON CONFLICT(year) DO UPDATE SET last_number = MAX(last_number, excluded.last_number)`,
+        [year, nextNumber]
+      );
+    } catch (err) {
+      console.warn("[QuoteRepository] Salvataggio locale quote_sequences:", err);
+    }
+
+    // Aggiorna la sequenza anche su Supabase Cloud (asincrono / non bloccante)
+    void QuoteSyncService.updateRemoteSequence(year, nextNumber);
+
+    return nextNumber;
   }
 
   private async ensureQuoteNumbersAssigned(): Promise<void> {
     try {
       const db = await getDatabase();
-      const rows = await db.select<{ id: string; year: number; quote_number: number | null }[]>(
-        "SELECT id, year, quote_number FROM quotes WHERE deleted_at IS NULL ORDER BY year ASC, created_at ASC"
+      // Assegna solo a preventivi che non hanno ancora un numero. NON rinumerare o ricomprimere mai i numeri esistenti!
+      const missing = await db.select<{ id: string; year: number }[]>(
+        "SELECT id, year FROM quotes WHERE quote_number IS NULL AND deleted_at IS NULL ORDER BY year ASC, created_at ASC"
       );
 
-      const byYear = new Map<number, typeof rows>();
-      for (const r of rows) {
-        const list = byYear.get(r.year) || [];
-        list.push(r);
-        byYear.set(r.year, list);
-      }
-
-      for (const [, quoteList] of byYear.entries()) {
-        const hasIrregular = quoteList.some(
-          (q) => q.quote_number == null || q.quote_number > quoteList.length * 2
-        );
-        if (hasIrregular) {
-          for (let i = 0; i < quoteList.length; i++) {
-            const nextSeq = i + 1;
-            await db.execute("UPDATE quotes SET quote_number = $1 WHERE id = $2", [nextSeq, quoteList[i].id]);
-          }
-        }
+      for (const r of missing) {
+        const nextSeq = await this.generateNextQuoteNumber(r.year);
+        await db.execute("UPDATE quotes SET quote_number = $1 WHERE id = $2", [nextSeq, r.id]);
       }
     } catch (err) {
       console.warn("[QuoteRepository] Assegnazione automatica quote_number:", err);
@@ -164,17 +214,184 @@ export class QuoteRepository {
     return { quoteId, ...conversion };
   }
 
+  /**
+   * Sposta un preventivo nel Cestino (massimo 5 elementi memorizzati sia in locale che su Supabase Cloud).
+   * Il numero di preventivo rimane consumato e non verrà mai riutilizzato.
+   */
   public async softDeleteQuote(id: string): Promise<void> {
+    const fullQuote = await this.getQuoteById(id);
+    const deletedAt = new Date().toISOString();
+
     await invoke("soft_delete_quote_transaction", {
       id,
-      deletedAt: new Date().toISOString(),
+      deletedAt,
       updatedBy: "system",
     });
-    try {
-      await QuoteSyncService.deleteQuote(id);
-    } catch (err) {
-      console.warn("[QuoteRepository] Sync deleteQuote su Supabase non riuscito:", err);
+
+    if (fullQuote) {
+      try {
+        const db = await getDatabase();
+        const code = formatQuoteCode(fullQuote.year, fullQuote.quote_number) ?? "";
+        const dataJson = JSON.stringify(fullQuote);
+
+        // 1. Inserisci o aggiorna nel cestino SQLite locale
+        await db.execute(
+          `INSERT INTO quotes_trash (
+            id, quote_number, numero, year, quote_date,
+            client_name, subject, total_document_subunits,
+            data_json, deleted_at, deleted_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT(id) DO UPDATE SET
+            quote_number = excluded.quote_number,
+            numero = excluded.numero,
+            year = excluded.year,
+            quote_date = excluded.quote_date,
+            client_name = excluded.client_name,
+            subject = excluded.subject,
+            total_document_subunits = excluded.total_document_subunits,
+            data_json = excluded.data_json,
+            deleted_at = excluded.deleted_at,
+            deleted_by = excluded.deleted_by`,
+          [
+            fullQuote.id,
+            fullQuote.quote_number,
+            code,
+            fullQuote.year,
+            fullQuote.quote_date,
+            fullQuote.client_name,
+            fullQuote.subject,
+            fullQuote.totals.total.toSubunits(),
+            dataJson,
+            deletedAt,
+            "system",
+          ]
+        );
+
+        // 2. Prune locale: mantiene rigorosamente fino a un massimo di 5 preventivi
+        await db.execute(`
+          DELETE FROM quotes_trash
+          WHERE id NOT IN (
+            SELECT id FROM quotes_trash
+            ORDER BY deleted_at DESC
+            LIMIT 5
+          )
+        `);
+
+        // 3. Sincronizzazione con Supabase Cloud (tabella preventivi_cestino)
+        await QuoteSyncService.pushTrashQuote(fullQuote, deletedAt, "system");
+      } catch (err) {
+        console.warn("[QuoteRepository] Salvataggio cestino quotes_trash:", err);
+      }
+    } else {
+      try {
+        await QuoteSyncService.deleteQuote(id);
+      } catch (err) {
+        console.warn("[QuoteRepository] Sync deleteQuote su Supabase non riuscito:", err);
+      }
     }
+  }
+
+  /**
+   * Restituisce i preventivi attualmente nel Cestino (massimo 5, ordinati dal più recente).
+   */
+  public async getTrashQuotes(): Promise<TrashQuoteRow[]> {
+    const db = await getDatabase();
+    try {
+      await QuoteSyncService.pullTrashQuotes();
+    } catch (err) {
+      console.warn("[QuoteRepository] Sync pullTrashQuotes:", err);
+    }
+
+    const rows = await db.select<TrashQuoteRow[]>(
+      "SELECT * FROM quotes_trash ORDER BY deleted_at DESC LIMIT 5"
+    );
+    return rows;
+  }
+
+  /**
+   * Restituisce il conteggio attuale di preventivi nel Cestino (da 0 a 5).
+   */
+  public async getTrashCount(): Promise<number> {
+    try {
+      const db = await getDatabase();
+      const rows = await db.select<{ count: number }[]>(
+        "SELECT COUNT(*) as count FROM quotes_trash"
+      );
+      return rows[0]?.count ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Ripristina un preventivo dal Cestino all'archivio attivo.
+   * Il preventivo riprende esattamente il proprio numero originale e stato,
+   * e viene rimosso dal cestino locale e da Supabase Cloud.
+   */
+  public async restoreQuoteFromTrash(id: string): Promise<Quote | null> {
+    const db = await getDatabase();
+
+    // 1. Trova l'elemento nel cestino
+    const trashRows = await db.select<TrashQuoteRow[]>(
+      "SELECT * FROM quotes_trash WHERE id = $1 LIMIT 1",
+      [id]
+    );
+    if (!trashRows[0]) return null;
+
+    const trashItem = trashRows[0];
+    const now = new Date().toISOString();
+
+    // 2. Ripristina in SQLite: rimuove deleted_at sia da quotes che da quote_items
+    await db.execute(
+      "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE id = $2",
+      [now, id]
+    );
+    await db.execute(
+      "UPDATE quote_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE quote_id = $2",
+      [now, id]
+    );
+
+    // 3. Rimuovi dal cestino locale
+    await db.execute("DELETE FROM quotes_trash WHERE id = $1", [id]);
+
+    // 4. Rimuovi dal cestino remoto di Supabase
+    void QuoteSyncService.deleteTrashFromSupabase(id);
+
+    // 5. Ricarica il preventivo ripristinato
+    let restored = await this.getQuoteById(id);
+
+    // Se per caso non era presente nella tabella quotes (es. creato altrove), ricrealo dal data_json
+    if (!restored && trashItem.data_json) {
+      try {
+        const parsed = JSON.parse(trashItem.data_json);
+        if (parsed) {
+          const draft = quoteToDraft(parsed);
+          restored = await this.saveDraft(toQuoteInput(draft));
+        }
+      } catch (err) {
+        console.warn("[QuoteRepository] Ripristino da data_json:", err);
+      }
+    }
+
+    if (restored) {
+      // 6. Pusha di nuovo il preventivo ripristinato su Supabase
+      try {
+        await QuoteSyncService.pushQuote(restored);
+      } catch (err) {
+        console.warn("[QuoteRepository] Push preventivo ripristinato su Supabase:", err);
+      }
+    }
+
+    return restored;
+  }
+
+  /**
+   * Elimina definitivamente un preventivo dal cestino
+   */
+  public async deleteTrashPermanently(id: string): Promise<void> {
+    const db = await getDatabase();
+    await db.execute("DELETE FROM quotes_trash WHERE id = $1", [id]);
+    void QuoteSyncService.deleteTrashFromSupabase(id);
   }
 
   private mapQuote(row: QuoteRow, items: QuoteItem[]): Quote {

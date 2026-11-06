@@ -124,3 +124,17 @@ export interface QuoteDraftInput {
   customer_notes?: string | null;
   items: QuoteItemInput[];
 }
+
+export interface TrashQuoteRow {
+  id: string;
+  quote_number: number | null;
+  numero: string;
+  year: number;
+  quote_date: string;
+  client_name: string;
+  subject: string;
+  total_document_subunits: number;
+  data_json: string;
+  deleted_at: string;
+  deleted_by?: string;
+}

@@ -4,6 +4,7 @@ import { QuoteStudioHeader } from "./components/QuoteStudioHeader";
 import { QuoteClientFields } from "./components/QuoteClientFields";
 import { QuoteItemsGrid } from "./components/QuoteItemsGrid";
 import { QuoteArchiveSidebar } from "./components/QuoteArchiveSidebar";
+import { QuoteTrashModal } from "./components/QuoteTrashModal";
 import { QuoteA4Preview } from "./document/QuoteA4Preview";
 import { quoteRepository } from "./services/quoteRepository";
 import { exportQuotePdf } from "./utils/quoteExportManager";
@@ -23,6 +24,8 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   const [viewMode, setViewMode] = useState<"calculation" | "customer">("calculation");
   const [alexMode, setAlexMode] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
+  const [trashCount, setTrashCount] = useState(0);
   const [archiveSearch, setArchiveSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -48,8 +51,17 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   useEffect(() => { savedSignature.current = signature(draft); }, []);
 
   const refreshQuotes = useCallback(async () => {
-    try { setQuotes(await quoteRepository.getQuotes()); }
-    catch (error) { console.error("[QuoteStudio] Impossibile caricare l'archivio preventivi", error); setMessage(errorMessage(error)); }
+    try {
+      const [allQuotes, tCount] = await Promise.all([
+        quoteRepository.getQuotes(),
+        quoteRepository.getTrashCount().catch(() => 0),
+      ]);
+      setQuotes(allQuotes);
+      setTrashCount(tCount);
+    } catch (error) {
+      console.error("[QuoteStudio] Impossibile caricare l'archivio preventivi", error);
+      setMessage(errorMessage(error));
+    }
   }, []);
   useEffect(() => { void refreshQuotes(); }, [refreshQuotes]);
 
@@ -181,10 +193,11 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
 
   return <div className="relative flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3 text-[var(--foreground)]">
     <QuoteStudioHeader status={draft.status ?? "bozza"} viewMode={viewMode} alexMode={alexMode} saving={saving}
-      archiveCount={quotes.length} quoteDate={draft.quote_date ?? ""}
+      archiveCount={quotes.length} trashCount={trashCount} quoteDate={draft.quote_date ?? ""}
       quoteCode={formatQuoteCode(draft.year, draft.quote_number)}
       onStatusChange={(status) => updateHeader({ status })} onViewChange={setViewMode}
       onAlexToggle={() => setAlexMode((value) => !value)} onArchive={() => setShowArchive((value) => !value)}
+      onOpenTrash={() => setShowTrash(true)}
       onSave={() => void save()} onNew={() => void handleNewQuote()}
       onPdf={() => void printPdf()} onConvert={() => void convertToDdt()} onFillRandomRows={fillRandomRows} />
     <QuoteKpiBanner items={draft.items} discount={draft.global_discount_pct ?? 0} alexMode={alexMode}
@@ -201,8 +214,17 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
       <span>{draft.items.filter(isQuoteDraftItemActive).length} righe compilate su {draft.items.length}</span>
     </footer>
     {message && <div role="status" className="absolute bottom-12 left-4 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs shadow-lg">{message}</div>}
-    {showArchive && <QuoteArchiveSidebar quotes={filteredQuotes} search={archiveSearch} onSearch={setArchiveSearch}
-      onClose={() => setShowArchive(false)} onOpen={(id) => void openQuote(id)} onCopy={(id) => void copyQuote(id)} onDelete={(id) => void deleteQuote(id)} />}
+    {showArchive && <QuoteArchiveSidebar quotes={filteredQuotes} search={archiveSearch} trashCount={trashCount} onSearch={setArchiveSearch}
+      onClose={() => setShowArchive(false)} onOpen={(id) => void openQuote(id)} onCopy={(id) => void copyQuote(id)} onDelete={(id) => void deleteQuote(id)}
+      onOpenTrash={() => { setShowArchive(false); setShowTrash(true); }} />}
+    <QuoteTrashModal
+      isOpen={showTrash}
+      onClose={() => setShowTrash(false)}
+      onQuoteRestored={(restored) => {
+        setMessage(`Preventivo ${restored.quote_number != null ? formatQuoteCode(restored.year, restored.quote_number) : ""} ripristinato con successo.`);
+        void refreshQuotes();
+      }}
+    />
     <UnsavedChangesModal
       isOpen={Boolean(closePrompt)}
       title="Preventivo con modifiche non salvate"
