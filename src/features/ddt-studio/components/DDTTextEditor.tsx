@@ -207,7 +207,32 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     }
   };
 
+  const handleInputPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    if (isUppercaseCol) {
+      const clip = e.clipboardData.getData("text");
+      if (clip) {
+        e.preventDefault();
+        const input = inputRef.current;
+        const start = input?.selectionStart ?? 0;
+        const end = input?.selectionEnd ?? 0;
+        const upper = clip.toUpperCase();
+        const nextVal = value.substring(0, start) + upper + value.substring(end);
+        setValue(nextVal);
+        setTimeout(() => {
+          if (inputRef.current) {
+            inputRef.current.setSelectionRange(start + upper.length, start + upper.length);
+          }
+        }, 0);
+      }
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Scorciatoie di sistema libere: Copia Ctrl+C, Incolla Ctrl+V, Taglia Ctrl+X, Seleziona Tutto Ctrl+A, Annulla Ctrl+Z
+    if ((e.ctrlKey || e.metaKey) && ["c", "v", "x", "a", "z"].includes(e.key.toLowerCase())) {
+      return;
+    }
+
     if (e.key === "Backspace" || e.key === "Delete") {
       isBackspaceOrDeleteRef.current = true;
       setShowSuggestions(false);
@@ -451,6 +476,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
         maxLength={undefined}
         onChange={handleInputChange}
         onKeyDown={onKeyDown}
+        onPaste={handleInputPaste}
         onBlur={() => {
           setTimeout(() => setShowSuggestions(false), 200);
         }}

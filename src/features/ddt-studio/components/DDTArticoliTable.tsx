@@ -244,10 +244,220 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
     setItems(reindexed);
   }, [setItems]);
 
-  // Gestione tastiera celle (Copia, Svuota Delete/Backspace stile Excel puro)
+  // Gestione incolla multi-cella o singola cella (da Excel o appunti)
+  const applyPasteToGrid = useCallback(
+    (startRowIndex: number, startColId: string, clipText: string) => {
+      if (!clipText || startRowIndex < 0) return;
+
+      const editableColsOrder = [
+        "unit",
+        "quantity",
+        "description",
+        "unit_price",
+        "discount_pct",
+        "vat_rate",
+      ];
+      if (showMargini) {
+        editableColsOrder.push("purchase_price");
+        editableColsOrder.push("ric_pct");
+      }
+
+      const startColIdx = editableColsOrder.indexOf(startColId);
+      if (startColIdx === -1) return;
+
+      const lines = clipText
+        .split(/\r?\n/)
+        .filter((l, idx, arr) => idx < arr.length - 1 || l.length > 0);
+      if (lines.length === 0) return;
+
+      setItems((prevItems) => {
+        const newItems = [...prevItems];
+        let hasChanges = false;
+
+        lines.forEach((line, lineOffset) => {
+          const targetRowIndex = startRowIndex + lineOffset;
+          if (targetRowIndex >= newItems.length) return;
+
+          const cells = line.split("\t");
+          const targetRow = { ...newItems[targetRowIndex] };
+
+          cells.forEach((cellRaw, cellOffset) => {
+            const targetColIdx = startColIdx + cellOffset;
+            if (targetColIdx >= editableColsOrder.length) return;
+
+            const colId = editableColsOrder[targetColIdx];
+            const val = cellRaw.trim();
+
+            if (colId === "unit") {
+              targetRow.unit = val.toUpperCase();
+              hasChanges = true;
+            } else if (colId === "quantity") {
+              targetRow.quantity = val;
+              hasChanges = true;
+            } else if (colId === "description") {
+              targetRow.description = val.toUpperCase();
+              hasChanges = true;
+            } else if (colId === "unit_price") {
+              const parsed = safeMoney(val);
+              targetRow.unit_price = parsed;
+              targetRow.base_price = parsed;
+              hasChanges = true;
+            } else if (colId === "discount_pct") {
+              targetRow.discount_pct = val;
+              targetRow.base_discount_pct = val;
+              hasChanges = true;
+            } else if (colId === "vat_rate") {
+              const parsed = parseInt(val.replace("%", "").trim(), 10);
+              targetRow.vat_rate = isNaN(parsed) ? "" : parsed;
+              hasChanges = true;
+            } else if (colId === "purchase_price") {
+              targetRow.purchase_price = safeMoney(val);
+              hasChanges = true;
+            } else if (colId === "ric_pct") {
+              const ricNum = parseFloat(val.replace("%", "").replace(",", "."));
+              const pp = isPositivePrice(targetRow.purchase_price)
+                ? safeMoney(targetRow.purchase_price).toNumber()
+                : 0;
+              if (!isNaN(ricNum) && pp > 0) {
+                const newUp = money(pp * (1 + ricNum / 100));
+                targetRow.unit_price = newUp;
+                targetRow.base_price = newUp;
+                hasChanges = true;
+              }
+            }
+          });
+
+          // Ricalcolo importi riga
+          const { netAmount, vatAmount } = calculateRowAmounts(
+            targetRow.quantity || (isPositivePrice(targetRow.unit_price) ? "1" : ""),
+            safeMoney(targetRow.unit_price),
+            targetRow.discount_pct || "0",
+            targetRow.vat_rate
+          );
+          targetRow.net_amount = netAmount;
+          targetRow.vat_amount = vatAmount;
+
+          newItems[targetRowIndex] = targetRow;
+        });
+
+        if (hasChanges && gridRef.current?.api) {
+          setTimeout(() => {
+            gridRef.current?.api?.refreshCells({ force: true });
+          }, 0);
+        }
+
+        return hasChanges ? newItems : prevItems;
+      });
+    },
+    [showMargini, setItems]
+  );
+
+  // Gestione tastiera celle (Copia Ctrl+C, Taglia Ctrl+X, Incolla Ctrl+V, Svuota Delete/Backspace stile Excel puro)
   const handleCellKeyDown = useCallback(
     async (e: any) => {
       if (!e.event) return;
+
+      const isCtrlOrMeta = e.event.ctrlKey || e.event.metaKey;
+      const keyLower = e.event.key?.toLowerCase();
+
+      // COPIA: Ctrl+C (quando non in edit mode)
+      if (isCtrlOrMeta && keyLower === "c" && !window.__isDDTCellEditing) {
+        const colId = e.column?.getColId();
+        const rowData = e.node?.data;
+        if (rowData && colId) {
+          e.event.preventDefault();
+          let textToCopy = "";
+          if (colId === "unit_price" || colId === "purchase_price") {
+            const m = safeMoney(rowData[colId]);
+            textToCopy = isPositivePrice(m) ? m.formatIT(false) : "";
+          } else if (colId === "net_amount" || colId === "vat_amount") {
+            const m = safeMoney(rowData[colId]);
+            textToCopy = m.formatIT(false);
+          } else {
+            textToCopy = String(rowData[colId] ?? "");
+          }
+          try {
+            await navigator.clipboard.writeText(textToCopy);
+          } catch (err) {
+            console.warn("[DDTArticoliTable] Errore copia clipboard:", err);
+          }
+        }
+        return;
+      }
+
+      // TAGLIA: Ctrl+X (quando non in edit mode)
+      if (isCtrlOrMeta && keyLower === "x" && !window.__isDDTCellEditing) {
+        if (e.column?.isCellEditable(e.node)) {
+          const colId = e.column.getColId();
+          const rowIndex = e.node.rowIndex;
+          const updatedRow = { ...e.node.data };
+          let textToCopy = "";
+
+          if (colId === "unit_price") {
+            const m = safeMoney(updatedRow.unit_price);
+            textToCopy = isPositivePrice(m) ? m.formatIT(false) : "";
+            updatedRow.unit_price = money(0);
+            updatedRow.base_price = money(0);
+          } else if (colId === "purchase_price") {
+            const m = safeMoney(updatedRow.purchase_price);
+            textToCopy = isPositivePrice(m) ? m.formatIT(false) : "";
+            updatedRow.purchase_price = money(0);
+          } else if (colId === "discount_pct") {
+            textToCopy = String(updatedRow.discount_pct ?? "");
+            updatedRow.discount_pct = "";
+            updatedRow.base_discount_pct = "";
+          } else if (colId === "vat_rate") {
+            textToCopy = String(updatedRow.vat_rate ?? "");
+            updatedRow.vat_rate = "";
+          } else {
+            textToCopy = String(updatedRow[colId] ?? "");
+            updatedRow[colId] = "";
+          }
+
+          e.event.preventDefault();
+          try {
+            await navigator.clipboard.writeText(textToCopy);
+          } catch (err) {
+            console.warn("[DDTArticoliTable] Errore taglia clipboard:", err);
+          }
+
+          const { netAmount, vatAmount } = calculateRowAmounts(
+            updatedRow.quantity || (isPositivePrice(updatedRow.unit_price) ? "1" : ""),
+            safeMoney(updatedRow.unit_price),
+            updatedRow.discount_pct || "0",
+            updatedRow.vat_rate
+          );
+          updatedRow.net_amount = netAmount;
+          updatedRow.vat_amount = vatAmount;
+
+          e.node.setData(updatedRow);
+          setItems((prev) => {
+            const copy = [...prev];
+            copy[rowIndex] = { ...updatedRow, row_index: rowIndex + 1 };
+            return copy;
+          });
+          if (gridRef.current?.api) {
+            gridRef.current.api.refreshCells({ rowNodes: [e.node], force: true });
+          }
+        }
+        return;
+      }
+
+      // INCOLLA: Ctrl+V (quando non in edit mode)
+      if (isCtrlOrMeta && keyLower === "v" && !window.__isDDTCellEditing) {
+        if (e.column?.isCellEditable(e.node)) {
+          e.event.preventDefault();
+          try {
+            const clipText = await navigator.clipboard.readText();
+            if (clipText) {
+              applyPasteToGrid(e.node.rowIndex, e.column.getColId(), clipText);
+            }
+          } catch (err) {
+            console.warn("[DDTArticoliTable] Errore incolla clipboard:", err);
+          }
+        }
+        return;
+      }
 
       // Tasto Canc o Backspace su cella evidenziata (non in edit mode): svuota la cella stile Excel
       if (
@@ -294,7 +504,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         }
       }
     },
-    [onOpenSearchModal, setItems]
+    [applyPasteToGrid, onOpenSearchModal, setItems]
   );
 
   // Navigazione Tab in avanti e indietro solo sulle colonne editabili (con a capo su riga successiva)
@@ -682,8 +892,26 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
     return cols;
   }, [showMargini, handleDeleteRow, onDescriptionTyping]);
 
+  // Gestione incolla nativo su contenitore griglia
+  const handleContainerPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (window.__isDDTCellEditing) return;
+      const focusedCell = gridRef.current?.api?.getFocusedCell();
+      if (!focusedCell) return;
+      const clipText = e.clipboardData?.getData("text/plain");
+      if (!clipText) return;
+      e.preventDefault();
+      const colId = typeof focusedCell.column === "string" ? focusedCell.column : focusedCell.column.getColId();
+      applyPasteToGrid(focusedCell.rowIndex, colId, clipText);
+    },
+    [applyPasteToGrid]
+  );
+
   return (
-    <div className="ddt-items-grid ag-theme-alpine w-full h-full flex-1 min-h-0 overflow-hidden relative border border-zinc-300">
+    <div
+      onPaste={handleContainerPaste}
+      className="ddt-items-grid ag-theme-alpine w-full h-full flex-1 min-h-0 overflow-hidden relative border border-zinc-300"
+    >
       <style>{`
         /* Focus chiaro e visibile sull'intera riga (solo tabella DDT principale) */
         .ddt-items-grid.ag-theme-alpine .ag-row.ag-row-focus {
