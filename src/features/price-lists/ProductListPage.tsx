@@ -69,7 +69,6 @@ const EDITABLE_COL_ORDER = [
   "cat",
   "fornitore",
   "codice_articolo",
-  "data_ref",
   "descrizione",
   "um",
   "perc_pub",
@@ -799,7 +798,7 @@ export const ProductListPage: React.FC = () => {
   // Apertura editor cella (doppio click, F2, Invio o digitazione di un carattere)
   const startEditing = useCallback(
     (rowId: string, colId: string, char?: string) => {
-      if (!canEdit) return;
+      if (!canEdit || colId === "data_ref") return;
       setActiveCell({ rowId, colId });
       setEditingCell({ rowId, colId });
       setInitialEditChar(char);
@@ -1579,14 +1578,14 @@ export const ProductListPage: React.FC = () => {
                     displayValue={formatDateAaaaMmGg(newTopRow.data_ref)}
                     align="center"
                     isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "data_ref"}
-                    isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "data_ref"}
-                    initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "data_ref" ? initialEditChar : undefined}
-                    canEdit={canEdit}
+                    isEditing={false}
+                    canEdit={false}
                     onSelectCell={selectCell}
-                    onStartEdit={startEditing}
-                    onCommit={commitCellEdit}
+                    onStartEdit={() => {}}
+                    onCommit={() => {}}
                     onCancel={cancelCellEdit}
                     onKeyDown={handleCellKeyDown}
+                    className="text-[var(--muted-foreground)] cursor-default select-none opacity-80"
                   />
                 )}
 
@@ -2051,15 +2050,14 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             displayValue={formatDateAaaaMmGg(item.data_ref)}
             align="center"
             isActive={activeColId === "data_ref"}
-            isEditing={editingColId === "data_ref"}
-            initialChar={editingColId === "data_ref" ? initialEditChar : undefined}
-            canEdit={canEdit}
+            isEditing={false}
+            canEdit={false}
             onSelectCell={onSelectCell}
-            onStartEdit={onStartEdit}
-            onCommit={onCommitCell}
+            onStartEdit={() => {}}
+            onCommit={() => {}}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)]"
+            className="text-[var(--muted-foreground)] cursor-default select-none opacity-80"
           />
         )}
 
@@ -2453,7 +2451,9 @@ const EditableCell: React.FC<EditableCellProps> = memo(
       <td
         ref={tdRef}
         onClick={() => onSelectCell(rowId, colId)}
-        onDoubleClick={() => onStartEdit(rowId, colId)}
+        onDoubleClick={() => {
+          if (canEdit && colId !== "data_ref") onStartEdit(rowId, colId);
+        }}
         onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue)}
         tabIndex={canEdit ? 0 : -1}
         className={`px-2.5 py-1.5 transition-colors outline-none cursor-pointer select-none ${alignClass} ${className} ${
