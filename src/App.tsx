@@ -105,7 +105,7 @@ export function App() {
       case "orders":
         return <OrderManagerPage windowId={windowId} />;
       case "price-lists":
-        return <ProductListPage />;
+        return <ProductListPage windowId={windowId} />;
       case "settings":
         return <SettingsPage />;
       case "ddt-studio":
@@ -115,7 +115,7 @@ export function App() {
       case "ddt-articles":
         return <DDTArticlesPage />;
       case "client-lists":
-        return <CustomerPriceListPage />;
+        return <CustomerPriceListPage windowId={windowId} />;
       case "clients":
         return <ClientListPage />;
       case "quotes":

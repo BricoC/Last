@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
-import { ListinoGeneraleRow, ListinoClienteRow, TrashListinoRow } from "../models/priceList";
+import {
+  ListinoGeneraleRow,
+  ListinoClienteRow,
+  TrashListinoRow,
+  TrashListinoClienteRow,
+} from "../models/priceList";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -511,6 +516,166 @@ export class PriceListSyncService {
       });
     } catch (err) {
       console.warn("[PriceListSyncService] Delete Cestino Supabase:", err);
+    }
+  }
+
+  /**
+   * Sincronizza (upsert) un batch di righe di Listini Clienti su Supabase Cloud.
+   */
+  async pushClientBatchToSupabase(
+    rows: ListinoClienteRow[]
+  ): Promise<{ success: boolean; updatedCount: number; error?: string }> {
+    if (rows.length === 0) return { success: true, updatedCount: 0 };
+    try {
+      const creds = await getSupabaseCredentials();
+      const db = await getDatabase();
+
+      for (const r of rows) {
+        const isNew = r.id.startsWith("new_");
+        const payload: any = {
+          cliente: r.cliente,
+          codice_articolo: r.codice_articolo ?? null,
+          descrizione: r.descrizione,
+          prezzo_fattura: r.prezzo_fattura ?? null,
+          prezzo_acquisto: r.prezzo_acquisto ?? null,
+          acquisto_eur: r.acquisto_eur ?? null,
+          perc_acquisto: r.perc_acquisto ?? null,
+          data_acquisto: r.data_acquisto ?? null,
+          acquisto_old: r.acquisto_old ?? null,
+          ricarico: r.ricarico ?? null,
+          data_ref: r.data_ref ?? null,
+          note: r.note ?? null,
+          note1: r.note1 ?? null,
+          note2: r.note2 ?? null,
+          updated_at: new Date().toISOString(),
+          modificato_da: "Operatore",
+        };
+
+        if (isNew) {
+          const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti`, {
+            method: "POST",
+            headers: {
+              apikey: creds.anonKey,
+              "Content-Type": "application/json",
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify(payload),
+          });
+          if (res.ok) {
+            const inserted = await res.json();
+            if (Array.isArray(inserted) && inserted[0]?.id) {
+              const newCloudId = `cli_${inserted[0].id}`;
+              await db.execute("UPDATE listini_clienti SET id = $1 WHERE id = $2;", [
+                newCloudId,
+                r.id,
+              ]);
+            }
+          }
+        } else {
+          const rawIdStr = r.id.replace(/^cli_/, "");
+          const numId = parseInt(rawIdStr, 10);
+          const targetId = isNaN(numId) ? rawIdStr : numId;
+
+          await fetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
+            method: "PATCH",
+            headers: {
+              apikey: creds.anonKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+        }
+      }
+
+      return { success: true, updatedCount: rows.length };
+    } catch (err: any) {
+      console.warn(
+        "[PriceListSyncService] Push Listini Clienti Supabase non riuscito (modalità locale attiva):",
+        err
+      );
+      return { success: false, updatedCount: 0, error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Elimina righe di Listini Clienti da Supabase Cloud.
+   */
+  async deleteClientRowsFromSupabase(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    try {
+      const creds = await getSupabaseCredentials();
+      for (const id of ids) {
+        if (id.startsWith("new_")) continue;
+        const rawIdStr = id.replace(/^cli_/, "");
+        const numId = parseInt(rawIdStr, 10);
+        const targetId = isNaN(numId) ? rawIdStr : numId;
+
+        await fetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
+          method: "DELETE",
+          headers: {
+            apikey: creds.anonKey,
+          },
+        });
+      }
+    } catch (err) {
+      console.warn("[PriceListSyncService] Delete Clienti Supabase asincrono non riuscito:", err);
+    }
+  }
+
+  /**
+   * Sposta elementi nel Cestino Clienti su Supabase.
+   */
+  async pushClientTrashBatchToSupabase(rows: TrashListinoClienteRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    try {
+      const creds = await getSupabaseCredentials();
+      const payload = rows.map((r) => ({
+        id: r.id,
+        deleted_at: r.deleted_at,
+        deleted_by: r.deleted_by || "Operatore",
+        cliente: r.cliente,
+        codice_articolo: r.codice_articolo || null,
+        descrizione: r.descrizione || "",
+        prezzo_fattura: r.prezzo_fattura,
+        acquisto_eur: r.acquisto_eur,
+        perc_acquisto: r.perc_acquisto,
+        data_acquisto: r.data_acquisto,
+        acquisto_old: r.acquisto_old,
+        ricarico: r.ricarico,
+        data_ref: r.data_ref,
+        note: r.note,
+        note1: r.note1,
+        note2: r.note2,
+      }));
+
+      await fetch(`${creds.projectUrl}/rest/v1/listini_clienti_cestino`, {
+        method: "POST",
+        headers: {
+          apikey: creds.anonKey,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      console.warn("[PriceListSyncService] Push Cestino Clienti Supabase:", err);
+    }
+  }
+
+  /**
+   * Rimuove un elemento dal Cestino Clienti su Supabase al momento del ripristino.
+   */
+  async deleteClientTrashFromSupabase(id: string): Promise<void> {
+    try {
+      const creds = await getSupabaseCredentials();
+      await fetch(`${creds.projectUrl}/rest/v1/listini_clienti_cestino?id=eq.${id}`, {
+        method: "DELETE",
+        headers: {
+          apikey: creds.anonKey,
+        },
+      });
+    } catch (err) {
+      console.warn("[PriceListSyncService] Delete Cestino Clienti Supabase:", err);
     }
   }
 }
