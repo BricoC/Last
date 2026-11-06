@@ -17,6 +17,9 @@ export async function migrateCustomerPriceListUpgradeV22(db: Database): Promise<
   if (!existingCols.has("data_acquisto")) {
     await db.execute("ALTER TABLE listini_clienti ADD COLUMN data_acquisto TEXT;");
   }
+  if (!existingCols.has("fornitore")) {
+    await db.execute("ALTER TABLE listini_clienti ADD COLUMN fornitore TEXT;");
+  }
   if (!existingCols.has("acquisto_old")) {
     await db.execute("ALTER TABLE listini_clienti ADD COLUMN acquisto_old TEXT;");
     // Popola acquisto_old col vecchio prezzo_acquisto convertito a testo
@@ -34,6 +37,7 @@ export async function migrateCustomerPriceListUpgradeV22(db: Database): Promise<
       deleted_at TEXT NOT NULL,
       deleted_by TEXT,
       cliente TEXT NOT NULL,
+      fornitore TEXT,
       codice_articolo TEXT,
       descrizione TEXT NOT NULL,
       prezzo_fattura REAL,
@@ -56,3 +60,4 @@ export async function migrateCustomerPriceListUpgradeV22(db: Database): Promise<
     ON listini_clienti_cestino(deleted_at DESC);
   `);
 }
+

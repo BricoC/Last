@@ -534,6 +534,7 @@ export class PriceListSyncService {
         const isNew = r.id.startsWith("new_");
         const payload: any = {
           cliente: r.cliente,
+          fornitore: r.fornitore ?? null,
           codice_articolo: r.codice_articolo ?? null,
           descrizione: r.descrizione,
           prezzo_fattura: r.prezzo_fattura ?? null,
@@ -634,6 +635,7 @@ export class PriceListSyncService {
         deleted_at: r.deleted_at,
         deleted_by: r.deleted_by || "Operatore",
         cliente: r.cliente,
+        fornitore: r.fornitore || null,
         codice_articolo: r.codice_articolo || null,
         descrizione: r.descrizione || "",
         prezzo_fattura: r.prezzo_fattura,

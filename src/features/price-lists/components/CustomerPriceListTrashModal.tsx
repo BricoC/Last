@@ -165,6 +165,7 @@ export const CustomerPriceListTrashModal: React.FC<CustomerPriceListTrashModalPr
                   <th className="px-3 py-2 text-left w-36">Eliminato Il</th>
                   <th className="px-3 py-2 text-left w-24">Operatore</th>
                   <th className="px-3 py-2 text-left w-36">Cliente</th>
+                  <th className="px-3 py-2 text-left w-28">Fornitore</th>
                   <th className="px-3 py-2 text-left w-28">Codice Art.</th>
                   <th className="px-3 py-2 text-left">Descrizione</th>
                   <th className="px-3 py-2 text-right w-24">Vendita (€)</th>
@@ -189,6 +190,9 @@ export const CustomerPriceListTrashModal: React.FC<CustomerPriceListTrashModalPr
                     </td>
                     <td className="px-3 py-2 font-bold text-amber-400 truncate max-w-[140px]" title={row.cliente}>
                       {row.cliente.replace(/^LIST_/, "")}
+                    </td>
+                    <td className="px-3 py-2 text-[var(--muted-foreground)] uppercase truncate max-w-[110px]" title={row.fornitore || ""}>
+                      {row.fornitore || "—"}
                     </td>
                     <td className="px-3 py-2 font-bold text-[var(--primary)] whitespace-nowrap">
                       {row.codice_articolo || "—"}
@@ -248,3 +252,4 @@ export const CustomerPriceListTrashModal: React.FC<CustomerPriceListTrashModalPr
     </div>
   );
 };
+

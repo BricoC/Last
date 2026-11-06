@@ -524,13 +524,14 @@ export class PriceListRepository {
     for (const row of rows) {
       await db.execute(
         `INSERT INTO listini_clienti (
-          id, cliente, codice_articolo, descrizione,
+          id, cliente, fornitore, codice_articolo, descrizione,
           prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto,
           data_acquisto, acquisto_old, ricarico, data_ref,
           note, note1, note2, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         ON CONFLICT(id) DO UPDATE SET
           cliente = excluded.cliente,
+          fornitore = excluded.fornitore,
           codice_articolo = excluded.codice_articolo,
           descrizione = excluded.descrizione,
           prezzo_fattura = excluded.prezzo_fattura,
@@ -548,6 +549,7 @@ export class PriceListRepository {
         [
           row.id,
           row.cliente,
+          row.fornitore ?? null,
           row.codice_articolo ?? null,
           row.descrizione,
           cleanNum5(row.prezzo_fattura),
@@ -589,10 +591,10 @@ export class PriceListRepository {
 
       await db.execute(
         `INSERT INTO listini_clienti_cestino (
-          id, deleted_at, deleted_by, cliente, codice_articolo, descrizione,
+          id, deleted_at, deleted_by, cliente, fornitore, codice_articolo, descrizione,
           prezzo_fattura, acquisto_eur, perc_acquisto, data_acquisto,
           acquisto_old, ricarico, data_ref, note, note1, note2, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         ON CONFLICT(id) DO UPDATE SET
           deleted_at = excluded.deleted_at,
           deleted_by = excluded.deleted_by;`,
@@ -601,6 +603,7 @@ export class PriceListRepository {
           nowIso,
           operator,
           row.cliente,
+          row.fornitore ?? null,
           row.codice_articolo ?? null,
           row.descrizione,
           cleanNum5(row.prezzo_fattura),
