@@ -27,6 +27,8 @@ import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { ItemPriceHistoryModal } from "./components/ItemPriceHistoryModal";
 import { PriceListTrashModal } from "./components/PriceListTrashModal";
+import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
+import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import {
   useColumnVisibility,
   ALL_GENERAL_COLUMNS,
@@ -222,7 +224,11 @@ function formatDateTime(date: Date | string | null | undefined): string {
   return `${day}/${month}/${year} alle ${hours}:${minutes}:${seconds}`;
 }
 
-export const ProductListPage: React.FC = () => {
+export interface ProductListPageProps {
+  windowId?: string;
+}
+
+export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) => {
   const { currentUser } = useUserStore();
   const canEdit = Boolean(currentUser?.is_admin || currentUser?.can_edit_price_lists);
 
@@ -738,6 +744,36 @@ export const ProductListPage: React.FC = () => {
       void saveAllPendingChanges();
     }, intervalMs);
   }, [saveAllPendingChanges]);
+
+  // Gestione popup blocco chiusura per modifiche non salvate
+  const [closePrompt, setClosePrompt] = useState<((choice: "save" | "discard" | "cancel") => void) | null>(null);
+
+  const confirmIfDirty = useCallback(async (): Promise<boolean> => {
+    if (dirtyRows.size === 0) return true;
+    const choice = await new Promise<"save" | "discard" | "cancel">((resolve) => setClosePrompt(() => resolve));
+    setClosePrompt(null);
+    if (choice === "discard") {
+      setDirtyRows(new Map());
+      return true;
+    }
+    if (choice === "save") {
+      await saveAllPendingChanges();
+      return true;
+    }
+    return false;
+  }, [dirtyRows, saveAllPendingChanges]);
+
+  useEffect(() => {
+    if (!windowId) return;
+    return registerDirtyCheck(windowId, () => dirtyRows.size > 0);
+  }, [windowId, dirtyRows.size]);
+
+  useEffect(() => {
+    if (!windowId) return;
+    return registerWindowCloseGuard(windowId, async () => {
+      return await confirmIfDirty();
+    });
+  }, [windowId, confirmIfDirty]);
 
   // Applica modifica ad una cella
   const applyCellChange = useCallback(
@@ -1889,6 +1925,19 @@ export const ProductListPage: React.FC = () => {
         isOpen={isTrashModalOpen}
         onClose={() => setIsTrashModalOpen(false)}
         onItemRestored={handleItemRestored}
+      />
+
+      <UnsavedChangesModal
+        isOpen={Boolean(closePrompt)}
+        title="Listino Generale con modifiche non salvate"
+        message={`Attenzione: sono presenti ${dirtyRows.size} articoli modificati non ancora salvati. Se esci senza salvare, le modifiche apportate andranno perse definitivamente.`}
+        onCancel={() => closePrompt?.("cancel")}
+        onDiscard={() => closePrompt?.("discard")}
+        onSave={() => closePrompt?.("save")}
+        saveLabel="Salva e Chiudi"
+        discardLabel="Non salvare ed Esci"
+        cancelLabel="Annulla"
+        isSaving={isSaving}
       />
     </div>
   );

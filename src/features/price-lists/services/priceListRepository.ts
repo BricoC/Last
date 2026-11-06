@@ -1,5 +1,11 @@
 import { getDatabase } from "@/shared/data-layer/database";
-import { ListinoGeneraleRow, ListinoClienteRow, PriceListLogEntry, TrashListinoRow } from "../models/priceList";
+import {
+  ListinoGeneraleRow,
+  ListinoClienteRow,
+  PriceListLogEntry,
+  TrashListinoRow,
+  TrashListinoClienteRow,
+} from "../models/priceList";
 import { resolveClientPriceLists } from "@/features/ddt-studio/utils/clientPriceListMatcher";
 
 function cleanNum5(val: number | null | undefined): number | null {
@@ -507,6 +513,173 @@ export class PriceListRepository {
     await db.execute("DELETE FROM listino_generale_cestino WHERE id = $1;", [id]);
 
     return row;
+  }
+
+  /**
+   * Salva o aggiorna un batch di righe di Listini Clienti in SQLite.
+   */
+  async saveClientRows(rows: ListinoClienteRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    const db = await getDatabase();
+    for (const row of rows) {
+      await db.execute(
+        `INSERT INTO listini_clienti (
+          id, cliente, codice_articolo, descrizione,
+          prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto,
+          data_acquisto, acquisto_old, ricarico, data_ref,
+          note, note1, note2, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        ON CONFLICT(id) DO UPDATE SET
+          cliente = excluded.cliente,
+          codice_articolo = excluded.codice_articolo,
+          descrizione = excluded.descrizione,
+          prezzo_fattura = excluded.prezzo_fattura,
+          prezzo_acquisto = excluded.prezzo_acquisto,
+          acquisto_eur = excluded.acquisto_eur,
+          perc_acquisto = excluded.perc_acquisto,
+          data_acquisto = excluded.data_acquisto,
+          acquisto_old = excluded.acquisto_old,
+          ricarico = excluded.ricarico,
+          data_ref = excluded.data_ref,
+          note = excluded.note,
+          note1 = excluded.note1,
+          note2 = excluded.note2,
+          updated_at = excluded.updated_at;`,
+        [
+          row.id,
+          row.cliente,
+          row.codice_articolo ?? null,
+          row.descrizione,
+          cleanNum5(row.prezzo_fattura),
+          cleanNum5(row.prezzo_acquisto),
+          cleanNum5(row.acquisto_eur),
+          cleanNum5(row.perc_acquisto),
+          row.data_acquisto ?? null,
+          row.acquisto_old ?? null,
+          cleanNum5(row.ricarico),
+          row.data_ref ?? null,
+          row.note ?? null,
+          row.note1 ?? null,
+          row.note2 ?? null,
+          row.created_at || new Date().toISOString(),
+          new Date().toISOString(),
+        ]
+      );
+    }
+  }
+
+  /**
+   * Sposta uno o più articoli nel Cestino Clienti (massimo 50 elementi a scorrimento FIFO)
+   */
+  async moveToClientTrash(rows: ListinoClienteRow[], deletedBy?: string): Promise<TrashListinoClienteRow[]> {
+    if (rows.length === 0) return [];
+    const db = await getDatabase();
+    const nowIso = new Date().toISOString();
+    const operator = deletedBy || "Operatore";
+
+    const trashEntries: TrashListinoClienteRow[] = [];
+
+    for (const row of rows) {
+      const trashItem: TrashListinoClienteRow = {
+        ...row,
+        deleted_at: nowIso,
+        deleted_by: operator,
+      };
+      trashEntries.push(trashItem);
+
+      await db.execute(
+        `INSERT INTO listini_clienti_cestino (
+          id, deleted_at, deleted_by, cliente, codice_articolo, descrizione,
+          prezzo_fattura, acquisto_eur, perc_acquisto, data_acquisto,
+          acquisto_old, ricarico, data_ref, note, note1, note2, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        ON CONFLICT(id) DO UPDATE SET
+          deleted_at = excluded.deleted_at,
+          deleted_by = excluded.deleted_by;`,
+        [
+          row.id,
+          nowIso,
+          operator,
+          row.cliente,
+          row.codice_articolo ?? null,
+          row.descrizione,
+          cleanNum5(row.prezzo_fattura),
+          cleanNum5(row.acquisto_eur),
+          cleanNum5(row.perc_acquisto),
+          row.data_acquisto ?? null,
+          row.acquisto_old ?? null,
+          cleanNum5(row.ricarico),
+          row.data_ref ?? null,
+          row.note ?? null,
+          row.note1 ?? null,
+          row.note2 ?? null,
+          row.created_at ?? null,
+          row.updated_at ?? null,
+        ]
+      );
+
+      // Rimuovi dalla tabella attiva
+      await db.execute("DELETE FROM listini_clienti WHERE id = $1;", [row.id]);
+    }
+
+    // Tronca il cestino alle ultime 50 voci (FIFO: le più vecchie vengono eliminate)
+    await db.execute(`
+      DELETE FROM listini_clienti_cestino
+      WHERE id NOT IN (
+        SELECT id FROM listini_clienti_cestino
+        ORDER BY deleted_at DESC
+        LIMIT 50
+      );
+    `);
+
+    return trashEntries;
+  }
+
+  /**
+   * Restituisce gli articoli nel cestino clienti ordinati dal più recente al più vecchio (max 50).
+   */
+  async getClientTrashItems(): Promise<TrashListinoClienteRow[]> {
+    const db = await getDatabase();
+    return await db.select<TrashListinoClienteRow[]>(
+      "SELECT * FROM listini_clienti_cestino ORDER BY deleted_at DESC LIMIT 50;"
+    );
+  }
+
+  /**
+   * Conteggio voci nel cestino clienti.
+   */
+  async getClientTrashCount(): Promise<number> {
+    const db = await getDatabase();
+    const rows = await db.select<{ count: number }[]>(
+      "SELECT COUNT(*) as count FROM listini_clienti_cestino;"
+    );
+    return rows[0]?.count ?? 0;
+  }
+
+  /**
+   * Ripristina un articolo dal Cestino al Listino Clienti attivo.
+   */
+  async restoreFromClientTrash(id: string): Promise<ListinoClienteRow | null> {
+    const db = await getDatabase();
+    const rows = await db.select<ListinoClienteRow[]>(
+      "SELECT * FROM listini_clienti_cestino WHERE id = $1 LIMIT 1;",
+      [id]
+    );
+    if (!rows || rows.length === 0) return null;
+
+    const row = rows[0];
+    await this.saveClientRows([row]);
+    await db.execute("DELETE FROM listini_clienti WHERE id = $1;", [id]);
+
+    return row;
+  }
+
+  /**
+   * Svuota completamente il cestino clienti.
+   */
+  async emptyClientTrash(): Promise<void> {
+    const db = await getDatabase();
+    await db.execute("DELETE FROM listini_clienti_cestino;");
   }
 }
 

@@ -101,3 +101,92 @@ export function useColumnVisibility(userId?: string) {
   };
 }
 
+export const ALL_CLIENT_COLUMNS: ColumnDefinition[] = [
+  { id: "actions", label: "Cestino (Elimina Riga)", defaultVisible: true, category: "anagrafica" },
+  { id: "cliente", label: "Cliente", defaultVisible: true, category: "anagrafica" },
+  { id: "codice_articolo", label: "Codice Articolo", defaultVisible: true, category: "anagrafica" },
+  { id: "descrizione", label: "Descrizione", defaultVisible: true, category: "anagrafica" },
+  { id: "prezzo_fattura", label: "Prezzo Vendita (€)", defaultVisible: true, category: "ricarichi" },
+  { id: "acquisto_eur", label: "Acquisto (€)", defaultVisible: true, category: "costi" },
+  { id: "perc_acquisto", label: "% Acquisto", defaultVisible: true, category: "ricarichi" },
+  { id: "data_acquisto", label: "Data Acquisto", defaultVisible: true, category: "costi" },
+  { id: "acquisto_old", label: "Acquisto OLD", defaultVisible: true, category: "costi" },
+  { id: "ricarico", label: "Ricarico (%)", defaultVisible: false, category: "ricarichi" },
+  { id: "data_ref", label: "Data", defaultVisible: true, category: "anagrafica" },
+  { id: "note", label: "Note", defaultVisible: true, category: "anagrafica" },
+  { id: "note1", label: "Note 1", defaultVisible: false, category: "anagrafica" },
+  { id: "note2", label: "Note 2", defaultVisible: false, category: "anagrafica" },
+];
+
+export function useClientColumnVisibility(userId?: string) {
+  const storageKey = `client_columns_${userId || "default"}`;
+
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {}
+    const defaults: Record<string, boolean> = {};
+    for (const col of ALL_CLIENT_COLUMNS) {
+      defaults[col.id] = col.defaultVisible;
+    }
+    return defaults;
+  });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        setVisibleColumns(JSON.parse(saved));
+      } else {
+        const defaults: Record<string, boolean> = {};
+        for (const col of ALL_CLIENT_COLUMNS) {
+          defaults[col.id] = col.defaultVisible;
+        }
+        setVisibleColumns(defaults);
+      }
+    } catch {}
+  }, [storageKey]);
+
+  const toggleColumn = useCallback(
+    (colId: string) => {
+      setVisibleColumns((prev) => {
+        const next = { ...prev, [colId]: !prev[colId] };
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+    },
+    [storageKey]
+  );
+
+  const resetDefaultColumns = useCallback(() => {
+    const defaults: Record<string, boolean> = {};
+    for (const col of ALL_CLIENT_COLUMNS) {
+      defaults[col.id] = col.defaultVisible;
+    }
+    setVisibleColumns(defaults);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(defaults));
+    } catch {}
+  }, [storageKey]);
+
+  const isVisible = useCallback(
+    (colId: string) => {
+      return visibleColumns[colId] !== false;
+    },
+    [visibleColumns]
+  );
+
+  return {
+    columns: ALL_CLIENT_COLUMNS,
+    visibleColumns,
+    isVisible,
+    toggleColumn,
+    resetDefaultColumns,
+  };
+}
+

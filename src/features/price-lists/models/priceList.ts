@@ -31,12 +31,22 @@ export interface ListinoClienteRow {
   descrizione: string;
   prezzo_fattura: number | null;
   prezzo_acquisto: number | null;
+  acquisto_eur?: number | null;
+  perc_acquisto?: number | null;
+  data_acquisto?: string | null;
+  acquisto_old?: string | null;
   ricarico: number | null;
+  data_ref?: string | null;
   note: string | null;
   note1: string | null;
   note2: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface TrashListinoClienteRow extends ListinoClienteRow {
+  deleted_at: string;
+  deleted_by?: string | null;
 }
 
 export interface PriceListLogEntry {
