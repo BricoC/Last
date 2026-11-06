@@ -195,15 +195,29 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const clientDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!isClientDropdownOpen) return;
+
     const handleClickOutside = (e: MouseEvent) => {
       if (clientDropdownRef.current && !clientDropdownRef.current.contains(e.target as Node)) {
         setIsClientDropdownOpen(false);
       }
     };
-    if (isClientDropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsClientDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
   }, [isClientDropdownOpen]);
 
   const filteredDropdownClients = useMemo(() => {
@@ -1116,6 +1130,13 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       type="text"
                       value={clientDropdownSearch}
                       onChange={(e) => setClientDropdownSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setIsClientDropdownOpen(false);
+                        }
+                      }}
                       placeholder="Cerca cliente..."
                       className="w-full pl-8 pr-2.5 py-1 text-xs bg-[#1a1d24] border border-[var(--border)]/70 rounded text-gray-100 placeholder:text-gray-500 focus:outline-none focus:border-sky-500"
                     />
