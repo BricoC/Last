@@ -348,8 +348,10 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
                 <input
                   type="date"
                   value={docDate}
-                  onChange={(e) => setDocDate(e.target.value)}
-                  className="w-full bg-[#0f172a] border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                  readOnly
+                  disabled
+                  title="La data del DDT non è modificabile manualmente"
+                  className="w-full bg-[#0f172a]/50 border border-slate-800 rounded px-2 py-1 text-xs text-slate-400 cursor-not-allowed select-none opacity-80"
                 />
               </div>
 
