@@ -24,6 +24,7 @@ import {
   User,
   Cloud,
   Loader2,
+  UploadCloud,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
@@ -221,6 +222,30 @@ export const TopNavBar: React.FC = () => {
               </button>
             );
           })}
+
+          {/* Pulsante Provvisorio Transitorio Migrazione Listini (Solo Amministratore) */}
+          {currentUser?.is_admin && (
+            <button
+              type="button"
+              onClick={() =>
+                openWindow({
+                  id: "manual-cloud-import",
+                  title: "Migrazione Listini",
+                  componentId: "manual-cloud-import",
+                })
+              }
+              title="Migrazione Listini Clienti da locale a Supabase (Solo Amministratore)"
+              className={cn(
+                "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap shrink-0 select-none cursor-pointer border",
+                activeWindowId === "manual-cloud-import"
+                  ? "bg-amber-500/20 text-amber-300 border-amber-500 shadow-sm font-semibold"
+                  : "bg-amber-500/10 text-amber-400/90 border-amber-500/30 hover:bg-amber-500/20 hover:text-amber-300"
+              )}
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-amber-400" />
+              <span>Migrazione Listini</span>
+            </button>
+          )}
         </div>
 
       {/* Sezione Destra: Strumenti Desktop Finestre + Impostazioni */}

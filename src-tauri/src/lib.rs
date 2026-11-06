@@ -31,6 +31,55 @@ fn save_file_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, Stri
     Ok(file_path.to_string_lossy().to_string())
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ExcelFileInfo {
+    pub filename: String,
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+#[tauri::command]
+fn list_excel_files_in_folder(folder_path: Option<String>) -> Result<Vec<ExcelFileInfo>, String> {
+    use std::path::Path;
+    let target_dir = folder_path.unwrap_or_else(|| r"D:\BricoClassFiles\Offline\ListiniClienti".to_string());
+    let path = Path::new(&target_dir);
+    if !path.exists() || !path.is_dir() {
+        return Err(format!("La cartella non esiste o non è valida: {}", target_dir));
+    }
+
+    let mut results = Vec::new();
+    let entries = fs::read_dir(path).map_err(|e| format!("Errore lettura cartella: {}", e))?;
+
+    for entry in entries.flatten() {
+        let file_path = entry.path();
+        if file_path.is_file() {
+            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            if ext == "xls" || ext == "xlsx" {
+                let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                if filename.starts_with("~$") {
+                    continue;
+                }
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                results.push(ExcelFileInfo {
+                    filename,
+                    path: file_path.to_string_lossy().to_string(),
+                    size_bytes: size,
+                });
+            }
+        }
+    }
+
+    results.sort_by(|a, b| a.filename.to_lowercase().cmp(&b.filename.to_lowercase()));
+    Ok(results)
+}
+
+#[tauri::command]
+fn read_single_excel_file_base64(file_path: String) -> Result<String, String> {
+    use base64::prelude::*;
+    let bytes = fs::read(&file_path).map_err(|e| format!("Errore lettura file '{}': {}", file_path, e))?;
+    Ok(BASE64_STANDARD.encode(&bytes))
+}
+
 #[tauri::command]
 fn save_pdf_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, String> {
     save_file_to_desktop(filename, bytes)
@@ -337,7 +386,9 @@ pub fn run() {
             supabase_ddt_import::import_supabase_ddt_into_local,
             quote_commands::save_quote_transaction,
             quote_commands::soft_delete_quote_transaction,
-            quote_commands::convert_quote_to_ddt_transaction
+            quote_commands::convert_quote_to_ddt_transaction,
+            list_excel_files_in_folder,
+            read_single_excel_file_base64
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
