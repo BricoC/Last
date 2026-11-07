@@ -2,16 +2,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod backup_commands;
 mod ddt_commands;
 mod ddt_delete_command;
-mod supabase_config;
-mod supabase_ddt_preview;
-mod supabase_ddt_import;
 mod ddt_types;
 mod quote_commands;
 mod quote_persistence;
 mod quote_types;
-mod backup_commands;
+mod supabase_config;
+mod supabase_ddt_import;
+mod supabase_ddt_preview;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -51,8 +51,11 @@ fn save_file_base64_to_desktop(filename: String, base64_content: String) -> Resu
         &base64_content
     };
 
-    let decoded = BASE64_STANDARD.decode(clean_base64).map_err(|e| format!("Errore decodifica base64: {}", e))?;
-    fs::write(&file_path, decoded).map_err(|e| format!("Errore nel salvataggio del file: {}", e))?;
+    let decoded = BASE64_STANDARD
+        .decode(clean_base64)
+        .map_err(|e| format!("Errore decodifica base64: {}", e))?;
+    fs::write(&file_path, decoded)
+        .map_err(|e| format!("Errore nel salvataggio del file: {}", e))?;
 
     Ok(file_path.to_string_lossy().to_string())
 }
@@ -65,16 +68,30 @@ pub struct ExcelFileInfo {
 }
 
 #[tauri::command]
-fn list_files_in_folder(folder_path: Option<String>, extensions: Option<Vec<String>>) -> Result<Vec<ExcelFileInfo>, String> {
+fn list_files_in_folder(
+    folder_path: Option<String>,
+    extensions: Option<Vec<String>>,
+) -> Result<Vec<ExcelFileInfo>, String> {
     use std::path::Path;
-    let target_dir = folder_path.unwrap_or_else(|| r"D:\BricoClassFiles\Offline\ListiniClienti".to_string());
+    let target_dir =
+        folder_path.unwrap_or_else(|| r"D:\BricoClassFiles\Offline\ListiniClienti".to_string());
     let path = Path::new(&target_dir);
     if !path.exists() || !path.is_dir() {
-        return Err(format!("La cartella non esiste o non è valida: {}", target_dir));
+        return Err(format!(
+            "La cartella non esiste o non è valida: {}",
+            target_dir
+        ));
     }
 
     let exts: Vec<String> = extensions
-        .unwrap_or_else(|| vec!["xls".to_string(), "xlsx".to_string(), "xlsm".to_string(), "csv".to_string()])
+        .unwrap_or_else(|| {
+            vec![
+                "xls".to_string(),
+                "xlsx".to_string(),
+                "xlsm".to_string(),
+                "csv".to_string(),
+            ]
+        })
         .into_iter()
         .map(|e| e.to_lowercase())
         .collect();
@@ -85,9 +102,17 @@ fn list_files_in_folder(folder_path: Option<String>, extensions: Option<Vec<Stri
     for entry in entries.flatten() {
         let file_path = entry.path();
         if file_path.is_file() {
-            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let ext = file_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
             if exts.contains(&ext) {
-                let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                let filename = file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
                 if filename.starts_with("~$") {
                     continue;
                 }
@@ -107,13 +132,21 @@ fn list_files_in_folder(folder_path: Option<String>, extensions: Option<Vec<Stri
 
 #[tauri::command]
 fn list_excel_files_in_folder(folder_path: Option<String>) -> Result<Vec<ExcelFileInfo>, String> {
-    list_files_in_folder(folder_path, Some(vec!["xls".to_string(), "xlsx".to_string(), "xlsm".to_string()]))
+    list_files_in_folder(
+        folder_path,
+        Some(vec![
+            "xls".to_string(),
+            "xlsx".to_string(),
+            "xlsm".to_string(),
+        ]),
+    )
 }
 
 #[tauri::command]
 fn read_single_excel_file_base64(file_path: String) -> Result<String, String> {
     use base64::prelude::*;
-    let bytes = fs::read(&file_path).map_err(|e| format!("Errore lettura file '{}': {}", file_path, e))?;
+    let bytes =
+        fs::read(&file_path).map_err(|e| format!("Errore lettura file '{}': {}", file_path, e))?;
     Ok(BASE64_STANDARD.encode(&bytes))
 }
 
@@ -275,7 +308,8 @@ fn send_order_email(to: String, subject: String, body: String) -> Result<(), Str
 #[tauri::command]
 fn save_temp_file(filename: String, bytes: Vec<u8>) -> Result<String, String> {
     let temp_dir = std::env::temp_dir().join("brico_ddt_email");
-    fs::create_dir_all(&temp_dir).map_err(|e| format!("Errore creazione cartella temporanea: {}", e))?;
+    fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Errore creazione cartella temporanea: {}", e))?;
     let file_path = temp_dir.join(&filename);
     fs::write(&file_path, bytes).map_err(|e| format!("Errore scrittura file temporaneo: {}", e))?;
     Ok(file_path.to_string_lossy().to_string())
@@ -405,6 +439,8 @@ fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .invoke_handler(tauri::generate_handler![

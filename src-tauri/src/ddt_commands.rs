@@ -79,7 +79,11 @@ pub(crate) async fn persist_ddt(
         .await
         .map_err(|error| format!("Impossibile verificare l'univocità del numero DDT: {error}"))?;
         if let Some((_existing_id, deleted_at)) = conflict {
-            let state = if deleted_at.is_some() { "anche in un DDT cancellato" } else { "in un altro DDT" };
+            let state = if deleted_at.is_some() {
+                "anche in un DDT cancellato"
+            } else {
+                "in un altro DDT"
+            };
             return Err(format!(
                 "Il DDT n. {doc_number}/{year} è già presente {state}. Il numero non può essere riutilizzato.",
                 year = payload.year
