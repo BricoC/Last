@@ -84,9 +84,12 @@ export function getCapturePageElements(): HTMLElement[] {
  * Cattura una pagina DOM A4 ad alta risoluzione (2.5x pixel ratio)
  * producendo una resa identica al 100% pixel per pixel all'anteprima video del browser.
  */
-export async function capturePageToPng(pageEl: HTMLElement): Promise<string> {
+export async function capturePageToPng(
+  pageEl: HTMLElement,
+  options?: { pixelRatio?: number }
+): Promise<string> {
   return await toPng(pageEl, {
-    pixelRatio: 2.5,
+    pixelRatio: options?.pixelRatio ?? 2.5,
     backgroundColor: "#ffffff",
     style: {
       boxShadow: "none",
@@ -171,6 +174,32 @@ export async function generatePdfBytesFromElements(pages: HTMLElement[]): Promis
 
   const pdfArrayBuffer = pdf.output("arraybuffer");
   return new Uint8Array(pdfArrayBuffer);
+}
+
+/**
+ * Genera il PDF direttamente in formato Base64 (Data URI), eliminando la serializzazione
+ * di array numerici pesanti tra JavaScript e Tauri Rust. Ideale per batch massivi in background.
+ */
+export async function generatePdfBase64FromElements(
+  pages: HTMLElement[],
+  options?: { pixelRatio?: number }
+): Promise<string> {
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const pdfW = pdf.internal.pageSize.getWidth();
+  const pdfH = pdf.internal.pageSize.getHeight();
+
+  for (let i = 0; i < pages.length; i++) {
+    if (i > 0) pdf.addPage();
+    const dataUrl = await capturePageToPng(pages[i], options);
+    pdf.addImage(dataUrl, "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
+  }
+
+  return pdf.output("datauristring");
 }
 
 /**

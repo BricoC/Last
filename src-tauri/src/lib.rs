@@ -31,6 +31,31 @@ fn save_file_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, Stri
     Ok(file_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn save_file_base64_to_desktop(filename: String, base64_content: String) -> Result<String, String> {
+    use base64::prelude::*;
+    let desktop_dir = std::env::var("USERPROFILE")
+        .map(|p| PathBuf::from(p).join("Desktop"))
+        .or_else(|_| std::env::var("HOME").map(|p| PathBuf::from(p).join("Desktop")))
+        .map_err(|_| "Impossibile trovare la cartella Desktop dell'utente".to_string())?;
+
+    let file_path = desktop_dir.join(&filename);
+    if let Some(parent) = file_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Errore creazione cartella: {}", e))?;
+    }
+
+    let clean_base64 = if let Some(idx) = base64_content.find(";base64,") {
+        &base64_content[idx + 8..]
+    } else {
+        &base64_content
+    };
+
+    let decoded = BASE64_STANDARD.decode(clean_base64).map_err(|e| format!("Errore decodifica base64: {}", e))?;
+    fs::write(&file_path, decoded).map_err(|e| format!("Errore nel salvataggio del file: {}", e))?;
+
+    Ok(file_path.to_string_lossy().to_string())
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ExcelFileInfo {
     pub filename: String,
@@ -383,6 +408,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             save_file_to_desktop,
+            save_file_base64_to_desktop,
             save_pdf_to_desktop,
             save_temp_file,
             print_ddt_silent,
