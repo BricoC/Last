@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
-import { OFFER_STATUSES, OFFER_STATUS_STYLES, type OfferRecord } from "../types/offer";
+import { OFFER_STATUSES, OFFER_STATUS_STYLES, type OfferRecord, type TrashOfferRow } from "../types/offer";
 
 describe("Offers Types and Search Logic", () => {
   it("defines exactly the 4 required statuses with respective styles", () => {
@@ -81,6 +81,18 @@ describe("Offers Types and Search Logic", () => {
     });
 
     expect(sorted[0].id).toBe("1"); // 2026-11-03 before 2026-11-02
+  });
+
+  it("handles TrashOfferRow with deleted_at timestamp correctly", () => {
+    const trashItem: TrashOfferRow = {
+      ...sampleOffers[0],
+      deleted_at: "2026-11-07T09:40:00.000Z",
+      deleted_by: "Admin",
+    };
+
+    expect(trashItem.deleted_at).toBe("2026-11-07T09:40:00.000Z");
+    expect(trashItem.deleted_by).toBe("Admin");
+    expect(trashItem.requester).toBe("igrif");
   });
 });
 

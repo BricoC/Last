@@ -138,7 +138,6 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
 
   const handleDelete = async () => {
     if (!offer || !onDelete) return;
-    if (!window.confirm("Sei sicuro di voler eliminare definitivamente questa offerta?")) return;
     setIsSubmitting(true);
     try {
       await onDelete(offer.id);

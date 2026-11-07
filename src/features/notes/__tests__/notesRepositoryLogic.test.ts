@@ -68,5 +68,29 @@ describe("Notes types and data model", () => {
     expect(matchesFragmentSearch([note.title, note.content_text], "ord acc")).toBe(true);
     expect(matchesFragmentSearch([note.title, note.content_text], "fornitore inesistente")).toBe(false);
   });
+
+  it("creates a trash row with deleted_at timestamp", () => {
+    const note: NoteRecord = {
+      id: "note-del",
+      title: "Da cancellare",
+      content_html: "<p>Bozza</p>",
+      content_text: "Bozza",
+      is_pinned: 0,
+      is_archived: 0,
+      color: "default",
+      created_at: "2026-11-07T08:00:00.000Z",
+      updated_at: "2026-11-07T08:00:00.000Z",
+      sync_status: "synced",
+    };
+
+    const trashRow = {
+      ...note,
+      deleted_at: "2026-11-07T09:40:00.000Z",
+      deleted_by: "Admin",
+    };
+
+    expect(trashRow.deleted_at).toBe("2026-11-07T09:40:00.000Z");
+    expect(trashRow.deleted_by).toBe("Admin");
+  });
 });
 

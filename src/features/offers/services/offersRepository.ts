@@ -1,5 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
-import type { OfferRecord, OfferStatus } from "../types/offer";
+import type { OfferRecord, OfferStatus, TrashOfferRow } from "../types/offer";
 import { offersSyncService } from "./offersSyncService";
 
 export class OffersRepository {
@@ -216,6 +216,154 @@ export class OffersRepository {
   }
 
   /**
+   * Sposta un'offerta nel Cestino (massimo 10 elementi FIFO)
+   */
+  public async moveToTrash(id: string, deletedBy?: string): Promise<void> {
+    const db = await getDatabase();
+    const rows = await db.select<OfferRecord[]>(`SELECT * FROM offers WHERE id = $1 LIMIT 1`, [id]);
+    if (!rows || rows.length === 0) return;
+
+    const offer = rows[0];
+    const nowIso = new Date().toISOString();
+    const user = deletedBy || "Operatore";
+
+    // 1. Inserisci o aggiorna nel cestino
+    await db.execute(
+      `INSERT INTO offers_trash (
+        id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, deleted_at, deleted_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      ON CONFLICT(id) DO UPDATE SET
+        deleted_at = excluded.deleted_at,
+        deleted_by = excluded.deleted_by`,
+      [
+        offer.id,
+        offer.supabase_id ?? null,
+        offer.offer_date,
+        offer.requester,
+        offer.contact || "",
+        offer.items_text,
+        offer.status,
+        offer.is_urgent,
+        offer.is_archived,
+        offer.created_by || user,
+        offer.updated_by || user,
+        offer.created_at,
+        offer.updated_at,
+        nowIso,
+        user,
+      ]
+    );
+
+    // 2. Rimuovi dalla tabella principale
+    await db.execute(`DELETE FROM offers WHERE id = $1`, [id]);
+
+    // 3. Tronca il cestino mantenendo rigorosamente le ultime 10 offerte (FIFO)
+    await db.execute(`
+      DELETE FROM offers_trash 
+      WHERE id NOT IN (
+        SELECT id FROM offers_trash 
+        ORDER BY deleted_at DESC 
+        LIMIT 10
+      );
+    `);
+
+    // 4. Rimuovi da Supabase se presente
+    if (offer.supabase_id) {
+      void offersSyncService.deleteRemoteOffer(offer.supabase_id).catch(() => {});
+    }
+  }
+
+  /**
+   * Restituisce le offerte nel cestino ordinate per data eliminazione (max 10)
+   */
+  public async getTrashOffers(): Promise<TrashOfferRow[]> {
+    const db = await getDatabase();
+    return await db.select<TrashOfferRow[]>(
+      `SELECT * FROM offers_trash ORDER BY deleted_at DESC LIMIT 10`
+    );
+  }
+
+  /**
+   * Conteggio offerte nel cestino
+   */
+  public async getTrashCount(): Promise<number> {
+    const db = await getDatabase();
+    const rows = await db.select<{ count: number }[]>(
+      `SELECT COUNT(*) as count FROM offers_trash`
+    );
+    return rows[0]?.count ?? 0;
+  }
+
+  /**
+   * Ripristina un'offerta dal Cestino alla lista attiva
+   */
+  public async restoreFromTrash(id: string): Promise<OfferRecord | null> {
+    const db = await getDatabase();
+    const rows = await db.select<TrashOfferRow[]>(
+      `SELECT * FROM offers_trash WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!rows || rows.length === 0) return null;
+
+    const item = rows[0];
+    const nowIso = new Date().toISOString();
+
+    // 1. Reinserisci nella tabella attiva con sync_status = 'pending'
+    await db.execute(
+      `INSERT INTO offers (
+        id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status
+      ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending')
+      ON CONFLICT(id) DO UPDATE SET
+        offer_date = excluded.offer_date,
+        requester = excluded.requester,
+        contact = excluded.contact,
+        items_text = excluded.items_text,
+        status = excluded.status,
+        is_urgent = excluded.is_urgent,
+        is_archived = excluded.is_archived,
+        updated_at = excluded.updated_at,
+        sync_status = 'pending'`,
+      [
+        item.id,
+        item.offer_date,
+        item.requester,
+        item.contact || "",
+        item.items_text,
+        item.status,
+        item.is_urgent,
+        item.is_archived,
+        item.created_by,
+        item.updated_by,
+        item.created_at,
+        nowIso,
+      ]
+    );
+
+    // 2. Rimuovi dal cestino
+    await db.execute(`DELETE FROM offers_trash WHERE id = $1`, [id]);
+
+    // 3. Sincronizza su Supabase
+    void offersSyncService.sync().catch(() => {});
+
+    return {
+      id: item.id,
+      supabase_id: null,
+      offer_date: item.offer_date,
+      requester: item.requester,
+      contact: item.contact,
+      items_text: item.items_text,
+      status: item.status,
+      is_urgent: item.is_urgent,
+      is_archived: item.is_archived,
+      created_by: item.created_by,
+      updated_by: item.updated_by,
+      created_at: item.created_at,
+      updated_at: nowIso,
+      sync_status: "pending",
+    };
+  }
+
+  /**
    * Elimina un'offerta localmente e da Supabase
    */
   public async deleteOffer(id: string): Promise<void> {
@@ -224,6 +372,7 @@ export class OffersRepository {
     const supabaseId = existing[0]?.supabase_id;
 
     await db.execute(`DELETE FROM offers WHERE id = $1`, [id]);
+    await db.execute(`DELETE FROM offers_trash WHERE id = $1`, [id]);
 
     if (supabaseId) {
       void offersSyncService.deleteRemoteOffer(supabaseId).catch(() => {});

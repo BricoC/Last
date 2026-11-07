@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { notesRepository } from "./services/notesRepository";
 import { notesSyncService } from "./services/notesSyncService";
+import { NotesTrashModal } from "./components/NotesTrashModal";
 import type { NoteRecord } from "./types/note";
 import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
@@ -88,6 +89,19 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
   const [isSupabaseTableMissing, setIsSupabaseTableMissing] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // Stato Cestino Note (max 10 elementi)
+  const [showTrashModal, setShowTrashModal] = useState(false);
+  const [trashCount, setTrashCount] = useState(0);
+
+  const loadTrashCount = useCallback(async () => {
+    try {
+      const count = await notesRepository.getTrashCount();
+      setTrashCount(count);
+    } catch (err) {
+      console.warn("[NotesPage] Errore conteggio cestino:", err);
+    }
+  }, []);
+
   // Palette dropdowns
   const [showColorPalette, setShowColorPalette] = useState(false);
   const [showHighlightPalette, setShowHighlightPalette] = useState(false);
@@ -124,7 +138,8 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
 
   useEffect(() => {
     void loadNotes();
-  }, [loadNotes]);
+    void loadTrashCount();
+  }, [loadNotes, loadTrashCount]);
 
   // Sincronizzazione con Supabase
   const handleSync = useCallback(async () => {
@@ -392,19 +407,19 @@ CREATE POLICY "Accesso note per tutti" ON public.note FOR ALL TO anon USING (tru
     }
   };
 
-  // Elimina nota
+  // Sposta nota nel Cestino (senza popup di conferma)
   const handleDeleteNote = async (id: string) => {
-    if (!window.confirm("Vuoi davvero eliminare definitivamente questa nota?")) return;
     try {
-      await notesRepository.deleteNote(id);
+      await notesRepository.moveToTrash(id, currentUser);
       const remaining = notes.filter((n) => n.id !== id);
       setNotes(remaining);
       if (activeNoteId === id) {
         handleCreateNewNote();
       }
+      void loadTrashCount();
       void notesSyncService.sync();
     } catch (err) {
-      console.error("[NotesPage] Errore eliminazione nota:", err);
+      console.error("[NotesPage] Errore spostamento nota nel cestino:", err);
     }
   };
 
@@ -465,6 +480,19 @@ CREATE POLICY "Accesso note per tutti" ON public.note FOR ALL TO anon USING (tru
             </div>
 
             <div className="flex items-center space-x-1">
+              <button
+                type="button"
+                onClick={() => setShowTrashModal(true)}
+                className="p-1.5 hover:text-white rounded hover:bg-slate-800 text-slate-400 relative transition-colors"
+                title="Cestino Note (ultime 10 eliminate)"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-red-400" />
+                {trashCount > 0 && (
+                  <span className="absolute -top-1 -right-1 px-1 min-w-[14px] h-[14px] rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center">
+                    {trashCount}
+                  </span>
+                )}
+              </button>
               <button
                 type="button"
                 onClick={() => void handleSync()}
@@ -1031,6 +1059,17 @@ CREATE POLICY "Accesso note per tutti" ON public.note FOR ALL TO anon USING (tru
               </div>
             </div>
       </div>
+
+      {/* Modale Cestino Note (max 10 elementi) */}
+      <NotesTrashModal
+        isOpen={showTrashModal}
+        onClose={() => setShowTrashModal(false)}
+        onNoteRestored={(restored) => {
+          setNotes((prev) => [restored, ...prev.filter((n) => n.id !== restored.id)]);
+          setActiveNoteId(restored.id);
+          void loadTrashCount();
+        }}
+      />
 
       {/* Portale dedicato alla Stampa A4 (@media print) */}
       {typeof document !== "undefined" &&
