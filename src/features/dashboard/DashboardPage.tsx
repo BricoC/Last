@@ -418,20 +418,10 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)] p-3 gap-2.5 select-none font-sans">
-      {/* 1. Header Toolbar Dashboard con Metriche Chiave Inline */}
-      <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] pb-2 gap-3 flex-wrap">
-        {/* Titolo Dashboard */}
-        <div className="flex items-center space-x-2 shrink-0">
-          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
-            <TrendingUp className="w-4 h-4" />
-          </div>
-          <h1 className="text-base font-extrabold tracking-tight text-[var(--foreground)]">
-            Dashboard
-          </h1>
-        </div>
-
+      {/* 1. Header Toolbar Dashboard con Metriche Chiave Inline e Tasti su singola riga */}
+      <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] pb-2 gap-2 flex-nowrap min-w-0">
         {/* Metriche Chiave Inline (Fatturato Annuo YTD, Margine Lordo Medio Annuo, Mese Corrente, Lordo Medio Mese, DDT Emessi) */}
-        <div className="flex items-center gap-2.5 bg-[var(--card)]/90 border border-[var(--border)] px-3 py-1.5 rounded-xl shadow-xs overflow-visible">
+        <div className="flex items-center gap-2 bg-[var(--card)]/90 border border-[var(--border)] px-2.5 py-1 rounded-xl shadow-xs overflow-visible min-w-0 shrink">
           {/* 1. Fatturato Annuo con confronto YTD a oggi e Popover al passaggio del mouse */}
           <div
             className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
