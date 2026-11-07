@@ -1,5 +1,6 @@
 export interface NoteRecord {
   id: string;
+  supabase_id?: number | null;
   title: string;
   content_html: string;
   content_text: string;

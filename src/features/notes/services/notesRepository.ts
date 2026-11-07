@@ -1,5 +1,6 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import type { NoteRecord } from "../types/note";
+import { notesSyncService } from "./notesSyncService";
 
 export class NotesRepository {
   /**
@@ -40,7 +41,7 @@ export class NotesRepository {
     await db.execute(
       `INSERT INTO notes (
         id, title, content_html, content_text, is_pinned, is_archived, color, created_by, updated_by, created_at, updated_at, sync_status
-      ) VALUES ($1, $2, '', '', 0, 0, $3, $4, $4, $5, $5, 'synced')`,
+      ) VALUES ($1, $2, '', '', 0, 0, $3, $4, $4, $5, $5, 'pending')`,
       [id, title, color, createdBy, nowIso]
     );
 
@@ -56,7 +57,7 @@ export class NotesRepository {
       updated_by: createdBy,
       created_at: nowIso,
       updated_at: nowIso,
-      sync_status: "synced",
+      sync_status: "pending",
     };
   }
 
@@ -83,7 +84,8 @@ export class NotesRepository {
         content_text = $3,
         color = $4,
         updated_by = $5,
-        updated_at = $6
+        updated_at = $6,
+        sync_status = 'pending'
       WHERE id = $7`,
       [params.title, params.content_html, params.content_text, color, updatedBy, nowIso, params.id]
     );
@@ -96,7 +98,7 @@ export class NotesRepository {
     const db = await getDatabase();
     const nowIso = new Date().toISOString();
     await db.execute(
-      `UPDATE notes SET is_pinned = $1, updated_at = $2 WHERE id = $3`,
+      `UPDATE notes SET is_pinned = $1, updated_at = $2, sync_status = 'pending' WHERE id = $3`,
       [isPinned ? 1 : 0, nowIso, id]
     );
   }
@@ -108,7 +110,7 @@ export class NotesRepository {
     const db = await getDatabase();
     const nowIso = new Date().toISOString();
     await db.execute(
-      `UPDATE notes SET is_archived = $1, updated_at = $2 WHERE id = $3`,
+      `UPDATE notes SET is_archived = $1, updated_at = $2, sync_status = 'pending' WHERE id = $3`,
       [isArchived ? 1 : 0, nowIso, id]
     );
   }
@@ -118,7 +120,14 @@ export class NotesRepository {
    */
   public async deleteNote(id: string): Promise<void> {
     const db = await getDatabase();
+    const rows = await db.select<{ supabase_id?: number | null }[]>(
+      `SELECT supabase_id FROM notes WHERE id = $1 LIMIT 1`,
+      [id]
+    );
     await db.execute(`DELETE FROM notes WHERE id = $1`, [id]);
+    if (rows[0]?.supabase_id) {
+      void notesSyncService.deleteRemoteNote(rows[0].supabase_id);
+    }
   }
 }
 
