@@ -10,27 +10,39 @@ export interface BackupCategoryMeta {
 
 export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
   {
+    id: "price_lists",
+    label: "Listini Prezzi e Prodotti",
+    description: "Catalogo generale articoli (9.700+), listini clienti personalizzati (18.500+), cestino e log.",
+    tables: [
+      "listino_generale",
+      "listini_clienti",
+      "listino_generale_cestino",
+      "listini_clienti_cestino",
+      "listini_prezzi_log",
+    ],
+  },
+  {
     id: "ddt",
     label: "DDT e Righe Documento",
-    description: "Tutti i DDT archiviati, righe articoli, destinazioni e dati collegati.",
-    tables: ["ddt_documents", "ddt_items"],
+    description: "Tutti i DDT archiviati (11.000+), righe articoli (32.000+), destinazioni e log.",
+    tables: ["ddt_documents", "ddt_items", "ddt_logs"],
   },
   {
     id: "clients",
     label: "Clienti e Destinazioni",
-    description: "Anagrafica completa clienti, sedi operative e listini associati.",
-    tables: ["clients", "client_price_lists"],
+    description: "Anagrafica completa clienti Brico Class e sedi operative di consegna.",
+    tables: ["clients"],
   },
   {
-    id: "price_lists",
-    label: "Listini Prezzi e Prodotti",
-    description: "Catalogo generale articoli, prezzi di acquisto/vendita e storico listini.",
-    tables: ["products", "price_lists", "price_lists_trash"],
+    id: "invoices",
+    label: "Fatture Fornitori ed Elettroniche",
+    description: "Archivio fornitori, fatture di acquisto registrate e relative righe di costo.",
+    tables: ["suppliers", "supplier_invoices", "supplier_invoice_items"],
   },
   {
     id: "notes",
     label: "Note e Cestino Note",
-    description: "Tutte le note di testo, formattazione e storico del cestino a 10 elementi.",
+    description: "Tutte le note di testo, fogli di lavoro e storico cestino a 10 elementi.",
     tables: ["notes", "notes_trash"],
   },
   {
@@ -42,20 +54,20 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
   {
     id: "quotes",
     label: "Preventivi e Cestino",
-    description: "Preventivi clienti emessi, numerazione annuale, righe e cestino preventivi.",
-    tables: ["quotes", "quote_rows", "quotes_trash", "quote_rows_trash"],
+    description: "Preventivi clienti emessi, righe articoli, sequenze annuali e cestino.",
+    tables: ["quotes", "quote_items", "quotes_trash", "quote_sequences"],
   },
   {
     id: "orders",
     label: "Ordini Fornitori e Numeri OR",
-    description: "Registri ordini emessi, righe e numeratori OR.",
-    tables: ["orders", "order_items", "or_numbers"],
+    description: "Registri ordini emessi e storico audit log.",
+    tables: ["orders", "order_audit_logs"],
   },
   {
     id: "settings",
     label: "Impostazioni e Configurazioni",
-    description: "Dati aziendali Brico Class, email destinatari banca, commercialista e cartiere.",
-    tables: ["company_settings", "email_settings"],
+    description: "Dati aziendali, email banca/commercialista, utenti di accesso e preferenze.",
+    tables: ["company_settings", "email_settings", "app_preferences", "app_users"],
   },
 ];
 
@@ -653,7 +665,6 @@ export async function checkAndExecuteDailyBackup(currentUserName?: string): Prom
   // 1. Verifica multi-utente: se il backup per oggi esiste già nella cartella condivisa o su Supabase
   const check = await checkTodayBackupAlreadyDone(config.folderPath, todayStr);
   if (check.exists) {
-    // Aggiorna la memoria locale
     config.lastRunDate = todayStr;
     saveBackupConfig(config);
     return {
