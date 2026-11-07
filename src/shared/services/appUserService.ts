@@ -16,6 +16,7 @@ export const ALL_APP_PAGE_MODULES: AppPageModule[] = [
   { id: "quotes", title: "Preventivi", category: "commerciale" },
   { id: "offers", title: "Offerte", category: "commerciale" },
   { id: "clients", title: "Clienti", category: "commerciale" },
+  { id: "notes", title: "Note", category: "operativo" },
   { id: "or-numbers", title: "OR Numbers", category: "operativo" },
   { id: "ddt-list", title: "DDT List", category: "archivio" },
   { id: "ddt-articles", title: "DDT Articoli", category: "archivio" },
@@ -38,6 +39,7 @@ export const DEFAULT_TOPBAR_ORDER: string[] = [
   "quotes",
   "offers",
   "clients",
+  "notes",
 ];
 
 export function isPageAllowedForUser(user: AppUser | null | undefined, pageId: string): boolean {

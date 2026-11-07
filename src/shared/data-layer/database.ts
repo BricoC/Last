@@ -16,6 +16,7 @@ import { migratePriceListTrashSchemaV19 } from "./migrations/priceListTrashSchem
 import { migrateEmailSettingsSchemaV20 } from "./migrations/emailSettingsSchema";
 import { migrateQuoteTrashSchemaV21 } from "./migrations/quoteTrashSchema";
 import { migrateCustomerPriceListUpgradeV22 } from "./migrations/customerPriceListSchema";
+import { migrateNotesSchemaV23 } from "./migrations/notesSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -362,6 +363,13 @@ const MIGRATIONS: Migration[] = [
     name: "customer_price_list_upgrade_v22",
     up: async (db: Database) => {
       await migrateCustomerPriceListUpgradeV22(db);
+    },
+  },
+  {
+    version: 23,
+    name: "create_notes_table",
+    up: async (db: Database) => {
+      await migrateNotesSchemaV23(db);
     },
   },
 ];
