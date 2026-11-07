@@ -1,10 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 
+export interface TableCountItem {
+  tableName: string;
+  count: number;
+}
+
 export interface BackupCategoryReportItem {
   id: string;
   categoryLabel: string;
-  tablesIncluded: string[];
+  tablesIncluded: TableCountItem[];
   recordCount: number;
   description: string;
 }
@@ -47,11 +52,12 @@ export async function inspectBackupFullReport(filePath: string): Promise<FullBac
 
     const categoriesReport: BackupCategoryReportItem[] = BACKUP_CATEGORIES.map((cat) => {
       let count = 0;
-      const foundTables: string[] = [];
+      const foundTables: TableCountItem[] = [];
       for (const t of cat.tables) {
         if (t in tableMap) {
-          count += tableMap[t];
-          foundTables.push(t);
+          const c = tableMap[t] || 0;
+          count += c;
+          foundTables.push({ tableName: t, count: c });
         }
       }
       return {
@@ -91,11 +97,12 @@ export async function inspectBackupFullReport(filePath: string): Promise<FullBac
 
     const categoriesReport: BackupCategoryReportItem[] = BACKUP_CATEGORIES.map((cat) => {
       let count = 0;
-      const foundTables: string[] = [];
+      const foundTables: TableCountItem[] = [];
       for (const t of cat.tables) {
         if (t in tableMap) {
-          count += tableMap[t];
-          foundTables.push(t);
+          const c = tableMap[t] || 0;
+          count += c;
+          foundTables.push({ tableName: t, count: c });
         }
       }
       return {
@@ -221,7 +228,21 @@ export interface BackupConfig {
 }
 
 export const DEFAULT_MAX_HISTORY = 15;
-export const DEFAULT_BACKUP_FOLDER = "D:\\BricoClassFiles\\OneDrive\\Last\\Backup";
+export const DEFAULT_BACKUP_FOLDER = "";
+
+/**
+ * Restituisce il percorso del Desktop dell'utente corrente (su Windows USERPROFILE o OneDrive)
+ */
+export async function getDefaultDesktopFolder(): Promise<string> {
+  try {
+    const desktop = await invoke<string>("get_default_desktop_folder");
+    return desktop || "";
+  } catch (err) {
+    console.warn("[backupService] Errore recupero Desktop predefinito:", err);
+    return "";
+  }
+}
+
 const CONFIG_STORAGE_KEY = "last_backup_configuration_v1";
 
 interface SupabaseConfig {
@@ -777,14 +798,18 @@ export async function checkAndExecuteDailyBackup(currentUserName?: string): Prom
   error?: string;
 }> {
   const config = loadBackupConfig();
-  if (!config.autoDailyEnabled || !config.folderPath) {
+  let folder = config.folderPath;
+  if (!folder) {
+    folder = await getDefaultDesktopFolder();
+  }
+  if (!config.autoDailyEnabled || !folder) {
     return { ran: false };
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
   // 1. Verifica multi-utente: se il backup per oggi esiste già nella cartella condivisa o su Supabase
-  const check = await checkTodayBackupAlreadyDone(config.folderPath, todayStr);
+  const check = await checkTodayBackupAlreadyDone(folder, todayStr);
   if (check.exists) {
     config.lastRunDate = todayStr;
     saveBackupConfig(config);
@@ -800,9 +825,9 @@ export async function checkAndExecuteDailyBackup(currentUserName?: string): Prom
     let res: { success: boolean; filePath: string; error?: string };
 
     if (config.autoBackupType === "full") {
-      res = await executeFullDatabaseBackup(config.folderPath);
+      res = await executeFullDatabaseBackup(folder);
     } else {
-      res = await executeModularBackup(config.folderPath, config.autoCategories);
+      res = await executeModularBackup(folder, config.autoCategories);
     }
 
     if (res.success) {
