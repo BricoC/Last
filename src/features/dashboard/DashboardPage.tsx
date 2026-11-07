@@ -11,6 +11,12 @@ import { DDTClientArticleHistoryModal } from "@/features/ddt-studio/components/D
 import { DDTQuickViewModal } from "@/features/ddt-studio/components/DDTQuickViewModal";
 import { MonthlyPerformanceModal } from "./components/MonthlyPerformanceModal";
 import { MonthDailyModal } from "./components/MonthDailyModal";
+import { RibaModal } from "./components/RibaModal";
+import {
+  calculateNextRibaDeadline,
+  fetchRemoteRibaStatus,
+  type RibaDeadlineInfo,
+} from "./services/ribaService";
 import {
   TrendingUp,
   Calendar,
@@ -27,6 +33,7 @@ import {
   Search,
   MapPin,
   Copy,
+  Landmark,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { useEscClose } from "@/shared/hooks/useEscClose";
@@ -105,6 +112,40 @@ export const DashboardPage: React.FC = () => {
 
   // Hover popover per confronto YTD/MTD al giorno odierno su tutte le 7 metriche
   const [hoveredKpi, setHoveredKpi] = useState<"turnover" | "margin" | "markup" | "monthTurnover" | "monthMargin" | "monthMarkup" | "ddtCount" | null>(null);
+
+  // Stato e scadenza autorizzazione Ri.Ba. Banca
+  const [ribaInfo, setRibaInfo] = useState<RibaDeadlineInfo | null>(() => {
+    const next = calculateNextRibaDeadline();
+    return {
+      ...next,
+      isPaid: false,
+    };
+  });
+  const [isRibaModalOpen, setIsRibaModalOpen] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkRiba = async () => {
+      const initial = calculateNextRibaDeadline();
+      if (!mounted) return;
+      try {
+        const remote = await fetchRemoteRibaStatus(initial.deadlineKey);
+        if (mounted) {
+          setRibaInfo({
+            ...initial,
+            isPaid: remote?.isPaid ?? false,
+            sentAt: remote?.sentAt,
+          });
+        }
+      } catch (err) {
+        console.warn("[DashboardPage] Errore verifica stato Ri.Ba da Supabase:", err);
+      }
+    };
+    void checkRiba();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Menù a tendina multi-selezione anni per il grafico
   const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
@@ -1060,8 +1101,73 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Destra: Tasto Storico Articoli, Menù a tendina Multi-selezione Anni & Ricarica */}
+        {/* Destra: Tasto Ri.Ba. Banca, Tasto Storico Articoli, Menù a tendina Multi-selezione Anni & Ricarica */}
         <div className="flex items-center space-x-2 shrink-0">
+          {/* Pulsante Ri.Ba. Banca */}
+          {ribaInfo && (
+            <button
+              type="button"
+              onClick={() => setIsRibaModalOpen(true)}
+              className={cn(
+                "flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs select-none border group",
+                ribaInfo.isPaid
+                  ? "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30 hover:border-emerald-500/50"
+                  : ribaInfo.daysToDeadline <= 5
+                  ? "bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40 ring-1 ring-rose-500/30 animate-pulse hover:brightness-110"
+                  : ribaInfo.daysToDeadline <= 10
+                  ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30 hover:border-amber-500/50"
+                  : "bg-[var(--card)] hover:bg-[var(--border)]/40 text-slate-300 border-[var(--border)]"
+              )}
+              title={`Scadenza Ri.Ba: ${ribaInfo.deadlineStr} - ${ribaInfo.isPaid ? "PAGATA" : "NON PAGATA"}. Clicca per visualizzare o preparare l'email.`}
+            >
+              <div className="relative flex items-center justify-center">
+                <Landmark
+                  className={cn(
+                    "w-3.5 h-3.5 transition-colors",
+                    ribaInfo.isPaid
+                      ? "text-emerald-400"
+                      : ribaInfo.daysToDeadline <= 5
+                      ? "text-rose-400"
+                      : ribaInfo.daysToDeadline <= 10
+                      ? "text-amber-400"
+                      : "text-sky-400"
+                  )}
+                />
+                {!ribaInfo.isPaid && ribaInfo.daysToDeadline <= 5 && (
+                  <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                  </span>
+                )}
+              </div>
+
+              <span>
+                Ri.Ba: <span className="font-mono font-bold">{ribaInfo.deadlineStr}</span>
+              </span>
+
+              <span
+                className={cn(
+                  "px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider",
+                  ribaInfo.isPaid
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                    : ribaInfo.daysToDeadline <= 5
+                    ? "bg-rose-600 text-white shadow-xs font-black"
+                    : ribaInfo.daysToDeadline <= 10
+                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                    : "bg-sky-500/15 text-sky-300 border border-sky-500/30"
+                )}
+              >
+                {ribaInfo.isPaid ? "PAGATA" : "NON PAGATA"}
+              </span>
+
+              {!ribaInfo.isPaid && ribaInfo.daysToDeadline <= 5 && (
+                <span className="text-[10px] bg-black/40 text-rose-200 px-1 py-0.5 rounded font-extrabold">
+                  {ribaInfo.daysToDeadline === 0 ? "OGGI" : `-${ribaInfo.daysToDeadline}g`}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* Pulsante Storico Articoli (apre direttamente il popup a schermo intero) */}
           <button
             type="button"
@@ -2049,6 +2155,18 @@ export const DashboardPage: React.FC = () => {
           }}
         />
       )}
+
+      {/* ============================================================== */}
+      {/* POPUP MODALE 6: AUTORIZZAZIONE RI.BA. BANCA                    */}
+      {/* ============================================================== */}
+      <RibaModal
+        isOpen={isRibaModalOpen}
+        onClose={() => setIsRibaModalOpen(false)}
+        ribaInfo={ribaInfo}
+        onStatusUpdated={(updated) => {
+          setRibaInfo((prev) => (prev ? { ...prev, ...updated } : prev));
+        }}
+      />
 
       {/* Toast notifica per copia PDF o altre azioni */}
       {toastMessage && (
