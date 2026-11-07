@@ -25,3 +25,4 @@ export async function migrateNotesSchemaV23(db: Database): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_notes_list ON notes(is_archived, is_pinned DESC, updated_at DESC);
   `);
 }
+
