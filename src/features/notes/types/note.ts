@@ -14,3 +14,8 @@ export interface NoteRecord {
   sync_status?: string;
 }
 
+export interface TrashNoteRow extends NoteRecord {
+  deleted_at: string;
+  deleted_by?: string;
+}
+

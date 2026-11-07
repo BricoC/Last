@@ -17,6 +17,11 @@ export interface OfferRecord {
   sync_status: "synced" | "pending" | "error";
 }
 
+export interface TrashOfferRow extends OfferRecord {
+  deleted_at: string;
+  deleted_by?: string;
+}
+
 export const OFFER_STATUSES: OfferStatus[] = [
   "Da preparare",
   "Inviata",

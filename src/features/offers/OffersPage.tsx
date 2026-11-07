@@ -25,6 +25,7 @@ import { OFFER_STATUSES, OFFER_STATUS_STYLES } from "./types/offer";
 import { offersRepository } from "./services/offersRepository";
 import { offersSyncService } from "./services/offersSyncService";
 import { OfferEditModal } from "./components/OfferEditModal";
+import { OffersTrashModal } from "./components/OffersTrashModal";
 import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { cn } from "@/shared/utils/cn";
@@ -55,6 +56,19 @@ export const OffersPage: React.FC = () => {
   const [isSupabaseTableMissing, setIsSupabaseTableMissing] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // Stato Cestino Offerte (max 10 elementi)
+  const [showTrashModal, setShowTrashModal] = useState(false);
+  const [trashCount, setTrashCount] = useState(0);
+
+  const loadTrashCount = useCallback(async () => {
+    try {
+      const count = await offersRepository.getTrashCount();
+      setTrashCount(count);
+    } catch (err) {
+      console.warn("[OffersPage] Errore conteggio cestino:", err);
+    }
+  }, []);
+
   // Espansione testo articoli per le singole schede (gestita per override manuale)
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   // Feedback copia testo
@@ -81,7 +95,8 @@ export const OffersPage: React.FC = () => {
 
   useEffect(() => {
     void loadData();
-  }, [loadData]);
+    void loadTrashCount();
+  }, [loadData, loadTrashCount]);
 
   // Ascolta aggiornamenti remoti o sync in background
   useEffect(() => {
@@ -209,13 +224,13 @@ export const OffersPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Sei sicuro di voler eliminare definitivamente questa offerta?")) return;
     try {
-      await offersRepository.deleteOffer(id);
+      await offersRepository.moveToTrash(id, currentUserName);
       await loadData();
       void handleSync();
+      void loadTrashCount();
     } catch (err) {
-      console.error("[OffersPage] Errore eliminazione offerta:", err);
+      console.error("[OffersPage] Errore spostamento offerta nel cestino:", err);
     }
   };
 
@@ -420,6 +435,22 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
           >
             <Plus className="w-4 h-4" />
             <span>Nuova Offerta</span>
+          </button>
+
+          {/* Bottone Cestino Offerte (max 10 elementi) */}
+          <button
+            type="button"
+            onClick={() => setShowTrashModal(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-xs text-[var(--muted-foreground)] hover:text-white transition-colors cursor-pointer relative"
+            title="Cestino Offerte (ultime 10 eliminate)"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+            <span className="hidden sm:inline">Cestino</span>
+            {trashCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-red-500/20 text-red-400 border border-red-500/40 text-[10px] font-bold">
+                {trashCount}
+              </span>
+            )}
           </button>
 
           {/* Bottone Sincronizza */}
@@ -794,6 +825,16 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
         onSave={handleSaveModal}
         onToggleArchive={handleToggleArchive}
         onDelete={handleDelete}
+      />
+
+      {/* 5. Modale Cestino Offerte (max 10 elementi) */}
+      <OffersTrashModal
+        isOpen={showTrashModal}
+        onClose={() => setShowTrashModal(false)}
+        onOfferRestored={() => {
+          void loadData();
+          void loadTrashCount();
+        }}
       />
     </div>
   );
