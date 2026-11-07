@@ -41,6 +41,9 @@ export function DDTListPage() {
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const [selectedDdtId, setSelectedDdtId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
+  const isKeyboardNavRef = useRef(false);
+  const activeRowElementRef = useRef<HTMLTableRowElement | null>(null);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [sortField, setSortField] = useState<DdtListSortField>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -221,6 +224,36 @@ export function DDTListPage() {
 
   const visibleRows = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
 
+  useEffect(() => {
+    if (isKeyboardNavRef.current && activeRowElementRef.current) {
+      activeRowElementRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeRowId]);
+
+  const handleTableKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "PageUp" && e.key !== "PageDown") return;
+    if (visibleRows.length === 0) return;
+    e.preventDefault();
+
+    const currentIndex = activeRowId ? visibleRows.findIndex((r) => r.id === activeRowId) : -1;
+    let nextIndex = currentIndex;
+
+    if (e.key === "ArrowDown") {
+      nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visibleRows.length - 1);
+    } else if (e.key === "ArrowUp") {
+      nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 1, 0);
+    } else if (e.key === "PageDown") {
+      nextIndex = currentIndex === -1 ? 10 : Math.min(currentIndex + 15, visibleRows.length - 1);
+    } else if (e.key === "PageUp") {
+      nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 15, 0);
+    }
+
+    if (nextIndex !== -1 && nextIndex !== currentIndex) {
+      isKeyboardNavRef.current = true;
+      setActiveRowId(visibleRows[nextIndex].id);
+    }
+  };
+
   const currentQuickDdtIndex = useMemo(() => {
     if (!selectedDdtId) return -1;
     return sorted.findIndex((d) => d.id === selectedDdtId);
@@ -327,8 +360,10 @@ export function DDTListPage() {
       ) : (
         <div
           ref={tableContainerRef}
+          tabIndex={0}
+          onKeyDown={handleTableKeyDown}
           onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)]"
+          className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)] outline-none"
         >
           <table className="w-full border-collapse text-xs">
             <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">
@@ -439,12 +474,21 @@ export function DDTListPage() {
                 const isPositiveRev = row.revenueSubunits > 0;
                 const isNegativeRev = row.revenueSubunits < 0;
                 const isSelected = selectedIds.has(row.id);
+                const isRowActive = activeRowId === row.id;
+                const isHighlighted = isRowActive || isSelected;
 
                 return (
                   <tr
                     key={row.id}
-                    className={`hover:bg-[var(--background)]/60 transition-colors ${
-                      isSelected ? "bg-blue-500/10" : ""
+                    ref={isRowActive ? activeRowElementRef : null}
+                    onMouseDown={() => {
+                      isKeyboardNavRef.current = false;
+                      setActiveRowId(row.id);
+                    }}
+                    className={`group cursor-default ${
+                      isHighlighted
+                        ? "bg-[#1e5b87] text-white font-medium"
+                        : "hover:bg-[var(--background)]/60"
                     }`}
                   >
                     {/* CHECKBOX */}
@@ -453,12 +497,14 @@ export function DDTListPage() {
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => handleToggleRow(row.id)}
-                        className="rounded border-[var(--border)] cursor-pointer accent-blue-500"
+                        className="rounded border-[var(--border)] cursor-pointer accent-sky-200"
                       />
                     </td>
 
                     {/* DATA */}
-                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap">
+                    <td className={`px-3 py-2 font-sans font-medium whitespace-nowrap ${
+                      isHighlighted ? "text-white" : "text-[var(--foreground)]"
+                    }`}>
                       {formatDdtViewDate(row.date)}
                     </td>
 
@@ -466,8 +512,13 @@ export function DDTListPage() {
                     <td className="px-3 py-2">
                       <button
                         type="button"
-                        onClick={() => setSelectedDdtId(row.id)}
-                        className="font-bold text-[var(--primary)] hover:underline inline-flex items-center gap-1.5 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedDdtId(row.id);
+                        }}
+                        className={`font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer ${
+                          isHighlighted ? "text-sky-200 hover:text-white" : "text-[var(--primary)]"
+                        }`}
                         title={`Apri dettaglio DDT ${formatDdtNumber(row.docNumber, row.series)}`}
                       >
                         <FileText className="h-3 w-3" />
@@ -476,22 +527,36 @@ export function DDTListPage() {
                     </td>
 
                     {/* CLIENTE */}
-                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[200px]" title={row.client}>
+                    <td
+                      className={`px-3 py-2 font-sans font-medium truncate max-w-[200px] ${
+                        isHighlighted ? "text-white" : "text-[var(--foreground)]"
+                      }`}
+                      title={row.client}
+                    >
                       {row.client}
                     </td>
 
                     {/* DESTINAZIONE */}
-                    <td className="px-3 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[220px]" title={row.destination}>
+                    <td
+                      className={`px-3 py-2 font-sans truncate max-w-[220px] ${
+                        isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
+                      title={row.destination}
+                    >
                       {row.destination || "—"}
                     </td>
 
                     {/* TOTALE IMPONIBILE */}
-                    <td className="px-3 py-2 text-right font-bold text-[var(--foreground)]">
+                    <td className={`px-3 py-2 text-right font-bold ${
+                      isHighlighted ? "text-white" : "text-[var(--foreground)]"
+                    }`}>
                       {formatDdtMoney(row.taxableSubunits)}
                     </td>
 
                     {/* PREZZO ACQUISTO */}
-                    <td className="px-3 py-2 text-right text-[var(--muted-foreground)]">
+                    <td className={`px-3 py-2 text-right ${
+                      isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                    }`}>
                       {formatDdtMoney(row.purchaseSubunits)}
                     </td>
 
@@ -499,10 +564,10 @@ export function DDTListPage() {
                     <td
                       className={`px-3 py-2 text-right font-semibold ${
                         isPositiveRev
-                          ? "text-emerald-400"
+                          ? (isHighlighted ? "text-emerald-300 font-bold" : "text-emerald-400")
                           : isNegativeRev
-                          ? "text-rose-400"
-                          : "text-[var(--muted-foreground)]"
+                          ? (isHighlighted ? "text-rose-300 font-bold" : "text-rose-400")
+                          : (isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]")
                       }`}
                     >
                       {formatDdtMoney(row.revenueSubunits)}
@@ -512,10 +577,10 @@ export function DDTListPage() {
                     <td
                       className={`px-3 py-2 text-right font-medium ${
                         isPositiveRev
-                          ? "text-emerald-400"
+                          ? (isHighlighted ? "text-emerald-300 font-bold" : "text-emerald-400")
                           : isNegativeRev
-                          ? "text-rose-400"
-                          : "text-[var(--muted-foreground)]"
+                          ? (isHighlighted ? "text-rose-300 font-bold" : "text-rose-400")
+                          : (isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]")
                       }`}
                     >
                       {formatDdtPercent(row.markupPercent)}
@@ -525,30 +590,47 @@ export function DDTListPage() {
                     <td
                       className={`px-2 py-2 text-center font-medium ${
                         row.discountPercent && row.discountPercent > 0
-                          ? "text-amber-400"
-                          : "text-[var(--muted-foreground)]"
+                          ? (isHighlighted ? "text-amber-200 font-bold" : "text-amber-400")
+                          : (isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]")
                       }`}
                     >
                       {formatDdtPercent(row.discountPercent)}
                     </td>
 
                     {/* OPERATORE */}
-                    <td className="px-3 py-2 text-center text-[var(--muted-foreground)] font-sans">
+                    <td className={`px-3 py-2 text-center font-sans ${
+                      isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                    }`}>
                       {row.operator || "—"}
                     </td>
 
                     {/* CAUSALE */}
-                    <td className="px-3 py-2 text-left font-sans text-[var(--muted-foreground)] truncate max-w-[140px]" title={row.reason}>
+                    <td
+                      className={`px-3 py-2 text-left font-sans truncate max-w-[140px] ${
+                        isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
+                      title={row.reason}
+                    >
                       {row.reason || "—"}
                     </td>
 
                     {/* ORDINE */}
-                    <td className="px-3 py-2 text-left font-sans text-[var(--muted-foreground)] truncate max-w-[160px]" title={row.orderReference}>
+                    <td
+                      className={`px-3 py-2 text-left font-sans truncate max-w-[160px] ${
+                        isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
+                      title={row.orderReference}
+                    >
                       {row.orderReference || "—"}
                     </td>
 
                     {/* PAGAMENTO */}
-                    <td className="px-3 py-2 text-left font-sans text-[var(--muted-foreground)] truncate max-w-[180px]" title={row.payment}>
+                    <td
+                      className={`px-3 py-2 text-left font-sans truncate max-w-[180px] ${
+                        isHighlighted ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
+                      title={row.payment}
+                    >
                       {row.payment || "—"}
                     </td>
                   </tr>

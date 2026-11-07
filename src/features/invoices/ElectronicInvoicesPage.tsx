@@ -97,6 +97,9 @@ export const ElectronicInvoicesPage: React.FC = () => {
     col: "article_code" | "description";
     text: string;
   } | null>(null);
+  const [activeRowKey, setActiveRowKey] = useState<string | number | null>(null);
+  const isKeyboardNavRef = useRef(false);
+  const activeRowElementRef = useRef<HTMLTableRowElement | null>(null);
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
 
   // Popup Aggiunta a Order Manager
@@ -352,6 +355,48 @@ export const ElectronicInvoicesPage: React.FC = () => {
 
   const visibleItems = useMemo(() => sortedItems.slice(0, visibleCount), [sortedItems, visibleCount]);
   const visibleInvoices = useMemo(() => sortedInvoices.slice(0, visibleCount), [sortedInvoices, visibleCount]);
+
+  useEffect(() => {
+    if (isKeyboardNavRef.current && activeRowElementRef.current) {
+      activeRowElementRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeRowKey]);
+
+  const handleTableKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "PageUp" && e.key !== "PageDown") return;
+    const currentList = activeTab === "items" ? visibleItems : visibleInvoices;
+    if (currentList.length === 0) return;
+    e.preventDefault();
+
+    const getKey = (item: any) =>
+      item.id ?? `${item.supplier_name || ""}-${item.doc_number}-${item.line_number || item.doc_date || ""}`;
+    const currentIndex = activeRowKey != null ? currentList.findIndex((r) => getKey(r) === activeRowKey) : -1;
+    let nextIndex = currentIndex;
+
+    if (e.key === "ArrowDown") {
+      nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, currentList.length - 1);
+    } else if (e.key === "ArrowUp") {
+      nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 1, 0);
+    } else if (e.key === "PageDown") {
+      nextIndex = currentIndex === -1 ? 10 : Math.min(currentIndex + 15, currentList.length - 1);
+    } else if (e.key === "PageUp") {
+      nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 15, 0);
+    }
+
+    if (nextIndex !== -1 && nextIndex !== currentIndex) {
+      isKeyboardNavRef.current = true;
+      const nextKey = getKey(currentList[nextIndex]);
+      setActiveRowKey(nextKey);
+      if (activeTab === "items") {
+        const row = currentList[nextIndex] as SupplierInvoiceItem;
+        setSelectedCell({
+          rowKey: nextKey,
+          col: selectedCell?.col || "article_code",
+          text: (selectedCell?.col === "description" ? row.description : row.article_code) || "",
+        });
+      }
+    }
+  };
 
   // Apertura Dettaglio Fattura da Riga Articolo
   const handleOpenDetailFromItem = async (item: SupplierInvoiceItem) => {
@@ -901,8 +946,10 @@ export const ElectronicInvoicesPage: React.FC = () => {
         ) : (
           <div
             ref={tableContainerRef}
+            tabIndex={0}
+            onKeyDown={handleTableKeyDown}
             onScroll={handleScroll}
-            className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)] select-text"
+            className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)] select-text outline-none"
           >
             <table className="w-full border-collapse text-xs">
               <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider select-none">
@@ -1059,16 +1106,28 @@ export const ElectronicInvoicesPage: React.FC = () => {
                     .join("+");
 
                   const rowKey = row.id || `${row.doc_number}-${row.line_number}`;
+                  const isRowActive = activeRowKey === rowKey || selectedCell?.rowKey === rowKey;
                   const isCodeSelected = selectedCell?.rowKey === rowKey && selectedCell?.col === "article_code";
                   const isDescSelected = selectedCell?.rowKey === rowKey && selectedCell?.col === "description";
 
                   return (
                     <tr
                       key={row.id}
-                      className="hover:bg-[var(--background)]/60 transition-colors"
+                      ref={isRowActive ? activeRowElementRef : null}
+                      onMouseDown={() => {
+                        isKeyboardNavRef.current = false;
+                        setActiveRowKey(rowKey);
+                      }}
+                      className={`group cursor-default ${
+                        isRowActive
+                          ? "bg-[#1e5b87] text-white font-medium"
+                          : "hover:bg-[var(--background)]/60"
+                      }`}
                     >
                       {/* DATA (copiabile) */}
-                      <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap select-text">
+                      <td className={`px-3 py-2 font-sans font-medium whitespace-nowrap select-text ${
+                        isRowActive ? "text-white" : "text-[var(--foreground)]"
+                      }`}>
                         {row.doc_date}
                       </td>
 
@@ -1076,8 +1135,13 @@ export const ElectronicInvoicesPage: React.FC = () => {
                       <td className="px-3 py-2">
                         <button
                           type="button"
-                          onClick={() => handleOpenDetailFromItem(row)}
-                          className="font-bold text-[var(--primary)] hover:underline inline-flex items-center gap-1.5 cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenDetailFromItem(row);
+                          }}
+                          className={`font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer ${
+                            isRowActive ? "text-sky-200 hover:text-white" : "text-[var(--primary)]"
+                          }`}
                           title="Apri fattura fornitore"
                         >
                           <FileText className="h-3 w-3" />
@@ -1086,26 +1150,35 @@ export const ElectronicInvoicesPage: React.FC = () => {
                       </td>
 
                       {/* FORNITORE (copiabile) */}
-                      <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[200px] select-text" title={row.supplier_name}>
+                      <td
+                        className={`px-3 py-2 font-sans font-medium truncate max-w-[200px] select-text ${
+                          isRowActive ? "text-white" : "text-[var(--foreground)]"
+                        }`}
+                        title={row.supplier_name}
+                      >
                         {row.supplier_name}
                       </td>
 
                       {/* CODICE ART. (copiabile con selezione mouse o click + Ctrl+C o doppio click) */}
                       <td
-                        onClick={() =>
+                        onMouseDown={() => {
+                          isKeyboardNavRef.current = false;
+                          setActiveRowKey(rowKey);
                           setSelectedCell({
                             rowKey,
                             col: "article_code",
                             text: row.article_code || "",
-                          })
-                        }
+                          });
+                        }}
                         onDoubleClick={() => copyText(row.article_code || "")}
                         style={{ userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}
                         title="Fai clic o seleziona per copiare con Ctrl+C"
                         className={cn(
-                          "px-3 py-2 select-text cursor-text transition-colors",
+                          "px-3 py-2 select-text cursor-text",
                           isCodeSelected
-                            ? "bg-[var(--primary)]/20 text-[var(--foreground)] font-semibold ring-1 ring-inset ring-[var(--primary)]/50 rounded-xs"
+                            ? "ring-1 ring-sky-300 ring-inset bg-white/10 font-bold"
+                            : isRowActive
+                            ? "text-sky-100"
                             : "text-[var(--muted-foreground)]"
                         )}
                       >
@@ -1114,27 +1187,33 @@ export const ElectronicInvoicesPage: React.FC = () => {
 
                       {/* UM (copiabile) */}
                       {showExtendedColumns && (
-                        <td className="px-2 py-2 text-center uppercase text-[var(--muted-foreground)] select-text">
+                        <td className={`px-2 py-2 text-center uppercase select-text ${
+                          isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                        }`}>
                           {row.unit || "NR"}
                         </td>
                       )}
 
                       {/* QUANTITÀ (copiabile) */}
                       {showExtendedColumns && (
-                        <td className="px-3 py-2 text-right font-bold text-[var(--foreground)] select-text">
+                        <td className={`px-3 py-2 text-right font-bold select-text ${
+                          isRowActive ? "text-white" : "text-[var(--foreground)]"
+                        }`}>
                           {row.quantity > 0 ? row.quantity : "—"}
                         </td>
                       )}
 
                       {/* DESCRIZIONE (copiabile con Ctrl+C, doppio clic per aggiungere a Order Manager) */}
                       <td
-                        onClick={() =>
+                        onMouseDown={() => {
+                          isKeyboardNavRef.current = false;
+                          setActiveRowKey(rowKey);
                           setSelectedCell({
                             rowKey,
                             col: "description",
                             text: row.description || "",
-                          })
-                        }
+                          });
+                        }}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           setAddToOrderTarget({
@@ -1149,9 +1228,11 @@ export const ElectronicInvoicesPage: React.FC = () => {
                         style={{ userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}
                         title="Doppio clic per aggiungere a Order Manager &bull; Clic + Ctrl+C per copiare"
                         className={cn(
-                          "px-3 py-2 font-sans select-text cursor-text transition-colors",
+                          "px-3 py-2 font-sans select-text cursor-text",
                           isDescSelected
-                            ? "bg-[var(--primary)]/20 text-[var(--foreground)] ring-1 ring-inset ring-[var(--primary)]/50 rounded-xs"
+                            ? "ring-1 ring-sky-300 ring-inset bg-white/10 font-bold"
+                            : isRowActive
+                            ? "text-white font-medium"
                             : "text-[var(--foreground)]"
                         )}
                       >
@@ -1160,20 +1241,26 @@ export const ElectronicInvoicesPage: React.FC = () => {
 
                       {/* PREZZO LISTINO (copiabile) */}
                       {showExtendedColumns && (
-                        <td className="px-3 py-2 text-right text-[var(--muted-foreground)] select-text">
+                        <td className={`px-3 py-2 text-right select-text ${
+                          isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                        }`}>
                           {row.unit_price > 0 ? formatEuro(row.unit_price, 4) : "—"}
                         </td>
                       )}
 
                       {/* SCONTO (copiabile) */}
                       {showExtendedColumns && (
-                        <td className="px-2 py-2 text-center text-[var(--muted-foreground)] select-text">
+                        <td className={`px-2 py-2 text-center select-text ${
+                          isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                        }`}>
                           {discounts || "—"}
                         </td>
                       )}
 
                       {/* COSTO NETTO (EVIDENZIATO, copiabile) */}
-                      <td className="px-3 py-2 text-right font-bold text-[var(--primary)] select-text">
+                      <td className={`px-3 py-2 text-right font-bold select-text ${
+                        isRowActive ? "text-sky-200" : "text-[var(--primary)]"
+                      }`}>
                         {row.discounted_price > 0
                           ? formatEuro(row.discounted_price, 4)
                           : row.unit_price > 0
@@ -1183,13 +1270,17 @@ export const ElectronicInvoicesPage: React.FC = () => {
 
                       {/* IMPORTO (copiabile) */}
                       {showExtendedColumns && (
-                        <td className="px-3 py-2 text-right text-[var(--foreground)] select-text">
+                        <td className={`px-3 py-2 text-right select-text ${
+                          isRowActive ? "text-white font-bold" : "text-[var(--foreground)]"
+                        }`}>
                           {row.total_price > 0 ? formatEuro(row.total_price, 2) : "—"}
                         </td>
                       )}
 
                       {/* IVA (copiabile) */}
-                      <td className="px-2 py-2 text-center text-[var(--muted-foreground)] select-text">
+                      <td className={`px-2 py-2 text-center select-text ${
+                        isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}>
                         {row.vat_rate}%
                       </td>
                     </tr>
@@ -1208,8 +1299,10 @@ export const ElectronicInvoicesPage: React.FC = () => {
         ) : (
           <div
             ref={tableContainerRef}
+            tabIndex={0}
+            onKeyDown={handleTableKeyDown}
             onScroll={handleScroll}
-            className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)] select-text"
+            className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)] select-text outline-none"
           >
             <table className="w-full border-collapse text-xs">
               <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider select-none">
@@ -1327,51 +1420,93 @@ export const ElectronicInvoicesPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
-                {visibleInvoices.map((inv) => (
-                  <tr
-                    key={inv.id}
-                    className="hover:bg-[var(--background)]/60 transition-colors"
-                  >
-                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap select-text">
-                      {inv.doc_date}
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenDetailFromInvoice(inv)}
-                        className="font-bold text-[var(--primary)] hover:underline inline-flex items-center gap-1.5 cursor-pointer"
-                        title="Apri fattura fornitore"
+                {visibleInvoices.map((inv) => {
+                  const invKey = inv.id ?? `${inv.supplier_name}-${inv.doc_number}-${inv.doc_date}`;
+                  const isInvActive = activeRowKey === invKey;
+                  return (
+                    <tr
+                      key={invKey}
+                      ref={isInvActive ? activeRowElementRef : null}
+                      onMouseDown={() => {
+                        isKeyboardNavRef.current = false;
+                        setActiveRowKey(invKey);
+                      }}
+                      className={`group cursor-default ${
+                        isInvActive
+                          ? "bg-[#1e5b87] text-white font-medium"
+                          : "hover:bg-[var(--background)]/60"
+                      }`}
+                    >
+                      <td className={`px-3 py-2 font-sans font-medium whitespace-nowrap select-text ${
+                        isInvActive ? "text-white" : "text-[var(--foreground)]"
+                      }`}>
+                        {inv.doc_date}
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenDetailFromInvoice(inv);
+                          }}
+                          className={`font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer ${
+                            isInvActive ? "text-sky-200 hover:text-white" : "text-[var(--primary)]"
+                          }`}
+                          title="Apri fattura fornitore"
+                        >
+                          <FileText className="h-3 w-3" />
+                          <span>{inv.doc_number}</span>
+                        </button>
+                      </td>
+                      <td
+                        className={`px-3 py-2 font-sans font-medium truncate max-w-[240px] select-text ${
+                          isInvActive ? "text-white" : "text-[var(--foreground)]"
+                        }`}
+                        title={inv.supplier_name}
                       >
-                        <FileText className="h-3 w-3" />
-                        <span>{inv.doc_number}</span>
-                      </button>
-                    </td>
-                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[240px] select-text" title={inv.supplier_name}>
-                      {inv.supplier_name}
-                    </td>
-                    <td className="px-3 py-2 text-center text-[var(--muted-foreground)] select-text">
-                      {inv.year}
-                    </td>
-                    <td className="px-3 py-2 text-right text-[var(--muted-foreground)] select-text">
-                      {formatEuro(inv.taxable_amount)}
-                    </td>
-                    <td className="px-3 py-2 text-right text-[var(--muted-foreground)] select-text">
-                      {formatEuro(inv.vat_amount)}
-                    </td>
-                    <td className="px-3 py-2 text-right font-bold text-[var(--foreground)] select-text">
-                      {formatEuro(inv.total_amount)}
-                    </td>
-                    <td className="px-3 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[180px] select-text">
-                      {inv.payment_method || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-center font-sans font-semibold text-amber-400 select-text">
-                      {inv.due_date || "—"}
-                    </td>
-                    <td className="px-3 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[200px] select-text" title={inv.notes}>
-                      {inv.notes || "—"}
-                    </td>
-                  </tr>
-                ))}
+                        {inv.supplier_name}
+                      </td>
+                      <td className={`px-3 py-2 text-center select-text ${
+                        isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}>
+                        {inv.year}
+                      </td>
+                      <td className={`px-3 py-2 text-right select-text ${
+                        isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}>
+                        {formatEuro(inv.taxable_amount)}
+                      </td>
+                      <td className={`px-3 py-2 text-right select-text ${
+                        isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}>
+                        {formatEuro(inv.vat_amount)}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-bold select-text ${
+                        isInvActive ? "text-white font-bold" : "text-[var(--foreground)]"
+                      }`}>
+                        {formatEuro(inv.total_amount)}
+                      </td>
+                      <td className={`px-3 py-2 font-sans truncate max-w-[180px] select-text ${
+                        isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}>
+                        {inv.payment_method || "—"}
+                      </td>
+                      <td className={`px-3 py-2 text-center font-sans font-semibold select-text ${
+                        isInvActive ? "text-amber-200 font-bold" : "text-amber-400"
+                      }`}>
+                        {inv.due_date || "—"}
+                      </td>
+                      <td
+                        className={`px-3 py-2 font-sans truncate max-w-[200px] select-text ${
+                          isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                        }`}
+                        title={inv.notes}
+                      >
+                        {inv.notes || "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

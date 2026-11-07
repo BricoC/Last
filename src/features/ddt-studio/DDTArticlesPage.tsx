@@ -39,6 +39,9 @@ export function DDTArticlesPage() {
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const [selectedDdtId, setSelectedDdtId] = useState<string | null>(null);
   const [selectedArticleForHistory, setSelectedArticleForHistory] = useState<DdtArticleViewRow | null>(null);
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
+  const isKeyboardNavRef = useRef(false);
+  const activeRowElementRef = useRef<HTMLTableRowElement | null>(null);
   const [sortField, setSortField] = useState<DdtArticleSortField>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const openWindow = useWindowStore((state) => state.openWindow);
@@ -193,6 +196,36 @@ export function DDTArticlesPage() {
 
   const visibleRows = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
 
+  useEffect(() => {
+    if (isKeyboardNavRef.current && activeRowElementRef.current) {
+      activeRowElementRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeRowId]);
+
+  const handleTableKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "PageUp" && e.key !== "PageDown") return;
+    if (visibleRows.length === 0) return;
+    e.preventDefault();
+
+    const currentIndex = activeRowId ? visibleRows.findIndex((r) => r.id === activeRowId) : -1;
+    let nextIndex = currentIndex;
+
+    if (e.key === "ArrowDown") {
+      nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visibleRows.length - 1);
+    } else if (e.key === "ArrowUp") {
+      nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 1, 0);
+    } else if (e.key === "PageDown") {
+      nextIndex = currentIndex === -1 ? 10 : Math.min(currentIndex + 15, visibleRows.length - 1);
+    } else if (e.key === "PageUp") {
+      nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 15, 0);
+    }
+
+    if (nextIndex !== -1 && nextIndex !== currentIndex) {
+      isKeyboardNavRef.current = true;
+      setActiveRowId(visibleRows[nextIndex].id);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2 text-[var(--foreground)]">
       {/* Search Input Bar */}
@@ -247,8 +280,10 @@ export function DDTArticlesPage() {
       ) : (
         <div
           ref={tableContainerRef}
+          tabIndex={0}
+          onKeyDown={handleTableKeyDown}
           onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)]"
+          className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)] outline-none"
         >
           <table className="w-full border-collapse text-xs">
             <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">
@@ -324,14 +359,26 @@ export function DDTArticlesPage() {
             <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
               {visibleRows.map((row) => {
                 const informational = row.rowKind === "note";
+                const isActive = activeRowId === row.id;
 
                 return (
                   <tr
                     key={row.id}
-                    className="hover:bg-[var(--background)]/60 transition-colors"
+                    ref={isActive ? activeRowElementRef : null}
+                    onMouseDown={() => {
+                      isKeyboardNavRef.current = false;
+                      setActiveRowId(row.id);
+                    }}
+                    className={`group cursor-default ${
+                      isActive
+                        ? "bg-[#1e5b87] text-white font-medium"
+                        : "hover:bg-[var(--background)]/60"
+                    }`}
                   >
                     {/* DATA */}
-                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] whitespace-nowrap">
+                    <td className={`px-3 py-2 font-sans font-medium whitespace-nowrap ${
+                      isActive ? "text-white" : "text-[var(--foreground)]"
+                    }`}>
                       {formatDdtViewDate(row.date)}
                     </td>
 
@@ -339,8 +386,13 @@ export function DDTArticlesPage() {
                     <td className="px-3 py-2">
                       <button
                         type="button"
-                        onClick={() => setSelectedDdtId(row.ddtId)}
-                        className="font-bold text-[var(--primary)] hover:underline inline-flex items-center gap-1.5 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedDdtId(row.ddtId);
+                        }}
+                        className={`font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer ${
+                          isActive ? "text-sky-200 hover:text-white" : "text-[var(--primary)]"
+                        }`}
                         title={`Apri dettaglio DDT ${formatDdtNumber(row.docNumber, row.series)}`}
                       >
                         <FileText className="h-3 w-3" />
@@ -349,22 +401,36 @@ export function DDTArticlesPage() {
                     </td>
 
                     {/* CLIENTE */}
-                    <td className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[200px]" title={row.client}>
+                    <td
+                      className={`px-3 py-2 font-sans font-medium truncate max-w-[200px] ${
+                        isActive ? "text-white" : "text-[var(--foreground)]"
+                      }`}
+                      title={row.client}
+                    >
                       {row.client}
                     </td>
 
                     {/* DESTINAZIONE */}
-                    <td className="px-3 py-2 font-sans text-[var(--muted-foreground)] truncate max-w-[200px]" title={row.destination}>
+                    <td
+                      className={`px-3 py-2 font-sans truncate max-w-[200px] ${
+                        isActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
+                      title={row.destination}
+                    >
                       {row.destination || "—"}
                     </td>
 
                     {/* UM */}
-                    <td className="px-2 py-2 text-center uppercase text-[var(--muted-foreground)]">
+                    <td className={`px-2 py-2 text-center uppercase ${
+                      isActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                    }`}>
                       {informational ? "" : (row.unit || "NR")}
                     </td>
 
                     {/* QUANTITÀ */}
-                    <td className="px-3 py-2 text-right font-bold text-[var(--foreground)]">
+                    <td className={`px-3 py-2 text-right font-bold ${
+                      isActive ? "text-white" : "text-[var(--foreground)]"
+                    }`}>
                       {informational ? "" : row.quantity}
                     </td>
 
@@ -372,21 +438,34 @@ export function DDTArticlesPage() {
                     <td className="px-3 py-2 font-sans">
                       <button
                         type="button"
-                        onClick={() => setSelectedArticleForHistory(row)}
-                        className="group text-left w-full hover:text-[var(--primary)] transition-colors cursor-pointer inline-flex items-center justify-between gap-2"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedArticleForHistory(row);
+                        }}
+                        className={`group text-left w-full cursor-pointer inline-flex items-center justify-between gap-2 ${
+                          isActive ? "text-white" : "hover:text-[var(--primary)]"
+                        }`}
                         title="Clicca per aprire lo storico acquisti di questo articolo"
                       >
-                        <span className="truncate group-hover:underline font-semibold text-[var(--foreground)]">
+                        <span className={`truncate group-hover:underline font-semibold ${
+                          isActive ? "text-white" : "text-[var(--foreground)]"
+                        }`}>
                           {row.description}
                         </span>
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[var(--primary)]/20 px-1.5 py-0.5 text-[10px] font-sans text-[var(--primary)] shrink-0 font-semibold">
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-sans shrink-0 font-semibold ${
+                          isActive
+                            ? "bg-white/20 text-white opacity-90 group-hover:opacity-100"
+                            : "opacity-0 group-hover:opacity-100 bg-[var(--primary)]/20 text-[var(--primary)]"
+                        }`}>
                           Storico ↗
                         </span>
                       </button>
                     </td>
 
                     {/* PREZZO UNIT. */}
-                    <td className="px-3 py-2 text-right text-[var(--muted-foreground)]">
+                    <td className={`px-3 py-2 text-right ${
+                      isActive ? "text-sky-100 font-medium" : "text-[var(--muted-foreground)]"
+                    }`}>
                       {informational ? "" : (row.unitPriceSubunits > 0 ? formatDdtMoney(row.unitPriceSubunits) : "—")}
                     </td>
 
@@ -394,20 +473,24 @@ export function DDTArticlesPage() {
                     <td
                       className={`px-2 py-2 text-center font-medium ${
                         row.discountPercent && row.discountPercent !== "0"
-                          ? "text-amber-400"
-                          : "text-[var(--muted-foreground)]"
+                          ? (isActive ? "text-amber-200 font-bold" : "text-amber-400")
+                          : (isActive ? "text-sky-100" : "text-[var(--muted-foreground)]")
                       }`}
                     >
                       {informational ? "" : (row.discountPercent ? `${row.discountPercent}%` : "—")}
                     </td>
 
                     {/* IMPORTO */}
-                    <td className="px-3 py-2 text-right font-bold text-sky-400">
+                    <td className={`px-3 py-2 text-right font-bold ${
+                      isActive ? "text-sky-200" : "text-sky-400"
+                    }`}>
                       {informational ? "" : formatDdtMoney(row.netAmountSubunits)}
                     </td>
 
                     {/* IVA */}
-                    <td className="px-2 py-2 text-center text-[var(--muted-foreground)]">
+                    <td className={`px-2 py-2 text-center ${
+                      isActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                    }`}>
                       {informational || row.vatRate === 0 ? "—" : `${row.vatRate}%`}
                     </td>
                   </tr>

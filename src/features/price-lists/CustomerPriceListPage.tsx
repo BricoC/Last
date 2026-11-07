@@ -246,6 +246,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const [activeCell, setActiveCell] = useState<{ rowId: string; colId: string } | null>(null);
   const [editingCell, setEditingCell] = useState<{ rowId: string; colId: string } | null>(null);
   const [initialEditChar, setInitialEditChar] = useState<string | undefined>(undefined);
+  const isKeyboardNavRef = useRef(false);
 
   // Cestino
   const [trashCount, setTrashCount] = useState<number>(0);
@@ -810,7 +811,8 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   );
 
   // Apertura editor cella
-  const selectCell = useCallback((rowId: string, colId: string) => {
+  const selectCell = useCallback((rowId: string, colId: string, fromKeyboard = false) => {
+    isKeyboardNavRef.current = fromKeyboard;
     setActiveCell({ rowId, colId });
     setEditingCell(null);
     setInitialEditChar(undefined);
@@ -871,14 +873,10 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       }
 
       if (nextColIndex !== currentColIndex || nextRowIndex !== currentRowIndex) {
-        setActiveCell({
-          rowId: allDisplayRows[nextRowIndex],
-          colId: visibleCols[nextColIndex],
-        });
-        setEditingCell(null);
+        selectCell(allDisplayRows[nextRowIndex], visibleCols[nextColIndex], true);
       }
     },
-    [activeCell, filteredItems, newTopRow.id, isVisible]
+    [activeCell, filteredItems, newTopRow.id, isVisible, selectCell]
   );
 
   // Gestione tasti cella
@@ -1457,6 +1455,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   displayValue={newTopRow.cliente || (selectedClientFilter !== "TUTTI" ? selectedClientFilter : "+ Cliente...")}
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "cliente"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "cliente"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "cliente" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1475,6 +1474,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   displayValue={newTopRow.fornitore || "+ Fornitore"}
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "fornitore"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "fornitore"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "fornitore" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1493,6 +1493,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   displayValue={newTopRow.codice_articolo || "+ Codice"}
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "codice_articolo"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "codice_articolo"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "codice_articolo" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1516,6 +1517,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   displayValue={newTopRow.descrizione || "+ Descrizione nuovo articolo..."}
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "descrizione"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1535,6 +1537,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   align="right"
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_fattura"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_fattura"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_fattura" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1555,6 +1558,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   align="right"
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "perc_acquisto"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_acquisto"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "perc_acquisto" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1574,6 +1578,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   align="right"
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "acquisto_eur"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "acquisto_eur"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "acquisto_eur" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1593,6 +1598,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   align="center"
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "data_acquisto"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "data_acquisto"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "data_acquisto" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1611,6 +1617,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   displayValue={newTopRow.acquisto_old || "—"}
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "acquisto_old"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "acquisto_old"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "acquisto_old" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1634,6 +1641,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   displayValue={newTopRow.note || "—"}
                   isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "note"}
                   isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "note"}
+                  shouldScroll={activeCell?.rowId === newTopRow.id && isKeyboardNavRef.current}
                   initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "note" ? initialEditChar : undefined}
                   canEdit={canEdit}
                   onSelectCell={selectCell}
@@ -1656,19 +1664,31 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
           <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11.5px]">
             {filteredItems.slice(0, visibleCount).map((item) => {
               const isDirty = dirtyRows.has(item.id);
+              const isRowActive = activeCell?.rowId === item.id;
+              const shouldScrollRow = isRowActive && isKeyboardNavRef.current;
               return (
                 <tr
                   key={item.id}
-                  className={`hover:bg-[var(--accent)]/30 transition-colors group ${
-                    isDirty ? "bg-amber-500/5 font-semibold" : ""
+                  className={`group cursor-default ${
+                    isRowActive
+                      ? "bg-[#1e5b87] text-white font-medium"
+                      : isDirty
+                      ? "bg-amber-500/10 hover:bg-amber-500/15"
+                      : "hover:bg-[var(--background)]/70"
                   }`}
                 >
                   {isVisible("actions") && (
-                    <td className="px-1.5 py-1 text-center border-r border-[var(--border)]/30">
+                    <td className={`px-1.5 py-1 text-center border-r border-[var(--border)]/30 ${
+                      isRowActive ? "bg-[#1e5b87]" : ""
+                    }`}>
                       <button
                         type="button"
                         onClick={() => void handleDeleteRow(item)}
-                        className="p-1 rounded hover:bg-rose-500/20 text-[var(--muted-foreground)] hover:text-rose-400 transition-colors"
+                        className={`p-1 rounded ${
+                          isRowActive
+                            ? "text-sky-100 hover:text-white hover:bg-rose-500/40"
+                            : "text-[var(--muted-foreground)] hover:text-rose-400 hover:bg-rose-500/20"
+                        }`}
                         title="Elimina e sposta nel Cestino"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1683,6 +1703,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       displayValue={item.cliente.replace(/^LIST_/, "")}
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "cliente"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "cliente"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "cliente" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1701,6 +1722,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       displayValue={item.fornitore || "—"}
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "fornitore"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "fornitore"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "fornitore" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1719,6 +1741,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       displayValue={item.codice_articolo || "—"}
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "codice_articolo"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "codice_articolo"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "codice_articolo" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1731,7 +1754,10 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   )}
                   {isVisible("data_ref") && (
                     <td
-                      className="px-2.5 py-1.5 text-center border-r border-[var(--border)]/30 text-[var(--muted-foreground)] font-mono whitespace-nowrap select-none"
+                      onMouseDown={() => selectCell(item.id, "descrizione")}
+                      className={`px-2.5 py-1.5 text-center border-r border-[var(--border)]/30 font-mono whitespace-nowrap select-none cursor-pointer ${
+                        isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
                       title="Data non modificabile manualmente (aggiornata in automatico alla modifica della riga)"
                     >
                       {formatDateAaaaMmGg(item.data_ref)}
@@ -1745,6 +1771,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       displayValue={item.descrizione || "—"}
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "descrizione"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "descrizione"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "descrizione" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1764,6 +1791,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "prezzo_fattura"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "prezzo_fattura"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "prezzo_fattura" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1784,6 +1812,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "perc_acquisto"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "perc_acquisto"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "perc_acquisto" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1803,6 +1832,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       align="right"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "acquisto_eur"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "acquisto_eur"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "acquisto_eur" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1822,6 +1852,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       align="center"
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "data_acquisto"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "data_acquisto"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "data_acquisto" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1840,6 +1871,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       displayValue={item.acquisto_old || (item.prezzo_acquisto ? String(item.prezzo_acquisto) : "—")}
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "acquisto_old"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "acquisto_old"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "acquisto_old" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1851,7 +1883,12 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                     />
                   )}
                   {isVisible("ricarico") && (
-                    <td className="px-2.5 py-1.5 text-right border-r border-[var(--border)]/30 text-[var(--muted-foreground)]">
+                    <td
+                      onMouseDown={() => selectCell(item.id, "descrizione")}
+                      className={`px-2.5 py-1.5 text-right border-r border-[var(--border)]/30 cursor-pointer ${
+                        isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
+                    >
                       {formatPercent(item.ricarico)}
                     </td>
                   )}
@@ -1863,6 +1900,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                       displayValue={item.note || "—"}
                       isActive={activeCell?.rowId === item.id && activeCell?.colId === "note"}
                       isEditing={editingCell?.rowId === item.id && editingCell?.colId === "note"}
+                      shouldScroll={shouldScrollRow}
                       initialChar={editingCell?.rowId === item.id && editingCell?.colId === "note" ? initialEditChar : undefined}
                       canEdit={canEdit}
                       onSelectCell={selectCell}
@@ -1874,12 +1912,22 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                     />
                   )}
                   {isVisible("note1") && (
-                    <td className="px-2.5 py-1.5 text-left border-r border-[var(--border)]/30 text-[var(--muted-foreground)] truncate max-w-[120px]">
+                    <td
+                      onMouseDown={() => selectCell(item.id, "descrizione")}
+                      className={`px-2.5 py-1.5 text-left border-r border-[var(--border)]/30 truncate max-w-[120px] cursor-pointer ${
+                        isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
+                    >
                       {item.note1 || "—"}
                     </td>
                   )}
                   {isVisible("note2") && (
-                    <td className="px-2.5 py-1.5 text-left border-r border-[var(--border)]/30 text-[var(--muted-foreground)] truncate max-w-[120px]">
+                    <td
+                      onMouseDown={() => selectCell(item.id, "descrizione")}
+                      className={`px-2.5 py-1.5 text-left border-r border-[var(--border)]/30 truncate max-w-[120px] cursor-pointer ${
+                        isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+                      }`}
+                    >
                       {item.note2 || "—"}
                     </td>
                   )}
@@ -2019,9 +2067,10 @@ interface EditableCellProps {
   align?: "left" | "center" | "right";
   isActive: boolean;
   isEditing: boolean;
+  shouldScroll?: boolean;
   initialChar?: string;
   canEdit: boolean;
-  onSelectCell: (rowId: string, colId: string) => void;
+  onSelectCell: (rowId: string, colId: string, fromKeyboard?: boolean) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
   onCommit: (rowId: string, colId: string, val: string) => void;
   onCancel: () => void;
@@ -2038,6 +2087,7 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     align = "left",
     isActive,
     isEditing,
+    shouldScroll = false,
     initialChar,
     canEdit,
     onSelectCell,
@@ -2054,8 +2104,11 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     useEffect(() => {
       if (isActive && !isEditing && tdRef.current) {
         tdRef.current.focus({ preventScroll: true });
+        if (shouldScroll) {
+          tdRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
       }
-    }, [isActive, isEditing]);
+    }, [isActive, isEditing, shouldScroll]);
 
     if (isEditing) {
       return (
@@ -2076,15 +2129,22 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     return (
       <td
         ref={tdRef}
-        onClick={() => onSelectCell(rowId, colId)}
+        onMouseDown={(e) => {
+          if (e.button === 0) {
+            onSelectCell(rowId, colId);
+          }
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
         onDoubleClick={() => {
           if (canEdit && colId !== "data_ref") onStartEdit(rowId, colId);
         }}
         onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue)}
         tabIndex={canEdit ? 0 : -1}
-        className={`px-2.5 py-1.5 transition-colors outline-none cursor-pointer select-none ${alignClass} ${className} ${
+        className={`px-2.5 py-1.5 outline-none cursor-pointer select-none ${alignClass} ${className} ${
           isActive
-            ? "ring-2 ring-[var(--primary)] ring-inset bg-[var(--primary)]/15 font-semibold text-[var(--foreground)]"
+            ? "ring-1 ring-sky-300 ring-inset bg-white/10 font-bold shadow-sm"
             : ""
         }`}
         title={displayValue}
