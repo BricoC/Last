@@ -381,10 +381,12 @@ export const BackupSettingsPanel: React.FC = () => {
         if (res.success) {
           setFeedback({
             type: "success",
-            message: "Database SQLite ripristinato con successo! Ricarica le schermate per vedere i nuovi dati.",
+            message: "Database SQLite ripristinato con successo! Ricaricamento dell'applicazione in corso...",
           });
           setInspectModalOpen(false);
-          void refreshCounts();
+          setTimeout(() => {
+            window.location.reload();
+          }, 1200);
         } else {
           setFeedback({ type: "error", message: res.error || "Errore durante il ripristino del database." });
         }
