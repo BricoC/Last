@@ -34,6 +34,33 @@ pub struct BackupFileInfo {
     pub backup_type: String, // "full_db" | "modular_json" | "unknown"
 }
 
+/// Restituisce il percorso del Desktop dell'utente corrente (su Windows USERPROFILE o OneDrive)
+#[tauri::command]
+pub fn get_default_desktop_folder() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            let desktop = std::path::PathBuf::from(&userprofile).join("Desktop");
+            if desktop.exists() {
+                return Ok(desktop.to_string_lossy().to_string());
+            }
+        }
+        if let Ok(onedrive) = std::env::var("OneDrive") {
+            let desktop = std::path::PathBuf::from(&onedrive).join("Desktop");
+            if desktop.exists() {
+                return Ok(desktop.to_string_lossy().to_string());
+            }
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let desktop = std::path::PathBuf::from(&home).join("Desktop");
+        if desktop.exists() {
+            return Ok(desktop.to_string_lossy().to_string());
+        }
+    }
+    Ok(String::new())
+}
+
 /// Apre la finestra di dialogo nativa Windows per selezionare una cartella
 #[tauri::command]
 pub fn select_folder_dialog(default_path: Option<String>) -> Result<Option<String>, String> {

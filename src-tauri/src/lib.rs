@@ -439,7 +439,8 @@ pub fn run() {
             backup_commands::check_today_backup_exists,
             backup_commands::clean_old_backups,
             backup_commands::delete_backup_file,
-            backup_commands::inspect_sqlite_backup_file
+            backup_commands::inspect_sqlite_backup_file,
+            backup_commands::get_default_desktop_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

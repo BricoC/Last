@@ -44,6 +44,7 @@ import {
   cleanOldBackups,
   deleteBackupFile,
   inspectBackupFullReport,
+  getDefaultDesktopFolder,
   DEFAULT_MAX_HISTORY,
   type BackupConfig,
   type BackupFileInfo,
@@ -122,8 +123,39 @@ export const BackupSettingsPanel: React.FC = () => {
       } catch (err) {
         console.warn("[BackupSettingsPanel] Fallback su impostazioni locali:", err);
       }
+
+      // Se nessuna cartella è configurata né localmente né su Supabase, imposta il Desktop come default
+      if (!config.folderPath) {
+        const desktop = await getDefaultDesktopFolder();
+        if (desktop) {
+          setConfig((prev) => {
+            if (!prev.folderPath) {
+              const updated = { ...prev, folderPath: desktop };
+              saveBackupConfig(updated);
+              void refreshBackupsList(desktop);
+              return updated;
+            }
+            return prev;
+          });
+        }
+      }
     })();
   }, [refreshCounts, refreshBackupsList]);
+
+  // Chiusura dei popup con il tasto ESC (Escape)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (reportModalOpen) {
+          setReportModalOpen(false);
+        } else if (inspectModalOpen) {
+          setInspectModalOpen(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [reportModalOpen, inspectModalOpen]);
 
   // Eliminazione manuale di un singolo file
   const handleDeleteBackup = async (filePath: string, filename: string) => {
@@ -1001,7 +1033,7 @@ export const BackupSettingsPanel: React.FC = () => {
       {/* POPUP MODALE RESOCONTO ANALITICO BACKUP */}
       {reportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden w-full max-w-2xl animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+          <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden w-[96vw] max-w-6xl animate-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]">
             {/* Header Modale */}
             <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
               <div className="flex items-center gap-2.5">
@@ -1070,15 +1102,15 @@ export const BackupSettingsPanel: React.FC = () => {
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
                         <tr className="bg-[var(--card)] border-b border-[var(--border)] text-[10px] uppercase font-bold text-[var(--muted-foreground)]">
-                          <th className="py-2.5 px-3">Sezione / Categoria</th>
-                          <th className="py-2.5 px-3">Tabelle nel Backup</th>
-                          <th className="py-2.5 px-3 text-right">Record Presenti</th>
+                          <th className="py-2.5 px-3 w-56">Sezione / Categoria</th>
+                          <th className="py-2.5 px-3">Tabelle nel Backup e Singoli Record</th>
+                          <th className="py-2.5 px-3 text-right">Totale Sezione</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border)]/40 font-sans">
                         {detailedReport.categories.map((cat) => (
                           <tr key={cat.id} className="hover:bg-[var(--card)]/50 transition-colors">
-                            <td className="py-2.5 px-3">
+                            <td className="py-2.5 px-3 w-56">
                               <div className="flex items-center gap-2">
                                 <div className="p-1 rounded bg-[var(--card)] border border-[var(--border)] shrink-0">
                                   {getCategoryIcon(cat.id)}
@@ -1087,15 +1119,26 @@ export const BackupSettingsPanel: React.FC = () => {
                               </div>
                             </td>
                             <td className="py-2.5 px-3 font-mono text-[11px] text-[var(--muted-foreground)]">
-                              <div className="flex flex-wrap gap-1">
+                              <div className="flex flex-wrap gap-1.5 items-center">
                                 {cat.tablesIncluded.map((t) => (
-                                  <span key={t} className="px-1.5 py-0.5 rounded bg-[var(--card)] border border-[var(--border)] text-[10px]">
-                                    {t}
+                                  <span
+                                    key={t.tableName}
+                                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--card)] border border-[var(--border)] text-[11px]"
+                                  >
+                                    <span className="text-slate-300 font-mono">{t.tableName}:</span>
+                                    <strong className="text-sky-400 font-bold font-mono">
+                                      {t.count.toLocaleString("it-IT")}
+                                    </strong>
                                   </span>
                                 ))}
+                                {cat.tablesIncluded.length === 0 && (
+                                  <span className="text-[var(--muted-foreground)] italic text-[10px]">
+                                    Nessuna tabella
+                                  </span>
+                                )}
                               </div>
                             </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400 text-xs">
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400 text-xs whitespace-nowrap">
                               {cat.recordCount.toLocaleString("it-IT")} record
                             </td>
                           </tr>
