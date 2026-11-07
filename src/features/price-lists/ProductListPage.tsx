@@ -886,8 +886,11 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     return () => window.removeEventListener("keydown", handleUndoKeyDown);
   }, [handleUndo, editingCell]);
 
+  const isKeyboardNavRef = useRef(false);
+
   // Selezione cella singola (click o navigazione con frecce, stile Excel)
-  const selectCell = useCallback((rowId: string, colId: string) => {
+  const selectCell = useCallback((rowId: string, colId: string, fromKeyboard = false) => {
+    isKeyboardNavRef.current = fromKeyboard;
     setActiveCell({ rowId, colId });
     setEditingCell(null);
     setInitialEditChar(undefined);
@@ -930,13 +933,13 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       if (rowIdx === -1 || colIdx === -1) return;
 
       if (direction === "ArrowDown" && rowIdx < allRows.length - 1) {
-        selectCell(allRows[rowIdx + 1].id, activeCell.colId);
+        selectCell(allRows[rowIdx + 1].id, activeCell.colId, true);
       } else if (direction === "ArrowUp" && rowIdx > 0) {
-        selectCell(allRows[rowIdx - 1].id, activeCell.colId);
+        selectCell(allRows[rowIdx - 1].id, activeCell.colId, true);
       } else if (direction === "ArrowRight" && colIdx < allVisibleCols.length - 1) {
-        selectCell(activeCell.rowId, allVisibleCols[colIdx + 1]);
+        selectCell(activeCell.rowId, allVisibleCols[colIdx + 1], true);
       } else if (direction === "ArrowLeft" && colIdx > 0) {
-        selectCell(activeCell.rowId, allVisibleCols[colIdx - 1]);
+        selectCell(activeCell.rowId, allVisibleCols[colIdx - 1], true);
       }
     },
     [activeCell, visibleColumns, newTopRow, filteredItems, visibleCount, selectCell]
@@ -961,7 +964,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         if (isEditing) {
           commitCellEdit(rowId, colId, currentValStr);
           if (rowIdx < allRows.length - 1) {
-            selectCell(allRows[rowIdx + 1].id, colId);
+            selectCell(allRows[rowIdx + 1].id, colId, true);
           }
         } else {
           startEditing(rowId, colId);
@@ -978,17 +981,17 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         }
         if (e.shiftKey) {
           if (colIdx > 0) {
-            selectCell(rowId, allVisibleCols[colIdx - 1]);
+            selectCell(rowId, allVisibleCols[colIdx - 1], true);
           } else if (rowIdx > 0) {
             const prevRow = allRows[rowIdx - 1];
-            selectCell(prevRow.id, allVisibleCols[allVisibleCols.length - 1]);
+            selectCell(prevRow.id, allVisibleCols[allVisibleCols.length - 1], true);
           }
         } else {
           if (colIdx < allVisibleCols.length - 1) {
-            selectCell(rowId, allVisibleCols[colIdx + 1]);
+            selectCell(rowId, allVisibleCols[colIdx + 1], true);
           } else if (rowIdx < allRows.length - 1) {
             const nextRow = allRows[rowIdx + 1];
-            selectCell(nextRow.id, allVisibleCols[0]);
+            selectCell(nextRow.id, allVisibleCols[0], true);
           }
         }
       } else if (e.key === "Escape") {
@@ -998,19 +1001,19 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         if (e.key === "ArrowDown" && rowIdx < allRows.length - 1) {
           e.preventDefault();
           e.stopPropagation();
-          selectCell(allRows[rowIdx + 1].id, colId);
+          selectCell(allRows[rowIdx + 1].id, colId, true);
         } else if (e.key === "ArrowUp" && rowIdx > 0) {
           e.preventDefault();
           e.stopPropagation();
-          selectCell(allRows[rowIdx - 1].id, colId);
+          selectCell(allRows[rowIdx - 1].id, colId, true);
         } else if (e.key === "ArrowRight" && colIdx < allVisibleCols.length - 1) {
           e.preventDefault();
           e.stopPropagation();
-          selectCell(rowId, allVisibleCols[colIdx + 1]);
+          selectCell(rowId, allVisibleCols[colIdx + 1], true);
         } else if (e.key === "ArrowLeft" && colIdx > 0) {
           e.preventDefault();
           e.stopPropagation();
-          selectCell(rowId, allVisibleCols[colIdx - 1]);
+          selectCell(rowId, allVisibleCols[colIdx - 1], true);
         } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
           e.stopPropagation();
@@ -1973,6 +1976,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                   isDirty={isDirty}
                   isSelected={isSelected}
                   isRowActive={isRowActive}
+                  shouldScroll={isRowActive && isKeyboardNavRef.current}
                   activeColId={isRowActive ? activeCell.colId : null}
                   editingColId={isRowEditing ? editingCell.colId : null}
                   initialEditChar={isRowEditing ? initialEditChar : undefined}
@@ -2042,6 +2046,7 @@ interface MemoizedProductRowProps {
   isDirty: boolean;
   isSelected: boolean;
   isRowActive: boolean;
+  shouldScroll?: boolean;
   activeColId: string | null;
   editingColId: string | null;
   initialEditChar?: string;
@@ -2063,6 +2068,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
     isDirty,
     isSelected,
     isRowActive,
+    shouldScroll = false,
     activeColId,
     editingColId,
     initialEditChar,
@@ -2083,18 +2089,18 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
 
     return (
       <tr
-        className={`transition-colors group cursor-default ${
+        className={`group cursor-default ${
           isHighlighted
-            ? "bg-[#0284c7] text-white font-medium"
+            ? "bg-[#1e5b87] text-white font-medium"
             : isDirty
             ? "bg-amber-500/10 hover:bg-amber-500/15"
             : "hover:bg-[var(--background)]/70"
         }`}
       >
         <td
-          className={`px-2 py-1 text-center sticky left-0 z-10 transition-colors ${
+          className={`px-2 py-1 text-center sticky left-0 z-10 ${
             isHighlighted
-              ? "bg-[#0284c7] text-white"
+              ? "bg-[#1e5b87] text-white"
               : isDirty
               ? "bg-amber-500/10"
               : "bg-[var(--card)]"
@@ -2113,9 +2119,9 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             <button
               type="button"
               onClick={() => onOpenHistory(item)}
-              className={`p-1 rounded transition-colors ${
+              className={`p-1 rounded ${
                 isHighlighted
-                  ? "text-sky-100 hover:text-white hover:bg-sky-700"
+                  ? "text-sky-100 hover:text-white hover:bg-sky-800"
                   : "text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-[var(--card)]"
               }`}
               title="Visualizza storico modifiche riga (max 15)"
@@ -2131,7 +2137,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             <button
               type="button"
               onClick={() => onDeleteRow(item)}
-              className={`p-1 rounded transition-colors ${
+              className={`p-1 rounded ${
                 isHighlighted
                   ? "text-sky-100 hover:text-red-200 hover:bg-red-600/40"
                   : "text-[var(--muted-foreground)] hover:text-red-400 hover:bg-red-500/15"
@@ -2153,6 +2159,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "cat"}
             isEditing={editingColId === "cat"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "cat" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2176,6 +2183,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "fornitore"}
             isEditing={editingColId === "fornitore"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "fornitore" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2199,6 +2207,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "codice_articolo"}
             isEditing={editingColId === "codice_articolo"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "codice_articolo" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2222,6 +2231,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "data_ref"}
             isEditing={false}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             canEdit={false}
             onSelectCell={onSelectCell}
             onStartEdit={() => {}}
@@ -2244,6 +2254,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "descrizione"}
             isEditing={editingColId === "descrizione"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "descrizione" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2267,6 +2278,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "um"}
             isEditing={editingColId === "um"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "um" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2288,6 +2300,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "perc_pub"}
             isEditing={editingColId === "perc_pub"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "perc_pub" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2309,6 +2322,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "prezzo_pubblico"}
             isEditing={editingColId === "prezzo_pubblico"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "prezzo_pubblico" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2330,6 +2344,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "perc_prof"}
             isEditing={editingColId === "perc_prof"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "perc_prof" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2351,6 +2366,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "prezzo_profess"}
             isEditing={editingColId === "prezzo_profess"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "prezzo_profess" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2372,6 +2388,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "perc_fatt"}
             isEditing={editingColId === "perc_fatt"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "perc_fatt" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2393,6 +2410,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "prezzo_fattura"}
             isEditing={editingColId === "prezzo_fattura"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "prezzo_fattura" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2418,6 +2436,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "prezzo_acquisto"}
             isEditing={editingColId === "prezzo_acquisto"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "prezzo_acquisto" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2427,7 +2446,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onKeyDown={onCellKeyDown}
             className={`font-bold border-x ${
               isHighlighted
-                ? "bg-sky-700/60 text-white font-black border-sky-400/40"
+                ? "bg-sky-800/60 text-white font-black border-sky-400/40"
                 : "text-sky-200 font-semibold bg-sky-950/20 border-sky-500/20"
             }`}
           />
@@ -2443,6 +2462,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "perc_iva"}
             isEditing={editingColId === "perc_iva"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "perc_iva" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2464,6 +2484,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "aumento"}
             isEditing={editingColId === "aumento"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "aumento" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2473,7 +2494,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onKeyDown={onCellKeyDown}
             className={
               isHighlighted
-                ? "text-sky-100 font-medium bg-sky-700/30"
+                ? "text-sky-100 font-medium bg-sky-800/30"
                 : "text-[var(--muted-foreground)] bg-sky-950/10"
             }
           />
@@ -2489,6 +2510,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             isActive={activeColId === "maga"}
             isEditing={editingColId === "maga"}
             isRowActive={isRowActive}
+            shouldScroll={shouldScroll}
             initialChar={editingColId === "maga" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2498,7 +2520,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onKeyDown={onCellKeyDown}
             className={
               isHighlighted
-                ? "text-sky-100 font-medium bg-sky-700/30"
+                ? "text-sky-100 font-medium bg-sky-800/30"
                 : "text-[var(--muted-foreground)] bg-sky-950/10"
             }
           />
@@ -2508,7 +2530,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
           <td
             className={`px-3 py-1 text-right font-bold border-x ${
               isHighlighted
-                ? "bg-sky-700/60 text-white font-black border-sky-400/40"
+                ? "bg-sky-800/60 text-white font-black border-sky-400/40"
                 : "bg-sky-900/20 text-sky-200 border-sky-500/20"
             }`}
             title="Prezzo acquisto base maggiorato da aumento e magazzino"
@@ -2601,6 +2623,7 @@ interface EditableCellProps {
   isActive: boolean;
   isEditing: boolean;
   isRowActive?: boolean;
+  shouldScroll?: boolean;
   initialChar?: string;
   canEdit: boolean;
   onSelectCell: (rowId: string, colId: string) => void;
@@ -2621,6 +2644,7 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     isActive,
     isEditing,
     isRowActive: _isRowActive,
+    shouldScroll = false,
     initialChar,
     canEdit,
     onSelectCell,
@@ -2637,9 +2661,11 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     useEffect(() => {
       if (isActive && !isEditing && tdRef.current) {
         tdRef.current.focus({ preventScroll: true });
-        tdRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+        if (shouldScroll) {
+          tdRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
       }
-    }, [isActive, isEditing]);
+    }, [isActive, isEditing, shouldScroll]);
 
     if (isEditing) {
       return (
@@ -2660,15 +2686,22 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     return (
       <td
         ref={tdRef}
-        onClick={() => onSelectCell(rowId, colId)}
+        onMouseDown={(e) => {
+          if (e.button === 0) {
+            onSelectCell(rowId, colId);
+          }
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
         onDoubleClick={() => {
           if (canEdit && colId !== "data_ref") onStartEdit(rowId, colId);
         }}
         onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue)}
         tabIndex={canEdit ? 0 : -1}
-        className={`px-2.5 py-1.5 transition-colors outline-none cursor-pointer select-none ${alignClass} ${className} ${
+        className={`px-2.5 py-1.5 outline-none cursor-pointer select-none ${alignClass} ${className} ${
           isActive
-            ? "ring-2 ring-white ring-inset bg-black/20 font-bold shadow-sm"
+            ? "ring-1 ring-sky-300 ring-inset bg-white/10 font-bold shadow-sm"
             : ""
         }`}
         title={displayValue}
