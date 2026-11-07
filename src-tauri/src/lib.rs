@@ -11,6 +11,7 @@ mod ddt_types;
 mod quote_commands;
 mod quote_persistence;
 mod quote_types;
+mod backup_commands;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -426,7 +427,15 @@ pub fn run() {
             quote_commands::convert_quote_to_ddt_transaction,
             list_excel_files_in_folder,
             list_files_in_folder,
-            read_single_excel_file_base64
+            read_single_excel_file_base64,
+            backup_commands::select_folder_dialog,
+            backup_commands::select_backup_file_dialog,
+            backup_commands::open_folder_in_explorer,
+            backup_commands::write_backup_file,
+            backup_commands::read_backup_file,
+            backup_commands::copy_database_file,
+            backup_commands::restore_database_file,
+            backup_commands::list_backups_in_directory
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
