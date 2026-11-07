@@ -1972,6 +1972,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                   item={item}
                   isDirty={isDirty}
                   isSelected={isSelected}
+                  isRowActive={isRowActive}
                   activeColId={isRowActive ? activeCell.colId : null}
                   editingColId={isRowEditing ? editingCell.colId : null}
                   initialEditChar={isRowEditing ? initialEditChar : undefined}
@@ -2040,6 +2041,7 @@ interface MemoizedProductRowProps {
   item: ListinoGeneraleRow;
   isDirty: boolean;
   isSelected: boolean;
+  isRowActive: boolean;
   activeColId: string | null;
   editingColId: string | null;
   initialEditChar?: string;
@@ -2060,6 +2062,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
     item,
     isDirty,
     isSelected,
+    isRowActive,
     activeColId,
     editingColId,
     initialEditChar,
@@ -2076,23 +2079,32 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
   }) => {
     const costoMagg =
       item.r2 ?? calculateCostoMaggiorato(item.prezzo_acquisto, item.aumento, item.maga);
+    const isHighlighted = isRowActive || isSelected;
 
     return (
       <tr
         className={`transition-colors group cursor-default ${
-          isSelected
-            ? "bg-primary/15 hover:bg-primary/20"
+          isHighlighted
+            ? "bg-[#0284c7] text-white font-medium"
             : isDirty
             ? "bg-amber-500/10 hover:bg-amber-500/15"
-            : "hover:bg-[var(--background)]"
+            : "hover:bg-[var(--background)]/70"
         }`}
       >
-        <td className="px-2 py-1 text-center bg-[var(--card)] sticky left-0 z-10">
+        <td
+          className={`px-2 py-1 text-center sticky left-0 z-10 transition-colors ${
+            isHighlighted
+              ? "bg-[#0284c7] text-white"
+              : isDirty
+              ? "bg-amber-500/10"
+              : "bg-[var(--card)]"
+          }`}
+        >
           <input
             type="checkbox"
             checked={isSelected}
             onChange={() => onToggleSelectRow(item.id)}
-            className="rounded border-[var(--border)]"
+            className="rounded border-[var(--border)] accent-sky-200"
           />
         </td>
 
@@ -2101,7 +2113,11 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             <button
               type="button"
               onClick={() => onOpenHistory(item)}
-              className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-[var(--card)] transition-colors"
+              className={`p-1 rounded transition-colors ${
+                isHighlighted
+                  ? "text-sky-100 hover:text-white hover:bg-sky-700"
+                  : "text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-[var(--card)]"
+              }`}
               title="Visualizza storico modifiche riga (max 15)"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -2115,7 +2131,11 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             <button
               type="button"
               onClick={() => onDeleteRow(item)}
-              className="p-1 rounded text-[var(--muted-foreground)] hover:text-red-400 hover:bg-red-500/15 transition-colors"
+              className={`p-1 rounded transition-colors ${
+                isHighlighted
+                  ? "text-sky-100 hover:text-red-200 hover:bg-red-600/40"
+                  : "text-[var(--muted-foreground)] hover:text-red-400 hover:bg-red-500/15"
+              }`}
               title={`Elimina articolo "${item.descrizione || item.codice_articolo || ""}"`}
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -2132,6 +2152,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="left"
             isActive={activeColId === "cat"}
             isEditing={editingColId === "cat"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "cat" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2139,7 +2160,9 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="font-sans font-medium text-[var(--foreground)] truncate max-w-[90px]"
+            className={`font-sans font-medium truncate max-w-[90px] ${
+              isHighlighted ? "text-white" : "text-[var(--foreground)]"
+            }`}
           />
         )}
 
@@ -2152,6 +2175,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="left"
             isActive={activeColId === "fornitore"}
             isEditing={editingColId === "fornitore"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "fornitore" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2159,7 +2183,9 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="font-sans font-medium text-[var(--foreground)] truncate max-w-[85px]"
+            className={`font-sans font-medium truncate max-w-[85px] ${
+              isHighlighted ? "text-white" : "text-[var(--foreground)]"
+            }`}
           />
         )}
 
@@ -2172,6 +2198,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="left"
             isActive={activeColId === "codice_articolo"}
             isEditing={editingColId === "codice_articolo"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "codice_articolo" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2179,7 +2206,9 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="font-bold text-[var(--primary)] truncate max-w-[95px]"
+            className={`truncate max-w-[95px] font-bold ${
+              isHighlighted ? "text-white font-black" : "text-[var(--primary)]"
+            }`}
           />
         )}
 
@@ -2192,13 +2221,16 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="center"
             isActive={activeColId === "data_ref"}
             isEditing={false}
+            isRowActive={isRowActive}
             canEdit={false}
             onSelectCell={onSelectCell}
             onStartEdit={() => {}}
             onCommit={() => {}}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)] cursor-default select-none opacity-80"
+            className={`cursor-default select-none ${
+              isHighlighted ? "text-sky-100 font-medium" : "text-[var(--muted-foreground)] opacity-80"
+            }`}
           />
         )}
 
@@ -2211,6 +2243,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="left"
             isActive={activeColId === "descrizione"}
             isEditing={editingColId === "descrizione"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "descrizione" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2218,7 +2251,9 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="font-sans font-medium text-[var(--foreground)] truncate max-w-[420px]"
+            className={`font-sans font-medium truncate max-w-[420px] ${
+              isHighlighted ? "text-white font-medium" : "text-[var(--foreground)]"
+            }`}
           />
         )}
 
@@ -2231,6 +2266,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="center"
             isActive={activeColId === "um"}
             isEditing={editingColId === "um"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "um" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2238,7 +2274,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)] w-14"
+            className={`w-14 ${isHighlighted ? "text-sky-100 font-medium" : "text-[var(--muted-foreground)]"}`}
           />
         )}
 
@@ -2251,6 +2287,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "perc_pub"}
             isEditing={editingColId === "perc_pub"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "perc_pub" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2258,7 +2295,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)]"
+            className={isHighlighted ? "text-white font-medium" : "text-[var(--muted-foreground)]"}
           />
         )}
 
@@ -2271,6 +2308,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "prezzo_pubblico"}
             isEditing={editingColId === "prezzo_pubblico"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "prezzo_pubblico" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2278,7 +2316,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="font-medium text-[var(--foreground)]"
+            className={`font-medium ${isHighlighted ? "text-white font-bold" : "text-[var(--foreground)]"}`}
           />
         )}
 
@@ -2291,6 +2329,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "perc_prof"}
             isEditing={editingColId === "perc_prof"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "perc_prof" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2298,7 +2337,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)]"
+            className={isHighlighted ? "text-white font-medium" : "text-[var(--muted-foreground)]"}
           />
         )}
 
@@ -2311,6 +2350,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "prezzo_profess"}
             isEditing={editingColId === "prezzo_profess"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "prezzo_profess" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2318,7 +2358,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="font-medium text-[var(--foreground)]"
+            className={`font-medium ${isHighlighted ? "text-white font-bold" : "text-[var(--foreground)]"}`}
           />
         )}
 
@@ -2331,6 +2371,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "perc_fatt"}
             isEditing={editingColId === "perc_fatt"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "perc_fatt" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2338,7 +2379,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)]"
+            className={isHighlighted ? "text-white font-medium" : "text-[var(--muted-foreground)]"}
           />
         )}
 
@@ -2351,6 +2392,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "prezzo_fattura"}
             isEditing={editingColId === "prezzo_fattura"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "prezzo_fattura" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2358,7 +2400,11 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="font-bold bg-amber-500/15 text-amber-200 border-x border-amber-500/20"
+            className={`font-bold border-x ${
+              isHighlighted
+                ? "bg-[#fef08a] text-slate-950 font-black border-amber-300 shadow-sm"
+                : "bg-amber-500/15 text-amber-200 border-amber-500/20"
+            }`}
           />
         )}
 
@@ -2371,6 +2417,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "prezzo_acquisto"}
             isEditing={editingColId === "prezzo_acquisto"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "prezzo_acquisto" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2378,7 +2425,11 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-sky-200 font-semibold bg-sky-950/20 border-x border-sky-500/20"
+            className={`font-bold border-x ${
+              isHighlighted
+                ? "bg-sky-700/60 text-white font-black border-sky-400/40"
+                : "text-sky-200 font-semibold bg-sky-950/20 border-sky-500/20"
+            }`}
           />
         )}
 
@@ -2391,6 +2442,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="center"
             isActive={activeColId === "perc_iva"}
             isEditing={editingColId === "perc_iva"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "perc_iva" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2398,7 +2450,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)]"
+            className={isHighlighted ? "text-sky-100 font-medium" : "text-[var(--muted-foreground)]"}
           />
         )}
 
@@ -2411,6 +2463,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "aumento"}
             isEditing={editingColId === "aumento"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "aumento" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2418,7 +2471,11 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)] bg-sky-950/10"
+            className={
+              isHighlighted
+                ? "text-sky-100 font-medium bg-sky-700/30"
+                : "text-[var(--muted-foreground)] bg-sky-950/10"
+            }
           />
         )}
 
@@ -2431,6 +2488,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             align="right"
             isActive={activeColId === "maga"}
             isEditing={editingColId === "maga"}
+            isRowActive={isRowActive}
             initialChar={editingColId === "maga" ? initialEditChar : undefined}
             canEdit={canEdit}
             onSelectCell={onSelectCell}
@@ -2438,13 +2496,21 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             onCommit={onCommitCell}
             onCancel={onCancelEdit}
             onKeyDown={onCellKeyDown}
-            className="text-[var(--muted-foreground)] bg-sky-950/10"
+            className={
+              isHighlighted
+                ? "text-sky-100 font-medium bg-sky-700/30"
+                : "text-[var(--muted-foreground)] bg-sky-950/10"
+            }
           />
         )}
 
         {visibleColumns.costo_maggiorato !== false && (
           <td
-            className="px-3 py-1 text-right font-bold bg-sky-900/20 text-sky-200 border-x border-sky-500/20"
+            className={`px-3 py-1 text-right font-bold border-x ${
+              isHighlighted
+                ? "bg-sky-700/60 text-white font-black border-sky-400/40"
+                : "bg-sky-900/20 text-sky-200 border-sky-500/20"
+            }`}
             title="Prezzo acquisto base maggiorato da aumento e magazzino"
           >
             {formatEuro5(costoMagg)}
@@ -2534,6 +2600,7 @@ interface EditableCellProps {
   align?: "left" | "center" | "right";
   isActive: boolean;
   isEditing: boolean;
+  isRowActive?: boolean;
   initialChar?: string;
   canEdit: boolean;
   onSelectCell: (rowId: string, colId: string) => void;
@@ -2553,6 +2620,7 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     align = "left",
     isActive,
     isEditing,
+    isRowActive: _isRowActive,
     initialChar,
     canEdit,
     onSelectCell,
@@ -2569,6 +2637,7 @@ const EditableCell: React.FC<EditableCellProps> = memo(
     useEffect(() => {
       if (isActive && !isEditing && tdRef.current) {
         tdRef.current.focus({ preventScroll: true });
+        tdRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
     }, [isActive, isEditing]);
 
@@ -2599,7 +2668,7 @@ const EditableCell: React.FC<EditableCellProps> = memo(
         tabIndex={canEdit ? 0 : -1}
         className={`px-2.5 py-1.5 transition-colors outline-none cursor-pointer select-none ${alignClass} ${className} ${
           isActive
-            ? "ring-2 ring-[var(--primary)] ring-inset bg-[var(--primary)]/15 font-semibold text-[var(--foreground)]"
+            ? "ring-2 ring-white ring-inset bg-black/20 font-bold shadow-sm"
             : ""
         }`}
         title={displayValue}
