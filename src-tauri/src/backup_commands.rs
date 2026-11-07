@@ -185,7 +185,7 @@ pub fn read_backup_file(file_path: String) -> Result<String, String> {
 
 /// Crea una copia fisica del database SQLite LastData.db nella cartella di destinazione
 #[tauri::command]
-pub fn copy_database_file(app: AppHandle, target_file_path: String) -> Result<u64, String> {
+pub async fn copy_database_file(app: AppHandle, target_file_path: String) -> Result<u64, String> {
     let mut db_path = app
         .path()
         .app_data_dir()
@@ -194,6 +194,12 @@ pub fn copy_database_file(app: AppHandle, target_file_path: String) -> Result<u6
 
     if !db_path.exists() {
         return Err(format!("Il database principale non esiste nel percorso: {:?}", db_path));
+    }
+
+    // Esegui checkpoint del WAL per garantire che tutte le transazioni siano salvate in LastData.db
+    let options = SqliteConnectOptions::new().filename(&db_path);
+    if let Ok(mut conn) = SqliteConnection::connect_with(&options).await {
+        let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);").execute(&mut conn).await;
     }
 
     let target_path = Path::new(&target_file_path);
@@ -225,6 +231,16 @@ pub fn restore_database_file(app: AppHandle, source_file_path: String) -> Result
         let mut safety_copy = db_path.clone();
         safety_copy.set_extension("db.pre_restore_safety");
         let _ = fs::copy(&db_path, safety_copy);
+    }
+
+    // Rimuovi eventuali file WAL e SHM temporanei per evitare conflitti con la cache del vecchio DB
+    let wal_path = db_path.with_file_name("LastData.db-wal");
+    if wal_path.exists() {
+        let _ = fs::remove_file(&wal_path);
+    }
+    let shm_path = db_path.with_file_name("LastData.db-shm");
+    if shm_path.exists() {
+        let _ = fs::remove_file(&shm_path);
     }
 
     fs::copy(source_path, &db_path).map_err(|e| format!("Errore durante la sovrascrittura del database: {}", e))?;
