@@ -33,6 +33,7 @@ describe("backupService unit tests", () => {
     expect(ids).toContain("ddt");
     expect(ids).toContain("clients");
     expect(ids).toContain("price_lists");
+    expect(ids).toContain("invoices");
     expect(ids).toContain("notes");
     expect(ids).toContain("offers");
     expect(ids).toContain("quotes");
