@@ -28,6 +28,7 @@ import { UserPasswordModal } from "@/shared/components/ui/UserPasswordModal";
 import { DdtBatchExportRunner } from "@/features/ddt-studio/components/DdtBatchExportRunner";
 
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
+import { checkAndExecuteDailyBackup } from "@/features/settings/services/backupService";
 
 export function App() {
   const { applyToDom } = useThemeStore();
@@ -43,6 +44,11 @@ export function App() {
     // Sincronizzazione incrementale automatica all'avvio da Supabase (scarica SOLO i nuovi DDT)
     void ddtIncrementalSyncService.syncNewDdtsFromSupabase().catch((err) => {
       console.warn("[App] Sync incrementale all'avvio non riuscita:", err);
+    });
+
+    // Controllo ed esecuzione silenziosa del backup giornaliero automatico
+    void checkAndExecuteDailyBackup().catch((err) => {
+      console.warn("[App] Backup giornaliero automatico non riuscito:", err);
     });
   }, []);
 
