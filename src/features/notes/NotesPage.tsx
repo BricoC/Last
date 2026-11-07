@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import {
   StickyNote,
   Plus,
@@ -82,8 +83,15 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
   const [showHighlightPalette, setShowHighlightPalette] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isInternalChangeRef = useRef(false);
+  const isSavingDraftRef = useRef(false);
+
+  const activeNoteIdRef = useRef<string | null>(activeNoteId);
+  useEffect(() => {
+    activeNoteIdRef.current = activeNoteId;
+  }, [activeNoteId]);
 
   const currentUser = useUserStore((s) => s.currentUser?.name) || "Operatore";
 
@@ -94,20 +102,27 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
       setNotes(data);
       if (selectId) {
         setActiveNoteId(selectId);
-      } else if (data.length > 0 && !activeNoteId) {
-        const firstUnarchived = data.find((n) => n.is_archived === 0) || data[0];
-        setActiveNoteId(firstUnarchived.id);
       }
+      // Nota: di default NON selezioniamo automaticamente una nota esistente,
+      // lasciando il foglio su una nuova nota vuota come richiesto!
     } catch (err) {
       console.error("[NotesPage] Errore caricamento note:", err);
     } finally {
       setLoading(false);
     }
-  }, [activeNoteId]);
+  }, []);
 
   useEffect(() => {
     void loadNotes();
   }, [loadNotes]);
+
+  // Focus immediato sul titolo all'avvio per poter scrivere subito
+  useEffect(() => {
+    const t = setTimeout(() => {
+      titleInputRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(t);
+  }, []);
 
   // Sincronizzazione contenuto quando cambia la nota attiva
   const activeNote = notes.find((n) => n.id === activeNoteId) || null;
@@ -126,14 +141,13 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
       if (editorRef.current) {
         editorRef.current.innerHTML = "";
       }
+      setSaveStatus("saved");
     }
   }, [activeNoteId]);
 
   // Salvataggio ritardato automatico (Debounce 400ms)
   const triggerAutoSave = useCallback(
     (newTitle: string, newHtml: string) => {
-      if (!activeNoteId) return;
-
       setSaveStatus("saving");
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
@@ -145,9 +159,35 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
           tempDiv.innerHTML = newHtml;
           const textOnly = tempDiv.innerText || tempDiv.textContent || "";
 
+          // Se entrambi i campi sono vuoti e non c'è una nota salvata, non creare record vuoti
+          if (!activeNoteIdRef.current && !newTitle.trim() && !textOnly.trim()) {
+            setSaveStatus("saved");
+            return;
+          }
+
+          let currentId = activeNoteIdRef.current;
+          if (!currentId) {
+            if (isSavingDraftRef.current) return;
+            isSavingDraftRef.current = true;
+            try {
+              const created = await notesRepository.createNote({
+                title: newTitle.trim() || "Nuova Nota",
+                created_by: currentUser,
+              });
+              currentId = created.id;
+              activeNoteIdRef.current = created.id;
+              setActiveNoteId(created.id);
+              setNotes((prev) => [created, ...prev]);
+            } finally {
+              isSavingDraftRef.current = false;
+            }
+          }
+
+          if (!currentId) return;
+
           await notesRepository.saveNote({
-            id: activeNoteId,
-            title: newTitle.trim() || "Senza titolo",
+            id: currentId,
+            title: newTitle.trim() || "Nuova Nota",
             content_html: newHtml,
             content_text: textOnly.trim(),
             updated_by: currentUser,
@@ -156,10 +196,10 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
           // Aggiorna stato locale lista note
           setNotes((prev) =>
             prev.map((n) =>
-              n.id === activeNoteId
+              n.id === currentId
                 ? {
                     ...n,
-                    title: newTitle.trim() || "Senza titolo",
+                    title: newTitle.trim() || "Nuova Nota",
                     content_html: newHtml,
                     content_text: textOnly.trim(),
                     updated_at: new Date().toISOString(),
@@ -174,7 +214,7 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
         }
       }, 400);
     },
-    [activeNoteId, currentUser]
+    [currentUser]
   );
 
   // Modifica del titolo
@@ -191,23 +231,53 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
     triggerAutoSave(title, html);
   };
 
-  // Creazione nuova nota
-  const handleCreateNewNote = async () => {
-    try {
-      const created = await notesRepository.createNote({
-        title: "Nuova Nota",
-        created_by: currentUser,
-      });
-      setNotes((prev) => [created, ...prev]);
-      setActiveNoteId(created.id);
-      setTitle(created.title);
-      if (editorRef.current) {
-        editorRef.current.innerHTML = "";
-        editorRef.current.focus();
+  // Selezione nota dall'elenco laterale con salvataggio al volo della precedente se necessario
+  const handleSelectNote = (id: string) => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      const html = editorRef.current?.innerHTML || "";
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = html;
+      const textOnly = tempDiv.innerText || tempDiv.textContent || "";
+      if (activeNoteIdRef.current && (title.trim() || textOnly.trim())) {
+        void notesRepository.saveNote({
+          id: activeNoteIdRef.current,
+          title: title.trim() || "Nuova Nota",
+          content_html: html,
+          content_text: textOnly.trim(),
+          updated_by: currentUser,
+        });
       }
-    } catch (err) {
-      console.error("[NotesPage] Errore creazione nota:", err);
     }
+    setActiveNoteId(id);
+  };
+
+  // Creazione nuova nota / foglio vuoto pronto per scrivere
+  const handleCreateNewNote = () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      const html = editorRef.current?.innerHTML || "";
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = html;
+      const textOnly = tempDiv.innerText || tempDiv.textContent || "";
+      if (activeNoteIdRef.current && (title.trim() || textOnly.trim())) {
+        void notesRepository.saveNote({
+          id: activeNoteIdRef.current,
+          title: title.trim() || "Nuova Nota",
+          content_html: html,
+          content_text: textOnly.trim(),
+          updated_by: currentUser,
+        });
+      }
+    }
+    setActiveNoteId(null);
+    activeNoteIdRef.current = null;
+    setTitle("");
+    if (editorRef.current) {
+      editorRef.current.innerHTML = "";
+    }
+    setSaveStatus("saved");
+    titleInputRef.current?.focus();
   };
 
   // Fissa / Rimuovi fissato
@@ -244,7 +314,7 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
       const remaining = notes.filter((n) => n.id !== id);
       setNotes(remaining);
       if (activeNoteId === id) {
-        setActiveNoteId(remaining.length > 0 ? remaining[0].id : null);
+        handleCreateNewNote();
       }
     } catch (err) {
       console.error("[NotesPage] Errore eliminazione nota:", err);
@@ -402,7 +472,7 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
               return (
                 <div
                   key={note.id}
-                  onClick={() => setActiveNoteId(note.id)}
+                  onClick={() => handleSelectNote(note.id)}
                   className={cn(
                     "p-2.5 rounded-lg text-left transition-all group relative cursor-pointer border",
                     isActive
@@ -472,10 +542,8 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
 
       {/* ─── 2. AREA LAVORO FOGLIO WORD (Pannello Centrale / Destro) ─── */}
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-950/70">
-        {activeNote ? (
-          <>
-            {/* ─── BARRA DEGLI STRUMENTI IN STILE WORD (Top Toolbar) ─── */}
-            <div className="shrink-0 border-b border-slate-800 bg-[#0f172a] p-2 flex flex-wrap items-center justify-between gap-2 shadow-sm text-xs">
+        {/* ─── BARRA DEGLI STRUMENTI IN STILE WORD (Top Toolbar) ─── */}
+        <div className="shrink-0 border-b border-slate-800 bg-[#0f172a] p-2 flex flex-wrap items-center justify-between gap-2 shadow-sm text-xs">
               {/* Gruppo Stili e Formattazione */}
               <div className="flex items-center flex-wrap gap-1">
                 {/* Undo / Redo */}
@@ -699,27 +767,38 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
                       <Loader2 className="w-3 h-3 text-amber-400 animate-spin" />
                       <span className="text-amber-300">Salvataggio...</span>
                     </>
-                  ) : saveStatus === "saved" ? (
+                  ) : activeNote ? (
                     <>
                       <Check className="w-3 h-3 text-emerald-400" />
                       <span className="text-emerald-300">Salvato</span>
                     </>
                   ) : (
-                    <span className="text-slate-400">Non salvato</span>
+                    <span className="text-amber-400/90 font-medium">Nuova nota</span>
                   )}
                 </div>
 
                 {/* Fissa in Alto */}
                 <button
                   type="button"
-                  onClick={() => void handleTogglePin(activeNote.id, activeNote.is_pinned)}
+                  disabled={!activeNote}
+                  onClick={() => {
+                    if (activeNote) void handleTogglePin(activeNote.id, activeNote.is_pinned);
+                  }}
                   className={cn(
                     "p-1.5 rounded border transition-colors",
-                    activeNote.is_pinned === 1
+                    !activeNote
+                      ? "opacity-40 cursor-not-allowed bg-slate-900 text-slate-500 border-slate-800"
+                      : activeNote.is_pinned === 1
                       ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
                       : "bg-slate-900 text-slate-400 border-slate-700 hover:text-white"
                   )}
-                  title={activeNote.is_pinned === 1 ? "Rimuovi fissaggio" : "Fissa in alto"}
+                  title={
+                    !activeNote
+                      ? "Fissa in alto (disponibile dopo il primo salvataggio)"
+                      : activeNote.is_pinned === 1
+                      ? "Rimuovi fissaggio"
+                      : "Fissa in alto"
+                  }
                 >
                   <Pin className="w-3.5 h-3.5" />
                 </button>
@@ -727,11 +806,25 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
                 {/* Archivia */}
                 <button
                   type="button"
-                  onClick={() => void handleToggleArchive(activeNote.id, activeNote.is_archived)}
-                  className="p-1.5 rounded bg-slate-900 text-slate-400 border border-slate-700 hover:text-white"
-                  title={activeNote.is_archived === 1 ? "Ripristina dall'archivio" : "Archivia nota"}
+                  disabled={!activeNote}
+                  onClick={() => {
+                    if (activeNote) void handleToggleArchive(activeNote.id, activeNote.is_archived);
+                  }}
+                  className={cn(
+                    "p-1.5 rounded border transition-colors",
+                    !activeNote
+                      ? "opacity-40 cursor-not-allowed bg-slate-900 text-slate-500 border-slate-800"
+                      : "bg-slate-900 text-slate-400 border-slate-700 hover:text-white"
+                  )}
+                  title={
+                    !activeNote
+                      ? "Archivia (disponibile dopo il primo salvataggio)"
+                      : activeNote.is_archived === 1
+                      ? "Ripristina dall'archivio"
+                      : "Archivia nota"
+                  }
                 >
-                  {activeNote.is_archived === 1 ? (
+                  {activeNote?.is_archived === 1 ? (
                     <ArchiveRestore className="w-3.5 h-3.5 text-blue-400" />
                   ) : (
                     <Archive className="w-3.5 h-3.5" />
@@ -743,17 +836,23 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
                   type="button"
                   onClick={() => window.print()}
                   className="p-1.5 rounded bg-slate-900 text-slate-400 border border-slate-700 hover:text-white"
-                  title="Stampa foglio"
+                  title="Stampa foglio (o salva in PDF)"
                 >
                   <Printer className="w-3.5 h-3.5" />
                 </button>
 
-                {/* Elimina */}
+                {/* Elimina o Pulisci Foglio */}
                 <button
                   type="button"
-                  onClick={() => void handleDeleteNote(activeNote.id)}
+                  onClick={() => {
+                    if (activeNote) {
+                      void handleDeleteNote(activeNote.id);
+                    } else {
+                      handleCreateNewNote();
+                    }
+                  }}
                   className="p-1.5 rounded bg-slate-900 text-red-400 border border-slate-700 hover:bg-red-500/10"
-                  title="Elimina nota"
+                  title={activeNote ? "Elimina nota" : "Cancella foglio"}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -765,9 +864,16 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
               <div className="w-full max-w-3xl min-h-[840px] bg-[#1e293b] border border-slate-700/80 rounded-xl shadow-2xl p-8 flex flex-col space-y-4 select-text">
                 {/* Titolo Documento */}
                 <input
+                  ref={titleInputRef}
                   type="text"
                   value={title}
                   onChange={(e) => handleTitleChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      editorRef.current?.focus();
+                    }
+                  }}
                   placeholder="Titolo della nota..."
                   className="w-full text-2xl font-bold bg-transparent border-b border-slate-700 pb-2 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 select-text"
                 />
@@ -788,27 +894,33 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
                 />
               </div>
             </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
-            <div className="p-3 rounded-full bg-slate-800 text-slate-500">
-              <StickyNote className="w-8 h-8" />
-            </div>
-            <h3 className="text-sm font-bold text-slate-300">Nessuna nota selezionata</h3>
-            <p className="text-xs text-slate-500 max-w-sm">
-              Scegli una nota dall'elenco a sinistra oppure creane una nuova per iniziare a scrivere sul foglio.
-            </p>
-            <button
-              type="button"
-              onClick={handleCreateNewNote}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center space-x-1.5 shadow-md"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Crea Nuova Nota</span>
-            </button>
-          </div>
-        )}
       </div>
+
+      {/* Portale dedicato alla Stampa A4 (@media print) */}
+      {typeof document !== "undefined" &&
+        createPortal(
+          <div
+            id="note-print-portal"
+            style={{
+              position: "fixed",
+              left: "-99999px",
+              top: 0,
+              width: "210mm",
+              opacity: 1,
+              pointerEvents: "none",
+              zIndex: -99999,
+            }}
+          >
+            {title ? <h1>{title}</h1> : <h1>Senza titolo</h1>}
+            <div
+              className="note-print-content"
+              dangerouslySetInnerHTML={{
+                __html: editorRef.current?.innerHTML || activeNote?.content_html || "",
+              }}
+            />
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
