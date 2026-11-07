@@ -187,7 +187,7 @@ pub fn restore_database_file(app: AppHandle, source_file_path: String) -> Result
     Ok(len)
 }
 
-/// Elenca i file di backup presenti nella cartella selezionata
+/// Elenca i file di backup presenti nella cartella selezionata ordinati per nome/data decrescente
 #[tauri::command]
 pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileInfo>, String> {
     let path = Path::new(&folder_path);
@@ -207,7 +207,7 @@ pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileIn
             if ext == "lastbackup" || ext == "json" || ext == "db" {
                 let meta = entry.metadata().ok();
                 let size_bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                
+
                 let modified_iso = meta
                     .and_then(|m| m.modified().ok())
                     .and_then(|time| {
@@ -236,9 +236,69 @@ pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileIn
         }
     }
 
-    // Ordina i file dal più recente al più vecchio (in base a modified_iso o nome)
+    // Ordina dal più recente al più vecchio (alfabeticamente per nome decrescente, dato che usano YYYY-MM-DD_HH-mm-ss)
     files.sort_by(|a, b| b.filename.cmp(&a.filename));
 
     Ok(files)
 }
 
+/// Controlla se nella cartella condivisa esiste già un backup per la data specificata (es. "2026-11-07")
+#[tauri::command]
+pub fn check_today_backup_exists(folder_path: String, date_str: String) -> Result<Option<String>, String> {
+    let path = Path::new(&folder_path);
+    if !path.exists() || !path.is_dir() {
+        return Ok(None);
+    }
+
+    let entries = fs::read_dir(path).map_err(|e| format!("Errore lettura cartella: {}", e))?;
+    for entry in entries.flatten() {
+        let fpath = entry.path();
+        if fpath.is_file() {
+            let fname = fpath.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if fname.contains(&date_str) && (fname.ends_with(".db") || fname.ends_with(".lastbackup") || fname.ends_with(".json")) {
+                return Ok(Some(fname.to_string()));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Mantiene solo i più recenti `keep_count` backup nella cartella, eliminando i file eccedenti (FIFO a 15 elementi)
+#[tauri::command]
+pub fn clean_old_backups(folder_path: String, keep_count: usize) -> Result<usize, String> {
+    let path = Path::new(&folder_path);
+    if !path.exists() || !path.is_dir() {
+        return Ok(0);
+    }
+
+    let list = list_backups_in_directory(folder_path)?;
+    if list.len() <= keep_count {
+        return Ok(0);
+    }
+
+    // I file oltre `keep_count` sono i più vecchi e vengono rimossi
+    let to_delete = &list[keep_count..];
+    let mut deleted_count = 0;
+
+    for item in to_delete {
+        let fpath = Path::new(&item.path);
+        if fpath.exists() && fpath.is_file() {
+            if fs::remove_file(fpath).is_ok() {
+                deleted_count += 1;
+            }
+        }
+    }
+
+    Ok(deleted_count)
+}
+
+/// Elimina un singolo file di backup
+#[tauri::command]
+pub fn delete_backup_file(file_path: String) -> Result<(), String> {
+    let path = Path::new(&file_path);
+    if path.exists() && path.is_file() {
+        fs::remove_file(path).map_err(|e| format!("Errore eliminazione file: {}", e))?;
+    }
+    Ok(())
+}

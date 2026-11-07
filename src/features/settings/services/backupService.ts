@@ -70,7 +70,7 @@ export interface BackupPackage {
 }
 
 export interface BackupFileInfo {
-  filename: String;
+  filename: string;
   path: string;
   size_bytes: number;
   modified_iso: string;
@@ -84,9 +84,41 @@ export interface BackupConfig {
   autoCategories: string[];
   lastRunDate: string | null;
   lastRunTimestamp: string | null;
+  lastRunBy: string | null;
+  maxHistoryCount: number; // Massimo 15 backup (FIFO)
 }
 
+export const DEFAULT_MAX_HISTORY = 15;
 const CONFIG_STORAGE_KEY = "last_backup_configuration_v1";
+
+interface SupabaseConfig {
+  projectUrl: string;
+  anonKey: string;
+}
+
+interface ConfigStatus {
+  config: SupabaseConfig | null;
+  configPath: string;
+}
+
+let cachedSupabaseConfig: SupabaseConfig | null = null;
+
+async function getSupabaseCredentials(): Promise<SupabaseConfig | null> {
+  if (cachedSupabaseConfig) return cachedSupabaseConfig;
+  try {
+    const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
+    if (status?.config?.projectUrl && status?.config?.anonKey) {
+      cachedSupabaseConfig = {
+        projectUrl: status.config.projectUrl.replace(/\/$/, ""),
+        anonKey: status.config.anonKey.trim(),
+      };
+      return cachedSupabaseConfig;
+    }
+  } catch (err) {
+    console.warn("[backupService] Impossibile recuperare credenziali Supabase:", err);
+  }
+  return null;
+}
 
 export function loadBackupConfig(): BackupConfig {
   try {
@@ -101,6 +133,8 @@ export function loadBackupConfig(): BackupConfig {
           autoCategories: parsed.autoCategories || BACKUP_CATEGORIES.map((c) => c.id),
           lastRunDate: parsed.lastRunDate || null,
           lastRunTimestamp: parsed.lastRunTimestamp || null,
+          lastRunBy: parsed.lastRunBy || null,
+          maxHistoryCount: parsed.maxHistoryCount || DEFAULT_MAX_HISTORY,
         };
       }
     }
@@ -115,6 +149,8 @@ export function loadBackupConfig(): BackupConfig {
     autoCategories: BACKUP_CATEGORIES.map((c) => c.id),
     lastRunDate: null,
     lastRunTimestamp: null,
+    lastRunBy: null,
+    maxHistoryCount: DEFAULT_MAX_HISTORY,
   };
 }
 
@@ -123,9 +159,96 @@ export function saveBackupConfig(config: BackupConfig): void {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
     }
+    // Sincronizza asincronamente con Supabase
+    void pushBackupSettingsToSupabase(config);
   } catch (err) {
     console.warn("[backupService] Errore salvataggio config backup:", err);
   }
+}
+
+/**
+ * Invia la configurazione di backup al Cloud Supabase (tabella backup_settings)
+ */
+export async function pushBackupSettingsToSupabase(config: BackupConfig): Promise<boolean> {
+  try {
+    const creds = await getSupabaseCredentials();
+    if (!creds) return false;
+
+    const row = {
+      id: "backup_config",
+      folder_path: config.folderPath,
+      auto_daily_enabled: config.autoDailyEnabled,
+      auto_backup_type: config.autoBackupType,
+      auto_categories: config.autoCategories,
+      last_run_date: config.lastRunDate,
+      last_run_timestamp: config.lastRunTimestamp,
+      last_run_by: config.lastRunBy || "system",
+      max_history_count: config.maxHistoryCount || DEFAULT_MAX_HISTORY,
+      updated_at: new Date().toISOString(),
+    };
+
+    const url = `${creds.projectUrl}/rest/v1/backup_settings`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        apikey: creds.anonKey,
+        Authorization: `Bearer ${creds.anonKey}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates",
+      },
+      body: JSON.stringify(row),
+    });
+
+    return res.ok;
+  } catch (err) {
+    console.warn("[backupService] Errore push backup_settings su Supabase:", err);
+    return false;
+  }
+}
+
+/**
+ * Scarica la configurazione di backup dal Cloud Supabase
+ */
+export async function pullBackupSettingsFromSupabase(): Promise<BackupConfig | null> {
+  try {
+    const creds = await getSupabaseCredentials();
+    if (!creds) return null;
+
+    const url = `${creds.projectUrl}/rest/v1/backup_settings?id=eq.backup_config&select=*`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        apikey: creds.anonKey,
+        Authorization: `Bearer ${creds.anonKey}`,
+      },
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0 && data[0]) {
+      const r = data[0];
+      const parsed: BackupConfig = {
+        folderPath: r.folder_path || "D:\\BricoClassFiles\\Backup",
+        autoDailyEnabled: r.auto_daily_enabled ?? true,
+        autoBackupType: r.auto_backup_type || "full",
+        autoCategories: Array.isArray(r.auto_categories) ? r.auto_categories : BACKUP_CATEGORIES.map((c) => c.id),
+        lastRunDate: r.last_run_date || null,
+        lastRunTimestamp: r.last_run_timestamp || null,
+        lastRunBy: r.last_run_by || null,
+        maxHistoryCount: r.max_history_count || DEFAULT_MAX_HISTORY,
+      };
+
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(parsed));
+      }
+
+      return parsed;
+    }
+  } catch (err) {
+    console.warn("[backupService] Errore pull backup_settings da Supabase:", err);
+  }
+  return null;
 }
 
 /**
@@ -144,7 +267,7 @@ export async function getCategoryRecordCounts(): Promise<Record<string, number>>
           total += rows[0].count;
         }
       } catch {
-        // Tabella potrebbe non esistere ancora se migrazione opzionale
+        // Tabella potrebbe non esistere se non ancora migrata
       }
     }
     counts[cat.id] = total;
@@ -192,6 +315,69 @@ export async function listBackups(folderPath: string): Promise<BackupFileInfo[]>
 }
 
 /**
+ * Esegue la pulizia automatica FIFO: mantiene i più recenti N backup (default 15) ed elimina i più vecchi
+ */
+export async function cleanOldBackups(folderPath: string, keepCount: number = DEFAULT_MAX_HISTORY): Promise<number> {
+  try {
+    const deleted = await invoke<number>("clean_old_backups", { folderPath, keepCount });
+    return deleted;
+  } catch (err) {
+    console.warn("[backupService] Errore pulizia vecchi backup:", err);
+    return 0;
+  }
+}
+
+/**
+ * Elimina un singolo file di backup
+ */
+export async function deleteBackupFile(filePath: string): Promise<boolean> {
+  try {
+    await invoke("delete_backup_file", { filePath });
+    return true;
+  } catch (err) {
+    console.warn("[backupService] Errore eliminazione file:", err);
+    return false;
+  }
+}
+
+/**
+ * Controlla se nella cartella condivisa o su Supabase esiste già un backup per la data odierna
+ */
+export async function checkTodayBackupAlreadyDone(
+  folderPath: string,
+  dateStr: string
+): Promise<{ exists: boolean; filename?: string; source?: "shared_folder" | "supabase" }> {
+  // 1. Controllo fisico nella cartella condivisa (se un altro PC ha già scritto il file per oggi)
+  try {
+    const foundFile = await invoke<string | null>("check_today_backup_exists", {
+      folderPath,
+      dateStr,
+    });
+    if (foundFile) {
+      return { exists: true, filename: foundFile, source: "shared_folder" };
+    }
+  } catch (err) {
+    console.warn("[backupService] Errore verifica file condiviso per oggi:", err);
+  }
+
+  // 2. Controllo su Supabase (se un altro PC ha registrato il backup per oggi)
+  try {
+    const remote = await pullBackupSettingsFromSupabase();
+    if (remote && remote.lastRunDate === dateStr) {
+      return {
+        exists: true,
+        filename: `Registrato da ${remote.lastRunBy || "altra postazione"}`,
+        source: "supabase",
+      };
+    }
+  } catch (err) {
+    console.warn("[backupService] Errore verifica Supabase per oggi:", err);
+  }
+
+  return { exists: false };
+}
+
+/**
  * Genera il timestamp per il nome del file
  */
 function getTimestampString(): string {
@@ -201,12 +387,13 @@ function getTimestampString(): string {
 }
 
 /**
- * Esegue il backup completo dell'intero database SQLite
+ * Esegue il backup completo dell'intero database SQLite con pulizia FIFO a 15 elementi
  */
 export async function executeFullDatabaseBackup(folderPath: string): Promise<{
   success: boolean;
   filePath: string;
   sizeBytes: number;
+  deletedOldBackups?: number;
   error?: string;
 }> {
   try {
@@ -214,10 +401,15 @@ export async function executeFullDatabaseBackup(folderPath: string): Promise<{
     const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\Backup_Last_Completo_${ts}.db`;
 
     const size = await invoke<number>("copy_database_file", { targetFilePath: targetFile });
+
+    // Pulizia FIFO: mantieni massimo 15 backup
+    const deleted = await cleanOldBackups(folderPath, DEFAULT_MAX_HISTORY);
+
     return {
       success: true,
       filePath: targetFile,
       sizeBytes: size,
+      deletedOldBackups: deleted,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -232,7 +424,7 @@ export async function executeFullDatabaseBackup(folderPath: string): Promise<{
 }
 
 /**
- * Esegue il backup modulare (o totale) in formato JSON / .lastbackup
+ * Esegue il backup modulare (o totale) in formato JSON / .lastbackup con pulizia FIFO a 15 elementi
  */
 export async function executeModularBackup(
   folderPath: string,
@@ -242,6 +434,7 @@ export async function executeModularBackup(
   filePath: string;
   sizeBytes: number;
   tableCounts: Record<string, number>;
+  deletedOldBackups?: number;
   error?: string;
 }> {
   try {
@@ -292,11 +485,15 @@ export async function executeModularBackup(
       content: json,
     });
 
+    // Pulizia FIFO: mantieni massimo 15 backup
+    const deleted = await cleanOldBackups(folderPath, DEFAULT_MAX_HISTORY);
+
     return {
       success: true,
       filePath: targetFile,
       sizeBytes: size,
       tableCounts,
+      deletedOldBackups: deleted,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -386,7 +583,6 @@ export async function restoreModularBackup(
   const restoredCounts: Record<string, number> = {};
 
   try {
-    // Raccoglie le tabelle da ripristinare
     const tablesToRestore = new Set<string>();
     for (const cat of BACKUP_CATEGORIES) {
       if (categoriesToRestore.includes(cat.id)) {
@@ -418,7 +614,6 @@ export async function restoreModularBackup(
         const placeholders = keys.map((_, idx) => `$${idx + 1}`).join(", ");
         const values = keys.map((k) => row[k]);
 
-        // Inserimento con clausola OR REPLACE per gestire i conflitti
         const sql = `INSERT OR REPLACE INTO ${table} (${columns}) VALUES (${placeholders});`;
         await db.execute(sql, values);
         count++;
@@ -438,10 +633,13 @@ export async function restoreModularBackup(
 }
 
 /**
- * Controllo ed esecuzione automatica del backup giornaliero
+ * Controllo ed esecuzione automatica del backup giornaliero con intelligenza multi-utente.
+ * Se un'altra postazione ha già effettuato il backup nella cartella condivisa per oggi, salta!
  */
-export async function checkAndExecuteDailyBackup(): Promise<{
+export async function checkAndExecuteDailyBackup(currentUserName?: string): Promise<{
   ran: boolean;
+  skippedMultiUser?: boolean;
+  alreadyDoneFile?: string;
   filePath?: string;
   error?: string;
 }> {
@@ -451,10 +649,21 @@ export async function checkAndExecuteDailyBackup(): Promise<{
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  if (config.lastRunDate === todayStr) {
-    return { ran: false }; // Già eseguito per oggi
+
+  // 1. Verifica multi-utente: se il backup per oggi esiste già nella cartella condivisa o su Supabase
+  const check = await checkTodayBackupAlreadyDone(config.folderPath, todayStr);
+  if (check.exists) {
+    // Aggiorna la memoria locale
+    config.lastRunDate = todayStr;
+    saveBackupConfig(config);
+    return {
+      ran: false,
+      skippedMultiUser: true,
+      alreadyDoneFile: check.filename,
+    };
   }
 
+  // 2. Se non esiste ancora per oggi, questa postazione esegue il backup
   try {
     let res: { success: boolean; filePath: string; error?: string };
 
@@ -467,6 +676,7 @@ export async function checkAndExecuteDailyBackup(): Promise<{
     if (res.success) {
       config.lastRunDate = todayStr;
       config.lastRunTimestamp = new Date().toISOString();
+      config.lastRunBy = currentUserName || "PC In Avvio";
       saveBackupConfig(config);
       return { ran: true, filePath: res.filePath };
     } else {
