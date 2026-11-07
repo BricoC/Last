@@ -46,8 +46,8 @@ export function App() {
       console.warn("[App] Sync incrementale all'avvio non riuscita:", err);
     });
 
-    // Controllo ed esecuzione silenziosa del backup giornaliero automatico
-    void checkAndExecuteDailyBackup().catch((err) => {
+    // Controllo ed esecuzione silenziosa del backup giornaliero automatico (multi-utente)
+    void checkAndExecuteDailyBackup(currentUser?.name).catch((err) => {
       console.warn("[App] Backup giornaliero automatico non riuscito:", err);
     });
   }, []);

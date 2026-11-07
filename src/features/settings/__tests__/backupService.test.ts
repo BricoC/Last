@@ -57,6 +57,8 @@ describe("backupService unit tests", () => {
       autoCategories: ["notes", "offers"],
       lastRunDate: "2026-11-07",
       lastRunTimestamp: "2026-11-07T10:00:00.000Z",
+      lastRunBy: "Sam",
+      maxHistoryCount: 15,
     };
 
     saveBackupConfig(custom);
@@ -67,5 +69,7 @@ describe("backupService unit tests", () => {
     expect(loaded.autoBackupType).toBe("modular");
     expect(loaded.autoCategories).toEqual(["notes", "offers"]);
     expect(loaded.lastRunDate).toBe("2026-11-07");
+    expect(loaded.lastRunBy).toBe("Sam");
+    expect(loaded.maxHistoryCount).toBe(15);
   });
 });

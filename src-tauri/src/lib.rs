@@ -435,7 +435,10 @@ pub fn run() {
             backup_commands::read_backup_file,
             backup_commands::copy_database_file,
             backup_commands::restore_database_file,
-            backup_commands::list_backups_in_directory
+            backup_commands::list_backups_in_directory,
+            backup_commands::check_today_backup_exists,
+            backup_commands::clean_old_backups,
+            backup_commands::delete_backup_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -40,10 +40,15 @@ import {
   inspectBackupFile,
   restoreDatabaseFile,
   restoreModularBackup,
+  pullBackupSettingsFromSupabase,
+  cleanOldBackups,
+  deleteBackupFile,
+  DEFAULT_MAX_HISTORY,
   type BackupConfig,
   type BackupFileInfo,
   type BackupPackage,
 } from "./services/backupService";
+import { Trash2 } from "lucide-react";
 
 export const BackupSettingsPanel: React.FC = () => {
   const [config, setConfig] = useState<BackupConfig>(() => loadBackupConfig());
@@ -94,7 +99,58 @@ export const BackupSettingsPanel: React.FC = () => {
     if (config.folderPath) {
       void refreshBackupsList(config.folderPath);
     }
-  }, [refreshCounts, refreshBackupsList, config.folderPath]);
+
+    // Allineamento automatico da Supabase per condividere la configurazione tra tutti i PC
+    void (async () => {
+      try {
+        const remote = await pullBackupSettingsFromSupabase();
+        if (remote) {
+          setConfig(remote);
+          setSelectedCategories(remote.autoCategories);
+          if (remote.folderPath) {
+            void refreshBackupsList(remote.folderPath);
+          }
+        }
+      } catch (err) {
+        console.warn("[BackupSettingsPanel] Fallback su impostazioni locali:", err);
+      }
+    })();
+  }, [refreshCounts, refreshBackupsList]);
+
+  // Eliminazione manuale di un singolo file
+  const handleDeleteBackup = async (filePath: string, filename: string) => {
+    try {
+      const ok = await deleteBackupFile(filePath);
+      if (ok) {
+        setFeedback({ type: "success", message: `Backup "${filename}" rimosso con successo.` });
+        if (config.folderPath) {
+          void refreshBackupsList(config.folderPath);
+        }
+      } else {
+        setFeedback({ type: "error", message: "Impossibile eliminare il file di backup." });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setFeedback({ type: "error", message: `Errore eliminazione: ${msg}` });
+    }
+  };
+
+  // Esecuzione pulizia FIFO 15 manuale
+  const handleRunFifoCleanup = async () => {
+    if (!config.folderPath) return;
+    try {
+      const deleted = await cleanOldBackups(config.folderPath, DEFAULT_MAX_HISTORY);
+      if (deleted > 0) {
+        setFeedback({ type: "success", message: `Pulizia FIFO eseguita: rimossi ${deleted} vecchi backup eccedenti.` });
+      } else {
+        setFeedback({ type: "info", message: "Nessun file eccedente da rimuovere (storico già entro i 15 elementi)." });
+      }
+      void refreshBackupsList(config.folderPath);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setFeedback({ type: "error", message: `Errore pulizia: ${msg}` });
+    }
+  };
 
   // Aggiornamento e persistenza configurazione
   const updateConfig = (patch: Partial<BackupConfig>) => {
@@ -481,22 +537,30 @@ export const BackupSettingsPanel: React.FC = () => {
           </label>
         </div>
 
-        {/* Stato ultimo backup giornaliero */}
-        <div className="flex items-center gap-2 pt-2 text-xs text-[var(--muted-foreground)] border-t border-[var(--border)]/50">
-          <Clock className="w-3.5 h-3.5 text-sky-400" />
-          <span>
-            Ultimo backup automatico eseguito:{" "}
-            {config.lastRunTimestamp ? (
-              <strong className="text-white">
-                {new Date(config.lastRunTimestamp).toLocaleString("it-IT", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })}
-              </strong>
-            ) : (
-              <span className="italic">Nessun backup automatico registrato</span>
-            )}
-          </span>
+        {/* Stato ultimo backup giornaliero e badge multi-utente */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 text-xs text-[var(--muted-foreground)] border-t border-[var(--border)]/50">
+          <div className="flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5 text-sky-400" />
+            <span>
+              Ultimo backup eseguito:{" "}
+              {config.lastRunTimestamp ? (
+                <strong className="text-white">
+                  {new Date(config.lastRunTimestamp).toLocaleString("it-IT", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}{" "}
+                  {config.lastRunBy && <span className="text-[var(--primary)] font-semibold">({config.lastRunBy})</span>}
+                </strong>
+              ) : (
+                <span className="italic">Nessun backup automatico registrato</span>
+              )}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-lg">
+            <span>👥 Controllo Multi-Utente:</span>
+            <span className="text-slate-300 font-normal">1 solo backup al giorno per tutta la rete</span>
+          </div>
         </div>
       </div>
 
@@ -615,26 +679,43 @@ export const BackupSettingsPanel: React.FC = () => {
 
       {/* SEZIONE 5: STORICO DEI FILE DI BACKUP NELLA CARTELLA */}
       <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-4 shadow-xs">
-        <div className="flex items-center justify-between pb-1 border-b border-[var(--border)]/60">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b border-[var(--border)]/60 gap-2">
           <div>
             <h2 className="text-base font-bold text-[var(--foreground)] flex items-center gap-2">
               <Clock className="w-4 h-4 text-teal-400" />
               <span>Backup Trovati nella Cartella</span>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
+                {existingBackups.length} / {DEFAULT_MAX_HISTORY} max
+              </span>
             </h2>
             <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-              File di salvataggio rilevati in <span className="font-mono text-white">{config.folderPath}</span>
+              Rotazione automatica FIFO: il 16° backup rimuove automaticamente il più vecchio.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void refreshBackupsList(config.folderPath)}
-            disabled={loadingBackups}
-            className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-white cursor-pointer"
-          >
-            <RefreshCw className={cn("w-3.5 h-3.5", loadingBackups && "animate-spin text-[var(--primary)]")} />
-            <span>Aggiorna</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {existingBackups.length > DEFAULT_MAX_HISTORY && (
+              <button
+                type="button"
+                onClick={handleRunFifoCleanup}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold cursor-pointer"
+                title="Rimuovi subito i backup eccedenti oltre i 15 consentiti"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Pulisci Eccedenze</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void refreshBackupsList(config.folderPath)}
+              disabled={loadingBackups}
+              className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-white cursor-pointer px-2 py-1 rounded-lg hover:bg-[var(--border)]/40"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", loadingBackups && "animate-spin text-[var(--primary)]")} />
+              <span>Aggiorna</span>
+            </button>
+          </div>
         </div>
 
         {existingBackups.length === 0 ? (
@@ -671,9 +752,20 @@ export const BackupSettingsPanel: React.FC = () => {
                     onClick={() => void handleSelectFileToRestore(b.path)}
                     disabled={isExporting || isRestoring}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-xs transition-colors cursor-pointer disabled:opacity-40"
+                    title="Seleziona questo backup per il ripristino"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     <span>Ripristina</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteBackup(b.path, b.filename)}
+                    disabled={isExporting || isRestoring}
+                    className="p-1.5 rounded-lg text-[var(--muted-foreground)] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer disabled:opacity-40"
+                    title="Elimina questo file di backup"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
@@ -871,3 +963,4 @@ export const BackupSettingsPanel: React.FC = () => {
     </div>
   );
 };
+
