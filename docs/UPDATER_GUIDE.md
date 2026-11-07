@@ -58,3 +58,4 @@ Tauri 2 utilizza una coppia di chiavi crittografiche asimmetriche (Minisign Ed25
 > [!CAUTION]
 > **Non condividere mai la chiave privata e non caricarla sul repository pubblico.**
 > Se utilizzi GitHub Actions per compilare e rilasciare automaticamente dal cloud, il contenuto di `last_updater.key` andrà inserito nei *Repository Secrets* di GitHub sotto la variabile `TAURI_SIGNING_PRIVATE_KEY`.
+

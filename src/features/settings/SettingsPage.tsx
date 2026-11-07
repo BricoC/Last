@@ -1,12 +1,13 @@
 import { SupabaseConnectionFields } from "./data-import/SupabaseConnectionFields";
 import React, { useState } from "react";
 import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
-import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2, Users, HardDrive } from "lucide-react";
+import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2, Users, HardDrive, DownloadCloud } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { CompanySettingsPanel } from "./CompanySettingsPanel";
 import { EmailSettingsPanel } from "./EmailSettingsPanel";
 import { DatabaseQuerySettingsPanel } from "./DatabaseQuerySettingsPanel";
 import { BackupSettingsPanel } from "./BackupSettingsPanel";
+import { SoftwareUpdateSettingsPanel } from "./SoftwareUpdateSettingsPanel";
 
 import { UserManagementPanel } from "./UserManagementPanel";
 
@@ -113,6 +114,7 @@ export const SettingsPage: React.FC = () => {
             { id: "general", label: "Parametri Generali", icon: <Sliders className="w-4 h-4" /> },
             { id: "email", label: "Configurazione Email", icon: <Mail className="w-4 h-4" /> },
             { id: "backup", label: "Backup & Ripristino", icon: <HardDrive className="w-4 h-4" /> },
+            { id: "updater", label: "Aggiornamenti", icon: <DownloadCloud className="w-4 h-4" /> },
             { id: "database", label: "Cloud & Database", icon: <Database className="w-4 h-4" /> },
             { id: "security", label: "Sicurezza & Permessi", icon: <Shield className="w-4 h-4" /> },
           ].map((item) => (
@@ -151,6 +153,10 @@ export const SettingsPage: React.FC = () => {
         ) : activeNav === "backup" ? (
           <div className="flex-1 min-w-0">
             <BackupSettingsPanel />
+          </div>
+        ) : activeNav === "updater" ? (
+          <div className="flex-1 min-w-0">
+            <SoftwareUpdateSettingsPanel />
           </div>
         ) : activeNav === "database" ? (
           <div className="flex-1 min-w-0 space-y-4">
