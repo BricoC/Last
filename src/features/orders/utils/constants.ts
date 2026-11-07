@@ -164,14 +164,28 @@ export const ORDER_GRID_CSS = `
     background-color: var(--card) !important; 
     color: var(--foreground) !important; 
     border-bottom: 1px solid var(--border) !important; 
-    transition: background 0.1s ease-in-out; 
   }
   .orders-modern-grid .ag-row:hover { 
     background-color: rgba(255, 255, 255, 0.03) !important; 
   }
+  .orders-modern-grid .ag-row.ag-row-focus,
+  .orders-modern-grid .ag-row.ag-row-selected,
+  .orders-modern-grid .ag-row:has(.ag-cell-focus),
+  .orders-modern-grid .ag-row:focus-within {
+    background-color: #1e5b87 !important;
+    color: #ffffff !important;
+  }
+  .orders-modern-grid .ag-row.ag-row-focus .ag-cell,
+  .orders-modern-grid .ag-row.ag-row-selected .ag-cell,
+  .orders-modern-grid .ag-row:has(.ag-cell-focus) .ag-cell,
+  .orders-modern-grid .ag-row:focus-within .ag-cell {
+    color: #ffffff !important;
+  }
   .orders-modern-grid .ag-cell-focus { 
-    outline: 2px solid #3b82f6 !important; 
-    outline-offset: -2px !important;
+    outline: 1px solid #7dd3fc !important; 
+    outline-offset: -1px !important;
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    font-weight: 700 !important;
   }
   .orders-modern-grid .ag-row-new-entry { 
     background-color: rgba(16, 185, 129, 0.04) !important; 
