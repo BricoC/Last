@@ -43,7 +43,7 @@ describe("backupService unit tests", () => {
 
   it("carica la configurazione predefinita quando localStorage è vuoto", () => {
     const config = loadBackupConfig();
-    expect(config.folderPath).toBe("D:\\BricoClassFiles\\Backup");
+    expect(config.folderPath).toBe("D:\\BricoClassFiles\\OneDrive\\Last\\Backup");
     expect(config.autoDailyEnabled).toBe(true);
     expect(config.autoBackupType).toBe("full");
     expect(config.autoCategories.length).toBe(BACKUP_CATEGORIES.length);
