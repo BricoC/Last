@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   StickyNote,
   Plus,
   Search,
+  X,
   Pin,
   PinOff,
   Trash2,
@@ -31,6 +32,7 @@ import {
 } from "lucide-react";
 import { notesRepository } from "./services/notesRepository";
 import type { NoteRecord } from "./types/note";
+import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { cn } from "@/shared/utils/cn";
 
@@ -256,16 +258,21 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
     handleEditorInput();
   };
 
-  // Filtraggio note a sinistra
-  const filteredNotes = notes.filter((n) => {
-    if (filterMode === "pinned" && n.is_pinned !== 1) return false;
-    if (filterMode === "archived" && n.is_archived !== 1) return false;
-    if (filterMode === "all" && n.is_archived === 1) return false;
+  // Filtraggio note a sinistra con ricerca multi-parola
+  const filteredNotes = useMemo(() => {
+    const isSearching = Boolean(search.trim());
+    return notes.filter((n) => {
+      if (filterMode === "pinned" && n.is_pinned !== 1) return false;
+      if (filterMode === "archived" && n.is_archived !== 1) return false;
+      // In modalità "Tutte": se non c'è ricerca mostra solo le attive non archiviate.
+      // Se c'è ricerca, permette di trovare le note su tutto l'archivio.
+      if (filterMode === "all" && !isSearching && n.is_archived === 1) return false;
 
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return n.title.toLowerCase().includes(q) || n.content_text.toLowerCase().includes(q);
-  });
+      if (!isSearching) return true;
+      const cleanText = n.content_text || n.content_html?.replace(/<[^>]*>/g, " ") || "";
+      return matchesFragmentSearch([n.title, cleanText], search);
+    });
+  }, [notes, filterMode, search]);
 
   const formatDateLabel = (isoDate: string) => {
     try {
@@ -319,8 +326,18 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cerca nelle note..."
-              className="w-full pl-8 pr-2.5 py-1 text-xs bg-slate-900/90 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/60"
+              className="w-full pl-8 pr-7 py-1 text-xs bg-slate-900/90 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/60"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                title="Cancella ricerca"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
 
           {/* Filtri Scheda */}
@@ -402,6 +419,11 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
                     >
                       {note.title || "Senza titolo"}
                     </span>
+                    {note.is_archived === 1 && (
+                      <span className="text-[9px] px-1 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
+                        Archivio
+                      </span>
+                    )}
                     {isPinned && (
                       <Pin className="w-3 h-3 text-amber-400 shrink-0 fill-amber-400" />
                     )}
@@ -790,3 +812,4 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
     </div>
   );
 };
+
