@@ -26,6 +26,7 @@ import { hasAnyUnsavedChanges, runAllWindowCloseGuards } from "@/shared/stores/u
 import { isPageAllowedForUser } from "@/shared/services/appUserService";
 import { UserPasswordModal } from "@/shared/components/ui/UserPasswordModal";
 import { DdtBatchExportRunner } from "@/features/ddt-studio/components/DdtBatchExportRunner";
+import { AppUpdaterRunner } from "@/shared/components/updater/AppUpdaterRunner";
 
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 import { checkAndExecuteDailyBackup } from "@/features/settings/services/backupService";
@@ -180,6 +181,9 @@ export function App() {
 
       {/* Runner Esportazione Report DDT in Background & Floating Widget */}
       <DdtBatchExportRunner />
+
+      {/* Runner Controllo & Download Aggiornamenti Automatici in Background */}
+      <AppUpdaterRunner />
     </div>
   );
 }

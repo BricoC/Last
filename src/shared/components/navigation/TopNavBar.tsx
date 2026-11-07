@@ -29,6 +29,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
+import { useAppUpdaterStore } from "@/shared/stores/useAppUpdaterStore";
+import { Sparkles } from "lucide-react";
 
 export interface NavModule {
   id: string;
@@ -72,6 +74,12 @@ export const TopNavBar: React.FC = () => {
     requestSwitchUser,
     updateCurrentUserTopbarOrder,
   } = useUserStore();
+
+  const {
+    status: updaterStatus,
+    newVersion: updaterNewVersion,
+    openModal: openUpdaterModal,
+  } = useAppUpdaterStore();
 
   const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
   const [dragOverModuleId, setDragOverModuleId] = useState<string | null>(null);
@@ -306,6 +314,19 @@ export const TopNavBar: React.FC = () => {
             <Minimize2 className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {/* Indicatore Aggiornamento Scaricato e Pronto (Stile Windows Update) */}
+        {updaterStatus === "ready" && (
+          <button
+            type="button"
+            onClick={openUpdaterModal}
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-500 text-white shadow-md animate-pulse cursor-pointer hover:bg-emerald-400 transition-all"
+            title="Aggiornamento scaricato! Clicca per riavviare subito l'applicazione"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Riavvia per v{updaterNewVersion || "..."}</span>
+          </button>
+        )}
 
         {/* Indicatore e Pulsante Cloud Sync Supabase */}
         <button
