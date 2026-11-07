@@ -15,6 +15,7 @@ import { ElectronicInvoicesPage } from "@/features/invoices/ElectronicInvoicesPa
 import { OrderManagerPage } from "@/features/orders/OrderManagerPage";
 import { OrNumbersPage } from "@/features/or-numbers/OrNumbersPage";
 import { OffersPage } from "@/features/offers/OffersPage";
+import { NotesPage } from "@/features/notes/NotesPage";
 import { ManualCloudImportPage } from "@/features/manual-cloud-import/ManualCloudImportPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
@@ -135,6 +136,8 @@ export function App() {
         return <OrNumbersPage windowId={windowId} />;
       case "offers":
         return <OffersPage />;
+      case "notes":
+        return <NotesPage windowId={windowId} />;
       case "manual-cloud-import":
         return currentUser?.is_admin ? <ManualCloudImportPage /> : null;
       default:

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { WindowItem, useWindowStore, SnapSlotType, requestWindowClose } from "@/shared/stores/useWindowStore";
-import { Minus, Square, Copy, X, Plus, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users, Hash, ClipboardList } from "lucide-react";
+import { Minus, Square, Copy, X, Plus, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users, Hash, ClipboardList, StickyNote } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
 type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -14,6 +14,7 @@ const MODULE_ICONS: Record<string, React.ReactNode> = {
   quotes: <Calculator className="w-4 h-4 text-purple-400" />,
   offers: <ClipboardList className="w-4 h-4 text-blue-400" />,
   clients: <Users className="w-4 h-4 text-teal-400" />,
+  notes: <StickyNote className="w-4 h-4 text-amber-400" />,
   settings: <SettingsIcon className="w-4 h-4 text-slate-300" />,
 };
 

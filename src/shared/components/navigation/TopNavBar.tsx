@@ -15,6 +15,7 @@ import {
   Calculator,
   ClipboardList,
   Users,
+  StickyNote,
   Settings as SettingsIcon,
   Columns2,
   Rows2,
@@ -49,6 +50,7 @@ export const ALL_TOPBAR_NAV_MODULES: NavModule[] = [
   { id: "quotes", title: "Preventivi", componentId: "quotes", icon: <Calculator className="w-3.5 h-3.5" /> },
   { id: "offers", title: "Offerte", componentId: "offers", icon: <ClipboardList className="w-3.5 h-3.5" /> },
   { id: "clients", title: "Clienti", componentId: "clients", icon: <Users className="w-3.5 h-3.5" /> },
+  { id: "notes", title: "Note", componentId: "notes", icon: <StickyNote className="w-3.5 h-3.5" /> },
 ];
 
 export const TopNavBar: React.FC = () => {
