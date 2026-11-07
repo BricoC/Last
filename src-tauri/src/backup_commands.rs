@@ -287,7 +287,7 @@ pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileIn
     Ok(files)
 }
 
-/// Controlla se nella cartella condivisa esiste già un backup per la data specificata (es. "2026-11-07")
+/// Controlla se nella cartella condivisa esiste già un backup per la data specificata (es. "2026-11-07" o "2026.11.07")
 #[tauri::command]
 pub fn check_today_backup_exists(folder_path: String, date_str: String) -> Result<Option<String>, String> {
     let path = Path::new(&folder_path);
@@ -295,12 +295,13 @@ pub fn check_today_backup_exists(folder_path: String, date_str: String) -> Resul
         return Ok(None);
     }
 
+    let date_dot = date_str.replace('-', ".");
     let entries = fs::read_dir(path).map_err(|e| format!("Errore lettura cartella: {}", e))?;
     for entry in entries.flatten() {
         let fpath = entry.path();
         if fpath.is_file() {
             let fname = fpath.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if fname.contains(&date_str) && (fname.ends_with(".db") || fname.ends_with(".lastbackup") || fname.ends_with(".json")) {
+            if (fname.contains(&date_str) || fname.contains(&date_dot)) && (fname.ends_with(".db") || fname.ends_with(".lastbackup") || fname.ends_with(".json")) {
                 return Ok(Some(fname.to_string()));
             }
         }

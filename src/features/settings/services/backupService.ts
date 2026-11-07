@@ -532,12 +532,17 @@ export async function checkTodayBackupAlreadyDone(
 }
 
 /**
- * Genera il timestamp per il nome del file
+ * Genera il timestamp per il nome del file nel formato: "aaaa.mm.gg ore hh.mm"
  */
-function getTimestampString(): string {
+function getBackupFileTimestamp(): string {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  const yyyy = now.getFullYear();
+  const mm = pad(now.getMonth() + 1);
+  const dd = pad(now.getDate());
+  const hh = pad(now.getHours());
+  const min = pad(now.getMinutes());
+  return `${yyyy}.${mm}.${dd} ore ${hh}.${min}`;
 }
 
 /**
@@ -551,8 +556,8 @@ export async function executeFullDatabaseBackup(folderPath: string): Promise<{
   error?: string;
 }> {
   try {
-    const ts = getTimestampString();
-    const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\Backup_Last_Completo_${ts}.db`;
+    const ts = getBackupFileTimestamp();
+    const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\Backup Completo ${ts}.db`;
 
     const size = await invoke<number>("copy_database_file", { targetFilePath: targetFile });
 
@@ -629,9 +634,9 @@ export async function executeModularBackup(
       tables: exportedData,
     };
 
-    const ts = getTimestampString();
-    const prefix = isTotal ? "Backup_Last_Totale" : "Backup_Last_Personalizzato";
-    const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\${prefix}_${ts}.lastbackup`;
+    const ts = getBackupFileTimestamp();
+    const prefix = isTotal ? "Backup Completo Modulare" : "Backup Modulare";
+    const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\${prefix} ${ts}.lastbackup`;
 
     const json = JSON.stringify(pkg, null, 2);
     const size = await invoke<number>("write_backup_file", {
