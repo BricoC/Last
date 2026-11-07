@@ -24,6 +24,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { hasAnyUnsavedChanges, runAllWindowCloseGuards } from "@/shared/stores/useWindowStore";
 import { isPageAllowedForUser } from "@/shared/services/appUserService";
 import { UserPasswordModal } from "@/shared/components/ui/UserPasswordModal";
+import { DdtBatchExportRunner } from "@/features/ddt-studio/components/DdtBatchExportRunner";
 
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 
@@ -167,6 +168,9 @@ export function App() {
         onCancel={cancelPasswordSwitch}
         onConfirm={confirmPasswordSwitch}
       />
+
+      {/* Runner Esportazione Report DDT in Background & Floating Widget */}
+      <DdtBatchExportRunner />
     </div>
   );
 }

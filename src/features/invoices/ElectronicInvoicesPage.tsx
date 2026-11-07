@@ -5,6 +5,7 @@ import {
   SupplierInvoiceItem,
 } from "./services/electronicInvoicesService";
 import { InvoiceDetailModal } from "./components/InvoiceDetailModal";
+import { AddToOrderManagerModal, AddToOrderManagerItem } from "./components/AddToOrderManagerModal";
 import { Button } from "@/shared/components/ui/button";
 import {
   normalizeSearch,
@@ -24,7 +25,12 @@ import {
   CheckCircle2,
   AlertTriangle,
   AlertCircle,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Check,
 } from "lucide-react";
+import { cn } from "@/shared/utils/cn";
 
 type IndexedItemRow = SupplierInvoiceItem & { _searchIndex: string };
 type IndexedInvoiceRow = SupplierInvoice & { _searchIndex: string };
@@ -85,6 +91,24 @@ export const ElectronicInvoicesPage: React.FC = () => {
   const [invSortField, setInvSortField] = useState<InvoiceSortField>("doc_date");
   const [invSortAsc, setInvSortAsc] = useState(false);
 
+  // Selezione Cella per Copia Rapida (Ctrl + C)
+  const [selectedCell, setSelectedCell] = useState<{
+    rowKey: string | number;
+    col: "article_code" | "description";
+    text: string;
+  } | null>(null);
+  const [copiedToast, setCopiedToast] = useState<string | null>(null);
+
+  // Popup Aggiunta a Order Manager
+  const [addToOrderTarget, setAddToOrderTarget] = useState<AddToOrderManagerItem | null>(null);
+
+  const copyText = (text: string) => {
+    if (!text || text === "—") return;
+    void navigator.clipboard.writeText(text);
+    setCopiedToast(`Copiato: "${text.slice(0, 32)}${text.length > 32 ? "..." : ""}"`);
+    setTimeout(() => setCopiedToast(null), 2500);
+  };
+
   // Paginazione virtuale progressiva (infinite scroll)
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
 
@@ -127,6 +151,39 @@ export const ElectronicInvoicesPage: React.FC = () => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Scorciatoia Ctrl+C per copiare cella attiva o testo selezionato
+  useEffect(() => {
+    const handleCopyKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        const mouseSelection = window.getSelection()?.toString();
+        if (mouseSelection && mouseSelection.trim().length > 0) {
+          void navigator.clipboard.writeText(mouseSelection);
+          setCopiedToast(
+            `Copiato: "${mouseSelection.slice(0, 32)}${mouseSelection.length > 32 ? "..." : ""}"`
+          );
+          setTimeout(() => setCopiedToast(null), 2500);
+          return;
+        }
+
+        if (selectedCell && selectedCell.text && selectedCell.text !== "—") {
+          e.preventDefault();
+          copyText(selectedCell.text);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleCopyKeyDown);
+    return () => window.removeEventListener("keydown", handleCopyKeyDown);
+  }, [selectedCell]);
 
   // Caricamento rapido iniziale di tutte le righe (richiede ~80ms una sola volta)
   const loadData = async () => {
@@ -198,6 +255,11 @@ export const ElectronicInvoicesPage: React.FC = () => {
       let valA: any = a[itemSortField];
       let valB: any = b[itemSortField];
 
+      if (itemSortField === "discounted_price") {
+        valA = a.discounted_price > 0 ? a.discounted_price : a.unit_price;
+        valB = b.discounted_price > 0 ? b.discounted_price : b.unit_price;
+      }
+
       if (valA == null) valA = "";
       if (valB == null) valB = "";
 
@@ -247,6 +309,28 @@ export const ElectronicInvoicesPage: React.FC = () => {
       setInvSortField(field);
       setInvSortAsc(field === "supplier_name");
     }
+  };
+
+  const renderItemSortIndicator = (field: ItemSortField) => {
+    if (itemSortField === field) {
+      return itemSortAsc ? (
+        <ArrowUp className="w-3 h-3 text-[var(--primary)] shrink-0" />
+      ) : (
+        <ArrowDown className="w-3 h-3 text-[var(--primary)] shrink-0" />
+      );
+    }
+    return <ArrowUpDown className="w-2.5 h-2.5 opacity-25 group-hover:opacity-75 transition-opacity shrink-0" />;
+  };
+
+  const renderInvSortIndicator = (field: InvoiceSortField) => {
+    if (invSortField === field) {
+      return invSortAsc ? (
+        <ArrowUp className="w-3 h-3 text-[var(--primary)] shrink-0" />
+      ) : (
+        <ArrowDown className="w-3 h-3 text-[var(--primary)] shrink-0" />
+      );
+    }
+    return <ArrowUpDown className="w-2.5 h-2.5 opacity-25 group-hover:opacity-75 transition-opacity shrink-0" />;
   };
 
   // Reset del batch visibile quando cambia la ricerca o i filtri o l'ordinamento
@@ -825,144 +909,144 @@ export const ElectronicInvoicesPage: React.FC = () => {
                 <tr>
                   <th
                     onClick={() => handleToggleItemSort("doc_date")}
-                    className="px-3 py-2 text-left w-32 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left w-32 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per data documento"
                   >
                     <div className="flex items-center gap-1">
                       <span>DATA</span>
-                      {itemSortField === "doc_date" && (
-                        <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderItemSortIndicator("doc_date")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleItemSort("doc_number")}
-                    className="px-3 py-2 text-left w-28 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left w-28 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per numero documento"
                   >
                     <div className="flex items-center gap-1">
                       <span>DOC N.</span>
-                      {itemSortField === "doc_number" && (
-                        <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderItemSortIndicator("doc_number")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleItemSort("supplier_name")}
-                    className="px-3 py-2 text-left w-52 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left w-52 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per fornitore"
                   >
                     <div className="flex items-center gap-1">
                       <span>FORNITORE</span>
-                      {itemSortField === "supplier_name" && (
-                        <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderItemSortIndicator("supplier_name")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleItemSort("article_code")}
-                    className="px-3 py-2 text-left w-36 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left w-36 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per codice articolo"
                   >
                     <div className="flex items-center gap-1">
                       <span>CODICE ART.</span>
-                      {itemSortField === "article_code" && (
-                        <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderItemSortIndicator("article_code")}
                     </div>
                   </th>
                   {showExtendedColumns && (
                     <th
                       onClick={() => handleToggleItemSort("unit")}
-                      className="px-2 py-2 text-center w-14 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                      style={{ cursor: "pointer" }}
+                      className="px-2 py-2 text-center w-14 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                      title="Ordina per unità di misura"
                     >
                       <div className="flex items-center justify-center gap-1">
                         <span>UM</span>
-                        {itemSortField === "unit" && (
-                          <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                        )}
+                        {renderItemSortIndicator("unit")}
                       </div>
                     </th>
                   )}
                   {showExtendedColumns && (
                     <th
                       onClick={() => handleToggleItemSort("quantity")}
-                      className="px-3 py-2 text-right w-16 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                      style={{ cursor: "pointer" }}
+                      className="px-3 py-2 text-right w-16 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                      title="Ordina per quantità"
                     >
                       <div className="flex items-center justify-end gap-1">
                         <span>Q.TÀ</span>
-                        {itemSortField === "quantity" && (
-                          <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                        )}
+                        {renderItemSortIndicator("quantity")}
                       </div>
                     </th>
                   )}
                   <th
                     onClick={() => handleToggleItemSort("description")}
-                    className="px-3 py-2 text-left cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per descrizione articolo"
                   >
                     <div className="flex items-center gap-1">
                       <span>DESCRIZIONE</span>
-                      {itemSortField === "description" && (
-                        <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderItemSortIndicator("description")}
                     </div>
                   </th>
                   {showExtendedColumns && (
                     <th
                       onClick={() => handleToggleItemSort("unit_price")}
-                      className="px-3 py-2 text-right w-24 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                      style={{ cursor: "pointer" }}
+                      className="px-3 py-2 text-right w-24 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                      title="Ordina per prezzo di listino"
                     >
                       <div className="flex items-center justify-end gap-1">
                         <span>LISTINO</span>
-                        {itemSortField === "unit_price" && (
-                          <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                        )}
+                        {renderItemSortIndicator("unit_price")}
                       </div>
                     </th>
                   )}
                   {showExtendedColumns && (
                     <th
                       onClick={() => handleToggleItemSort("discount_1")}
-                      className="px-2 py-2 text-center w-20 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                      style={{ cursor: "pointer" }}
+                      className="px-2 py-2 text-center w-20 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                      title="Ordina per sconti"
                     >
                       <div className="flex items-center justify-center gap-1">
                         <span>SCONTO</span>
-                        {itemSortField === "discount_1" && (
-                          <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                        )}
+                        {renderItemSortIndicator("discount_1")}
                       </div>
                     </th>
                   )}
                   <th
                     onClick={() => handleToggleItemSort("discounted_price")}
-                    className="px-3 py-2 text-right w-28 text-[var(--primary)] font-bold cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-right w-28 text-[var(--primary)] font-bold group hover:bg-[var(--card)] transition-colors"
+                    title="Ordina per costo netto"
                   >
                     <div className="flex items-center justify-end gap-1">
                       <span>COSTO NETTO (€)</span>
-                      {itemSortField === "discounted_price" && (
-                        <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderItemSortIndicator("discounted_price")}
                     </div>
                   </th>
                   {showExtendedColumns && (
                     <th
                       onClick={() => handleToggleItemSort("total_price")}
-                      className="px-3 py-2 text-right w-24 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                      style={{ cursor: "pointer" }}
+                      className="px-3 py-2 text-right w-24 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                      title="Ordina per importo riga"
                     >
                       <div className="flex items-center justify-end gap-1">
                         <span>IMPORTO</span>
-                        {itemSortField === "total_price" && (
-                          <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                        )}
+                        {renderItemSortIndicator("total_price")}
                       </div>
                     </th>
                   )}
                   <th
                     onClick={() => handleToggleItemSort("vat_rate")}
-                    className="px-2 py-2 text-center w-14 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-2 py-2 text-center w-14 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per aliquota IVA"
                   >
                     <div className="flex items-center justify-center gap-1">
                       <span>IVA</span>
-                      {itemSortField === "vat_rate" && (
-                        <span className="text-[var(--primary)] text-[10px]">{itemSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderItemSortIndicator("vat_rate")}
                     </div>
                   </th>
                 </tr>
@@ -973,6 +1057,10 @@ export const ElectronicInvoicesPage: React.FC = () => {
                     .filter((d) => d > 0)
                     .map((d) => `${d}%`)
                     .join("+");
+
+                  const rowKey = row.id || `${row.doc_number}-${row.line_number}`;
+                  const isCodeSelected = selectedCell?.rowKey === rowKey && selectedCell?.col === "article_code";
+                  const isDescSelected = selectedCell?.rowKey === rowKey && selectedCell?.col === "description";
 
                   return (
                     <tr
@@ -1002,8 +1090,25 @@ export const ElectronicInvoicesPage: React.FC = () => {
                         {row.supplier_name}
                       </td>
 
-                      {/* CODICE ART. (copiabile) */}
-                      <td className="px-3 py-2 text-[var(--muted-foreground)] select-text">
+                      {/* CODICE ART. (copiabile con selezione mouse o click + Ctrl+C o doppio click) */}
+                      <td
+                        onClick={() =>
+                          setSelectedCell({
+                            rowKey,
+                            col: "article_code",
+                            text: row.article_code || "",
+                          })
+                        }
+                        onDoubleClick={() => copyText(row.article_code || "")}
+                        style={{ userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}
+                        title="Fai clic o seleziona per copiare con Ctrl+C"
+                        className={cn(
+                          "px-3 py-2 select-text cursor-text transition-colors",
+                          isCodeSelected
+                            ? "bg-[var(--primary)]/20 text-[var(--foreground)] font-semibold ring-1 ring-inset ring-[var(--primary)]/50 rounded-xs"
+                            : "text-[var(--muted-foreground)]"
+                        )}
+                      >
                         {row.article_code || "—"}
                       </td>
 
@@ -1021,8 +1126,35 @@ export const ElectronicInvoicesPage: React.FC = () => {
                         </td>
                       )}
 
-                      {/* DESCRIZIONE (copiabile) */}
-                      <td className="px-3 py-2 font-sans text-[var(--foreground)] select-text">
+                      {/* DESCRIZIONE (copiabile con Ctrl+C, doppio clic per aggiungere a Order Manager) */}
+                      <td
+                        onClick={() =>
+                          setSelectedCell({
+                            rowKey,
+                            col: "description",
+                            text: row.description || "",
+                          })
+                        }
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setAddToOrderTarget({
+                            supplier_name: row.supplier_name,
+                            article_code: row.article_code || "",
+                            description: row.description,
+                            quantity: row.quantity > 0 ? row.quantity : 1,
+                            unit_price: row.unit_price,
+                            discounted_price: row.discounted_price,
+                          });
+                        }}
+                        style={{ userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}
+                        title="Doppio clic per aggiungere a Order Manager &bull; Clic + Ctrl+C per copiare"
+                        className={cn(
+                          "px-3 py-2 font-sans select-text cursor-text transition-colors",
+                          isDescSelected
+                            ? "bg-[var(--primary)]/20 text-[var(--foreground)] ring-1 ring-inset ring-[var(--primary)]/50 rounded-xs"
+                            : "text-[var(--foreground)]"
+                        )}
+                      >
                         {row.description}
                       </td>
 
@@ -1084,112 +1216,112 @@ export const ElectronicInvoicesPage: React.FC = () => {
                 <tr>
                   <th
                     onClick={() => handleToggleInvSort("doc_date")}
-                    className="px-3 py-2 text-left w-32 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left w-32 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per data documento"
                   >
                     <div className="flex items-center gap-1">
                       <span>DATA DOC</span>
-                      {invSortField === "doc_date" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("doc_date")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("doc_number")}
-                    className="px-3 py-2 text-left w-28 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left w-28 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per numero fattura"
                   >
                     <div className="flex items-center gap-1">
                       <span>N° FATTURA</span>
-                      {invSortField === "doc_number" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("doc_number")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("supplier_name")}
-                    className="px-3 py-2 text-left w-64 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left w-64 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per fornitore"
                   >
                     <div className="flex items-center gap-1">
                       <span>FORNITORE</span>
-                      {invSortField === "supplier_name" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("supplier_name")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("year")}
-                    className="px-3 py-2 text-center w-20 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-center w-20 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per anno"
                   >
                     <div className="flex items-center justify-center gap-1">
                       <span>ANNO</span>
-                      {invSortField === "year" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("year")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("taxable_amount")}
-                    className="px-3 py-2 text-right w-28 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-right w-28 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per imponibile"
                   >
                     <div className="flex items-center justify-end gap-1">
                       <span>IMPONIBILE</span>
-                      {invSortField === "taxable_amount" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("taxable_amount")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("vat_amount")}
-                    className="px-3 py-2 text-right w-24 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-right w-24 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per importo IVA"
                   >
                     <div className="flex items-center justify-end gap-1">
                       <span>IVA</span>
-                      {invSortField === "vat_amount" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("vat_amount")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("total_amount")}
-                    className="px-3 py-2 text-right w-32 font-bold text-[var(--foreground)] cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-right w-32 font-bold text-[var(--foreground)] group hover:bg-[var(--card)] transition-colors"
+                    title="Ordina per totale documento"
                   >
                     <div className="flex items-center justify-end gap-1">
                       <span>TOTALE DOC (€)</span>
-                      {invSortField === "total_amount" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("total_amount")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("payment_method")}
-                    className="px-3 py-2 text-left w-48 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left w-48 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per modalità di pagamento"
                   >
                     <div className="flex items-center gap-1">
                       <span>MODALITÀ PAGAMENTO</span>
-                      {invSortField === "payment_method" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("payment_method")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("due_date")}
-                    className="px-3 py-2 text-center w-28 cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-center w-28 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per scadenza"
                   >
                     <div className="flex items-center justify-center gap-1">
                       <span>SCADENZA</span>
-                      {invSortField === "due_date" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("due_date")}
                     </div>
                   </th>
                   <th
                     onClick={() => handleToggleInvSort("notes")}
-                    className="px-3 py-2 text-left cursor-pointer hover:bg-[var(--card)] transition-colors"
+                    style={{ cursor: "pointer" }}
+                    className="px-3 py-2 text-left group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+                    title="Ordina per note / causale"
                   >
                     <div className="flex items-center gap-1">
                       <span>NOTE / CAUSALE</span>
-                      {invSortField === "notes" && (
-                        <span className="text-[var(--primary)] text-[10px]">{invSortAsc ? "▲" : "▼"}</span>
-                      )}
+                      {renderInvSortIndicator("notes")}
                     </div>
                   </th>
                 </tr>
@@ -1266,6 +1398,25 @@ export const ElectronicInvoicesPage: React.FC = () => {
         lines={invoiceLines}
         isLoadingLines={isLoadingLines}
       />
+
+      {/* ─── MODALE AGGIUNGI A ORDER MANAGER ─── */}
+      <AddToOrderManagerModal
+        isOpen={Boolean(addToOrderTarget)}
+        onClose={() => setAddToOrderTarget(null)}
+        item={addToOrderTarget}
+        onSuccess={(msg) => {
+          setCopiedToast(msg);
+          setTimeout(() => setCopiedToast(null), 3500);
+        }}
+      />
+
+      {/* ─── TOAST FEEDBACK COPIA (CTRL + C) ─── */}
+      {copiedToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-150 pointer-events-none">
+          <Check className="w-4 h-4" />
+          <span>{copiedToast}</span>
+        </div>
+      )}
     </div>
   );
 };
