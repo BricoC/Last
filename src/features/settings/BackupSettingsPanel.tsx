@@ -43,12 +43,14 @@ import {
   pullBackupSettingsFromSupabase,
   cleanOldBackups,
   deleteBackupFile,
+  inspectBackupFullReport,
   DEFAULT_MAX_HISTORY,
   type BackupConfig,
   type BackupFileInfo,
   type BackupPackage,
+  type FullBackupReport,
 } from "./services/backupService";
-import { Trash2 } from "lucide-react";
+import { Trash2, FileSearch } from "lucide-react";
 
 export const BackupSettingsPanel: React.FC = () => {
   const [config, setConfig] = useState<BackupConfig>(() => loadBackupConfig());
@@ -69,6 +71,12 @@ export const BackupSettingsPanel: React.FC = () => {
   const [isDatabaseRestore, setIsDatabaseRestore] = useState(false);
   const [categoriesToRestore, setCategoriesToRestore] = useState<string[]>([]);
   const [restoreMode, setRestoreMode] = useState<"merge" | "replace">("merge");
+
+  // Popup Resoconto Analitico Backup
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [detailedReport, setDetailedReport] = useState<FullBackupReport | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [showRawTables, setShowRawTables] = useState(false);
 
   // Caricamento conteggi record
   const refreshCounts = useCallback(async () => {
@@ -149,6 +157,24 @@ export const BackupSettingsPanel: React.FC = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setFeedback({ type: "error", message: `Errore pulizia: ${msg}` });
+    }
+  };
+
+  // Apertura modale del Resoconto Analitico Dettagliato
+  const handleOpenDetailedReport = async (filePath: string) => {
+    setLoadingReport(true);
+    setReportModalOpen(true);
+    setDetailedReport(null);
+    setShowRawTables(false);
+    try {
+      const rep = await inspectBackupFullReport(filePath);
+      setDetailedReport(rep);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setFeedback({ type: "error", message: `Impossibile analizzare il file di backup: ${msg}` });
+      setReportModalOpen(false);
+    } finally {
+      setLoadingReport(false);
     }
   };
 
@@ -749,6 +775,17 @@ export const BackupSettingsPanel: React.FC = () => {
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
+                    onClick={() => void handleOpenDetailedReport(b.path)}
+                    disabled={isExporting || isRestoring}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 font-bold text-xs transition-colors cursor-pointer disabled:opacity-40"
+                    title="Visualizza il resoconto analitico completo di questo backup"
+                  >
+                    <FileSearch className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Resoconto</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => void handleSelectFileToRestore(b.path)}
                     disabled={isExporting || isRestoring}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-xs transition-colors cursor-pointer disabled:opacity-40"
@@ -889,7 +926,7 @@ export const BackupSettingsPanel: React.FC = () => {
                         if (!isAvailableInPkg) return null;
 
                         const isChecked = categoriesToRestore.includes(cat.id);
-                        const countInPkg = cat.tables.reduce((acc, t) => acc + (inspectedPkg?.tableCounts[t] || 0), 0);
+                        const countInPkg = cat.tables.reduce((acc: number, t: string) => acc + (inspectedPkg?.tableCounts[t] || 0), 0);
 
                         return (
                           <label
@@ -956,6 +993,181 @@ export const BackupSettingsPanel: React.FC = () => {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP MODALE RESOCONTO ANALITICO BACKUP */}
+      {reportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden w-full max-w-2xl animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+            {/* Header Modale */}
+            <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/30">
+                  <FileSearch className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Resoconto Analitico Backup</h3>
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    {detailedReport ? detailedReport.fileName : "Analisi del file in corso..."}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setReportModalOpen(false)}
+                className="p-1.5 rounded-lg text-[var(--muted-foreground)] hover:text-white hover:bg-[var(--border)]/40 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Contenuto Modale */}
+            <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+              {loadingReport || !detailedReport ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-3 text-[var(--muted-foreground)]">
+                  <Loader2 className="w-8 h-8 animate-spin text-[var(--primary)]" />
+                  <span className="font-semibold text-xs">Ispezione e conteggio analitico delle tabelle...</span>
+                </div>
+              ) : (
+                <>
+                  {/* Badge Riepilogo */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="p-2.5 rounded-xl bg-[var(--background)]/60 border border-[var(--border)]">
+                      <span className="text-[10px] text-[var(--muted-foreground)] uppercase font-bold block">Dimensione</span>
+                      <span className="text-sm font-black text-white font-mono">
+                        {formatFileSize(detailedReport.sizeBytes)}
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-[var(--background)]/60 border border-[var(--border)]">
+                      <span className="text-[10px] text-[var(--muted-foreground)] uppercase font-bold block">Tabelle Archiviate</span>
+                      <span className="text-sm font-black text-purple-400 font-mono">
+                        {detailedReport.totalTables} tabelle
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-[var(--background)]/60 border border-[var(--border)]">
+                      <span className="text-[10px] text-[var(--muted-foreground)] uppercase font-bold block">Record Totali</span>
+                      <span className="text-sm font-black text-emerald-400 font-mono">
+                        {detailedReport.totalRecords.toLocaleString("it-IT")} record
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-[var(--background)]/60 border border-[var(--border)]">
+                      <span className="text-[10px] text-[var(--muted-foreground)] uppercase font-bold block">Tipo Salvataggio</span>
+                      <span className="text-xs font-bold text-sky-400 block pt-0.5">
+                        {detailedReport.backupType === "full_db" ? "Database SQLite (.db)" : "Modulare (.lastbackup)"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Tabella Dettagliata per Categoria */}
+                  <div className="rounded-xl border border-[var(--border)] overflow-hidden bg-[var(--background)]/40">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-[var(--card)] border-b border-[var(--border)] text-[10px] uppercase font-bold text-[var(--muted-foreground)]">
+                          <th className="py-2.5 px-3">Sezione / Categoria</th>
+                          <th className="py-2.5 px-3">Tabelle nel Backup</th>
+                          <th className="py-2.5 px-3 text-right">Record Presenti</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border)]/40 font-sans">
+                        {detailedReport.categories.map((cat) => (
+                          <tr key={cat.id} className="hover:bg-[var(--card)]/50 transition-colors">
+                            <td className="py-2.5 px-3">
+                              <div className="flex items-center gap-2">
+                                <div className="p-1 rounded bg-[var(--card)] border border-[var(--border)] shrink-0">
+                                  {getCategoryIcon(cat.id)}
+                                </div>
+                                <span className="font-bold text-white text-xs">{cat.categoryLabel}</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-[var(--muted-foreground)]">
+                              <div className="flex flex-wrap gap-1">
+                                {cat.tablesIncluded.map((t) => (
+                                  <span key={t} className="px-1.5 py-0.5 rounded bg-[var(--card)] border border-[var(--border)] text-[10px]">
+                                    {t}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400 text-xs">
+                              {cat.recordCount.toLocaleString("it-IT")} record
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-[var(--card)] border-t-2 border-[var(--border)] font-bold text-xs">
+                          <td className="py-2.5 px-3 text-white uppercase text-[11px]">Totale Assoluto</td>
+                          <td className="py-2.5 px-3 font-mono text-purple-300 text-[11px]">
+                            {detailedReport.totalTables} Tabelle di sistema
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-400 text-sm">
+                            {detailedReport.totalRecords.toLocaleString("it-IT")} record
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  {/* Toggle tabelle raw */}
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowRawTables(!showRawTables)}
+                      className="text-[11px] font-semibold text-[var(--primary)] hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <span>{showRawTables ? "Nascondi" : "Mostra"} tutte le {detailedReport.rawTables.length} tabelle singole di SQLite</span>
+                    </button>
+
+                    {showRawTables && (
+                      <div className="mt-2 p-3 rounded-xl bg-[var(--background)]/80 border border-[var(--border)] grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] font-mono animate-in fade-in duration-150">
+                        {detailedReport.rawTables.map((t) => (
+                          <div key={t.name} className="flex items-center justify-between p-1.5 rounded bg-[var(--card)] border border-[var(--border)]/50">
+                            <span className="text-slate-300 truncate mr-2">{t.name}</span>
+                            <span className="text-emerald-400 font-bold shrink-0">{t.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer Modale */}
+            <div className="p-4 border-t border-[var(--border)] bg-[var(--background)]/40 flex items-center justify-between">
+              <span className="text-[11px] text-[var(--muted-foreground)] truncate max-w-xs">
+                ☁️ Percorso: <span className="font-mono text-slate-300">{detailedReport?.filePath}</span>
+              </span>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setReportModalOpen(false)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-[var(--muted-foreground)] hover:text-white hover:bg-[var(--border)]/50 transition-colors cursor-pointer"
+                >
+                  Chiudi
+                </button>
+                {detailedReport && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportModalOpen(false);
+                      void handleSelectFileToRestore(detailedReport.filePath);
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 shadow-md cursor-pointer"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Ripristina Questo Backup</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -3,9 +3,27 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tauri::{AppHandle, Manager};
+use sqlx::{Connection, SqliteConnection};
+use sqlx::sqlite::SqliteConnectOptions;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TableInspectionInfo {
+    pub name: String,
+    pub count: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BackupInspectionResult {
+    pub file_name: String,
+    pub file_path: String,
+    pub size_bytes: u64,
+    pub tables_count: usize,
+    pub total_records: i64,
+    pub tables: Vec<TableInspectionInfo>,
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BackupFileInfo {
@@ -301,4 +319,54 @@ pub fn delete_backup_file(file_path: String) -> Result<(), String> {
         fs::remove_file(path).map_err(|e| format!("Errore eliminazione file: {}", e))?;
     }
     Ok(())
+}
+
+/// Ispeziona un file di database SQLite (.db) e conta analiticamente tutte le tabelle e i record
+#[tauri::command]
+pub async fn inspect_sqlite_backup_file(file_path: String) -> Result<BackupInspectionResult, String> {
+    let path = Path::new(&file_path);
+    if !path.exists() {
+        return Err(format!("File non trovato: {}", file_path));
+    }
+
+    let meta = fs::metadata(path).map_err(|e| format!("Errore metadati file: {}", e))?;
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+
+    let options = SqliteConnectOptions::new()
+        .filename(path)
+        .read_only(true);
+
+    let mut conn = SqliteConnection::connect_with(&options)
+        .await
+        .map_err(|e| format!("Impossibile aprire il database SQLite: {}", e))?;
+
+    let table_names = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    )
+    .fetch_all(&mut conn)
+    .await
+    .map_err(|e| format!("Errore lettura schema tabelle: {}", e))?;
+
+    let mut tables = Vec::new();
+    let mut total_records: i64 = 0;
+
+    for name in table_names {
+        let count_query = format!("SELECT COUNT(*) FROM \"{}\"", name);
+        let count = sqlx::query_scalar::<_, i64>(&count_query)
+            .fetch_one(&mut conn)
+            .await
+            .unwrap_or(0);
+
+        total_records += count;
+        tables.push(TableInspectionInfo { name, count });
+    }
+
+    Ok(BackupInspectionResult {
+        file_name,
+        file_path,
+        size_bytes: meta.len(),
+        tables_count: tables.len(),
+        total_records,
+        tables,
+    })
 }

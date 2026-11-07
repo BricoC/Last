@@ -1,6 +1,126 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 
+export interface BackupCategoryReportItem {
+  id: string;
+  categoryLabel: string;
+  tablesIncluded: string[];
+  recordCount: number;
+  description: string;
+}
+
+export interface FullBackupReport {
+  fileName: string;
+  filePath: string;
+  sizeBytes: number;
+  createdAtFormatted?: string;
+  backupType: "full_db" | "modular_json";
+  totalTables: number;
+  totalRecords: number;
+  categories: BackupCategoryReportItem[];
+  rawTables: { name: string; count: number }[];
+}
+
+/**
+ * Ispeziona in modo analitico e dettagliato qualsiasi backup (database .db o modulare .lastbackup)
+ * restituendo il conteggio dei record categoria per categoria e tabella per tabella.
+ */
+export async function inspectBackupFullReport(filePath: string): Promise<FullBackupReport> {
+  const isDb = filePath.toLowerCase().endsWith(".db");
+  const fileName = filePath.split(/[\\/]/).pop() || filePath;
+
+  if (isDb) {
+    interface RawSqliteInspection {
+      file_name: string;
+      file_path: string;
+      size_bytes: number;
+      tables_count: number;
+      total_records: number;
+      tables: { name: string; count: number }[];
+    }
+
+    const raw = await invoke<RawSqliteInspection>("inspect_sqlite_backup_file", { filePath });
+    const tableMap: Record<string, number> = {};
+    for (const t of raw.tables) {
+      tableMap[t.name] = t.count;
+    }
+
+    const categoriesReport: BackupCategoryReportItem[] = BACKUP_CATEGORIES.map((cat) => {
+      let count = 0;
+      const foundTables: string[] = [];
+      for (const t of cat.tables) {
+        if (t in tableMap) {
+          count += tableMap[t];
+          foundTables.push(t);
+        }
+      }
+      return {
+        id: cat.id,
+        categoryLabel: cat.label,
+        tablesIncluded: foundTables,
+        recordCount: count,
+        description: cat.description,
+      };
+    });
+
+    return {
+      fileName: raw.file_name,
+      filePath: raw.file_path,
+      sizeBytes: raw.size_bytes,
+      backupType: "full_db",
+      totalTables: raw.tables_count,
+      totalRecords: raw.total_records,
+      categories: categoriesReport,
+      rawTables: raw.tables,
+    };
+  } else {
+    const insp = await inspectBackupFile(filePath);
+    if (!insp.pkg) {
+      throw new Error(insp.error || "File di backup non valido");
+    }
+
+    const pkg = insp.pkg;
+    const tableMap = pkg.tableCounts || {};
+    let totalRecords = 0;
+    const rawTables: { name: string; count: number }[] = [];
+
+    for (const [t, c] of Object.entries(tableMap)) {
+      totalRecords += c;
+      rawTables.push({ name: t, count: c });
+    }
+
+    const categoriesReport: BackupCategoryReportItem[] = BACKUP_CATEGORIES.map((cat) => {
+      let count = 0;
+      const foundTables: string[] = [];
+      for (const t of cat.tables) {
+        if (t in tableMap) {
+          count += tableMap[t];
+          foundTables.push(t);
+        }
+      }
+      return {
+        id: cat.id,
+        categoryLabel: cat.label,
+        tablesIncluded: foundTables,
+        recordCount: count,
+        description: cat.description,
+      };
+    });
+
+    return {
+      fileName,
+      filePath,
+      sizeBytes: 0,
+      createdAtFormatted: new Date(pkg.createdAt).toLocaleString("it-IT"),
+      backupType: "modular_json",
+      totalTables: rawTables.length,
+      totalRecords,
+      categories: categoriesReport,
+      rawTables,
+    };
+  }
+}
+
 export interface BackupCategoryMeta {
   id: string;
   label: string;
@@ -101,6 +221,7 @@ export interface BackupConfig {
 }
 
 export const DEFAULT_MAX_HISTORY = 15;
+export const DEFAULT_BACKUP_FOLDER = "D:\\BricoClassFiles\\OneDrive\\Last\\Backup";
 const CONFIG_STORAGE_KEY = "last_backup_configuration_v1";
 
 interface SupabaseConfig {
@@ -139,7 +260,7 @@ export function loadBackupConfig(): BackupConfig {
       if (raw) {
         const parsed = JSON.parse(raw);
         return {
-          folderPath: parsed.folderPath || "D:\\BricoClassFiles\\Backup",
+          folderPath: parsed.folderPath || DEFAULT_BACKUP_FOLDER,
           autoDailyEnabled: parsed.autoDailyEnabled ?? true,
           autoBackupType: parsed.autoBackupType || "full",
           autoCategories: parsed.autoCategories || BACKUP_CATEGORIES.map((c) => c.id),
@@ -155,7 +276,7 @@ export function loadBackupConfig(): BackupConfig {
   }
 
   return {
-    folderPath: "D:\\BricoClassFiles\\Backup",
+    folderPath: DEFAULT_BACKUP_FOLDER,
     autoDailyEnabled: true,
     autoBackupType: "full",
     autoCategories: BACKUP_CATEGORIES.map((c) => c.id),
@@ -241,7 +362,7 @@ export async function pullBackupSettingsFromSupabase(): Promise<BackupConfig | n
     if (Array.isArray(data) && data.length > 0 && data[0]) {
       const r = data[0];
       const parsed: BackupConfig = {
-        folderPath: r.folder_path || "D:\\BricoClassFiles\\Backup",
+        folderPath: r.folder_path || DEFAULT_BACKUP_FOLDER,
         autoDailyEnabled: r.auto_daily_enabled ?? true,
         autoBackupType: r.auto_backup_type || "full",
         autoCategories: Array.isArray(r.auto_categories) ? r.auto_categories : BACKUP_CATEGORIES.map((c) => c.id),
