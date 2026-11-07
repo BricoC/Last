@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{Connection, SqliteConnection};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tauri::{AppHandle, Manager};
-use sqlx::{Connection, SqliteConnection};
-use sqlx::sqlite::SqliteConnectOptions;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -86,10 +86,19 @@ pub fn select_folder_dialog(default_path: Option<String>) -> Result<Option<Strin
         );
 
         let mut cmd = Command::new("powershell");
-        cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &ps_script]);
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &ps_script,
+        ]);
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
-        let output = cmd.output().map_err(|e| format!("Errore esecuzione selettore cartella: {}", e))?;
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Errore esecuzione selettore cartella: {}", e))?;
         let res = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if res.is_empty() {
             Ok(None)
@@ -122,10 +131,19 @@ pub fn select_backup_file_dialog() -> Result<Option<String>, String> {
         "#;
 
         let mut cmd = Command::new("powershell");
-        cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps_script]);
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            ps_script,
+        ]);
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
-        let output = cmd.output().map_err(|e| format!("Errore esecuzione selettore file: {}", e))?;
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Errore esecuzione selettore file: {}", e))?;
         let res = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if res.is_empty() {
             Ok(None)
@@ -146,12 +164,16 @@ pub fn open_folder_in_explorer(folder_path: String) -> Result<(), String> {
     {
         let path = Path::new(&folder_path);
         if !path.exists() {
-            return Err(format!("La cartella specificata non esiste: {}", folder_path));
+            return Err(format!(
+                "La cartella specificata non esiste: {}",
+                folder_path
+            ));
         }
 
         let mut cmd = Command::new("explorer");
         cmd.arg(&folder_path);
-        cmd.spawn().map_err(|e| format!("Impossibile aprire Esplora Risorse: {}", e))?;
+        cmd.spawn()
+            .map_err(|e| format!("Impossibile aprire Esplora Risorse: {}", e))?;
         Ok(())
     }
     #[cfg(not(target_os = "windows"))]
@@ -165,9 +187,11 @@ pub fn open_folder_in_explorer(folder_path: String) -> Result<(), String> {
 pub fn write_backup_file(file_path: String, content: String) -> Result<u64, String> {
     let path = Path::new(&file_path);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Errore creazione cartella di destinazione: {}", e))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Errore creazione cartella di destinazione: {}", e))?;
     }
-    fs::write(path, content.as_bytes()).map_err(|e| format!("Errore scrittura file backup: {}", e))?;
+    fs::write(path, content.as_bytes())
+        .map_err(|e| format!("Errore scrittura file backup: {}", e))?;
     let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
 }
@@ -179,7 +203,8 @@ pub fn read_backup_file(file_path: String) -> Result<String, String> {
     if !path.exists() {
         return Err(format!("File non trovato: {}", file_path));
     }
-    let content = fs::read_to_string(path).map_err(|e| format!("Errore lettura file di backup: {}", e))?;
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("Errore lettura file di backup: {}", e))?;
     Ok(content)
 }
 
@@ -193,21 +218,28 @@ pub async fn copy_database_file(app: AppHandle, target_file_path: String) -> Res
     db_path.push("LastData.db");
 
     if !db_path.exists() {
-        return Err(format!("Il database principale non esiste nel percorso: {:?}", db_path));
+        return Err(format!(
+            "Il database principale non esiste nel percorso: {:?}",
+            db_path
+        ));
     }
 
     // Esegui checkpoint del WAL per garantire che tutte le transazioni siano salvate in LastData.db
     let options = SqliteConnectOptions::new().filename(&db_path);
     if let Ok(mut conn) = SqliteConnection::connect_with(&options).await {
-        let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);").execute(&mut conn).await;
+        let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);")
+            .execute(&mut conn)
+            .await;
     }
 
     let target_path = Path::new(&target_file_path);
     if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Errore creazione cartella destinazione: {}", e))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Errore creazione cartella destinazione: {}", e))?;
     }
 
-    fs::copy(&db_path, target_path).map_err(|e| format!("Errore copia del database SQLite: {}", e))?;
+    fs::copy(&db_path, target_path)
+        .map_err(|e| format!("Errore copia del database SQLite: {}", e))?;
     let len = fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
 }
@@ -243,7 +275,8 @@ pub fn restore_database_file(app: AppHandle, source_file_path: String) -> Result
         let _ = fs::remove_file(&shm_path);
     }
 
-    fs::copy(source_path, &db_path).map_err(|e| format!("Errore durante la sovrascrittura del database: {}", e))?;
+    fs::copy(source_path, &db_path)
+        .map_err(|e| format!("Errore durante la sovrascrittura del database: {}", e))?;
     let len = fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
 }
@@ -262,8 +295,16 @@ pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileIn
     for entry in entries.flatten() {
         let fpath = entry.path();
         if fpath.is_file() {
-            let fname = fpath.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-            let ext = fpath.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let fname = fpath
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let ext = fpath
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
 
             if ext == "lastbackup" || ext == "json" || ext == "db" {
                 let meta = entry.metadata().ok();
@@ -305,7 +346,10 @@ pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileIn
 
 /// Controlla se nella cartella condivisa esiste già un backup per la data specificata (es. "2026-11-07" o "2026.11.07")
 #[tauri::command]
-pub fn check_today_backup_exists(folder_path: String, date_str: String) -> Result<Option<String>, String> {
+pub fn check_today_backup_exists(
+    folder_path: String,
+    date_str: String,
+) -> Result<Option<String>, String> {
     let path = Path::new(&folder_path);
     if !path.exists() || !path.is_dir() {
         return Ok(None);
@@ -317,7 +361,11 @@ pub fn check_today_backup_exists(folder_path: String, date_str: String) -> Resul
         let fpath = entry.path();
         if fpath.is_file() {
             let fname = fpath.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if (fname.contains(&date_str) || fname.contains(&date_dot)) && (fname.ends_with(".db") || fname.ends_with(".lastbackup") || fname.ends_with(".json")) {
+            if (fname.contains(&date_str) || fname.contains(&date_dot))
+                && (fname.ends_with(".db")
+                    || fname.ends_with(".lastbackup")
+                    || fname.ends_with(".json"))
+            {
                 return Ok(Some(fname.to_string()));
             }
         }
@@ -367,18 +415,22 @@ pub fn delete_backup_file(file_path: String) -> Result<(), String> {
 
 /// Ispeziona un file di database SQLite (.db) e conta analiticamente tutte le tabelle e i record
 #[tauri::command]
-pub async fn inspect_sqlite_backup_file(file_path: String) -> Result<BackupInspectionResult, String> {
+pub async fn inspect_sqlite_backup_file(
+    file_path: String,
+) -> Result<BackupInspectionResult, String> {
     let path = Path::new(&file_path);
     if !path.exists() {
         return Err(format!("File non trovato: {}", file_path));
     }
 
     let meta = fs::metadata(path).map_err(|e| format!("Errore metadati file: {}", e))?;
-    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
 
-    let options = SqliteConnectOptions::new()
-        .filename(path)
-        .read_only(true);
+    let options = SqliteConnectOptions::new().filename(path).read_only(true);
 
     let mut conn = SqliteConnection::connect_with(&options)
         .await

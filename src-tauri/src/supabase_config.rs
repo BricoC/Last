@@ -22,12 +22,18 @@ pub struct ConfigStatus {
 
 impl SupabaseConfig {
     fn validate(&self) -> Result<(), String> {
-        let url = self.project_url.strip_prefix("https://")
+        let url = self
+            .project_url
+            .strip_prefix("https://")
             .and_then(|value| value.strip_suffix(".supabase.co"))
             .ok_or("URL non valido: usa https://<project-ref>.supabase.co")?;
-        if url.is_empty() || url.len() > 63
-            || !url.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            || url.starts_with('-') || url.ends_with('-')
+        if url.is_empty()
+            || url.len() > 63
+            || !url
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || url.starts_with('-')
+            || url.ends_with('-')
         {
             return Err("URL progetto Supabase non valido".into());
         }
@@ -44,7 +50,9 @@ impl SupabaseConfig {
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map(|path| path.join(CONFIG_FILE))
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join(CONFIG_FILE))
         .map_err(|_| "Cartella dati Last non disponibile".into())
 }
 
@@ -55,12 +63,19 @@ fn read_config(app: &AppHandle) -> Result<Option<SupabaseConfig>, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("Impossibile leggere la configurazione locale Supabase".into()),
     };
-    if file.metadata().map_err(|_| "Configurazione non leggibile")?.len() > 16_384 {
+    if file
+        .metadata()
+        .map_err(|_| "Configurazione non leggibile")?
+        .len()
+        > 16_384
+    {
         return Err("File di configurazione troppo grande".into());
     }
     let config: SupabaseConfig = serde_json::from_reader(file)
         .map_err(|_| "Configurazione Supabase non valida".to_string())?;
-    if !config.project_url.is_empty() { config.validate()?; }
+    if !config.project_url.is_empty() {
+        config.validate()?;
+    }
     Ok(Some(config))
 }
 
@@ -73,18 +88,26 @@ fn status(app: &AppHandle) -> Result<ConfigStatus, String> {
 
 #[tauri::command]
 pub fn load_supabase_config(app: AppHandle) -> Result<ConfigStatus, String> {
-    let _guard = CONFIG_LOCK.lock().map_err(|_| "Configurazione temporaneamente non disponibile")?;
+    let _guard = CONFIG_LOCK
+        .lock()
+        .map_err(|_| "Configurazione temporaneamente non disponibile")?;
     status(&app)
 }
 
 #[tauri::command]
-pub fn save_supabase_config(app: AppHandle, config: SupabaseConfig) -> Result<ConfigStatus, String> {
-    let _guard = CONFIG_LOCK.lock().map_err(|_| "Configurazione temporaneamente non disponibile")?;
+pub fn save_supabase_config(
+    app: AppHandle,
+    config: SupabaseConfig,
+) -> Result<ConfigStatus, String> {
+    let _guard = CONFIG_LOCK
+        .lock()
+        .map_err(|_| "Configurazione temporaneamente non disponibile")?;
     config.validate()?;
     let path = config_path(&app)?;
     let directory = path.parent().ok_or("Cartella configurazione non valida")?;
     fs::create_dir_all(directory).map_err(|_| "Impossibile creare la cartella configurazione")?;
-    let bytes = serde_json::to_vec_pretty(&config).map_err(|_| "Configurazione non serializzabile")?;
+    let bytes =
+        serde_json::to_vec_pretty(&config).map_err(|_| "Configurazione non serializzabile")?;
     let temporary = path.with_extension("json.tmp");
     fs::write(&temporary, bytes).map_err(|_| "Impossibile scrivere la configurazione locale")?;
     fs::rename(&temporary, &path).map_err(|_| "Impossibile aggiornare la configurazione locale")?;

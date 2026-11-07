@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::{HashMap, HashSet}, fs, time::{SystemTime, UNIX_EPOCH}};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tauri::{AppHandle, Manager};
 
 #[derive(Deserialize)]
@@ -13,23 +17,58 @@ pub struct DdtImportPayload {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DdtImportHeader {
-    id: String, doc_number: i64, year: i64, series: String, doc_date: String, status: String,
-    client_name: String, client_address: Option<String>, client_city: Option<String>, client_vat: Option<String>,
-    client_fiscal_code: Option<String>, client_sdi: Option<String>, client_phones_json: String,
-    destination_name: Option<String>, destination_address: Option<String>, destination_city: Option<String>,
-    transport_reason: String, payment_method: Option<String>, order_reference: Option<String>,
-    account_or_balance: String, operator: Option<String>, goods_appearance: Option<String>, carriage_terms: String,
-    packages_count: Option<String>, weight_kg: Option<String>, carrier: Option<String>, internal_notes: Option<String>,
-    total_taxable_subunits: i64, total_vat_subunits: i64, total_document_subunits: i64,
-    created_at: String, updated_at: String,
+    id: String,
+    doc_number: i64,
+    year: i64,
+    series: String,
+    doc_date: String,
+    status: String,
+    client_name: String,
+    client_address: Option<String>,
+    client_city: Option<String>,
+    client_vat: Option<String>,
+    client_fiscal_code: Option<String>,
+    client_sdi: Option<String>,
+    client_phones_json: String,
+    destination_name: Option<String>,
+    destination_address: Option<String>,
+    destination_city: Option<String>,
+    transport_reason: String,
+    payment_method: Option<String>,
+    order_reference: Option<String>,
+    account_or_balance: String,
+    operator: Option<String>,
+    goods_appearance: Option<String>,
+    carriage_terms: String,
+    packages_count: Option<String>,
+    weight_kg: Option<String>,
+    carrier: Option<String>,
+    internal_notes: Option<String>,
+    total_taxable_subunits: i64,
+    total_vat_subunits: i64,
+    total_document_subunits: i64,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DdtImportLine {
-    id: String, cloud_header_id: Option<String>, row_index: i64, description: String, row_kind: String,
-    unit: String, quantity: String, unit_price_subunits: i64, discount_pct: String, net_amount_subunits: i64,
-    vat_rate: i64, vat_amount_subunits: i64, purchase_price_subunits: i64, created_at: String, updated_at: String,
+    id: String,
+    cloud_header_id: Option<String>,
+    row_index: i64,
+    description: String,
+    row_kind: String,
+    unit: String,
+    quantity: String,
+    unit_price_subunits: i64,
+    discount_pct: String,
+    net_amount_subunits: i64,
+    vat_rate: i64,
+    vat_amount_subunits: i64,
+    purchase_price_subunits: i64,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(Serialize)]
@@ -54,11 +93,19 @@ struct LocalHeader {
     deleted_at: Option<String>,
 }
 
-fn document_key(year: i64, number: i64) -> (i64, i64) { (year, number) }
+fn document_key(year: i64, number: i64) -> (i64, i64) {
+    (year, number)
+}
 
-async fn local_headers(connection: &mut sqlx::SqliteConnection) -> Result<Vec<LocalHeader>, String> {
-    sqlx::query_as::<_, LocalHeader>("SELECT id, year, doc_number, sync_status, deleted_at FROM ddt_documents")
-        .fetch_all(&mut *connection).await.map_err(|error| format!("Impossibile controllare i DDT locali: {error}"))
+async fn local_headers(
+    connection: &mut sqlx::SqliteConnection,
+) -> Result<Vec<LocalHeader>, String> {
+    sqlx::query_as::<_, LocalHeader>(
+        "SELECT id, year, doc_number, sync_status, deleted_at FROM ddt_documents",
+    )
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|error| format!("Impossibile controllare i DDT locali: {error}"))
 }
 
 #[tauri::command]
@@ -66,27 +113,48 @@ pub async fn import_supabase_ddt_into_local(
     app: AppHandle,
     payload: DdtImportPayload,
 ) -> Result<DdtImportResult, String> {
-    let data_dir = app.path().app_data_dir().map_err(|_| "Cartella dati Last non disponibile".to_string())?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Cartella dati Last non disponibile".to_string())?;
     let db_path = data_dir.join("LastData.db");
-    if !db_path.exists() { return Err("Database locale Last non trovato".into()); }
-    let options = SqliteConnectOptions::new().filename(&db_path).create_if_missing(false);
-    let pool = SqlitePoolOptions::new().max_connections(1).connect_with(options).await
+    if !db_path.exists() {
+        return Err("Database locale Last non trovato".into());
+    }
+    let options = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(false);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
         .map_err(|error| format!("Impossibile aprire il database locale Last: {error}"))?;
     let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
     let local = local_headers(&mut connection).await?;
-    let local_by_id: HashMap<String, &LocalHeader> = local.iter().map(|header| (header.id.clone(), header)).collect();
+    let local_by_id: HashMap<String, &LocalHeader> = local
+        .iter()
+        .map(|header| (header.id.clone(), header))
+        .collect();
     let mut active_numbers = HashSet::new();
     for header in &local {
         if header.deleted_at.is_none() {
-            if let Some(number) = header.doc_number { active_numbers.insert(document_key(header.year, number)); }
+            if let Some(number) = header.doc_number {
+                active_numbers.insert(document_key(header.year, number));
+            }
         }
     }
 
     let mut cloud_key_counts: HashMap<(i64, i64), usize> = HashMap::new();
     for header in &payload.headers {
-        *cloud_key_counts.entry(document_key(header.year, header.doc_number)).or_default() += 1;
+        *cloud_key_counts
+            .entry(document_key(header.year, header.doc_number))
+            .or_default() += 1;
     }
-    let duplicate_cloud_headers = cloud_key_counts.values().filter(|count| **count > 1).map(|count| *count).sum();
+    let duplicate_cloud_headers = cloud_key_counts
+        .values()
+        .filter(|count| **count > 1)
+        .map(|count| *count)
+        .sum();
     let mut candidate_ids = HashSet::new();
     let mut conflicts = 0usize;
     let mut already_present = 0usize;
@@ -94,16 +162,23 @@ pub async fn import_supabase_ddt_into_local(
     for header in &payload.headers {
         let key = document_key(header.year, header.doc_number);
         let _disposition = if cloud_key_counts.get(&key).copied().unwrap_or(0) > 1 {
-            conflicts += 1; "duplicate"
+            conflicts += 1;
+            "duplicate"
         } else if let Some(existing) = local_by_id.get(&header.id) {
-            if existing.deleted_at.is_none() && existing.year == header.year
-                && existing.doc_number == Some(header.doc_number) && existing.sync_status == "synced" {
-                already_present += 1; "present"
+            if existing.deleted_at.is_none()
+                && existing.year == header.year
+                && existing.doc_number == Some(header.doc_number)
+                && existing.sync_status == "synced"
+            {
+                already_present += 1;
+                "present"
             } else {
-                conflicts += 1; "conflict"
+                conflicts += 1;
+                "conflict"
             }
         } else if active_numbers.contains(&key) {
-            conflicts += 1; "conflict"
+            conflicts += 1;
+            "conflict"
         } else {
             candidate_ids.insert(header.id.clone());
             "candidate"
@@ -113,13 +188,20 @@ pub async fn import_supabase_ddt_into_local(
     let mut orphan_lines = 0usize;
     let mut candidate_lines: Vec<&DdtImportLine> = Vec::new();
     let line_ids = sqlx::query_scalar::<_, String>("SELECT id FROM ddt_items")
-        .fetch_all(&mut *connection).await.map_err(|error| format!("Impossibile controllare gli UUID delle righe locali: {error}"))?;
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|error| format!("Impossibile controllare gli UUID delle righe locali: {error}"))?;
     let existing_line_ids: HashSet<String> = line_ids.into_iter().collect();
     let mut line_id_conflicts = 0usize;
     let mut headers_with_line_id_conflict = HashSet::new();
     for line in &payload.lines {
-        let Some(header_id) = line.cloud_header_id.as_deref() else { orphan_lines += 1; continue; };
-        if !candidate_ids.contains(header_id) { continue; }
+        let Some(header_id) = line.cloud_header_id.as_deref() else {
+            orphan_lines += 1;
+            continue;
+        };
+        if !candidate_ids.contains(header_id) {
+            continue;
+        }
         if existing_line_ids.contains(&line.id) {
             line_id_conflicts += 1;
             headers_with_line_id_conflict.insert(header_id.to_string());
@@ -131,24 +213,47 @@ pub async fn import_supabase_ddt_into_local(
         candidate_ids.remove(&header_id);
         conflicts += 1;
     }
-    candidate_lines.retain(|line| line.cloud_header_id.as_ref().is_some_and(|id| candidate_ids.contains(id)));
+    candidate_lines.retain(|line| {
+        line.cloud_header_id
+            .as_ref()
+            .is_some_and(|id| candidate_ids.contains(id))
+    });
 
-    let candidate_headers: Vec<&DdtImportHeader> = payload.headers.iter()
-        .filter(|header| candidate_ids.contains(&header.id)).collect();
+    let candidate_headers: Vec<&DdtImportHeader> = payload
+        .headers
+        .iter()
+        .filter(|header| candidate_ids.contains(&header.id))
+        .collect();
     if candidate_headers.is_empty() {
         return Ok(DdtImportResult {
-            imported_headers: 0, imported_lines: 0, already_present, conflicts,
-            duplicate_cloud_headers, orphan_lines, line_id_conflicts, backup_path: None,
+            imported_headers: 0,
+            imported_lines: 0,
+            already_present,
+            conflicts,
+            duplicate_cloud_headers,
+            orphan_lines,
+            line_id_conflicts,
+            backup_path: None,
         });
     }
 
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_secs();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
     let backup = data_dir.join(format!("LastData.pre-supabase-ddt-import-{timestamp}.db"));
     let backup_name = backup.to_string_lossy().to_string();
-    sqlx::query("VACUUM INTO $1").bind(&backup_name).execute(&mut *connection).await
-        .map_err(|error| format!("Backup SQLite non riuscito; nessun DDT è stato importato: {error}"))?;
+    sqlx::query("VACUUM INTO $1")
+        .bind(&backup_name)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| {
+            format!("Backup SQLite non riuscito; nessun DDT è stato importato: {error}")
+        })?;
 
-    sqlx::query("BEGIN IMMEDIATE").execute(&mut *connection).await
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut *connection)
+        .await
         .map_err(|error| format!("Impossibile avviare la transazione d’importazione: {error}"))?;
     let result = import_transaction(&mut connection, &candidate_headers, &candidate_lines).await;
     match result {
@@ -156,8 +261,14 @@ pub async fn import_supabase_ddt_into_local(
             sqlx::query("COMMIT").execute(&mut *connection).await
                 .map_err(|error| format!("Commit importazione non riuscito (backup disponibile in {backup_name}): {error}"))?;
             Ok(DdtImportResult {
-                imported_headers, imported_lines, already_present, conflicts,
-                duplicate_cloud_headers, orphan_lines, line_id_conflicts, backup_path: Some(backup_name),
+                imported_headers,
+                imported_lines,
+                already_present,
+                conflicts,
+                duplicate_cloud_headers,
+                orphan_lines,
+                line_id_conflicts,
+                backup_path: Some(backup_name),
             })
         }
         Err(error) => {
@@ -202,7 +313,10 @@ async fn import_transaction(
     }
 
     for line in lines {
-        let header_id = line.cloud_header_id.as_deref().ok_or("Riga candidata senza testata collegata")?;
+        let header_id = line
+            .cloud_header_id
+            .as_deref()
+            .ok_or("Riga candidata senza testata collegata")?;
         sqlx::query(
             "INSERT INTO ddt_items (
               id, ddt_id, row_index, description, row_kind, unit, quantity, unit_price_subunits,
