@@ -69,7 +69,7 @@ La distribuzione degli aggiornamenti è automatizzata al 100% tramite GitHub Act
 1. Apri la repository del tuo progetto su GitHub: `https://github.com/BricoC/Last`
 2. Vai su **Settings** &rarr; **Secrets and variables** &rarr; **Actions**.
 3. Clicca su **New repository secret**.
-4. Nome: `TAURI_SIGNING_PRIVATE_KEY`
+4. Nome: `SHAK_SIGNING_PRIVATE_KEY` (oppure `TAURI_SIGNING_PRIVATE_KEY`)
 5. Valore: copia e incolla l'intero testo contenuto nel file della tua chiave privata:
    `D:\BricoClassFiles\OneDrive\Last\File vari\1. Chiavi Firma Updater\last_updater.key`
    *(oppure da `C:\Users\Brico Class\.tauri\last_updater.key`)*
