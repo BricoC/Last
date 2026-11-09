@@ -382,6 +382,18 @@ pub fn clean_old_backups(folder_path: String, keep_count: usize) -> Result<usize
         return Ok(0);
     }
 
+    // Pulisci automaticamente eventuali file temporanei SQLite (-shm e -wal) residui nella cartella
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let ep = entry.path();
+            if let Some(name) = ep.file_name().and_then(|n| n.to_str()) {
+                if name.ends_with(".db-wal") || name.ends_with(".db-shm") {
+                    let _ = fs::remove_file(&ep);
+                }
+            }
+        }
+    }
+
     let list = list_backups_in_directory(folder_path)?;
     if list.len() <= keep_count {
         return Ok(0);
