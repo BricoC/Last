@@ -63,3 +63,4 @@ try {
   console.error("\x1b[31m[ERRORE durante il commit/push Git]:\x1b[0m", err.message);
   process.exit(1);
 }
+
