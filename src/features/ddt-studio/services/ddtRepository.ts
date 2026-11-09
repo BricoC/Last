@@ -200,12 +200,199 @@ export class DdtRepository {
   }
 
   /**
-   * Soft delete di un DDT
+   * Soft delete di un DDT (sposta nel Cestino a 15 elementi FIFO)
    */
   public async deleteDdt(id: string): Promise<void> {
     await invoke("soft_delete_ddt_transaction", {
       id,
       deletedAt: new Date().toISOString(),
+    });
+    // Tronca il cestino mantenendo rigorosamente le ultime 15 voci (FIFO)
+    await this.pruneTrash();
+  }
+
+  /**
+   * Recupera il conteggio dei DDT ed elementi nel Cestino
+   */
+  public async getTrashCount(): Promise<number> {
+    try {
+      const db = await getDatabase();
+      const rows = await db.select<{ count: number }[]>(
+        "SELECT COUNT(*) as count FROM ddt_documents WHERE deleted_at IS NOT NULL"
+      );
+      return rows[0]?.count ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Recupera le ultime 15 voci nel Cestino DDT ordinate per data di eliminazione decrescente
+   */
+  public async getTrashDdts(): Promise<Array<{
+    id: string;
+    doc_number: number | null;
+    series: string;
+    year: number;
+    doc_date: string;
+    status: string;
+    client_name: string;
+    total_document_subunits: number;
+    deleted_at: string;
+    items_count: number;
+  }>> {
+    const db = await getDatabase();
+    const rows = await db.select<any[]>(`
+      SELECT d.id, d.doc_number, d.series, d.year, d.doc_date, d.status,
+             d.client_name, d.total_document_subunits, d.deleted_at,
+             COALESCE((SELECT COUNT(*) FROM ddt_items i WHERE i.ddt_id = d.id), 0) as items_count
+      FROM ddt_documents d
+      WHERE d.deleted_at IS NOT NULL
+      ORDER BY d.deleted_at DESC
+      LIMIT 15
+    `);
+    return rows;
+  }
+
+  /**
+   * Mantiene al massimo 15 elementi nel Cestino, eliminando definitivamente le voci eccedenti
+   */
+  public async pruneTrash(): Promise<void> {
+    try {
+      const db = await getDatabase();
+      const rows = await db.select<{ id: string }[]>(
+        "SELECT id FROM ddt_documents WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT -1 OFFSET 15"
+      );
+      for (const row of rows) {
+        await db.execute("DELETE FROM ddt_items WHERE ddt_id = $1", [row.id]);
+        await db.execute("DELETE FROM ddt_documents WHERE id = $1", [row.id]);
+      }
+    } catch (err) {
+      console.warn("[ddtRepository] Errore pulizia FIFO cestino DDT:", err);
+    }
+  }
+
+  /**
+   * Svuota completamente il Cestino eliminando in modo permanente tutti i record cancellati
+   */
+  public async emptyTrash(): Promise<void> {
+    const db = await getDatabase();
+    await db.execute(
+      "DELETE FROM ddt_items WHERE ddt_id IN (SELECT id FROM ddt_documents WHERE deleted_at IS NOT NULL)"
+    );
+    await db.execute("DELETE FROM ddt_documents WHERE deleted_at IS NOT NULL");
+  }
+
+  /**
+   * Ripristina un DDT dal Cestino
+   * Se il numero è già occupato da un altro documento attivo, restituisce conflict: true
+   * oppure consente il ripristino come Bozza o con nuovo numero.
+   */
+  public async restoreDdt(
+    id: string,
+    mode: "original" | "draft" | "new_number" = "original"
+  ): Promise<{
+    success: boolean;
+    conflict?: boolean;
+    restoredAs?: "original" | "bozza" | "new_number";
+    docNumber?: number | null;
+    year?: number;
+    error?: string;
+  }> {
+    const db = await getDatabase();
+    const docRows = await db.select<any[]>(
+      "SELECT * FROM ddt_documents WHERE id = $1 AND deleted_at IS NOT NULL",
+      [id]
+    );
+    if (docRows.length === 0) {
+      return { success: false, error: "DDT non trovato nel Cestino" };
+    }
+    const doc = docRows[0];
+    const now = new Date().toISOString();
+
+    // 1. Ripristino forzato come Bozza
+    if (mode === "draft" || doc.doc_number == null || doc.status === "bozza") {
+      await db.execute(
+        `UPDATE ddt_documents SET doc_number = NULL, status = 'bozza', deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE id = $2`,
+        [now, id]
+      );
+      await db.execute(
+        `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2`,
+        [now, id]
+      );
+      return { success: true, restoredAs: "bozza", docNumber: null, year: doc.year };
+    }
+
+    // 2. Ripristino forzato con Assegnazione Nuovo Numero
+    if (mode === "new_number") {
+      const nextNum = await this.getNextDocNumber(doc.year, doc.series || "");
+      await db.execute(
+        `UPDATE ddt_documents SET doc_number = $1, status = 'confermato', deleted_at = NULL, updated_at = $2, sync_status = 'pending' WHERE id = $3`,
+        [nextNum, now, id]
+      );
+      await db.execute(
+        `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2`,
+        [now, id]
+      );
+      return { success: true, restoredAs: "new_number", docNumber: nextNum, year: doc.year };
+    }
+
+    // 3. Ripristino con numero originale: verifica assenza di conflitti con DDT attivi
+    const conflictRows = await db.select<any[]>(
+      "SELECT id FROM ddt_documents WHERE year = $1 AND doc_number = $2 AND deleted_at IS NULL AND id <> $3",
+      [doc.year, doc.doc_number, id]
+    );
+    if (conflictRows.length > 0) {
+      return {
+        success: false,
+        conflict: true,
+        docNumber: doc.doc_number,
+        year: doc.year,
+      };
+    }
+
+    // Numero originale libero: ripristina normalmente
+    await db.execute(
+      `UPDATE ddt_documents SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE id = $2`,
+      [now, id]
+    );
+    await db.execute(
+      `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2`,
+      [now, id]
+    );
+    return { success: true, restoredAs: "original", docNumber: doc.doc_number, year: doc.year };
+  }
+
+  /**
+   * Risoluzione conflitto di importazione: sostituisce il DDT locale con quello importato.
+   * Il DDT locale precedente viene spostato nel Cestino (così non va mai perso).
+   */
+  public async replaceLocalDdtWithImported(
+    localId: string,
+    importedHeader: any,
+    importedLines: any[]
+  ): Promise<void> {
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+
+    // 1. Sposta il DDT locale corrente nel Cestino
+    await db.execute(
+      "UPDATE ddt_documents SET deleted_at = $1, updated_at = $1, updated_by = 'conflict-resolver', sync_status = 'pending' WHERE id = $2",
+      [now, localId]
+    );
+    await db.execute(
+      "UPDATE ddt_items SET deleted_at = $1, updated_at = $1, updated_by = 'conflict-resolver', sync_status = 'pending' WHERE ddt_id = $2",
+      [now, localId]
+    );
+    await this.pruneTrash();
+
+    // 2. Inserisci il DDT importato con il numero ufficiale e le sue righe
+    await invoke("save_ddt_transaction", {
+      payload: {
+        ...importedHeader,
+        items: importedLines && importedLines.length > 0 ? importedLines : (importedHeader.items || []),
+        is_emission: false, // mantiene il numero specificato
+      },
     });
   }
 

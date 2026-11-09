@@ -134,6 +134,79 @@ class DdtIncrementalSyncService {
           console.warn(`[Sync Incrementale] Errore fetch testate anno ${year}: ${headersRes.status}`);
         }
 
+        // 2c-bis. Controllo Conflitto su localMax: se esiste su Supabase un DDT con lo stesso numero ma contenuto diverso
+        if (localMax > 0) {
+          try {
+            const checkMaxUrl = new URL(`/rest/v1/ddt`, projectUrl);
+            checkMaxUrl.searchParams.set("anno", `eq.${year}`);
+            checkMaxUrl.searchParams.set("numero", `eq.${localMax}`);
+            checkMaxUrl.searchParams.set("select", HEADER_FIELDS);
+            const checkMaxRes = await fetch(checkMaxUrl.toString(), {
+              headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+            });
+            if (checkMaxRes.ok) {
+              const maxHeaders = (await checkMaxRes.json()) as CloudHeader[];
+              if (maxHeaders && maxHeaders.length > 0) {
+                const remote = maxHeaders[0];
+                const localRows = await db.select<any[]>(
+                  "SELECT * FROM ddt_documents WHERE year = $1 AND doc_number = $2 AND deleted_at IS NULL LIMIT 1",
+                  [year, localMax]
+                );
+                if (localRows.length > 0) {
+                  const loc = localRows[0];
+                  const remoteTotalSubunits = Math.round((Number(remote.totale_documento) || 0) * 100000);
+                  const isDifferent =
+                    loc.id !== remote.id &&
+                    (loc.client_name?.trim().toLowerCase() !== remote.cliente?.trim().toLowerCase() ||
+                      Math.abs((loc.total_document_subunits || 0) - remoteTotalSubunits) > 100);
+
+                  if (isDifferent) {
+                    const confLinesUrl = new URL(`/rest/v1/ddt_righe`, projectUrl);
+                    confLinesUrl.searchParams.set("anno", `eq.${year}`);
+                    confLinesUrl.searchParams.set("numero_ddt", `eq.${localMax}`);
+                    confLinesUrl.searchParams.set("select", LINE_FIELDS);
+                    confLinesUrl.searchParams.set("order", "riga_nr.asc");
+                    const confLinesRes = await fetch(confLinesUrl.toString(), {
+                      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+                    });
+                    const confLines = confLinesRes.ok ? ((await confLinesRes.json()) as CloudLine[]) : [];
+
+                    if (typeof window !== "undefined") {
+                      window.dispatchEvent(
+                        new CustomEvent("ddt-conflict-detected", {
+                          detail: {
+                            year,
+                            docNumber: localMax,
+                            localDoc: {
+                              id: loc.id,
+                              client_name: loc.client_name,
+                              doc_date: loc.doc_date,
+                              total_document_subunits: loc.total_document_subunits,
+                              status: loc.status,
+                            },
+                            incomingDoc: {
+                              id: remote.id,
+                              client_name: remote.cliente || "",
+                              doc_date: remote.data || "",
+                              total_document_subunits: remoteTotalSubunits,
+                              items_count: confLines.length,
+                              source: "Gestionale / Cloud Supabase",
+                              rawHeader: mapHeaderForLocal(remote),
+                              rawLines: confLines.map((l, idx) => mapLineForLocal(l, remote.id, idx + 1)),
+                            },
+                          },
+                        })
+                      );
+                    }
+                  }
+                }
+              }
+            }
+          } catch (conflictCheckErr) {
+            console.warn("[Sync Incrementale] Errore controllo conflitto su localMax:", conflictCheckErr);
+          }
+        }
+
         // Controlla se rimangono buchi di numerazione non trovati neanche su Supabase
         const recoveredNums = new Set(fetchedHeadersForYear.map((h) => Number(h.numero)));
         const stillMissing = missingGaps.filter((n) => !recoveredNums.has(n));

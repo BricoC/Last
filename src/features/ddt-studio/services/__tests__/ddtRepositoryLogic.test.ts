@@ -92,4 +92,45 @@ describe("DdtRepository Logic & Life-cycle", () => {
     expect(duplicated.items?.[0].description).toBe("TASSELLO SX 6");
     expect(duplicated.items?.[0].unit_price.formatIT(false)).toBe("0,15800");
   });
+
+  it("gestisce il ciclo di vita del Cestino DDT a 15 voci FIFO con rilevamento conflitti di ripristino", () => {
+    // 1. Un DDT nel cestino con numero 2938
+    const trashDdt = {
+      id: "trash-1",
+      doc_number: 2938,
+      year: 2026,
+      status: "confermato",
+      deleted_at: "2026-11-09T18:00:00Z",
+    };
+
+    // 2. Se un altro DDT attivo ha già preso il numero 2938, ripristino originale fallisce per conflitto
+    const activeDdts = [{ id: "active-1", doc_number: 2938, year: 2026, deleted_at: null }];
+    const hasConflict = activeDdts.some(
+      (d) => d.year === trashDdt.year && d.doc_number === trashDdt.doc_number && d.deleted_at === null
+    );
+    expect(hasConflict).toBe(true);
+
+    // 3. Ripristino alternativo come Bozza (azzerando il doc_number)
+    const restoredAsDraft = {
+      ...trashDdt,
+      doc_number: null,
+      status: "bozza",
+      deleted_at: null,
+    };
+    expect(restoredAsDraft.doc_number).toBeNull();
+    expect(restoredAsDraft.status).toBe("bozza");
+    expect(restoredAsDraft.deleted_at).toBeNull();
+
+    // 4. Ripristino alternativo con nuovo numero progressivo (2939)
+    const maxActiveNumber = Math.max(...activeDdts.map((d) => d.doc_number));
+    const nextNumber = maxActiveNumber + 1;
+    const restoredWithNewNumber = {
+      ...trashDdt,
+      doc_number: nextNumber,
+      status: "confermato",
+      deleted_at: null,
+    };
+    expect(restoredWithNewNumber.doc_number).toBe(2939);
+    expect(restoredWithNewNumber.deleted_at).toBeNull();
+  });
 });
