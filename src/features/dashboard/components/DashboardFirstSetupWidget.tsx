@@ -29,7 +29,13 @@ interface Props {
 export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted }) => {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isDismissed, setIsDismissed] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(() => {
+    if (typeof localStorage === "undefined") return false;
+    return (
+      localStorage.getItem("dashboard_setup_dismissed") === "true" ||
+      localStorage.getItem("dashboard_setup_completed") === "true"
+    );
+  });
 
   // Campi configurazione
   const [supabaseUrl, setSupabaseUrl] = useState("");
@@ -53,6 +59,12 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
     setSupabaseUrl(s.supabaseUrl);
     setSupabaseKey(s.supabaseKey);
     setBackupFolder(s.backupFolder);
+    if (s.isAllConfigured) {
+      setIsDismissed(true);
+      try {
+        localStorage.setItem("dashboard_setup_completed", "true");
+      } catch {}
+    }
   };
 
   const handleChooseFolder = async () => {
@@ -106,6 +118,9 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
 
     setIsRunningImport(false);
     if (res.success) {
+      try {
+        localStorage.setItem("dashboard_setup_completed", "true");
+      } catch {}
       void checkSetupStatus();
       if (onSetupCompleted) onSetupCompleted();
     }
@@ -113,7 +128,10 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
 
   const handleDismiss = () => {
     setIsDismissed(true);
-    localStorage.setItem("dashboard_setup_dismissed", "true");
+    try {
+      localStorage.setItem("dashboard_setup_dismissed", "true");
+      localStorage.setItem("dashboard_setup_completed", "true");
+    } catch {}
   };
 
   // Se è tutto configurato e non mancano dati, oppure l'utente l'ha chiuso, non mostrare nulla

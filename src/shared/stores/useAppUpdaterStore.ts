@@ -116,11 +116,11 @@ export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
         }
       });
 
-      // Download completato con successo: pronto per il riavvio
+      // Download completato con successo: pronto per il prossimo riavvio (non riavviare da solo)
       set({
         status: "ready",
         downloadProgress: 100,
-        isModalOpen: true, // Mostra il popup di riavvio stile Windows Update
+        isModalOpen: false, // Non forzare popup né riavvii automatici
       });
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : String(err);
