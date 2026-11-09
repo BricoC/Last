@@ -24,6 +24,8 @@ export interface DDTStudioHeaderProps {
   activeView: "editor" | "a4";
   setActiveView: (view: "editor" | "a4") => void;
   selectedYear?: number | null;
+  trashCount?: number;
+  onOpenTrash?: () => void;
   onNewDdt: () => void;
   onSaveDraft: () => void;
   onEmitDdt: () => void;
@@ -45,6 +47,8 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   activeView,
   setActiveView,
   selectedYear,
+  trashCount = 0,
+  onOpenTrash,
   onNewDdt,
   onSaveDraft,
   onEmitDdt,
@@ -115,6 +119,23 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
           <Plus className="w-3.5 h-3.5 text-[var(--primary)]" />
           <span>Nuovo DDT</span>
         </button>
+
+        {onOpenTrash && (
+          <button
+            type="button"
+            onClick={onOpenTrash}
+            className="h-7 px-2.5 rounded text-xs font-semibold bg-[var(--background)] border border-[var(--border)] hover:border-rose-500/80 text-[var(--foreground)] flex items-center space-x-1.5 transition-colors cursor-default"
+            title="Cestino DDT Studio (ultime 15 voci)"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span className="hidden sm:inline">Cestino</span>
+            {trashCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 text-[10px] font-mono font-bold">
+                {trashCount}
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Centro: Switcher Vista Editor vs Foglio A4 (con ESC key support!) */}

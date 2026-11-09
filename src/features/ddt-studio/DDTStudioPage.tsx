@@ -20,6 +20,8 @@ import { DDTA4Document } from "./document/DDTA4Document";
 import { DDTArticoliSearchModal } from "./components/DDTArticoliSearchModal";
 import { DDTMultiListinoModal } from "./components/DDTMultiListinoModal";
 import { DDTPrintCopiesModal } from "./components/DDTPrintCopiesModal";
+import { DdtTrashModal } from "./components/DdtTrashModal";
+import { DdtConflictModal, DdtConflictDetail } from "./components/DdtConflictModal";
 import {
   exportDdtPdfToDesktop,
   executeDdtPrint,
@@ -186,6 +188,35 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [closePrompt, setClosePrompt] = useState<((choice: DdtCloseChoice) => void) | null>(null);
   const savedSignature = React.useRef<string | null>(null);
   const ddtLoadRequest = React.useRef(0);
+
+  // Stato Cestino DDT Studio (15 voci) & Conflitti
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const [trashCount, setTrashCount] = useState(0);
+  const [activeConflict, setActiveConflict] = useState<DdtConflictDetail | null>(null);
+
+  const refreshTrashCount = useCallback(async () => {
+    try {
+      const count = await ddtRepository.getTrashCount();
+      setTrashCount(count);
+    } catch (e) {
+      console.warn("Errore conteggio cestino DDT:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshTrashCount();
+  }, [refreshTrashCount]);
+
+  // Ascolto eventi di conflitto rilevati durante importazione o sincronizzazione
+  useEffect(() => {
+    const handleConflict = (e: any) => {
+      if (e?.detail) {
+        setActiveConflict(e.detail as DdtConflictDetail);
+      }
+    };
+    window.addEventListener("ddt-conflict-detected", handleConflict);
+    return () => window.removeEventListener("ddt-conflict-detected", handleConflict);
+  }, []);
 
   // Stato DDT Corrente
   const [ddt, setDdt] = useState<Partial<DdtDocument>>(makeEmptyDdt());
@@ -777,17 +808,18 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     }
   };
 
-  // Elimina DDT
+  // Elimina DDT (sposta nel Cestino a 15 elementi FIFO)
   const handleDeleteDdt = async () => {
     if (!ddt.id) return;
-    if (!confirm("Sei sicuro di voler eliminare questo DDT?")) return;
+    if (!confirm("Sei sicuro di voler eliminare questo DDT? Verrà conservato nel Cestino (15 voci max).")) return;
 
     try {
       await ddtRepository.deleteDdt(ddt.id);
       savedSignature.current = currentSignature;
       handleNewDdt();
       await loadRecentDdts();
-      showToast("DDT eliminato");
+      await refreshTrashCount();
+      showToast("DDT spostato nel Cestino");
     } catch (e) {
       console.error("Errore eliminazione:", e);
     }
@@ -801,12 +833,45 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         handleNewDdt();
       }
       await loadRecentDdts();
-      showToast("DDT eliminato dall’archivio");
+      await refreshTrashCount();
+      showToast("DDT spostato nel Cestino");
       return true;
     } catch (e) {
       console.error("Errore eliminazione DDT dall’archivio:", e);
       showToast(`Errore eliminazione DDT: ${getErrorMessage(e)}`);
       return false;
+    }
+  };
+
+  // Risoluzione conflitti numerazione DDT durante importazione
+  const handleResolveConflict = async (action: "replace" | "draft" | "new_number" | "ignore") => {
+    if (!activeConflict) return;
+    try {
+      if (action === "replace") {
+        await ddtRepository.replaceLocalDdtWithImported(
+          activeConflict.localDoc.id,
+          activeConflict.incomingDoc.rawHeader,
+          activeConflict.incomingDoc.rawLines
+        );
+        showToast(`DDT ${activeConflict.docNumber} sostituito con la versione importata (precedente nel Cestino)`);
+      } else if (action === "draft") {
+        const draftHeader = { ...activeConflict.incomingDoc.rawHeader, doc_number: null, status: "bozza" };
+        await ddtRepository.saveDraft(draftHeader, activeConflict.incomingDoc.rawLines);
+        showToast("DDT importato salvato tra le Bozze");
+      } else if (action === "new_number") {
+        const nextNum = await ddtRepository.getNextDocNumber(activeConflict.year);
+        const numberedHeader = { ...activeConflict.incomingDoc.rawHeader, doc_number: nextNum, status: "confermato" };
+        await ddtRepository.emitDdt(numberedHeader, activeConflict.incomingDoc.rawLines);
+        showToast(`DDT importato registrato come DDT ${nextNum}`);
+      } else {
+        showToast("DDT importato ignorato");
+      }
+      setActiveConflict(null);
+      await loadRecentDdts();
+      await refreshTrashCount();
+    } catch (err) {
+      console.error("Errore risoluzione conflitto:", err);
+      showToast(`Errore risoluzione: ${getErrorMessage(err)}`);
     }
   };
 
@@ -1092,6 +1157,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         activeView={activeView}
         setActiveView={setActiveView}
         selectedYear={selectedYear}
+        trashCount={trashCount}
+        onOpenTrash={() => setIsTrashOpen(true)}
         onNewDdt={handleNewDdt}
         onSaveDraft={handleSaveDraft}
         onEmitDdt={handleEmitDdt}
@@ -1250,6 +1317,24 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         onClose={() => setIsPrintCopiesModalOpen(false)}
         onConfirm={handleConfirmPrint}
         isPrinting={isPrinting}
+      />
+
+      {/* Modale Cestino DDT Studio (ultime 15 voci) */}
+      <DdtTrashModal
+        isOpen={isTrashOpen}
+        onClose={() => setIsTrashOpen(false)}
+        onDdtRestored={async () => {
+          await loadRecentDdts();
+          await refreshTrashCount();
+        }}
+      />
+
+      {/* Modale Risoluzione Conflitti Numerazione DDT */}
+      <DdtConflictModal
+        isOpen={Boolean(activeConflict)}
+        conflict={activeConflict}
+        onClose={() => setActiveConflict(null)}
+        onResolve={handleResolveConflict}
       />
 
       {/* Portale Dedicato alla Stampa & Esportazione Immagine (In coordinate stabili offscreen) */}
