@@ -1,7 +1,7 @@
 {
   "name": "last",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Last — Gestionale Desktop BricoClass (Tauri v2, React, TypeScript, SQLite, Supabase)",
   "type": "module",
   "scripts": {
