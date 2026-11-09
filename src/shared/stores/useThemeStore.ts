@@ -203,6 +203,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   },
 
   applyToDom: () => {
+    if (typeof document === "undefined") return;
     const { theme } = get();
     const root = document.documentElement;
 

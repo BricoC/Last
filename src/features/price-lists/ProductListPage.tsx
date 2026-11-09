@@ -1119,7 +1119,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     if (payload.action === "delete") {
       const idsToDelete = Array.from(selectedIds);
       const rowsToDelete = items.filter((r) => selectedIds.has(r.id));
-      const opName = currentUser?.name || "Amministratore";
+      const opName = currentUser?.name || "Admin";
       await priceListRepository.moveToTrash(rowsToDelete, opName);
       setItems((prev) => prev.filter((r) => !selectedIds.has(r.id)));
       setTotalDbCount((prev) => Math.max(0, prev - idsToDelete.length));
@@ -1264,7 +1264,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     async (row: ListinoGeneraleRow) => {
       if (!canEdit) return;
       try {
-        const opName = currentUser?.name || "Amministratore";
+        const opName = currentUser?.name || "Admin";
         await priceListRepository.moveToTrash([row], opName);
         setItems((prev) => prev.filter((r) => r.id !== row.id));
         setTotalDbCount((prev) => Math.max(0, prev - 1));
