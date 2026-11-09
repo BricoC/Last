@@ -6,6 +6,9 @@ on:
       - "v*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   publish-tauri:
     permissions:
@@ -41,8 +44,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.SHAK_SIGNING_PRIVATE_KEY || secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
-          tagName: "v__VERSION__"
-          releaseName: "Last v__VERSION__"
+          tagName: ${{ github.ref_name }}
+          releaseName: "Last ${{ github.ref_name }}"
           releaseBody: "Aggiornamento automatico Last Gestionale BricoClass."
           releaseDraft: false
           prerelease: false
