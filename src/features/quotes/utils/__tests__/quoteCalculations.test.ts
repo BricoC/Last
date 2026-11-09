@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { money } from "@/shared/domain/monetaryValue";
 import { calculateQuoteItem, calculateQuoteTotals } from "../quoteCalculations";
 import { QuoteItemInput } from "../../models/quote";
-import { formatQuoteCode } from "../../models/quoteDraft";
+import { formatQuoteCode, createEmptyQuoteDraft } from "../../models/quoteDraft";
+import { makeQuotePdfFilename } from "../quoteExportManager";
 
 function item(overrides: Partial<QuoteItemInput> = {}): QuoteItemInput {
   return {
@@ -107,5 +108,23 @@ describe("quoteCalculations", () => {
     expect(formatQuoteCode(2026, null)).toBeNull();
     expect(formatQuoteCode(2026, undefined)).toBeNull();
     expect(formatQuoteCode(2026, 0)).toBeNull();
+  });
+
+  it("genera il nome file PDF preventivo secondo lo schema 'Preventivo aaaa.nnnn Cliente'", () => {
+    const draft = createEmptyQuoteDraft();
+    draft.year = 2026;
+    draft.quote_number = 1;
+    draft.client_name = "CARTIERE CARRARA";
+
+    expect(makeQuotePdfFilename(draft)).toBe("Preventivo 2026.1 CARTIERE CARRARA.pdf");
+
+    // Senza cliente ma con oggetto
+    draft.client_name = "";
+    draft.subject = "Fornitura Edile";
+    expect(makeQuotePdfFilename(draft)).toBe("Preventivo 2026.1 Fornitura Edile.pdf");
+
+    // Con caratteri non ammessi da Windows
+    draft.client_name = 'ROSSI: "IMPIANTI" / S.R.L.?';
+    expect(makeQuotePdfFilename(draft)).toBe("Preventivo 2026.1 ROSSI IMPIANTI S.R.L..pdf");
   });
 });
