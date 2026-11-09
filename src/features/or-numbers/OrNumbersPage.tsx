@@ -125,6 +125,16 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    const handleUpdate = () => {
+      void loadData();
+    };
+    window.addEventListener("ddt-data-updated", handleUpdate);
+    return () => {
+      window.removeEventListener("ddt-data-updated", handleUpdate);
+    };
+  }, [loadData]);
+
   // Apertura documento in DDT Studio
   const handleOpenDdtInStudio = (id: string) => {
     requestOpenDdt(id);

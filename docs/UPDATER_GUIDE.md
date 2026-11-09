@@ -59,3 +59,34 @@ Tauri 2 utilizza una coppia di chiavi crittografiche asimmetriche (Minisign Ed25
 > **Non condividere mai la chiave privata e non caricarla sul repository pubblico.**
 > Se utilizzi GitHub Actions per compilare e rilasciare automaticamente dal cloud, il contenuto di `last_updater.key` andrà inserito nei *Repository Secrets* di GitHub sotto la variabile `TAURI_SIGNING_PRIVATE_KEY`.
 
+---
+
+## 3. Come Inviare e Pubblicare un Aggiornamento (Passo 4)
+
+La distribuzione degli aggiornamenti è automatizzata al 100% tramite GitHub Actions e lo script di rilascio.
+
+### Configurazione Una Tantum (Solo la prima volta su GitHub)
+1. Apri la repository del tuo progetto su GitHub: `https://github.com/BricoC/Last`
+2. Vai su **Settings** &rarr; **Secrets and variables** &rarr; **Actions**.
+3. Clicca su **New repository secret**.
+4. Nome: `TAURI_SIGNING_PRIVATE_KEY`
+5. Valore: copia e incolla l'intero testo contenuto nel file della tua chiave privata:
+   `D:\BricoClassFiles\OneDrive\Last\File vari\1. Chiavi Firma Updater\last_updater.key`
+   *(oppure da `C:\Users\Brico Class\.tauri\last_updater.key`)*
+6. Clicca su **Add secret**. Fatto!
+
+### Procedura per Rilasciare un Nuovo Aggiornamento a Tutti i PC
+Quando hai finito le tue modifiche e vuoi inviare l'aggiornamento ai negozi:
+
+1. Apri il terminale nella cartella del progetto e lancia semplicemente:
+   ```powershell
+   npm run release -- -Version "0.1.1" -Notes "Descrizione delle novita"
+   ```
+2. Lo script farà tutto in automatico:
+   - Aggiorna la versione nei file di configurazione
+   - Crea il commit e il tag Git (es. `v0.1.1`)
+   - Spinge le modifiche su GitHub
+   - GitHub Actions compilerà l'applicazione, firmerà i file con la chiave privata e pubblicherà la Release con il file `latest.json`.
+3. Entro pochi minuti, tutti i computer dei punti vendita rileveranno l'aggiornamento, lo scaricheranno in background e mostreranno il popup per riavviare!
+
+
