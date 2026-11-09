@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ChevronDown, Eye, FileText, Plus, Save, Sparkles, Trash2, Truck } from "lucide-react";
+import { Archive, Check, ChevronDown, Copy, Eye, FileText, Plus, Save, Sparkles, Trash2, Truck } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
+import { cn } from "@/shared/utils/cn";
 import type { QuoteStatus } from "../models/quote";
 
 export function QuoteStudioHeader(props: {
   status: QuoteStatus; viewMode: "calculation" | "customer"; alexMode: boolean;
   saving: boolean; archiveCount: number; trashCount?: number; quoteDate: string; quoteCode?: string | null;
+  copyingPdf?: boolean; copySuccess?: boolean;
   onStatusChange: (status: QuoteStatus) => void;
   onViewChange: (mode: "calculation" | "customer") => void;
   onAlexToggle: () => void; onArchive: () => void; onOpenTrash?: () => void; onSave: () => void;
-  onNew: () => void; onPdf: () => void; onConvert: () => void; onFillRandomRows: () => void;
+  onNew: () => void; onPdf: () => void; onCopyPdf?: () => void; onConvert: () => void; onFillRandomRows: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -54,6 +56,37 @@ export function QuoteStudioHeader(props: {
       <Button size="sm" variant="outline" onClick={props.onNew}><Plus className="mr-1 h-3.5 w-3.5" />Nuovo</Button>
       <Button size="sm" variant="outline" disabled={props.saving} onClick={props.onSave}><Save className="mr-1 h-3.5 w-3.5" />{props.saving ? "Salva…" : "Salva"}</Button>
       <Button size="sm" variant="danger" onClick={props.onPdf}>PDF</Button>
+      {props.onCopyPdf && (
+        <button
+          type="button"
+          onClick={props.onCopyPdf}
+          disabled={props.copyingPdf}
+          className={cn(
+            "flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer",
+            props.copySuccess
+              ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-300 shadow-xs"
+              : "border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 hover:text-white"
+          )}
+          title="Genera e copia il PDF del preventivo negli appunti di Windows per incollarlo in un'email o cartella (Ctrl+C)"
+        >
+          {props.copyingPdf ? (
+            <>
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+              <span>Copia PDF…</span>
+            </>
+          ) : props.copySuccess ? (
+            <>
+              <Check className="h-3.5 w-3.5 text-emerald-400" />
+              <span>PDF Copiato! (Ctrl+V)</span>
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5" />
+              <span>Copia PDF (Ctrl+C)</span>
+            </>
+          )}
+        </button>
+      )}
       <div className="relative flex" ref={menuRef}>
         <Button size="sm" variant="secondary" disabled={props.saving} title="Crea una bozza DDT dal preventivo" onClick={props.onConvert} className="rounded-r-none"><Truck className="mr-1 h-3.5 w-3.5" />Trasforma in DDT</Button>
         <Button size="sm" variant="secondary" aria-label="Altre azioni preventivo" aria-expanded={menuOpen}
