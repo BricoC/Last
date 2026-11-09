@@ -96,6 +96,13 @@ describe("Client Model & Repository Consistency Rules", () => {
 
     expect(matchesFragmentSearch("C.A.M.M. TRASPORTI", "camm")).toBe(true);
     expect(matchesFragmentSearch("MO.VI LOGISTICA", "movi logistica")).toBe(true);
+
+    // Se si cerca con punteggiatura (es. 200.01), NON deve matchare numeri senza punto (es. 4240200012, 020001553)
+    expect(matchesSearchToken("4240200012", "200.01")).toBe(false);
+    expect(matchesSearchToken("020001553", "200.01")).toBe(false);
+    expect(matchesSearchToken("2200012", "200.01")).toBe(false);
+    expect(matchesSearchToken("200.01", "200.01")).toBe(true);
+    expect(matchesSearchToken("lama m42 ineco 200.01", "200.01")).toBe(true);
   });
 
   it("preserva stabilimenti distinti, opzioni numerate e voci senza luogo (es. ROGIO vs ROGIO 2, STAB. FERRANIA)", () => {
