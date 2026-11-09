@@ -149,12 +149,65 @@ export class OrNumbersRepository {
     }
   }
 
+  public static async syncOrdersFromSupabase(year: number, month?: number): Promise<void> {
+    try {
+      const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
+      if (!configRes?.config?.projectUrl || !configRes?.config?.anonKey) return;
+
+      const url = new URL("/rest/v1/ddt", configRes.config.projectUrl.replace(/\/$/, ""));
+      url.searchParams.set("anno", `eq.${year}`);
+      if (month !== undefined) {
+        const mm = String(month).padStart(2, "0");
+        const startDate = `${year}-${mm}-01`;
+        const lastDay = new Date(year, month, 0).getDate();
+        const endDate = `${year}-${mm}-${String(lastDay).padStart(2, "0")}`;
+        url.searchParams.set("data", `gte.${startDate}`);
+        url.searchParams.set("data", `lte.${endDate}`);
+      }
+      url.searchParams.set("nr_vs_ordine", "not.is.null");
+      url.searchParams.set("select", "id,numero,anno,nr_vs_ordine");
+      url.searchParams.set("limit", "1000");
+
+      const res = await fetch(url.toString(), {
+        headers: {
+          apikey: configRes.config.anonKey,
+          Authorization: `Bearer ${configRes.config.anonKey}`,
+        },
+      });
+
+      if (res.ok) {
+        const remoteDdts = (await res.json()) as Array<{ id: string; numero: number; anno: number; nr_vs_ordine: string | null }>;
+        if (Array.isArray(remoteDdts) && remoteDdts.length > 0) {
+          const db = await getDatabase();
+          for (const d of remoteDdts) {
+            const ord = (d.nr_vs_ordine || "").trim();
+            if (ord) {
+              await db.execute(
+                `UPDATE ddt_documents 
+                 SET order_reference = $1 
+                 WHERE (id = $2 OR (doc_number = $3 AND year = $4))
+                   AND (order_reference IS NULL OR TRIM(order_reference) = '' OR TRIM(order_reference) <> $1)`,
+                [ord, d.id, d.numero, d.anno]
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[OrNumbersRepository] Sync orders da Supabase warning:", e);
+    }
+  }
+
   public static async getOrRowsForMonth(
     year: number,
     month: number,
     clientType: "CARRARA" | "WEPA"
   ): Promise<OrRow[]> {
     await this.ensureLogsTable();
+
+    // Sincronizza prima gli ordini da Supabase per il mese selezionato
+    await this.syncOrdersFromSupabase(year, month);
+
     const db = await getDatabase();
 
     const mm = String(month).padStart(2, "0");
@@ -210,7 +263,7 @@ export class OrNumbersRepository {
       const logStatus = logsMap[keyDot] || logsMap[keySlash] || logsMap[keyId] || "";
 
       // Destinazione pulita dal nome del cliente
-      const rawDest = r.destination_address || r.destination_city || r.destination_name || "";
+      const rawDest = r.destination_name || r.destination_address || r.destination_city || "";
       let cleanDest = cleanDestinationName(rawDest, r.client_name);
 
       // Normalizzazione speciale stile noManV1 per Wepa
@@ -268,8 +321,20 @@ export class OrNumbersRepository {
     try {
       const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
       if (configRes?.config?.projectUrl && configRes?.config?.anonKey) {
+        // Recupera anche year e doc_number per un match impeccabile
+        const docRows = await db.select<{ year: number; doc_number: number }[]>(
+          "SELECT year, doc_number FROM ddt_documents WHERE id = $1",
+          [ddtId]
+        );
+
         const url = new URL("/rest/v1/ddt", configRes.config.projectUrl.replace(/\/$/, ""));
-        url.searchParams.set("id", `eq.${ddtId}`);
+        if (docRows.length > 0 && docRows[0].doc_number) {
+          url.searchParams.set("anno", `eq.${docRows[0].year}`);
+          url.searchParams.set("numero", `eq.${docRows[0].doc_number}`);
+        } else {
+          url.searchParams.set("id", `eq.${ddtId}`);
+        }
+
         await fetch(url.toString(), {
           method: "PATCH",
           headers: {
@@ -278,7 +343,10 @@ export class OrNumbersRepository {
             "Content-Type": "application/json",
             Prefer: "return=minimal"
           },
-          body: JSON.stringify({ nr_vs_ordine: orderRef.trim() })
+          body: JSON.stringify({ 
+            nr_vs_ordine: orderRef.trim(),
+            ultima_modifica: new Date().toISOString()
+          })
         });
       }
     } catch (err) {

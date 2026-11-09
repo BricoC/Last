@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { clientSyncService } from "@/features/clients/services/clientSyncService";
 import { ddtRepository } from "./ddtRepository";
+import { OrNumbersRepository } from "@/features/or-numbers/services/orNumbersRepository";
 import {
   HEADER_FIELDS,
   LINE_FIELDS,
@@ -328,7 +329,14 @@ class DdtIncrementalSyncService {
       await clientSyncService.importMissingClientsFromDdts();
       await ddtRepository.enrichMissingDdtClientData();
 
-      // 7. Notifica ai componenti aperti di ricaricare i dati aggiornati
+      // 7. Sincronizzazione aggiornamenti numeri d'ordine (nr_vs_ordine) da Supabase
+      try {
+        await OrNumbersRepository.syncOrdersFromSupabase(currentYear);
+      } catch (errSyncOrd) {
+        console.warn("[Sync Incrementale] Warning sync ordini:", errSyncOrd);
+      }
+
+      // 8. Notifica ai componenti aperti di ricaricare i dati aggiornati
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("ddt-data-updated"));
       }
