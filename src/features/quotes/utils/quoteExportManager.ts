@@ -4,10 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import type { QuoteDraft } from "../models/quoteDraft";
 
 export function makeQuotePdfFilename(draft: QuoteDraft): string {
-  const code = draft.quote_number != null ? `Prev_${draft.year}_${draft.quote_number}` : "Preventivo";
+  const year = draft.year || new Date().getFullYear();
+  const num = draft.quote_number != null ? ` ${year}.${draft.quote_number}` : ` ${year}`;
   const client = (draft.client_name || draft.subject || "").trim();
-  const raw = client ? `${code}_${client}` : code;
-  return `${raw.replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, "_")}.pdf`;
+  const raw = client ? `Preventivo${num} ${client}.pdf` : `Preventivo${num}.pdf`;
+  // Rimuovi caratteri non ammessi nei nomi file di Windows (< > : " / \ | ? *) e normalizza gli spazi
+  return raw.replace(/[<>:"/\\|?*]/g, "").replace(/\s+/g, " ").trim();
 }
 
 export async function generateQuotePdfBytes(draft: QuoteDraft): Promise<{ filename: string; bytes: Uint8Array }> {
