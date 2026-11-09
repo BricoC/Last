@@ -75,8 +75,22 @@ export const useUserStore = create<UserState>((set, get) => ({
         themeStore.setPreset(active.theme_preset);
       }
 
-      // Se l'utente attivo richiede password, NON impostiamo currentUser all'avvio/F5:
-      // Si attiva il blocco di sicurezza finché non viene immessa la password corretta
+      // Se l'utente attivo è già autenticato in questa sessione (es. Admin ha già inserito la password),
+      // manteniamo currentUser autenticato senza richiedere la password di nuovo quando si entra in Impostazioni!
+      const current = get().currentUser;
+      if (current && current.id === active?.id) {
+        set({
+          users: list,
+          currentUser: active,
+          pendingPasswordSwitch: null,
+          isLoading: false,
+          lastCloudSync: new Date(),
+        });
+        return;
+      }
+
+      // Se invece non c'è ancora un utente autenticato (blocco all'avvio / refresh F5)
+      // e l'utente attivo richiede password:
       if (active && active.require_password && active.password_hash) {
         set({
           users: list,
