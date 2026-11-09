@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { useAppUpdaterStore } from "@/shared/stores/useAppUpdaterStore";
-import { Sparkles, RefreshCw, X, ShieldCheck, ArrowRight, Clock } from "lucide-react";
+import { RefreshCw, X, ShieldCheck, ArrowRight, Clock } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 
 export const UpdateReadyModal: React.FC = () => {
@@ -44,8 +44,8 @@ export const UpdateReadyModal: React.FC = () => {
 
         {/* Header Icona e Titolo */}
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-xs">
-            <Sparkles className="w-6 h-6 animate-pulse" />
+          <div className="w-12 h-12 rounded-xl bg-zinc-900 border border-[var(--border)] flex items-center justify-center p-1.5 shrink-0 shadow-xs">
+            <img src="/logo.svg" alt="Last" className="w-full h-full object-contain" />
           </div>
           <div>
             <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[11px] font-bold border border-emerald-500/20 mb-1">

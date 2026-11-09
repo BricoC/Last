@@ -6,7 +6,6 @@ import {
   ShieldCheck,
   Database,
   RotateCcw,
-  Sparkles,
   AlertCircle,
 } from "lucide-react";
 import { useAppUpdaterStore } from "@/shared/stores/useAppUpdaterStore";
@@ -39,12 +38,12 @@ export const SoftwareUpdateSettingsPanel: React.FC = () => {
       <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-6 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[var(--border)]">
           <div className="flex items-center space-x-3.5">
-            <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-[var(--primary)] shrink-0">
-              <Sparkles className="w-6 h-6" />
+            <div className="w-12 h-12 rounded-xl bg-[var(--background)] border border-[var(--border)] flex items-center justify-center p-1.5 shrink-0 shadow-xs">
+              <img src="/logo.svg" alt="Last" className="w-full h-full object-contain" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h3 className="text-base font-bold text-[var(--foreground)]">Last Gestionale Desktop</h3>
+                <h3 className="text-base font-bold text-[var(--foreground)]">Last</h3>
                 <span className="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
                   v{currentVersion}
                 </span>
