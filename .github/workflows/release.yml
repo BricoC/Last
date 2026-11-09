@@ -19,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
 
       - name: Install Rust Stable
@@ -46,5 +46,4 @@ jobs:
           releaseBody: "Aggiornamento automatico Last Gestionale BricoClass."
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
 
