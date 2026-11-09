@@ -29,6 +29,7 @@ import {
   ArrowUp,
   ArrowDown,
   Check,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
@@ -63,7 +64,17 @@ type InvoiceSortField =
 
 const BATCH_SIZE = 150;
 
-export const ElectronicInvoicesPage: React.FC = () => {
+export interface ElectronicInvoicesPageProps {
+  initialSearch?: string;
+  isModal?: boolean;
+  onClose?: () => void;
+}
+
+export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
+  initialSearch,
+  isModal = false,
+  onClose,
+}) => {
   // Vista attiva: "items" (Storico Articoli) o "invoices" (Elenco Documenti)
   const [activeTab, setActiveTab] = useState<"items" | "invoices">("items");
 
@@ -74,7 +85,7 @@ export const ElectronicInvoicesPage: React.FC = () => {
   const [error, setError] = useState("");
 
   // Ricerca con useDeferredValue per non bloccare mai la digitazione
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch || "");
   const deferredSearch = useDeferredValue(search);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -154,6 +165,31 @@ export const ElectronicInvoicesPage: React.FC = () => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Aggiornamento dinamico termine di ricerca se passato come prop modale
+  useEffect(() => {
+    if (initialSearch !== undefined) {
+      setSearch(initialSearch);
+    }
+  }, [initialSearch]);
+
+  // Gestione tasto ESC per chiudere il popup modale se non ci sono sotto-modali aperte
+  useEffect(() => {
+    if (!isModal || !onClose) return;
+    const handleEscKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Se una modale di dettaglio interna è aperta, lascia che sia lei a chiudersi
+        if (isDetailOpen || Boolean(addToOrderTarget)) {
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleEscKeyDown);
+    return () => window.removeEventListener("keydown", handleEscKeyDown);
+  }, [isModal, onClose, isDetailOpen, addToOrderTarget]);
 
   // Scorciatoia Ctrl+C per copiare cella attiva o testo selezionato
   useEffect(() => {
@@ -681,6 +717,36 @@ export const ElectronicInvoicesPage: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Header Modal Bar se aperta come popup dal Listino Generale */}
+      {isModal && (
+        <div className="flex h-10 shrink-0 items-center justify-between rounded-md bg-slate-900 border border-slate-800 px-3 text-xs text-slate-200 shadow-sm">
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            <Receipt className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="font-bold text-xs sm:text-sm tracking-wide text-white truncate">
+              Fatture Elettroniche Fornitori
+            </span>
+            <span className="hidden md:inline text-[11px] text-slate-400 border-l border-slate-700 pl-2.5">
+              Ricerca rapida prezzi e storico acquisti
+            </span>
+            {initialSearch && (
+              <span className="hidden sm:inline px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono text-[11px] truncate max-w-xs">
+                Filtro: {initialSearch}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white border border-slate-700 hover:border-rose-500 transition-colors cursor-pointer shrink-0"
+            title="Chiudi popup (ESC)"
+          >
+            <span>Chiudi</span>
+            <span className="text-[10px] font-mono opacity-65">(ESC)</span>
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* ─── 1. BARRA DI RICERCA (STESSO IDENTICO STILE DI DDT ARTICOLI) ─── */}
       <label className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 text-xs text-[var(--foreground)]">
         <Search className="h-4 w-4 shrink-0 text-[var(--muted-foreground)]" />

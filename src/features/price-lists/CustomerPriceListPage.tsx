@@ -311,6 +311,28 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       setOriginalRowsSnapshot(snapshot);
       setDirtyRows(new Map());
       setUndoStack([]);
+
+      // Sincronizzazione incrementale Cloud in background (zero blocco interfaccia)
+      void (async () => {
+        try {
+          const syncRes = await priceListSyncService.syncIncrementalClientiFromSupabase();
+          if (syncRes.updatedCount > 0) {
+            console.log(`[CustomerPriceListPage] Sincronizzati dal Cloud ${syncRes.updatedCount} articoli listini clienti.`);
+            const refreshedRows = await priceListRepository.searchClientPrices("", undefined, 20000);
+            setItems(refreshedRows);
+            setTotalDbCount(refreshedRows.length);
+            setOriginalRowsSnapshot((prev) => {
+              const next = new Map(prev);
+              for (const r of syncRes.updatedRows) {
+                next.set(r.id, { ...r });
+              }
+              return next;
+            });
+          }
+        } catch (e) {
+          console.warn("[CustomerPriceListPage] Sync incrementale fallito:", e);
+        }
+      })();
     } catch (err) {
       console.error("Errore caricamento listini clienti da SQLite:", err);
       setError(err instanceof Error ? err.message : "Errore lettura database locale.");

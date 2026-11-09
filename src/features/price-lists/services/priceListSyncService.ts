@@ -680,6 +680,228 @@ export class PriceListSyncService {
       console.warn("[PriceListSyncService] Delete Cestino Clienti Supabase:", err);
     }
   }
+
+  /**
+   * Sincronizzazione incrementale veloce da Supabase Cloud per Listino Generale.
+   * Scarica solo gli articoli modificati da altri PC successivamente all'ultimo sync locale,
+   * aggiorna SQLite e restituisce il numero di righe aggiornate.
+   */
+  async syncIncrementalGeneralFromSupabase(): Promise<{
+    updatedCount: number;
+    updatedRows: ListinoGeneraleRow[];
+  }> {
+    try {
+      const creds = await getSupabaseCredentials();
+      const db = await getDatabase();
+
+      let localMaxIso: string | null = null;
+      try {
+        const rows = await db.select<{ max_up: string | null }[]>(
+          "SELECT MAX(updated_at) as max_up FROM listino_generale WHERE updated_at IS NOT NULL;"
+        );
+        localMaxIso = rows[0]?.max_up || null;
+      } catch {}
+
+      const lastSyncStored =
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("price_list_last_incremental_sync_general")
+          : null;
+
+      let referenceDate: Date;
+      if (lastSyncStored && !isNaN(new Date(lastSyncStored).getTime())) {
+        referenceDate = new Date(lastSyncStored);
+      } else if (localMaxIso && !isNaN(new Date(localMaxIso).getTime())) {
+        referenceDate = new Date(localMaxIso);
+      } else {
+        referenceDate = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      }
+
+      const sinceIso = new Date(referenceDate.getTime() - 60000).toISOString();
+
+      const genFields =
+        "id,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
+
+      const genUrl = new URL(`/rest/v1/listino_generale`, creds.projectUrl);
+      genUrl.searchParams.set("updated_at", `gt.${sinceIso}`);
+      genUrl.searchParams.set("select", genFields);
+      genUrl.searchParams.set("order", "updated_at.asc");
+      genUrl.searchParams.set("limit", "1000");
+
+      const varUrl = new URL(`/rest/v1/listini_vari`, creds.projectUrl);
+      varUrl.searchParams.set("updated_at", `gt.${sinceIso}`);
+      varUrl.searchParams.set("select", genFields);
+      varUrl.searchParams.set("order", "updated_at.asc");
+      varUrl.searchParams.set("limit", "1000");
+
+      const [resGen, resVar] = await Promise.all([
+        fetch(genUrl.toString(), { headers: { apikey: creds.anonKey } }),
+        fetch(varUrl.toString(), { headers: { apikey: creds.anonKey } }),
+      ]);
+
+      if (!resGen.ok) {
+        throw new Error(`Errore fetch Supabase listino_generale: ${resGen.status}`);
+      }
+      const rawGen: any[] = await resGen.json();
+      const rawVar: any[] = resVar.ok ? await resVar.json() : [];
+
+      if ((!rawGen || rawGen.length === 0) && (!rawVar || rawVar.length === 0)) {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem("price_list_last_incremental_sync_general", new Date().toISOString());
+        }
+        return { updatedCount: 0, updatedRows: [] };
+      }
+
+      const rowsToUpsert: ListinoGeneraleRow[] = [
+        ...rawGen.map((r: any): ListinoGeneraleRow => ({
+          id: `gen_${r.id}`,
+          source_table: "listino_generale",
+          cat: r.cat ?? null,
+          fornitore: r.fornitore ?? null,
+          codice_articolo: r.codice_articolo ?? null,
+          data_ref: r.data ?? null,
+          descrizione: r.descrizione ?? "",
+          um: r.um ?? null,
+          perc_pub: r.perc_pub != null ? Number(r.perc_pub) : null,
+          prezzo_pubblico: r.prezzo_pubblico != null ? Number(r.prezzo_pubblico) : null,
+          perc_prof: r.perc_prof != null ? Number(r.perc_prof) : null,
+          prezzo_profess: r.prezzo_profess != null ? Number(r.prezzo_profess) : null,
+          perc_fatt: r.perc_fatt != null ? Number(r.perc_fatt) : null,
+          prezzo_fattura: r.prezzo_fattura != null ? Number(r.prezzo_fattura) : null,
+          prezzo_acquisto: r.prezzo_acquisto != null ? Number(r.prezzo_acquisto) : null,
+          aumento: r.aumento != null ? Number(r.aumento) : null,
+          r1: r.r1 != null ? Number(r.r1) : null,
+          maga: r.maga != null ? Number(r.maga) : null,
+          r2: r.r2 != null ? Number(r.r2) : null,
+          perc_iva: r.perc_iva != null ? Number(r.perc_iva) : 0.22,
+          note: r.note ?? null,
+          created_at: r.created_at ?? undefined,
+          updated_at: r.updated_at ?? undefined,
+        })),
+        ...rawVar.map((r: any): ListinoGeneraleRow => ({
+          id: `var_${r.id}`,
+          source_table: "listini_vari",
+          cat: r.cat ?? null,
+          fornitore: r.fornitore ?? null,
+          codice_articolo: r.codice_articolo ?? null,
+          data_ref: r.data ?? null,
+          descrizione: r.descrizione ?? "",
+          um: r.um ?? null,
+          perc_pub: r.perc_pub != null ? Number(r.perc_pub) : null,
+          prezzo_pubblico: r.prezzo_pubblico != null ? Number(r.prezzo_pubblico) : null,
+          perc_prof: r.perc_prof != null ? Number(r.perc_prof) : null,
+          prezzo_profess: r.prezzo_profess != null ? Number(r.prezzo_profess) : null,
+          perc_fatt: r.perc_fatt != null ? Number(r.perc_fatt) : null,
+          prezzo_fattura: r.prezzo_fattura != null ? Number(r.prezzo_fattura) : null,
+          prezzo_acquisto: r.prezzo_acquisto != null ? Number(r.prezzo_acquisto) : null,
+          aumento: r.aumento != null ? Number(r.aumento) : null,
+          r1: r.r1 != null ? Number(r.r1) : null,
+          maga: r.maga != null ? Number(r.maga) : null,
+          r2: r.r2 != null ? Number(r.r2) : null,
+          perc_iva: r.perc_iva != null ? Number(r.perc_iva) : 0.22,
+          note: r.note ?? null,
+          created_at: r.created_at ?? undefined,
+          updated_at: r.updated_at ?? undefined,
+        })),
+      ];
+
+      const { priceListRepository } = await import("./priceListRepository");
+      await priceListRepository.saveGeneralRows(rowsToUpsert);
+
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("price_list_last_incremental_sync_general", new Date().toISOString());
+      }
+
+      return { updatedCount: rowsToUpsert.length, updatedRows: rowsToUpsert };
+    } catch (err) {
+      console.warn("[PriceListSyncService] Sincronizzazione incrementale non riuscita (modalità offline):", err);
+      return { updatedCount: 0, updatedRows: [] };
+    }
+  }
+
+  /**
+   * Sincronizzazione incrementale veloce da Supabase Cloud per Listini Clienti.
+   */
+  async syncIncrementalClientiFromSupabase(): Promise<{
+    updatedCount: number;
+    updatedRows: ListinoClienteRow[];
+  }> {
+    try {
+      const creds = await getSupabaseCredentials();
+      const db = await getDatabase();
+
+      let localMaxIso: string | null = null;
+      try {
+        const rows = await db.select<{ max_up: string | null }[]>(
+          "SELECT MAX(updated_at) as max_up FROM listini_clienti WHERE updated_at IS NOT NULL;"
+        );
+        localMaxIso = rows[0]?.max_up || null;
+      } catch {}
+
+      const lastSyncStored =
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("price_list_last_incremental_sync_clienti")
+          : null;
+
+      let referenceDate: Date;
+      if (lastSyncStored && !isNaN(new Date(lastSyncStored).getTime())) {
+        referenceDate = new Date(lastSyncStored);
+      } else if (localMaxIso && !isNaN(new Date(localMaxIso).getTime())) {
+        referenceDate = new Date(localMaxIso);
+      } else {
+        referenceDate = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      }
+
+      const sinceIso = new Date(referenceDate.getTime() - 60000).toISOString();
+
+      const cliFields =
+        "id,created_at,updated_at,cliente,codice_articolo,descrizione,prezzo_fattura,prezzo_acquisto,ricarico,note,note1,note2";
+
+      const cliUrl = new URL(`/rest/v1/listini_clienti`, creds.projectUrl);
+      cliUrl.searchParams.set("updated_at", `gt.${sinceIso}`);
+      cliUrl.searchParams.set("select", cliFields);
+      cliUrl.searchParams.set("order", "updated_at.asc");
+      cliUrl.searchParams.set("limit", "1000");
+
+      const res = await fetch(cliUrl.toString(), { headers: { apikey: creds.anonKey } });
+      if (!res.ok) {
+        throw new Error(`Errore fetch Supabase listini_clienti: ${res.status}`);
+      }
+      const rawClienti: any[] = await res.json();
+      if (!rawClienti || rawClienti.length === 0) {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem("price_list_last_incremental_sync_clienti", new Date().toISOString());
+        }
+        return { updatedCount: 0, updatedRows: [] };
+      }
+
+      const rowsToUpsert: ListinoClienteRow[] = rawClienti.map((r: any): ListinoClienteRow => ({
+        id: `cli_${r.id}`,
+        cliente: r.cliente ?? "",
+        codice_articolo: r.codice_articolo ?? null,
+        descrizione: r.descrizione ?? "",
+        prezzo_fattura: r.prezzo_fattura != null ? Number(r.prezzo_fattura) : null,
+        prezzo_acquisto: r.prezzo_acquisto != null ? Number(r.prezzo_acquisto) : null,
+        ricarico: r.ricarico != null ? Number(r.ricarico) : null,
+        note: r.note ?? null,
+        note1: r.note1 ?? null,
+        note2: r.note2 ?? null,
+        created_at: r.created_at ?? undefined,
+        updated_at: r.updated_at ?? undefined,
+      }));
+
+      const { priceListRepository } = await import("./priceListRepository");
+      await priceListRepository.saveClientRows(rowsToUpsert);
+
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("price_list_last_incremental_sync_clienti", new Date().toISOString());
+      }
+
+      return { updatedCount: rowsToUpsert.length, updatedRows: rowsToUpsert };
+    } catch (err) {
+      console.warn("[PriceListSyncService] Sincronizzazione incrementale clienti fallita:", err);
+      return { updatedCount: 0, updatedRows: [] };
+    }
+  }
 }
 
 export const priceListSyncService = new PriceListSyncService();
