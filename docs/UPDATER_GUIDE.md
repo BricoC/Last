@@ -79,8 +79,8 @@ La distribuzione degli aggiornamenti è automatizzata al 100% tramite GitHub Act
 Quando hai finito le tue modifiche e vuoi inviare l'aggiornamento ai negozi:
 
 1. Apri il terminale nella cartella del progetto e lancia semplicemente:
-   ```powershell
-   npm run release -- -Version "0.1.1" -Notes "Descrizione delle novita"
+   ```bash
+   npm run release 0.1.2 "Descrizione delle novita"
    ```
 2. Lo script farà tutto in automatico:
    - Aggiorna la versione nei file di configurazione
