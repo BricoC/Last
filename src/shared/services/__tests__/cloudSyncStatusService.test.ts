@@ -40,3 +40,4 @@ describe("cloudSyncStatusService formatting", () => {
     expect(formatRelativeTime(twoDaysAgo)).toBe("2 gg fa");
   });
 });
+
