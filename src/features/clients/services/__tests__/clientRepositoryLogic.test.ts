@@ -97,12 +97,33 @@ describe("Client Model & Repository Consistency Rules", () => {
     expect(matchesFragmentSearch("C.A.M.M. TRASPORTI", "camm")).toBe(true);
     expect(matchesFragmentSearch("MO.VI LOGISTICA", "movi logistica")).toBe(true);
 
-    // Se si cerca con punteggiatura (es. 200.01), NON deve matchare numeri senza punto (es. 4240200012, 020001553)
+    // Se si cerca con punteggiatura (es. 200.01), NON deve matchare numeri senza punto (es. 4240200012, 020001553, 2200012)
     expect(matchesSearchToken("4240200012", "200.01")).toBe(false);
     expect(matchesSearchToken("020001553", "200.01")).toBe(false);
     expect(matchesSearchToken("2200012", "200.01")).toBe(false);
     expect(matchesSearchToken("200.01", "200.01")).toBe(true);
     expect(matchesSearchToken("lama m42 ineco 200.01", "200.01")).toBe(true);
+
+    // E viceversa: cercando 20001 (senza punto) NON deve matchare 200.01!
+    expect(matchesSearchToken("200.01", "20001")).toBe(false);
+    expect(matchesSearchToken("lama m42 ineco 200.01", "20001")).toBe(false);
+    expect(matchesSearchToken("4240200012", "20001")).toBe(true);
+    expect(matchesSearchToken("020001553", "20001")).toBe(true);
+
+    // Simulazione esatta delle righe reali delle fatture elettroniche con date e codici misti
+    const rowCricchetto = "cricchetto reversibile 1/2 00102960 / 4240200012 ineco-industrial national c... e01198 2026 2026-03-31";
+    const rowLama200_01 = "lama m42 co 8% 2380x20x0.9 z 14 200.01 ineco-industrial national c... 0000073 2025 2025-01-31";
+    const rowSpeseVarie = "spese varie doc trade srl 020001553 2024 2024-09-30";
+
+    // "200.01" trova la lama ma NON cricchetto né spese varie
+    expect(matchesSearchToken(rowLama200_01, "200.01")).toBe(true);
+    expect(matchesSearchToken(rowCricchetto, "200.01")).toBe(false);
+    expect(matchesSearchToken(rowSpeseVarie, "200.01")).toBe(false);
+
+    // "20001" trova cricchetto e spese varie ma NON trova 200.01!
+    expect(matchesSearchToken(rowLama200_01, "20001")).toBe(false);
+    expect(matchesSearchToken(rowCricchetto, "20001")).toBe(true);
+    expect(matchesSearchToken(rowSpeseVarie, "20001")).toBe(true);
   });
 
   it("preserva stabilimenti distinti, opzioni numerate e voci senza luogo (es. ROGIO vs ROGIO 2, STAB. FERRANIA)", () => {
