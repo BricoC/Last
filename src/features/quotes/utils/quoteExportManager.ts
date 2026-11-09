@@ -3,7 +3,14 @@ import jsPDF from "jspdf";
 import { invoke } from "@tauri-apps/api/core";
 import type { QuoteDraft } from "../models/quoteDraft";
 
-export async function exportQuotePdf(draft: QuoteDraft): Promise<string> {
+export function makeQuotePdfFilename(draft: QuoteDraft): string {
+  const code = draft.quote_number != null ? `Prev_${draft.year}_${draft.quote_number}` : "Preventivo";
+  const client = (draft.client_name || draft.subject || "").trim();
+  const raw = client ? `${code}_${client}` : code;
+  return `${raw.replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, "_")}.pdf`;
+}
+
+export async function generateQuotePdfBytes(draft: QuoteDraft): Promise<{ filename: string; bytes: Uint8Array }> {
   if (document.fonts?.ready) await document.fonts.ready;
   await waitForPreview();
   const pages = Array.from(document.querySelectorAll<HTMLElement>("#quote-print-root .quote-a4-page"));
@@ -23,15 +30,38 @@ export async function exportQuotePdf(draft: QuoteDraft): Promise<string> {
     pdf.addImage(image, "PNG", 0, 0, width, height, undefined, "FAST");
   }
 
-  const filename = makeFilename(draft);
-  const bytes = Array.from(new Uint8Array(pdf.output("arraybuffer")));
+  const filename = makeQuotePdfFilename(draft);
+  const bytes = new Uint8Array(pdf.output("arraybuffer"));
+  return { filename, bytes };
+}
+
+/**
+ * Genera il PDF del preventivo, lo salva nei file temporanei e lo copia negli Appunti di Windows (CF_HDROP).
+ * Successivamente è possibile incollarlo direttamente come file allegato in qualsiasi email o cartella (Ctrl+V).
+ */
+export async function copyQuotePdfToClipboard(draft: QuoteDraft): Promise<string> {
+  const { filename, bytes } = await generateQuotePdfBytes(draft);
+  const savedPath = await invoke<string>("save_temp_file", {
+    filename,
+    bytes: Array.from(bytes),
+  });
+  await invoke("copy_files_to_clipboard", {
+    paths: [savedPath],
+  });
+  return savedPath;
+}
+
+export async function exportQuotePdf(draft: QuoteDraft): Promise<string> {
+  const { filename, bytes } = await generateQuotePdfBytes(draft);
+  const bytesArray = Array.from(bytes);
   try {
-    await invoke<string>("save_file_to_desktop", { filename, bytes });
+    await invoke<string>("save_file_to_desktop", { filename, bytes: bytesArray });
   } catch {
     try {
-      await invoke<string>("save_pdf_to_desktop", { filename, bytes });
+      await invoke<string>("save_pdf_to_desktop", { filename, bytes: bytesArray });
     } catch {
-      const url = URL.createObjectURL(pdf.output("blob"));
+      const blob = new Blob([bytes as any], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = filename;
@@ -49,7 +79,4 @@ async function waitForPreview(): Promise<void> {
   }
 }
 
-function makeFilename(draft: QuoteDraft): string {
-  const base = (draft.subject || "Preventivo").trim();
-  return `${base.replace(/[<>:"/\\|?*]/g, "_")}.pdf`;
-}
+

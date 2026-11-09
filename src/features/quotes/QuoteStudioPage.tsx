@@ -7,7 +7,7 @@ import { QuoteArchiveSidebar } from "./components/QuoteArchiveSidebar";
 import { QuoteTrashModal } from "./components/QuoteTrashModal";
 import { QuoteA4Preview } from "./document/QuoteA4Preview";
 import { quoteRepository } from "./services/quoteRepository";
-import { exportQuotePdf } from "./utils/quoteExportManager";
+import { exportQuotePdf, copyQuotePdfToClipboard } from "./utils/quoteExportManager";
 import { money } from "@/shared/domain/monetaryValue";
 import { registerWindowCloseGuard, registerDirtyCheck, useWindowStore } from "@/shared/stores/useWindowStore";
 import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
@@ -177,11 +177,48 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
       setMessage(errorMessage(error));
     }
   };
+  const [copyingPdf, setCopyingPdf] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+
   const printPdf = async () => {
     setMessage("");
     try { setMessage(`PDF creato: ${await exportQuotePdf(draft)}`); }
     catch (error) { setMessage(errorMessage(error)); }
   };
+
+  const handleCopyPdf = useCallback(async () => {
+    if (copyingPdf) return;
+    setCopyingPdf(true);
+    setMessage("");
+    try {
+      await copyQuotePdfToClipboard(draft);
+      setCopySuccess(true);
+      setMessage("PDF Preventivo copiato negli appunti! Ora puoi incollarlo (Ctrl+V) direttamente in un'email o cartella.");
+      setTimeout(() => setCopySuccess(false), 3000);
+    } catch (error) {
+      console.error("[QuoteStudio] Errore copia PDF preventivo:", error);
+      setMessage(`Errore copia PDF: ${errorMessage(error)}`);
+    } finally {
+      setCopyingPdf(false);
+    }
+  }, [draft, copyingPdf]);
+
+  useEffect(() => {
+    const handleCopyKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        const target = e.target as HTMLElement | null;
+        const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+        const selectedText = window.getSelection()?.toString();
+        if (!selectedText && !isInput) {
+          e.preventDefault();
+          e.stopPropagation();
+          void handleCopyPdf();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleCopyKeyDown);
+    return () => window.removeEventListener("keydown", handleCopyKeyDown);
+  }, [handleCopyPdf]);
   const fillRandomRows = () => {
     const emptyRows = draft.items.flatMap((item, index) => isQuoteDraftItemActive(item) ? [] : [index]);
     if (emptyRows.length < 15) {
@@ -204,7 +241,9 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
       onAlexToggle={() => setAlexMode((value) => !value)} onArchive={() => setShowArchive((value) => !value)}
       onOpenTrash={() => setShowTrash(true)}
       onSave={() => void save()} onNew={() => void handleNewQuote()}
-      onPdf={() => void printPdf()} onConvert={() => void convertToDdt()} onFillRandomRows={fillRandomRows} />
+      onPdf={() => void printPdf()} onCopyPdf={() => void handleCopyPdf()}
+      copyingPdf={copyingPdf} copySuccess={copySuccess}
+      onConvert={() => void convertToDdt()} onFillRandomRows={fillRandomRows} />
     <QuoteKpiBanner items={draft.items} discount={draft.global_discount_pct ?? 0} alexMode={alexMode}
       onDiscountChange={(value) => updateHeader({ global_discount_pct: value })} />
     <QuoteClientFields draft={draft} onChange={updateHeader} />
