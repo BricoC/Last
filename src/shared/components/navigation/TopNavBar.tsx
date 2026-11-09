@@ -346,11 +346,11 @@ export const TopNavBar: React.FC = () => {
           <button
             type="button"
             onClick={openUpdaterModal}
-            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-500 text-white shadow-md animate-pulse cursor-pointer hover:bg-emerald-400 transition-all"
-            title="Aggiornamento scaricato! Clicca per riavviare subito l'applicazione"
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-600/90 text-white shadow-sm cursor-pointer hover:bg-emerald-500 transition-all"
+            title="Aggiornamento scaricato! Verrà applicato al prossimo riavvio (oppure clicca per dettagli)"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Riavvia per v{updaterNewVersion || "..."}</span>
+            <span>v{updaterNewVersion || "..."} pronta (prossimo avvio)</span>
           </button>
         )}
 

@@ -66,10 +66,23 @@ export class CloudFullSetupService {
     const activeUserId = AppUserService.getActiveUserId();
     const needsUser = !activeUserId;
 
-    // Se l'utente ha esplicitamente nascosto il reminder in localStorage
-    const dismissed = typeof localStorage !== "undefined" && localStorage.getItem("dashboard_setup_dismissed") === "true";
+    // Se l'utente ha già completato il setup o chiuso il banner in localStorage
+    const dismissed =
+      typeof localStorage !== "undefined" &&
+      (localStorage.getItem("dashboard_setup_dismissed") === "true" ||
+        localStorage.getItem("dashboard_setup_completed") === "true");
 
-    const isAllConfigured = (!needsSupabase && !needsData && !needsBackupFolder) || dismissed;
+    // Se Supabase e la cartella di backup sono già impostati, la postazione è già configurata
+    const isAlreadySetup = !needsSupabase && !needsBackupFolder;
+
+    const isAllConfigured = isAlreadySetup || dismissed || (!needsSupabase && !needsData && !needsBackupFolder);
+
+    // Se è tutto configurato, memorizza persistentemente che il primo avvio è completato
+    if (isAlreadySetup && typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem("dashboard_setup_completed", "true");
+      } catch {}
+    }
 
     return {
       needsSupabase,
