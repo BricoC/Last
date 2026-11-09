@@ -77,6 +77,7 @@ export const TopNavBar: React.FC = () => {
   } = useUserStore();
 
   const {
+    currentVersion,
     status: updaterStatus,
     newVersion: updaterNewVersion,
     openModal: openUpdaterModal,
@@ -352,6 +353,16 @@ export const TopNavBar: React.FC = () => {
             <Sparkles className="w-3.5 h-3.5" />
             <span>v{updaterNewVersion || "..."} pronta (prossimo avvio)</span>
           </button>
+        )}
+
+        {/* Versione del programma (basta il numero) prima del tasto Cloud */}
+        {currentVersion && (
+          <span
+            className="text-[11px] font-mono font-medium text-[var(--muted-foreground)] opacity-70 px-1 py-0.5 select-none"
+            title={`Versione installata: ${currentVersion}`}
+          >
+            {currentVersion}
+          </span>
         )}
 
         {/* Indicatore e Pulsante Cloud Sync Supabase */}

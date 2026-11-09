@@ -34,7 +34,7 @@ interface AppUpdaterState {
 
 export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
   status: "idle",
-  currentVersion: "0.1.0",
+  currentVersion: "0.1.5",
   newVersion: null,
   releaseDate: null,
   releaseNotes: null,
