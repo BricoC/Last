@@ -26,19 +26,17 @@ export function tokenizeSearch(query: string): string[] {
 /** Matches a token against target text, supporting both literal and punctuation-agnostic match (e.g. "cam" or "camm" matches "c.a.m.m.") */
 export function matchesSearchToken(target: string, token: string): boolean {
   if (target.includes(token)) return true;
-  const cleanToken = stripPunctuation(token);
-  if (!cleanToken) return false;
 
-  // Se l'utente ha inserito esplicitamente punteggiatura (es. "200.01"),
-  // NON dobbiamo fare match con sequenze prive di punteggiatura (es. "4240200012" o "020001553").
-  // Il match tollerante deve valere solo se anche il target conteneva punteggiatura (es. "c-a-m-m" vs "c.a.m.m.").
-  const tokenHasPunctuation = token !== cleanToken;
-  if (tokenHasPunctuation) {
-    const cleanTarget = stripPunctuation(target);
-    const targetHasPunctuation = target !== cleanTarget;
-    return targetHasPunctuation && cleanTarget.includes(cleanToken);
+  // Se il termine cercato contiene cifre (es. "200.01", "20001", codici articolo, date, misure),
+  // deve valere SOLO il match letterale (target.includes(token)).
+  // I numeri e codici con punteggiatura NON devono mai perdere i punti né fondersi con numeri interi.
+  // In questo modo "200.01" trova solo "200.01" e "20001" trova solo "20001".
+  if (/\d/.test(token)) {
+    return false;
   }
 
+  const cleanToken = stripPunctuation(token);
+  if (!cleanToken) return false;
   const cleanTarget = stripPunctuation(target);
   return cleanTarget.includes(cleanToken);
 }
