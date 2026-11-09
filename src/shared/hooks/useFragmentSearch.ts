@@ -28,6 +28,17 @@ export function matchesSearchToken(target: string, token: string): boolean {
   if (target.includes(token)) return true;
   const cleanToken = stripPunctuation(token);
   if (!cleanToken) return false;
+
+  // Se l'utente ha inserito esplicitamente punteggiatura (es. "200.01"),
+  // NON dobbiamo fare match con sequenze prive di punteggiatura (es. "4240200012" o "020001553").
+  // Il match tollerante deve valere solo se anche il target conteneva punteggiatura (es. "c-a-m-m" vs "c.a.m.m.").
+  const tokenHasPunctuation = token !== cleanToken;
+  if (tokenHasPunctuation) {
+    const cleanTarget = stripPunctuation(target);
+    const targetHasPunctuation = target !== cleanTarget;
+    return targetHasPunctuation && cleanTarget.includes(cleanToken);
+  }
+
   const cleanTarget = stripPunctuation(target);
   return cleanTarget.includes(cleanToken);
 }
