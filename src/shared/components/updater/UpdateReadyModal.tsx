@@ -121,3 +121,4 @@ export const UpdateReadyModal: React.FC = () => {
     </div>
   );
 };
+

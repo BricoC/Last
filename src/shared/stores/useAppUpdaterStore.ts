@@ -141,3 +141,4 @@ export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
   openModal: () => set({ isModalOpen: true }),
   dismissModal: () => set({ isModalOpen: false }),
 }));
+

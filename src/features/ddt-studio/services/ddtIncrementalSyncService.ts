@@ -21,9 +21,16 @@ interface ConfigStatus {
   config: SupabaseConfig | null;
 }
 
+export interface NumberingGapInfo {
+  year: number;
+  missingNumbers: number[];
+}
+
 export interface IncrementalSyncResult {
   newHeadersCount: number;
   newLinesCount: number;
+  recoveredGapsCount?: number;
+  unresolvedGaps?: NumberingGapInfo[];
   backupPath: string | null;
   error?: string;
 }
@@ -47,29 +54,66 @@ class DdtIncrementalSyncService {
       const projectUrl = status.config.projectUrl.trim().replace(/\/$/, "");
       const anonKey = status.config.anonKey.trim();
 
-      // 2. Determina gli anni attivi e il massimo doc_number per ciascuno da SQLite locale
+      // 2. Determina gli anni attivi da SQLite locale
       const db = await getDatabase();
       const currentYear = new Date().getFullYear();
       const activeYears = [currentYear, currentYear - 1];
 
-      const maxRows = await db.select<{ year: number; max_num: number }[]>(
-        `SELECT year, MAX(doc_number) as max_num 
-         FROM ddt_documents 
-         WHERE deleted_at IS NULL AND doc_number IS NOT NULL AND year >= $1
-         GROUP BY year`,
-        [currentYear - 1]
-      );
-
-      const maxByYear = new Map<number, number>();
-      maxRows.forEach((r) => maxByYear.set(r.year, r.max_num || 0));
-
       const newHeaders: CloudHeader[] = [];
       const newLines: CloudLine[] = [];
+      const unresolvedGaps: NumberingGapInfo[] = [];
+      let totalRecoveredGaps = 0;
 
       for (const year of activeYears) {
-        const localMax = maxByYear.get(year) ?? 0;
+        // 2a. Recupera tutti i doc_number esistenti in locale per l'anno per identificare sia il massimo che eventuali buchi
+        const localDocRows = await db.select<{ doc_number: number }[]>(
+          `SELECT doc_number 
+           FROM ddt_documents 
+           WHERE deleted_at IS NULL AND doc_number IS NOT NULL AND year = $1
+           ORDER BY doc_number ASC`,
+          [year]
+        );
 
-        // Query mirata e leggera: interroga SOLO i DDT con numero superiore al massimo locale
+        const localNums = new Set(localDocRows.map((r) => r.doc_number));
+        const localMax = localDocRows.length > 0 ? Math.max(...localDocRows.map((r) => r.doc_number)) : 0;
+
+        // Rileva tutti i buchi di numerazione sequenziale tra 1 e localMax
+        const missingGaps: number[] = [];
+        for (let n = 1; n < localMax; n++) {
+          if (!localNums.has(n)) {
+            missingGaps.push(n);
+          }
+        }
+
+        const fetchedHeadersForYear: CloudHeader[] = [];
+
+        // 2b. PRIORITÀ BUCHI: Se ci sono numeri mancanti nella sequenza locale, cerca di recuperarli da Supabase
+        if (missingGaps.length > 0) {
+          console.warn(`[Sync Incrementale] Rilevati ${missingGaps.length} buchi di numerazione per l'anno ${year}:`, missingGaps);
+          const CHUNK = 50;
+          for (let i = 0; i < missingGaps.length; i += CHUNK) {
+            const chunk = missingGaps.slice(i, i + CHUNK);
+            const gapUrl = new URL(`/rest/v1/ddt`, projectUrl);
+            gapUrl.searchParams.set("anno", `eq.${year}`);
+            gapUrl.searchParams.set("numero", `in.(${chunk.join(",")})`);
+            gapUrl.searchParams.set("select", HEADER_FIELDS);
+            gapUrl.searchParams.set("order", "numero.asc");
+
+            const gapRes = await fetch(gapUrl.toString(), {
+              headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+            });
+            if (gapRes.ok) {
+              const gapHeaders = (await gapRes.json()) as CloudHeader[];
+              if (gapHeaders && gapHeaders.length > 0) {
+                console.log(`[Sync Incrementale] Recuperati da Supabase ${gapHeaders.length} DDT che colmano buchi:`, gapHeaders.map((h) => h.numero));
+                fetchedHeadersForYear.push(...gapHeaders);
+                totalRecoveredGaps += gapHeaders.length;
+              }
+            }
+          }
+        }
+
+        // 2c. Query per nuovi DDT con numero superiore al massimo locale
         const headersUrl = new URL(`/rest/v1/ddt`, projectUrl);
         headersUrl.searchParams.set("anno", `eq.${year}`);
         headersUrl.searchParams.set("numero", `gt.${localMax}`);
@@ -80,37 +124,61 @@ class DdtIncrementalSyncService {
           headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
         });
 
-        if (!headersRes.ok) {
-          console.warn(`[Sync Incrementale] Errore fetch testate anno ${year}: ${headersRes.status}`);
-          continue;
-        }
-
-        const fetchedHeaders = (await headersRes.json()) as CloudHeader[];
-        if (!fetchedHeaders || fetchedHeaders.length === 0) {
-          continue;
-        }
-
-        newHeaders.push(...fetchedHeaders);
-
-        // Fetch mirato delle righe per i nuovi numeri DDT individuati
-        const minNum = Math.min(...fetchedHeaders.map((h) => Number(h.numero)));
-        const maxNum = Math.max(...fetchedHeaders.map((h) => Number(h.numero)));
-
-        const linesUrl = new URL(`/rest/v1/ddt_righe`, projectUrl);
-        linesUrl.searchParams.set("anno", `eq.${year}`);
-        linesUrl.searchParams.set("and", `(numero_ddt.gte.${minNum},numero_ddt.lte.${maxNum})`);
-        linesUrl.searchParams.set("select", LINE_FIELDS);
-        linesUrl.searchParams.set("order", "numero_ddt.asc,riga_nr.asc");
-
-        const linesRes = await fetch(linesUrl.toString(), {
-          headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
-        });
-
-        if (linesRes.ok) {
-          const fetchedLines = (await linesRes.json()) as CloudLine[];
-          if (fetchedLines && fetchedLines.length > 0) {
-            newLines.push(...fetchedLines);
+        if (headersRes.ok) {
+          const fetchedHeaders = (await headersRes.json()) as CloudHeader[];
+          if (fetchedHeaders && fetchedHeaders.length > 0) {
+            fetchedHeadersForYear.push(...fetchedHeaders);
           }
+        } else {
+          console.warn(`[Sync Incrementale] Errore fetch testate anno ${year}: ${headersRes.status}`);
+        }
+
+        // Controlla se rimangono buchi di numerazione non trovati neanche su Supabase
+        const recoveredNums = new Set(fetchedHeadersForYear.map((h) => Number(h.numero)));
+        const stillMissing = missingGaps.filter((n) => !recoveredNums.has(n));
+        if (stillMissing.length > 0) {
+          unresolvedGaps.push({ year, missingNumbers: stillMissing });
+        }
+
+        if (fetchedHeadersForYear.length === 0) {
+          continue;
+        }
+
+        newHeaders.push(...fetchedHeadersForYear);
+
+        // 2d. Fetch mirato delle righe per TUTTI i numeri individuati (nuovi + buchi recuperati) in chunk
+        const distinctNumbers = Array.from(new Set(fetchedHeadersForYear.map((h) => Number(h.numero))));
+        const CHUNK = 50;
+        for (let i = 0; i < distinctNumbers.length; i += CHUNK) {
+          const chunk = distinctNumbers.slice(i, i + CHUNK);
+          const linesUrl = new URL(`/rest/v1/ddt_righe`, projectUrl);
+          linesUrl.searchParams.set("anno", `eq.${year}`);
+          linesUrl.searchParams.set("numero_ddt", `in.(${chunk.join(",")})`);
+          linesUrl.searchParams.set("select", LINE_FIELDS);
+          linesUrl.searchParams.set("order", "numero_ddt.asc,riga_nr.asc");
+
+          const linesRes = await fetch(linesUrl.toString(), {
+            headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+          });
+
+          if (linesRes.ok) {
+            const fetchedLines = (await linesRes.json()) as CloudLine[];
+            if (fetchedLines && fetchedLines.length > 0) {
+              newLines.push(...fetchedLines);
+            }
+          }
+        }
+      }
+
+      // Se ci sono buchi irrisolti (mancanti sia in locale che su Supabase), notifica l'evento
+      if (unresolvedGaps.length > 0) {
+        console.warn("[Sync Incrementale] ATTENZIONE: Rilevati buchi di numerazione DDT non risolti nemmeno su Supabase:", unresolvedGaps);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("ddt-numbering-gap-detected", {
+              detail: { unresolvedGaps },
+            })
+          );
         }
       }
 
@@ -213,7 +281,13 @@ class DdtIncrementalSyncService {
 
       // 3. Se non ci sono nuovi DDT su Supabase e non c'erano righe da recuperare, chiudi all'istante
       if (newHeaders.length === 0) {
-        return { newHeadersCount: 0, newLinesCount: 0, backupPath: null };
+        return {
+          newHeadersCount: 0,
+          newLinesCount: 0,
+          backupPath: null,
+          recoveredGapsCount: 0,
+          unresolvedGaps: unresolvedGaps.length > 0 ? unresolvedGaps : undefined,
+        };
       }
 
       console.log(`[Sync Incrementale] Individuati ${newHeaders.length} nuovi DDT da importare (${newLines.length} righe).`);
@@ -262,6 +336,8 @@ class DdtIncrementalSyncService {
       return {
         newHeadersCount: importResult.importedHeaders,
         newLinesCount: importResult.importedLines,
+        recoveredGapsCount: totalRecoveredGaps,
+        unresolvedGaps: unresolvedGaps.length > 0 ? unresolvedGaps : undefined,
         backupPath: importResult.backupPath,
       };
     } catch (err) {
