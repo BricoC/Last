@@ -92,6 +92,48 @@ async function fetchAllPages<T>(
   return allRows;
 }
 
+async function fetchPagesWithFilter<T>(
+  baseUrl: string,
+  anonKey: string,
+  table: string,
+  select: string,
+  filterParam: string,
+  filterVal: string
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let offset = 0;
+  const PAGE_SIZE = 1000;
+
+  while (true) {
+    const pageUrl = new URL(`/rest/v1/${table}`, baseUrl);
+    pageUrl.searchParams.set("select", select);
+    pageUrl.searchParams.set(filterParam, filterVal);
+    pageUrl.searchParams.set("order", "updated_at.desc");
+    pageUrl.searchParams.set("limit", String(PAGE_SIZE));
+    pageUrl.searchParams.set("offset", String(offset));
+
+    const response = await fetch(pageUrl.toString(), {
+      method: "GET",
+      headers: {
+        apikey: anonKey,
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) return [];
+      throw new Error(`Errore fetch Supabase su ${table}: ${response.status}`);
+    }
+
+    const rows: T[] = await response.json();
+    if (!rows || rows.length === 0) break;
+    allRows.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+    offset += rows.length;
+  }
+
+  return allRows;
+}
+
 export class PriceListSyncService {
   /**
    * Sincronizza i listini da Supabase Cloud e li memorizza nel database SQLite locale.
@@ -689,6 +731,7 @@ export class PriceListSyncService {
   async syncIncrementalGeneralFromSupabase(): Promise<{
     updatedCount: number;
     updatedRows: ListinoGeneraleRow[];
+    error?: string;
   }> {
     try {
       const creds = await getSupabaseCredentials();
@@ -702,52 +745,39 @@ export class PriceListSyncService {
         localMaxIso = rows[0]?.max_up || null;
       } catch {}
 
-      const lastSyncStored =
-        typeof localStorage !== "undefined"
-          ? localStorage.getItem("price_list_last_incremental_sync_general")
-          : null;
-
       let referenceDate: Date;
-      if (lastSyncStored && !isNaN(new Date(lastSyncStored).getTime())) {
-        referenceDate = new Date(lastSyncStored);
-      } else if (localMaxIso && !isNaN(new Date(localMaxIso).getTime())) {
+      if (localMaxIso && !isNaN(new Date(localMaxIso).getTime())) {
         referenceDate = new Date(localMaxIso);
       } else {
         referenceDate = new Date(Date.now() - 30 * 24 * 3600 * 1000);
       }
 
-      const sinceIso = new Date(referenceDate.getTime() - 60000).toISOString();
+      // 10 secondi di tolleranza per compensare differenze di orologio tra macchine
+      const sinceIso = new Date(referenceDate.getTime() - 10000).toISOString();
 
       const genFields =
         "id,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
 
-      const genUrl = new URL(`/rest/v1/listino_generale`, creds.projectUrl);
-      genUrl.searchParams.set("updated_at", `gt.${sinceIso}`);
-      genUrl.searchParams.set("select", genFields);
-      genUrl.searchParams.set("order", "updated_at.asc");
-      genUrl.searchParams.set("limit", "1000");
-
-      const varUrl = new URL(`/rest/v1/listini_vari`, creds.projectUrl);
-      varUrl.searchParams.set("updated_at", `gt.${sinceIso}`);
-      varUrl.searchParams.set("select", genFields);
-      varUrl.searchParams.set("order", "updated_at.asc");
-      varUrl.searchParams.set("limit", "1000");
-
-      const [resGen, resVar] = await Promise.all([
-        fetch(genUrl.toString(), { headers: { apikey: creds.anonKey } }),
-        fetch(varUrl.toString(), { headers: { apikey: creds.anonKey } }),
+      const [rawGen, rawVar] = await Promise.all([
+        fetchPagesWithFilter<any>(
+          creds.projectUrl,
+          creds.anonKey,
+          "listino_generale",
+          genFields,
+          "updated_at",
+          `gt.${sinceIso}`
+        ),
+        fetchPagesWithFilter<any>(
+          creds.projectUrl,
+          creds.anonKey,
+          "listini_vari",
+          genFields,
+          "updated_at",
+          `gt.${sinceIso}`
+        ),
       ]);
 
-      if (!resGen.ok) {
-        throw new Error(`Errore fetch Supabase listino_generale: ${resGen.status}`);
-      }
-      const rawGen: any[] = await resGen.json();
-      const rawVar: any[] = resVar.ok ? await resVar.json() : [];
-
       if ((!rawGen || rawGen.length === 0) && (!rawVar || rawVar.length === 0)) {
-        if (typeof localStorage !== "undefined") {
-          localStorage.setItem("price_list_last_incremental_sync_general", new Date().toISOString());
-        }
         return { updatedCount: 0, updatedRows: [] };
       }
 
@@ -807,14 +837,10 @@ export class PriceListSyncService {
       const { priceListRepository } = await import("./priceListRepository");
       await priceListRepository.saveGeneralRows(rowsToUpsert);
 
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem("price_list_last_incremental_sync_general", new Date().toISOString());
-      }
-
       return { updatedCount: rowsToUpsert.length, updatedRows: rowsToUpsert };
-    } catch (err) {
+    } catch (err: any) {
       console.warn("[PriceListSyncService] Sincronizzazione incrementale non riuscita (modalità offline):", err);
-      return { updatedCount: 0, updatedRows: [] };
+      return { updatedCount: 0, updatedRows: [], error: err?.message || String(err) };
     }
   }
 
@@ -824,6 +850,7 @@ export class PriceListSyncService {
   async syncIncrementalClientiFromSupabase(): Promise<{
     updatedCount: number;
     updatedRows: ListinoClienteRow[];
+    error?: string;
   }> {
     try {
       const creds = await getSupabaseCredentials();
@@ -837,40 +864,28 @@ export class PriceListSyncService {
         localMaxIso = rows[0]?.max_up || null;
       } catch {}
 
-      const lastSyncStored =
-        typeof localStorage !== "undefined"
-          ? localStorage.getItem("price_list_last_incremental_sync_clienti")
-          : null;
-
       let referenceDate: Date;
-      if (lastSyncStored && !isNaN(new Date(lastSyncStored).getTime())) {
-        referenceDate = new Date(lastSyncStored);
-      } else if (localMaxIso && !isNaN(new Date(localMaxIso).getTime())) {
+      if (localMaxIso && !isNaN(new Date(localMaxIso).getTime())) {
         referenceDate = new Date(localMaxIso);
       } else {
         referenceDate = new Date(Date.now() - 30 * 24 * 3600 * 1000);
       }
 
-      const sinceIso = new Date(referenceDate.getTime() - 60000).toISOString();
+      const sinceIso = new Date(referenceDate.getTime() - 10000).toISOString();
 
       const cliFields =
         "id,created_at,updated_at,cliente,codice_articolo,descrizione,prezzo_fattura,prezzo_acquisto,ricarico,note,note1,note2";
 
-      const cliUrl = new URL(`/rest/v1/listini_clienti`, creds.projectUrl);
-      cliUrl.searchParams.set("updated_at", `gt.${sinceIso}`);
-      cliUrl.searchParams.set("select", cliFields);
-      cliUrl.searchParams.set("order", "updated_at.asc");
-      cliUrl.searchParams.set("limit", "1000");
+      const rawClienti = await fetchPagesWithFilter<any>(
+        creds.projectUrl,
+        creds.anonKey,
+        "listini_clienti",
+        cliFields,
+        "updated_at",
+        `gt.${sinceIso}`
+      );
 
-      const res = await fetch(cliUrl.toString(), { headers: { apikey: creds.anonKey } });
-      if (!res.ok) {
-        throw new Error(`Errore fetch Supabase listini_clienti: ${res.status}`);
-      }
-      const rawClienti: any[] = await res.json();
       if (!rawClienti || rawClienti.length === 0) {
-        if (typeof localStorage !== "undefined") {
-          localStorage.setItem("price_list_last_incremental_sync_clienti", new Date().toISOString());
-        }
         return { updatedCount: 0, updatedRows: [] };
       }
 
@@ -892,14 +907,10 @@ export class PriceListSyncService {
       const { priceListRepository } = await import("./priceListRepository");
       await priceListRepository.saveClientRows(rowsToUpsert);
 
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem("price_list_last_incremental_sync_clienti", new Date().toISOString());
-      }
-
       return { updatedCount: rowsToUpsert.length, updatedRows: rowsToUpsert };
-    } catch (err) {
+    } catch (err: any) {
       console.warn("[PriceListSyncService] Sincronizzazione incrementale clienti fallita:", err);
-      return { updatedCount: 0, updatedRows: [] };
+      return { updatedCount: 0, updatedRows: [], error: err?.message || String(err) };
     }
   }
 }

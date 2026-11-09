@@ -436,7 +436,9 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     setCloudSyncMessage(null);
     try {
       const syncRes = await priceListSyncService.syncIncrementalGeneralFromSupabase();
-      if (syncRes.updatedCount > 0) {
+      if (syncRes.error) {
+        setCloudSyncMessage(`Errore Cloud: ${syncRes.error}`);
+      } else if (syncRes.updatedCount > 0) {
         const refreshedRows = await priceListRepository.searchGeneral("", 15000);
         setItems(refreshedRows);
         setTotalDbCount(refreshedRows.length);
@@ -1151,10 +1153,6 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
           e.preventDefault();
           e.stopPropagation();
           selectCell(rowId, allVisibleCols[colIdx - 1], true);
-        } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          e.preventDefault();
-          e.stopPropagation();
-          startEditing(rowId, colId, e.key);
         }
       }
     },
@@ -1448,6 +1446,9 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
             ref={searchInputRef}
             type="text"
             value={search}
+            onFocus={() => {
+              setActiveCell(null);
+            }}
             onChange={(e) => {
               setSearch(e.target.value);
               setVisibleCount(BATCH_SIZE);
@@ -2883,8 +2884,18 @@ const EditableCell: React.FC<EditableCellProps> = memo(
 
     useEffect(() => {
       if (isActive && !isEditing && tdRef.current) {
-        tdRef.current.focus({ preventScroll: true });
+        // Se un input (es. Quick Filter) ha il focus, NON rubare mai il focus
+        const activeEl = typeof document !== "undefined" ? document.activeElement : null;
+        if (
+          activeEl &&
+          (activeEl.tagName === "INPUT" ||
+            activeEl.tagName === "TEXTAREA" ||
+            activeEl.getAttribute("contenteditable") === "true")
+        ) {
+          return;
+        }
         if (shouldScroll) {
+          tdRef.current.focus({ preventScroll: true });
           tdRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
         }
       }
