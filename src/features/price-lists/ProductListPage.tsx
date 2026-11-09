@@ -19,10 +19,14 @@ import {
   CheckCircle2,
   Plus,
   Trash2,
+  Receipt,
+  CloudDownload,
 } from "lucide-react";
 import { ListinoGeneraleRow, PriceListLogEntry, TrashListinoRow } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
 import { priceListSyncService } from "./services/priceListSyncService";
+import { orderRepository } from "@/features/orders/services/orderRepository";
+import { ElectronicInvoicesPage } from "@/features/invoices/ElectronicInvoicesPage";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { ItemPriceHistoryModal } from "./components/ItemPriceHistoryModal";
@@ -320,6 +324,16 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
   // Modale Storico Variazioni Riga (Colonna A...)
   const [historyModalItem, setHistoryModalItem] = useState<ListinoGeneraleRow | null>(null);
 
+  // Modale Popup Fatture Elettroniche (pre-filtrata su articolo)
+  const [invoicesModalSearch, setInvoicesModalSearch] = useState<string | null>(null);
+
+  // Fornitori unificati per Autocomplete colonna fornitore
+  const [generalSuppliers, setGeneralSuppliers] = useState<string[]>([]);
+
+  // Stato sincronizzazione Cloud
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [cloudSyncMessage, setCloudSyncMessage] = useState<string | null>(null);
+
   // Modale Cestino Articoli Eliminati (Max 30 FIFO)
   const [trashCount, setTrashCount] = useState<number>(0);
   const [isTrashModalOpen, setIsTrashModalOpen] = useState(false);
@@ -330,7 +344,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
   // Timer auto-save silenzioso ogni 10 minuti (configurabile)
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Caricamento iniziale da SQLite locale
+  // Caricamento iniziale da SQLite locale con sincronizzazione incrementale Supabase in background
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -359,12 +373,55 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         console.warn("[ProductListPage] Errore lettura data ultima modifica:", e);
       }
 
+      // Caricamento fornitori per autocomplete
+      try {
+        const [orderSupps, dbSupps] = await Promise.all([
+          orderRepository.getSuppliers().catch(() => []),
+          priceListRepository.getDistinctGeneralSuppliers().catch(() => []),
+        ]);
+        const merged = Array.from(
+          new Set([
+            ...orderSupps.map((s) => s.name?.trim()).filter(Boolean),
+            ...dbSupps,
+          ])
+        ).sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
+        setGeneralSuppliers(merged);
+      } catch (e) {
+        console.warn("[ProductListPage] Errore caricamento fornitori:", e);
+      }
+
       const snapshot = new Map<string, ListinoGeneraleRow>();
       for (const r of rows) {
         snapshot.set(r.id, { ...r });
       }
       setOriginalRowsSnapshot(snapshot);
       setDirtyRows(new Map());
+
+      // Sincronizzazione incrementale Cloud in background (nessun blocco dell'interfaccia)
+      void (async () => {
+        try {
+          const syncRes = await priceListSyncService.syncIncrementalGeneralFromSupabase();
+          if (syncRes.updatedCount > 0) {
+            console.log(`[ProductListPage] Sincronizzati dal Cloud ${syncRes.updatedCount} articoli.`);
+            const refreshedRows = await priceListRepository.searchGeneral("", 15000);
+            setItems(refreshedRows);
+            setTotalDbCount(refreshedRows.length);
+            setOriginalRowsSnapshot((prev) => {
+              const next = new Map(prev);
+              for (const r of syncRes.updatedRows) {
+                next.set(r.id, { ...r });
+              }
+              return next;
+            });
+            const lastMod = await priceListRepository.getLastModificationTime();
+            if (lastMod) {
+              setLastDbModTime(new Date(lastMod));
+            }
+          }
+        } catch (err) {
+          console.warn("[ProductListPage] Sync incrementale cloud in background fallito:", err);
+        }
+      })();
     } catch (err) {
       console.error("Errore caricamento listino generale da SQLite:", err);
       setError(err instanceof Error ? err.message : "Errore lettura database locale.");
@@ -372,6 +429,71 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       setLoading(false);
     }
   }, []);
+
+  // Sincronizzazione manuale Cloud al click dell'utente
+  const handleManualCloudSync = useCallback(async () => {
+    setIsSyncingCloud(true);
+    setCloudSyncMessage(null);
+    try {
+      const syncRes = await priceListSyncService.syncIncrementalGeneralFromSupabase();
+      if (syncRes.updatedCount > 0) {
+        const refreshedRows = await priceListRepository.searchGeneral("", 15000);
+        setItems(refreshedRows);
+        setTotalDbCount(refreshedRows.length);
+        setOriginalRowsSnapshot((prev) => {
+          const next = new Map(prev);
+          for (const r of syncRes.updatedRows) {
+            next.set(r.id, { ...r });
+          }
+          return next;
+        });
+        const lastMod = await priceListRepository.getLastModificationTime();
+        if (lastMod) {
+          setLastDbModTime(new Date(lastMod));
+        }
+        setCloudSyncMessage(`Sincronizzati ${syncRes.updatedCount} articoli dal Cloud`);
+      } else {
+        setCloudSyncMessage("Tutto aggiornato con il Cloud");
+      }
+    } catch (err: any) {
+      console.warn("[ProductListPage] Errore sync manuale Cloud:", err);
+      setCloudSyncMessage("Errore connessione Cloud");
+    } finally {
+      setIsSyncingCloud(false);
+      setTimeout(() => setCloudSyncMessage(null), 4000);
+    }
+  }, []);
+
+  // Apertura modale Fatture Elettroniche filtrata sull'articolo
+  const handleOpenInvoices = useCallback((item: ListinoGeneraleRow) => {
+    const searchKey = item.codice_articolo?.trim() || item.descrizione?.trim() || "";
+    setInvoicesModalSearch(searchKey);
+  }, []);
+
+  // Controllo automatico aggiornamenti Cloud quando la finestra riprende il focus
+  useEffect(() => {
+    let lastFocusCheck = Date.now();
+    const handleWindowFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusCheck > 30000 && dirtyRows.size === 0) {
+        lastFocusCheck = now;
+        priceListSyncService
+          .syncIncrementalGeneralFromSupabase()
+          .then((res) => {
+            if (res.updatedCount > 0) {
+              priceListRepository.searchGeneral("", 15000).then((refreshedRows) => {
+                setItems(refreshedRows);
+                setTotalDbCount(refreshedRows.length);
+                setOriginalRowsSnapshot(new Map(refreshedRows.map((r) => [r.id, { ...r }])));
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    };
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [dirtyRows.size]);
 
   useEffect(() => {
     void loadData();
@@ -1311,6 +1433,13 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       className="flex flex-col h-full bg-[var(--background)] text-[var(--foreground)] select-none outline-none"
       tabIndex={0}
     >
+      {/* Autocomplete Datalist per Fornitori Listino Generale */}
+      <datalist id="general-suppliers-autocomplete">
+        {generalSuppliers.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+
       {/* 1. Header Toolbar */}
       <div className="p-2.5 border-b border-[var(--border)] bg-[var(--card)] flex items-center space-x-3 shrink-0">
         <div className="relative flex-1">
@@ -1344,6 +1473,24 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
             onToggleColumn={toggleColumn}
             onResetDefault={resetDefaultColumns}
           />
+
+          {/* Sincronizzazione Cloud manuale per scaricare istantaneamente modifiche da altri PC */}
+          <button
+            type="button"
+            onClick={handleManualCloudSync}
+            disabled={loading || isSaving || isSyncingCloud}
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 hover:text-sky-300 transition-colors shadow-xs cursor-pointer font-medium"
+            title="Sincronizza subito modifiche da altri PC (Supabase Cloud)"
+          >
+            <CloudDownload className={`w-3.5 h-3.5 ${isSyncingCloud ? "animate-bounce" : ""}`} />
+            <span className="hidden sm:inline">{isSyncingCloud ? "Sync Cloud..." : "Sync Cloud"}</span>
+          </button>
+
+          {cloudSyncMessage && (
+            <span className="text-[11px] text-sky-400 font-medium px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 animate-in fade-in">
+              {cloudSyncMessage}
+            </span>
+          )}
 
           <button
             type="button"
@@ -1489,6 +1636,16 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
               {visibleColumns.history !== false && (
                 <th className="px-2 py-2 w-10 text-center" title="Storico modifiche riga">
                   A...
+                </th>
+              )}
+
+              {/* Mini colonna Fatture Elettroniche */}
+              {visibleColumns.invoices !== false && (
+                <th
+                  className="px-1.5 py-2 w-8 min-w-[32px] max-w-[32px] text-center"
+                  title="Cerca nelle Fatture Elettroniche (prezzi d'acquisto e storico fornitori)"
+                >
+                  <Receipt className="w-3.5 h-3.5 mx-auto text-amber-400" />
                 </th>
               )}
 
@@ -1650,6 +1807,10 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                   <td className="px-2 py-1 text-center text-emerald-400/60 font-semibold text-[10px]">
                     NUOVO
                   </td>
+                )}
+
+                {visibleColumns.invoices !== false && (
+                  <td className="px-1.5 py-1 text-center text-[var(--muted-foreground)]/30">—</td>
                 )}
 
                 {visibleColumns.actions !== false && canEdit && (
@@ -1999,6 +2160,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                   visibleColumns={visibleColumns}
                   onToggleSelectRow={handleToggleSelectRow}
                   onOpenHistory={setHistoryModalItem}
+                  onOpenInvoices={handleOpenInvoices}
                   onDeleteRow={handleDeleteRow}
                   onSelectCell={selectCell}
                   onStartEdit={startEditing}
@@ -2051,6 +2213,25 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         cancelLabel="Annulla"
         isSaving={isSaving}
       />
+
+      {/* Modale Popup Fatture Elettroniche (pre-filtrata sull'articolo selezionato) */}
+      {invoicesModalSearch !== null && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
+          onClick={() => setInvoicesModalSearch(null)}
+        >
+          <div
+            className="w-full h-full max-w-[1780px] max-h-[96vh] bg-[var(--background)] border border-slate-700/80 rounded-xl shadow-2xl flex flex-col overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ElectronicInvoicesPage
+              initialSearch={invoicesModalSearch}
+              isModal={true}
+              onClose={() => setInvoicesModalSearch(null)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -2069,6 +2250,7 @@ interface MemoizedProductRowProps {
   visibleColumns: Record<string, boolean>;
   onToggleSelectRow: (id: string) => void;
   onOpenHistory: (item: ListinoGeneraleRow) => void;
+  onOpenInvoices: (item: ListinoGeneraleRow) => void;
   onDeleteRow: (item: ListinoGeneraleRow) => void;
   onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
@@ -2091,6 +2273,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
     visibleColumns,
     onToggleSelectRow,
     onOpenHistory,
+    onOpenInvoices,
     onDeleteRow,
     onSelectCell,
     onStartEdit,
@@ -2142,6 +2325,28 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
               title="Visualizza storico modifiche riga (max 15)"
             >
               <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </td>
+        )}
+
+        {/* Mini colonna Fatture Elettroniche */}
+        {visibleColumns.invoices !== false && (
+          <td className="px-1.5 py-1 text-center">
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenInvoices(item);
+              }}
+              className={`p-1 rounded transition-colors cursor-pointer ${
+                isHighlighted
+                  ? "text-amber-200 hover:text-amber-100 hover:bg-amber-400/20"
+                  : "text-amber-400/80 hover:text-amber-300 hover:bg-amber-400/10"
+              }`}
+              title={`Cerca "${item.codice_articolo || item.descrizione}" nelle Fatture Elettroniche`}
+            >
+              <Receipt className="w-3.5 h-3.5 mx-auto" />
             </button>
           </td>
         )}
@@ -2599,12 +2804,15 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
     }
   }, [isInitialCharTyped]);
 
+  const datalistId = colId === "fornitore" ? "general-suppliers-autocomplete" : undefined;
+
   return (
     <td className={`p-0 relative ${alignClass} ${className}`}>
       <input
         ref={inputRef}
         autoFocus
         type="text"
+        list={datalistId}
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
         onBlur={() => onCommit(rowId, colId, localValue)}

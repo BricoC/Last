@@ -101,4 +101,12 @@ describe("Product Repository & Consistency Rules", () => {
     expect(isCodeActive("TASSELLO-8")).toBe(true);
     expect(isCodeActive("TASSELLO-6")).toBe(false);
   });
+
+  it("include la colonna 'invoices' visibile di default per il popup Fatture Elettroniche", async () => {
+    const { ALL_GENERAL_COLUMNS } = await import("../../hooks/useColumnVisibility");
+    const invoicesCol = ALL_GENERAL_COLUMNS.find((c) => c.id === "invoices");
+    expect(invoicesCol).toBeDefined();
+    expect(invoicesCol?.defaultVisible).toBe(true);
+    expect(invoicesCol?.label).toContain("Fatture Elettroniche");
+  });
 });

@@ -134,6 +134,7 @@ export const BulkEditToolbar: React.FC<BulkEditToolbarProps> = ({
         {selectedAction !== "delete" && (
           <input
             type="text"
+            list={selectedAction === "set_fornitore" ? "general-suppliers-autocomplete" : undefined}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {

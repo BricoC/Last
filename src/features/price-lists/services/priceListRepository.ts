@@ -156,6 +156,28 @@ export class PriceListRepository {
   }
 
   /**
+   * Restituisce tutti i fornitori distinti dal Listino Generale locale.
+   */
+  async getDistinctGeneralSuppliers(): Promise<string[]> {
+    try {
+      const db = await getDatabase();
+      const rows = await db.select<{ fornitore: string | null }[]>(
+        `SELECT DISTINCT fornitore FROM listino_generale 
+         WHERE fornitore IS NOT NULL AND TRIM(fornitore) != ''
+         ORDER BY fornitore ASC;`
+      );
+      return rows
+        .map((r) => r.fornitore?.trim() || "")
+        .filter(Boolean)
+        .filter((v, i, a) => a.indexOf(v) === i)
+        .sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
+    } catch (err) {
+      console.warn("[PriceListRepository] Errore lettura fornitori listino generale:", err);
+      return [];
+    }
+  }
+
+  /**
    * Ricerca full-text su Listini Clienti (esclusi test LIST_000 e LIST_).
    */
   async searchClientPrices(
