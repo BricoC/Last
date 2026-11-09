@@ -259,7 +259,7 @@ export const TopNavBar: React.FC = () => {
             );
           })}
 
-          {/* Pulsante Provvisorio Transitorio Migrazione Listini (Solo Amministratore) */}
+          {/* Pulsante Provvisorio Transitorio Migrazione Listini (Solo Admin) */}
           {currentUser?.is_admin && (
             <button
               type="button"
@@ -270,7 +270,7 @@ export const TopNavBar: React.FC = () => {
                   componentId: "manual-cloud-import",
                 })
               }
-              title="Migrazione Listini Clienti da locale a Supabase (Solo Amministratore)"
+              title="Migrazione Listini Clienti da locale a Supabase (Solo Admin)"
               className={cn(
                 "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap shrink-0 select-none cursor-pointer border",
                 activeWindowId === "manual-cloud-import"

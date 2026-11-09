@@ -33,8 +33,14 @@ import { checkAndExecuteDailyBackup } from "@/features/settings/services/backupS
 
 export function App() {
   const { applyToDom } = useThemeStore();
-  const { currentUser, pendingPasswordSwitch, cancelPasswordSwitch, confirmPasswordSwitch } =
-    useUserStore();
+  const {
+    currentUser,
+    users,
+    pendingPasswordSwitch,
+    cancelPasswordSwitch,
+    confirmPasswordSwitch,
+    requestSwitchUser,
+  } = useUserStore();
 
   useEffect(() => {
     // Applica le variabili CSS del tema Grigio L4 all'avvio dell'applicazione
@@ -46,12 +52,16 @@ export function App() {
     void ddtIncrementalSyncService.syncNewDdtsFromSupabase().catch((err) => {
       console.warn("[App] Sync incrementale all'avvio non riuscita:", err);
     });
-
-    // Controllo ed esecuzione silenziosa del backup giornaliero automatico (multi-utente)
-    void checkAndExecuteDailyBackup(currentUser?.name).catch((err) => {
-      console.warn("[App] Backup giornaliero automatico non riuscito:", err);
-    });
   }, []);
+
+  // Controllo ed esecuzione silenziosa del backup giornaliero automatico quando l'utente è autenticato
+  useEffect(() => {
+    if (currentUser?.name) {
+      void checkAndExecuteDailyBackup(currentUser.name).catch((err) => {
+        console.warn("[App] Backup giornaliero automatico non riuscito:", err);
+      });
+    }
+  }, [currentUser?.name]);
 
   // Blocco di sicurezza chiusura browser/tab in caso di modifiche non salvate
   useEffect(() => {
@@ -110,7 +120,7 @@ export function App() {
             L'utente o la postazione attiva (<strong className="text-white">{currentUser.name}</strong>) non dispone dei privilegi per accedere alla schermata selezionata.
           </p>
           <p className="text-[11px] text-[var(--muted-foreground)]">
-            Per abilitare la visualizzazione di questa pagina per questa postazione, accedi con un account Amministratore e abilita il modulo in Impostazioni &rarr; Utenti e Postazioni.
+            Per abilitare la visualizzazione di questa pagina per questa postazione, accedi con un account Admin e abilita il modulo in Impostazioni &rarr; Utenti e Postazioni.
           </p>
         </div>
       );
@@ -171,10 +181,13 @@ export function App() {
       {/* 3. Area Desktop MDI con supporto Finestre Flottanti, Ridimensionabili e Massimizzabili */}
       <DesktopWorkspace renderContent={renderWindowContent} />
 
-      {/* Modale Password Cambio Utente / Postazione */}
+      {/* Modale / Schermata Password Utente (Sblocco all'avvio / F5 e Cambio Utente) */}
       <UserPasswordModal
         isOpen={Boolean(pendingPasswordSwitch)}
         targetUser={pendingPasswordSwitch}
+        isStartupLock={!currentUser && Boolean(pendingPasswordSwitch)}
+        availableUsers={users}
+        onSelectUser={(userId) => void requestSwitchUser(userId)}
         onCancel={cancelPasswordSwitch}
         onConfirm={confirmPasswordSwitch}
       />

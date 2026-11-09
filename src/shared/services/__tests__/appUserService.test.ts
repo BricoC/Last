@@ -85,5 +85,10 @@ describe("isPageAllowedForUser", () => {
     const wrong = await verifyPassword("sbagliata", hash);
     expect(wrong).toBe(false);
   });
+
+  it("fails verification when hash is empty or undefined", async () => {
+    expect(await verifyPassword("segreto123", "")).toBe(false);
+    expect(await verifyPassword("segreto123", undefined)).toBe(false);
+  });
 });
 

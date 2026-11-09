@@ -205,7 +205,7 @@ export const UserManagementPanel: React.FC = () => {
 
   const handleDelete = async (user: AppUser) => {
     if (user.is_admin) {
-      setMessage({ type: "error", text: "Impossibile eliminare l'account Amministratore principale." });
+      setMessage({ type: "error", text: "Impossibile eliminare l'account Admin principale." });
       return;
     }
     if (confirm(`Sei sicuro di voler eliminare l'utente / postazione "${user.name}"?`)) {
@@ -584,7 +584,7 @@ export const UserManagementPanel: React.FC = () => {
                 <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold">
                   <Shield className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>
-                    L'Amministratore principale dispone permanentemente dell'accesso a tutti i moduli di sistema. Queste pagine non possono essere disabilitate.
+                    L'Admin principale dispone permanentemente dell'accesso a tutti i moduli di sistema. Queste pagine non possono essere disabilitate.
                   </span>
                 </div>
               )}

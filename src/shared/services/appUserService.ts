@@ -91,7 +91,7 @@ export async function verifyPassword(plain: string, hash?: string): Promise<bool
 const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
   {
     id: "admin",
-    name: "Amministratore (Ufficio)",
+    name: "Admin",
     station_name: "PC Ufficio",
     can_access_settings: true,
     can_access_ddt: true,
@@ -211,6 +211,15 @@ export class AppUserService {
         } catch {
           // Colonna già presente, errore ignorato in sicurezza
         }
+      }
+
+      // Rinomina automatica di 'Amministratore' in 'Admin' per l'account principale id='admin'
+      try {
+        await db.execute(
+          "UPDATE app_users SET name = 'Admin' WHERE id = 'admin' AND name != 'Admin'"
+        );
+      } catch {
+        // Nessun aggiornamento necessario
       }
 
       // Verifica se ci sono utenti, altrimenti effettua il seed iniziale

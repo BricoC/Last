@@ -65,7 +65,6 @@ export const useUserStore = create<UserState>((set, get) => ({
         active = list[0];
         AppUserService.setActiveUserId(active.id);
       }
-      set({ users: list, currentUser: active || null, isLoading: false, lastCloudSync: new Date() });
 
       // Applica il tema salvato della postazione attiva all'avvio
       if (active?.theme_preset) {
@@ -74,6 +73,26 @@ export const useUserStore = create<UserState>((set, get) => ({
           themeStore.setBrightness(active.theme_brightness);
         }
         themeStore.setPreset(active.theme_preset);
+      }
+
+      // Se l'utente attivo richiede password, NON impostiamo currentUser all'avvio/F5:
+      // Si attiva il blocco di sicurezza finché non viene immessa la password corretta
+      if (active && active.require_password && active.password_hash) {
+        set({
+          users: list,
+          currentUser: null,
+          pendingPasswordSwitch: active,
+          isLoading: false,
+          lastCloudSync: new Date(),
+        });
+      } else {
+        set({
+          users: list,
+          currentUser: active || null,
+          pendingPasswordSwitch: null,
+          isLoading: false,
+          lastCloudSync: new Date(),
+        });
       }
     } catch (e) {
       console.error("Errore caricamento utenti:", e);
@@ -86,14 +105,22 @@ export const useUserStore = create<UserState>((set, get) => ({
     try {
       await AppUserService.syncWithCloud();
       const list = await AppUserService.getAllUsers();
-      const activeId = AppUserService.getActiveUserId();
-      const active = list.find((u) => u.id === activeId) || list[0] || null;
-      set({
-        users: list,
-        currentUser: active,
-        isSyncingCloud: false,
-        lastCloudSync: new Date(),
-      });
+      const current = get().currentUser;
+      if (current) {
+        const active = list.find((u) => u.id === current.id) || current;
+        set({
+          users: list,
+          currentUser: active,
+          isSyncingCloud: false,
+          lastCloudSync: new Date(),
+        });
+      } else {
+        set({
+          users: list,
+          isSyncingCloud: false,
+          lastCloudSync: new Date(),
+        });
+      }
     } catch (err) {
       console.error("[useUserStore] Errore sync cloud:", err);
       set({ isSyncingCloud: false });
@@ -101,8 +128,8 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   requestSwitchUser: async (userId: string): Promise<boolean> => {
-    const { users, currentUser, switchUser } = get();
-    if (currentUser?.id === userId) return true;
+    const { users, currentUser, switchUser, pendingPasswordSwitch } = get();
+    if (currentUser?.id === userId && !pendingPasswordSwitch) return true;
     const target = users.find((u) => u.id === userId);
     if (!target) return false;
 
@@ -113,11 +140,24 @@ export const useUserStore = create<UserState>((set, get) => ({
     }
 
     // Altrimenti passa subito senza password
+    set({ pendingPasswordSwitch: null });
     switchUser(userId);
     return true;
   },
 
   cancelPasswordSwitch: () => {
+    const { currentUser, users, switchUser } = get();
+    if (!currentUser) {
+      // Se non c'è un utente attivo autenticato (blocco all'avvio o F5),
+      // cerca la prima postazione libera che non richiede password (es. Banco)
+      const unprotected = users.find((u) => !u.require_password || !u.password_hash);
+      if (unprotected) {
+        set({ pendingPasswordSwitch: null });
+        switchUser(unprotected.id);
+        return;
+      }
+      return;
+    }
     set({ pendingPasswordSwitch: null });
   },
 

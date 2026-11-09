@@ -193,6 +193,11 @@ export class UserSyncService {
             topbarOrder = DEFAULT_TOPBAR_ORDER;
           }
 
+          const normalizedName =
+            r.id === "admin" && (r.name === "Amministratore" || r.name === "Amministratore (Ufficio)")
+              ? "Admin"
+              : r.name;
+
           await db.execute(
             `INSERT INTO app_users (
               id, name, station_name, can_access_settings, can_access_ddt, can_access_price_lists,
@@ -214,7 +219,7 @@ export class UserSyncService {
               topbar_order = excluded.topbar_order`,
             [
               r.id,
-              r.name,
+              normalizedName,
               r.station_name || "",
               r.is_admin ? 1 : r.can_access_settings ? 1 : 0,
               r.is_admin ? 1 : r.can_edit_price_lists ? 1 : 0,
@@ -229,6 +234,26 @@ export class UserSyncService {
               r.created_at || new Date().toISOString(),
             ]
           );
+          if (r.id === "admin" && r.name !== normalizedName) {
+            void this.pushUserToSupabase({
+              id: "admin",
+              name: "Admin",
+              station_name: r.station_name || "",
+              can_access_settings: true,
+              can_access_ddt: true,
+              can_access_price_lists: true,
+              can_edit_price_lists: true,
+              can_edit_or_numbers: true,
+              is_admin: true,
+              allowed_pages: DEFAULT_ALLOWED_PAGES,
+              theme_preset: (r.theme_preset || "grigio") as any,
+              theme_brightness: Number(r.theme_brightness) || 4,
+              password_hash: r.password_hash || "",
+              require_password: Boolean(r.require_password),
+              topbar_order: topbarOrder,
+              created_at: r.created_at || new Date().toISOString(),
+            });
+          }
           pulled++;
         }
       }
