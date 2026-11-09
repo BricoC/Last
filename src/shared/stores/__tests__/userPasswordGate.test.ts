@@ -154,4 +154,43 @@ describe("useUserStore Password Gate", () => {
     expect(useUserStore.getState().currentUser?.id).toBe("banco-1");
     expect(useUserStore.getState().pendingPasswordSwitch).toBeNull();
   });
+
+  it("does not re-prompt for password when already authenticated as Admin (e.g. entering Settings)", async () => {
+    const adminHash = await hashPassword("admin123");
+    const adminUser: AppUser = {
+      id: "admin",
+      name: "Admin",
+      station_name: "PC Ufficio",
+      can_access_settings: true,
+      can_access_ddt: true,
+      can_access_price_lists: true,
+      can_edit_price_lists: true,
+      can_edit_or_numbers: true,
+      is_admin: true,
+      allowed_pages: ["dashboard"],
+      theme_preset: "grigio",
+      theme_brightness: 4,
+      require_password: true,
+      password_hash: adminHash,
+      created_at: new Date().toISOString(),
+    };
+
+    // User is already logged in as Admin
+    useUserStore.setState({
+      users: [adminUser],
+      currentUser: adminUser,
+      pendingPasswordSwitch: null,
+    });
+
+    vi.spyOn(AppUserService, "getAllUsers").mockResolvedValue([adminUser]);
+    vi.spyOn(AppUserService, "getActiveUserId").mockReturnValue("admin");
+    vi.spyOn(AppUserService, "syncWithCloud").mockResolvedValue({ pulled: 0, pushed: 0, success: true });
+
+    // Entering Settings calls loadUsers()
+    await useUserStore.getState().loadUsers();
+
+    // Must remain authenticated without setting pendingPasswordSwitch!
+    expect(useUserStore.getState().currentUser?.id).toBe("admin");
+    expect(useUserStore.getState().pendingPasswordSwitch).toBeNull();
+  });
 });
