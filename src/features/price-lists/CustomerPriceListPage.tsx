@@ -940,14 +940,6 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
           if (canEdit) applyCellChange(rowId, colId, null);
           return;
         }
-
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          if (canEdit) {
-            e.preventDefault();
-            startEditing(rowId, colId, e.key);
-          }
-          return;
-        }
       } else {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -1291,6 +1283,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             ref={searchInputRef}
             type="text"
             value={search}
+            onFocus={() => setActiveCell(null)}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Cerca cliente, fornitore, descrizione, codice... (F4)"
             className="w-full pl-8 pr-7 py-1 text-xs bg-[var(--card)] border border-[var(--border)] rounded-md outline-none text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)]"
@@ -2125,8 +2118,17 @@ const EditableCell: React.FC<EditableCellProps> = memo(
 
     useEffect(() => {
       if (isActive && !isEditing && tdRef.current) {
-        tdRef.current.focus({ preventScroll: true });
+        const activeEl = typeof document !== "undefined" ? document.activeElement : null;
+        if (
+          activeEl &&
+          (activeEl.tagName === "INPUT" ||
+            activeEl.tagName === "TEXTAREA" ||
+            activeEl.getAttribute("contenteditable") === "true")
+        ) {
+          return;
+        }
         if (shouldScroll) {
+          tdRef.current.focus({ preventScroll: true });
           tdRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
         }
       }
