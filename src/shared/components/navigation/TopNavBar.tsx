@@ -26,6 +26,7 @@ import {
   Cloud,
   Loader2,
   UploadCloud,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
@@ -85,6 +86,8 @@ export const TopNavBar: React.FC = () => {
   const [dragOverModuleId, setDragOverModuleId] = useState<string | null>(null);
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [gapWarning, setGapWarning] = useState<string | null>(null);
+  const [showGapAlert, setShowGapAlert] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -94,13 +97,36 @@ export const TopNavBar: React.FC = () => {
     if (isSyncing) return;
     setIsSyncing(true);
     try {
-      await ddtIncrementalSyncService.syncNewDdtsFromSupabase();
+      const res = await ddtIncrementalSyncService.syncNewDdtsFromSupabase();
       const now = new Date();
       setLastSyncTime(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
+      if (res.unresolvedGaps && res.unresolvedGaps.length > 0) {
+        const text = res.unresolvedGaps
+          .map((g) => `Anno ${g.year}: DDT mancanti [${g.missingNumbers.join(", ")}]`)
+          .join(" | ");
+        setGapWarning(text);
+      } else {
+        setGapWarning(null);
+      }
     } finally {
       setIsSyncing(false);
     }
   };
+
+  useEffect(() => {
+    const onGapDetected = (e: Event) => {
+      const customEvent = e as CustomEvent<{ unresolvedGaps: { year: number; missingNumbers: number[] }[] }>;
+      const gaps = customEvent.detail?.unresolvedGaps;
+      if (gaps && gaps.length > 0) {
+        const text = gaps
+          .map((g) => `Anno ${g.year}: DDT mancanti [${g.missingNumbers.join(", ")}]`)
+          .join(" | ");
+        setGapWarning(text);
+      }
+    };
+    window.addEventListener("ddt-numbering-gap-detected", onGapDetected);
+    return () => window.removeEventListener("ddt-numbering-gap-detected", onGapDetected);
+  }, []);
 
   useEffect(() => {
     const onDdtUpdated = () => {
@@ -329,27 +355,74 @@ export const TopNavBar: React.FC = () => {
         )}
 
         {/* Indicatore e Pulsante Cloud Sync Supabase */}
-        <button
-          type="button"
-          onClick={handleManualSync}
-          disabled={isSyncing}
-          className={cn(
-            "flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all cursor-pointer",
-            isSyncing
-              ? "bg-amber-500/15 border-amber-500/40 text-amber-300 animate-pulse"
-              : lastSyncTime
-              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
-              : "bg-[var(--background)] border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+        <div className="relative flex items-center">
+          <button
+            type="button"
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className={cn(
+              "flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all cursor-pointer",
+              isSyncing
+                ? "bg-amber-500/15 border-amber-500/40 text-amber-300 animate-pulse"
+                : gapWarning
+                ? "bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25"
+                : lastSyncTime
+                ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
+                : "bg-[var(--background)] border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            )}
+            title="Sincronizzazione Cloud Supabase (Clicca per verificare nuovi DDT ora)"
+          >
+            {isSyncing ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+            ) : gapWarning ? (
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+            )}
+            <span>{isSyncing ? "Sync in corso..." : lastSyncTime ? `Cloud: ${lastSyncTime}` : "Cloud Sync"}</span>
+          </button>
+
+          {/* Badge Avviso Buchi Numerazione DDT se rilevati */}
+          {gapWarning && (
+            <button
+              type="button"
+              onClick={() => setShowGapAlert((prev) => !prev)}
+              className="ml-1.5 p-1 rounded-md bg-rose-500/20 border border-rose-500/40 text-rose-300 hover:bg-rose-500/30 transition-colors flex items-center gap-1 text-[11px] font-bold cursor-pointer"
+              title="Attenzione: rilevati buchi nella numerazione sequenziale dei DDT!"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+              <span>Buchi DDT</span>
+            </button>
           )}
-          title="Sincronizzazione Cloud Supabase (Clicca per verificare nuovi DDT ora)"
-        >
-          {isSyncing ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-          ) : (
-            <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+
+          {/* Popover Dettaglio Buchi */}
+          {showGapAlert && gapWarning && (
+            <div className="absolute right-0 top-9 z-50 w-80 p-3 bg-slate-900 border border-rose-500/60 shadow-2xl rounded-lg text-slate-100 text-xs">
+              <div className="flex items-center justify-between pb-1.5 border-b border-rose-500/30 mb-2">
+                <span className="font-bold text-rose-400 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  Salto di Numerazione DDT
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowGapAlert(false)}
+                  className="text-slate-400 hover:text-white text-xs font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-slate-300 mb-2">
+                I seguenti numeri DDT non risultano registrati né in locale né sul cloud:
+              </p>
+              <div className="p-2 bg-slate-950/80 rounded border border-rose-500/30 font-mono text-[11px] text-rose-300 break-words mb-2">
+                {gapWarning}
+              </div>
+              <p className="text-[11px] text-slate-400 italic">
+                Verifica che i DDT non siano rimasti salvati solo in bozza o offline.
+              </p>
+            </div>
           )}
-          <span>{isSyncing ? "Sync in corso..." : lastSyncTime ? `Cloud: ${lastSyncTime}` : "Cloud Sync"}</span>
-        </button>
+        </div>
 
         {/* Indicatore e Selettore Rapido Utente / Postazione PC */}
         <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md bg-[var(--background)] border border-[var(--border)] text-xs">

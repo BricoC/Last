@@ -175,12 +175,19 @@ function parseInputPercent(val: string): number | null {
   return round5(num > 2 ? num / 100 : num);
 }
 
-function formatEuro5(val: number | null | undefined): string {
+function formatSellingPrice(val: number | null | undefined): string {
   if (val == null || isNaN(val)) return "—";
-  const rounded = round5(val);
-  return `€ ${rounded.toLocaleString("it-IT", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 5,
+  return `€ ${Number(val).toLocaleString("it-IT", {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  })}`;
+}
+
+function formatCostPrice(val: number | null | undefined): string {
+  if (val == null || isNaN(val)) return "—";
+  return `€ ${Number(val).toLocaleString("it-IT", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
   })}`;
 }
 
@@ -207,6 +214,14 @@ function getFormattedInitValue(val: any, col: string, char?: string): string {
   ) {
     const pct = val > 2 ? val : val * 100;
     return `${round5(pct)}%`;
+  }
+  if (col === "prezzo_pubblico" || col === "prezzo_profess" || col === "prezzo_fattura") {
+    const n = Number(val);
+    if (!isNaN(n)) return (Math.round(n * 1000) / 1000).toString();
+  }
+  if (col === "prezzo_acquisto") {
+    const n = Number(val);
+    if (!isNaN(n)) return (Math.round(n * 10000) / 10000).toString();
   }
   return String(val);
 }
@@ -1783,7 +1798,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                     rowId={newTopRow.id}
                     colId="prezzo_pubblico"
                     value={newTopRow.prezzo_pubblico ?? ""}
-                    displayValue={formatEuro5(newTopRow.prezzo_pubblico)}
+                    displayValue={formatSellingPrice(newTopRow.prezzo_pubblico)}
                     align="right"
                     isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_pubblico"}
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_pubblico"}
@@ -1821,7 +1836,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                     rowId={newTopRow.id}
                     colId="prezzo_profess"
                     value={newTopRow.prezzo_profess ?? ""}
-                    displayValue={formatEuro5(newTopRow.prezzo_profess)}
+                    displayValue={formatSellingPrice(newTopRow.prezzo_profess)}
                     align="right"
                     isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_profess"}
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_profess"}
@@ -1859,7 +1874,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                     rowId={newTopRow.id}
                     colId="prezzo_fattura"
                     value={newTopRow.prezzo_fattura ?? ""}
-                    displayValue={formatEuro5(newTopRow.prezzo_fattura)}
+                    displayValue={formatSellingPrice(newTopRow.prezzo_fattura)}
                     align="right"
                     isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_fattura"}
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_fattura"}
@@ -1879,7 +1894,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                     rowId={newTopRow.id}
                     colId="prezzo_acquisto"
                     value={newTopRow.prezzo_acquisto ?? ""}
-                    displayValue={formatEuro5(newTopRow.prezzo_acquisto)}
+                    displayValue={formatCostPrice(newTopRow.prezzo_acquisto)}
                     align="right"
                     isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "prezzo_acquisto"}
                     isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "prezzo_acquisto"}
@@ -1953,7 +1968,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
 
                 {visibleColumns.costo_maggiorato !== false && (
                   <td className="px-3 py-1 text-right font-medium text-sky-200/70 border-x border-sky-500/20">
-                    {formatEuro5(
+                    {formatCostPrice(
                       newTopRow.r2 ??
                         calculateCostoMaggiorato(newTopRow.prezzo_acquisto, newTopRow.aumento, newTopRow.maga)
                     )}
@@ -2317,7 +2332,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             rowId={item.id}
             colId="prezzo_pubblico"
             value={item.prezzo_pubblico ?? ""}
-            displayValue={formatEuro5(item.prezzo_pubblico)}
+            displayValue={formatSellingPrice(item.prezzo_pubblico)}
             align="right"
             isActive={activeColId === "prezzo_pubblico"}
             isEditing={editingColId === "prezzo_pubblico"}
@@ -2361,7 +2376,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             rowId={item.id}
             colId="prezzo_profess"
             value={item.prezzo_profess ?? ""}
-            displayValue={formatEuro5(item.prezzo_profess)}
+            displayValue={formatSellingPrice(item.prezzo_profess)}
             align="right"
             isActive={activeColId === "prezzo_profess"}
             isEditing={editingColId === "prezzo_profess"}
@@ -2405,7 +2420,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             rowId={item.id}
             colId="prezzo_fattura"
             value={item.prezzo_fattura ?? ""}
-            displayValue={formatEuro5(item.prezzo_fattura)}
+            displayValue={formatSellingPrice(item.prezzo_fattura)}
             align="right"
             isActive={activeColId === "prezzo_fattura"}
             isEditing={editingColId === "prezzo_fattura"}
@@ -2431,7 +2446,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             rowId={item.id}
             colId="prezzo_acquisto"
             value={item.prezzo_acquisto ?? ""}
-            displayValue={formatEuro5(item.prezzo_acquisto)}
+            displayValue={formatCostPrice(item.prezzo_acquisto)}
             align="right"
             isActive={activeColId === "prezzo_acquisto"}
             isEditing={editingColId === "prezzo_acquisto"}
@@ -2535,7 +2550,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             }`}
             title="Prezzo acquisto base maggiorato da aumento e magazzino"
           >
-            {formatEuro5(costoMagg)}
+            {formatCostPrice(costoMagg)}
           </td>
         )}
       </tr>

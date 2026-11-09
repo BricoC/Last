@@ -39,3 +39,4 @@ export const AppUpdaterRunner: React.FC = () => {
     </>
   );
 };
+
