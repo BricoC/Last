@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { isPageAllowedForUser, DEFAULT_TOPBAR_ORDER } from "@/shared/services/appUserService";
@@ -27,11 +27,15 @@ import {
   Loader2,
   UploadCloud,
   AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
-import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 import { useAppUpdaterStore } from "@/shared/stores/useAppUpdaterStore";
-import { Sparkles } from "lucide-react";
+import {
+  cloudSyncStatusService,
+  CloudSyncStatusInfo,
+} from "@/shared/services/cloudSyncStatusService";
+import { CloudSyncHoverPopover } from "./CloudSyncHoverPopover";
 
 export interface NavModule {
   id: string;
@@ -89,30 +93,79 @@ export const TopNavBar: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [gapWarning, setGapWarning] = useState<string | null>(null);
   const [showGapAlert, setShowGapAlert] = useState(false);
+  const [isPopoverHovered, setIsPopoverHovered] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<CloudSyncStatusInfo | null>(null);
+  const [isCheckingCloudStatus, setIsCheckingCloudStatus] = useState(false);
+  const hoverTimeoutRef = useRef<number | null>(null);
+
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
+    const stored = localStorage.getItem("last_supabase_sync_timestamp");
+    if (stored) {
+      const d = new Date(stored);
+      if (!isNaN(d.getTime())) {
+        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      }
+    }
     const now = new Date();
     return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   });
+
+  const fetchCloudStatus = async (force = false) => {
+    setIsCheckingCloudStatus(true);
+    try {
+      const s = await cloudSyncStatusService.getStatus(force);
+      setCloudStatus(s);
+      if (s.localLastSyncDate) {
+        const d = s.localLastSyncDate;
+        setLastSyncTime(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+      }
+    } finally {
+      setIsCheckingCloudStatus(false);
+    }
+  };
+
+  const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) {
+      window.clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setIsPopoverHovered(true);
+    void fetchCloudStatus(false);
+  };
+
+  const handleMouseLeave = () => {
+    hoverTimeoutRef.current = window.setTimeout(() => {
+      setIsPopoverHovered(false);
+    }, 250);
+  };
 
   const handleManualSync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
     try {
-      const res = await ddtIncrementalSyncService.syncNewDdtsFromSupabase();
+      const res = await cloudSyncStatusService.executeFullSync();
       const now = new Date();
       setLastSyncTime(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
-      if (res.unresolvedGaps && res.unresolvedGaps.length > 0) {
-        const text = res.unresolvedGaps
+      if (res.ddtResult.unresolvedGaps && res.ddtResult.unresolvedGaps.length > 0) {
+        const text = res.ddtResult.unresolvedGaps
           .map((g) => `Anno ${g.year}: DDT mancanti [${g.missingNumbers.join(", ")}]`)
           .join(" | ");
         setGapWarning(text);
       } else {
         setGapWarning(null);
       }
+      await fetchCloudStatus(true);
     } finally {
       setIsSyncing(false);
     }
   };
+
+  useEffect(() => {
+    void fetchCloudStatus(false);
+    const onSyncStatusUpdated = () => void fetchCloudStatus(true);
+    window.addEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
+    return () => window.removeEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
+  }, []);
 
   useEffect(() => {
     const onGapDetected = (e: Event) => {
@@ -365,8 +418,12 @@ export const TopNavBar: React.FC = () => {
           </span>
         )}
 
-        {/* Indicatore e Pulsante Cloud Sync Supabase */}
-        <div className="relative flex items-center">
+        {/* Indicatore e Pulsante Cloud Sync Supabase con Hover Popover */}
+        <div
+          className="relative flex items-center"
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
           <button
             type="button"
             onClick={handleManualSync}
@@ -377,21 +434,50 @@ export const TopNavBar: React.FC = () => {
                 ? "bg-amber-500/15 border-amber-500/40 text-amber-300 animate-pulse"
                 : gapWarning
                 ? "bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25"
+                : cloudStatus?.hasPendingRemoteChanges
+                ? "bg-amber-500/20 border-amber-500/50 text-amber-300 hover:bg-amber-500/30"
                 : lastSyncTime
                 ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
                 : "bg-[var(--background)] border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             )}
-            title="Sincronizzazione Cloud Supabase (Clicca per verificare nuovi DDT ora)"
+            title="Sincronizzazione Cloud Supabase (Passa sopra con il mouse per visualizzare data ultimo scaricamento e stato effettivo del Cloud)"
           >
             {isSyncing ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
             ) : gapWarning ? (
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+            ) : cloudStatus?.hasPendingRemoteChanges ? (
+              <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+                <Cloud className="w-3.5 h-3.5 text-amber-400" />
+                <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                </span>
+              </span>
             ) : (
               <Cloud className="w-3.5 h-3.5 text-emerald-400" />
             )}
-            <span>{isSyncing ? "Sync in corso..." : lastSyncTime ? `Cloud: ${lastSyncTime}` : "Cloud Sync"}</span>
+            <span>
+              {isSyncing
+                ? "Sync in corso..."
+                : cloudStatus?.hasPendingRemoteChanges
+                ? "Cloud: Nuovi dati!"
+                : lastSyncTime
+                ? `Cloud: ${lastSyncTime}`
+                : "Cloud Sync"}
+            </span>
           </button>
+
+          {/* Hover Popover: Dettaglio ultimo scaricamento locale vs effettivo aggiornamento Supabase */}
+          {isPopoverHovered && (
+            <CloudSyncHoverPopover
+              status={cloudStatus}
+              isLoading={isCheckingCloudStatus}
+              isSyncing={isSyncing}
+              onRefreshStatus={() => void fetchCloudStatus(true)}
+              onExecuteSync={() => void handleManualSync()}
+            />
+          )}
 
           {/* Badge Avviso Buchi Numerazione DDT se rilevati */}
           {gapWarning && (
