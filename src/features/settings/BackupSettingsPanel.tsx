@@ -384,8 +384,13 @@ export const BackupSettingsPanel: React.FC = () => {
             message: "Database SQLite ripristinato con successo! Ricaricamento dell'applicazione in corso...",
           });
           setInspectModalOpen(false);
-          setTimeout(() => {
-            window.location.reload();
+          setTimeout(async () => {
+            try {
+              const { relaunch } = await import("@tauri-apps/plugin-process");
+              await relaunch();
+            } catch {
+              window.location.reload();
+            }
           }, 1200);
         } else {
           setFeedback({ type: "error", message: res.error || "Errore durante il ripristino del database." });

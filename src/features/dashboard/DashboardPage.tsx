@@ -12,6 +12,7 @@ import { DDTQuickViewModal } from "@/features/ddt-studio/components/DDTQuickView
 import { MonthlyPerformanceModal } from "./components/MonthlyPerformanceModal";
 import { MonthDailyModal } from "./components/MonthDailyModal";
 import { RibaModal } from "./components/RibaModal";
+import { DashboardFirstSetupWidget } from "./components/DashboardFirstSetupWidget";
 import {
   calculateNextRibaDeadline,
   fetchRemoteRibaStatus,
@@ -418,6 +419,9 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)] p-3 gap-2.5 select-none font-sans">
+      {/* 0. Banner / Widget Setup Rapido Primo Avvio (Compare solo se mancano dati o al primo avvio) */}
+      <DashboardFirstSetupWidget onSetupCompleted={() => void loadData()} />
+
       {/* 1. Header Toolbar Dashboard con Metriche Chiave Inline e Tasti su singola riga */}
       <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] pb-2 gap-2 flex-nowrap min-w-0">
         {/* Metriche Chiave Inline (Fatturato Annuo YTD, Margine Lordo Medio Annuo, Mese Corrente, Lordo Medio Mese, DDT Emessi) */}

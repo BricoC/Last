@@ -803,11 +803,25 @@ export async function checkAndExecuteDailyBackup(currentUserName?: string): Prom
   error?: string;
 }> {
   const config = loadBackupConfig();
-  let folder = config.folderPath;
-  if (!folder) {
-    folder = await getDefaultDesktopFolder();
+  // Se la cartella di backup non è stata esplicitamente configurata dall'utente, non fare backup automatico
+  if (!config.folderPath || config.folderPath.trim() === "") {
+    console.log("[backupService] Backup automatico saltato: nessuna cartella di backup configurata.");
+    return { ran: false };
   }
-  if (!config.autoDailyEnabled || !folder) {
+  const folder = config.folderPath;
+  if (!config.autoDailyEnabled) {
+    return { ran: false };
+  }
+
+  // Non eseguire il backup se il database locale è vuoto (es. prima installazione)
+  try {
+    const db = await getDatabase();
+    const ddtCheck = await db.select<{ count: number }[]>("SELECT COUNT(*) as count FROM ddt_documents WHERE deleted_at IS NULL");
+    if (!ddtCheck || !ddtCheck[0] || ddtCheck[0].count === 0) {
+      console.log("[backupService] Backup automatico saltato: database vuoto o non ancora inizializzato (0 DDT).");
+      return { ran: false };
+    }
+  } catch {
     return { ran: false };
   }
 
