@@ -7,6 +7,7 @@ import { DdtItem } from "../models/ddt";
 import { calculateRowAmounts, formatCascadeDiscountDisplay } from "../utils/ddtCalculations";
 import { money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import DDTTextEditor from "./DDTTextEditor";
+import { isCellInRange, parseTsv, formatTsv, normalizeExcelRowCells, type CellRange } from "@/shared/utils/gridClipboardHelper";
 
 export interface DDTArticoliTableHandle {
   clearFocusedCell: () => void;
@@ -55,6 +56,74 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
   onFocusSearchModal,
 }, ref) => {
   const gridRef = useRef<AgGridReact<DdtItem>>(null);
+
+  const allVisibleCols = useMemo(
+    () => [
+      "unit",
+      "quantity",
+      "description",
+      "unit_price",
+      "discount_pct",
+      "net_amount",
+      "vat_rate",
+      ...(showMargini ? ["purchase_price", "ric_pct"] : []),
+    ],
+    [showMargini]
+  );
+
+  const isMouseDownRef = useRef(false);
+  const selectionRangeRef = useRef<CellRange | null>(null);
+
+  useEffect(() => {
+    const onGlobalMouseUp = () => {
+      isMouseDownRef.current = false;
+    };
+    window.addEventListener("mouseup", onGlobalMouseUp);
+    return () => window.removeEventListener("mouseup", onGlobalMouseUp);
+  }, []);
+
+  const handleCellMouseDown = useCallback((e: any) => {
+    if (window.__isDDTCellEditing) return;
+    if (!e.event || e.event.button !== 0) return;
+    const colId = e.column?.getColId();
+    const rowIndex = e.rowIndex;
+    if (rowIndex === null || rowIndex === undefined || !colId || colId === "azioni" || colId === "row_index") return;
+
+    if (e.event.shiftKey && selectionRangeRef.current) {
+      selectionRangeRef.current = {
+        start: selectionRangeRef.current.start,
+        end: { rowIndex, colId },
+      };
+      gridRef.current?.api?.refreshCells({ force: true });
+    } else {
+      isMouseDownRef.current = true;
+      selectionRangeRef.current = {
+        start: { rowIndex, colId },
+        end: { rowIndex, colId },
+      };
+      gridRef.current?.api?.refreshCells({ force: true });
+    }
+  }, []);
+
+  const handleCellMouseOver = useCallback((e: any) => {
+    if (!isMouseDownRef.current || window.__isDDTCellEditing) return;
+    const colId = e.column?.getColId();
+    const rowIndex = e.rowIndex;
+    if (rowIndex === null || rowIndex === undefined || !colId || colId === "azioni" || colId === "row_index") return;
+
+    if (selectionRangeRef.current) {
+      if (
+        selectionRangeRef.current.end.rowIndex !== rowIndex ||
+        selectionRangeRef.current.end.colId !== colId
+      ) {
+        selectionRangeRef.current = {
+          start: selectionRangeRef.current.start,
+          end: { rowIndex, colId },
+        };
+        gridRef.current?.api?.refreshCells({ force: true });
+      }
+    }
+  }, []);
 
   useImperativeHandle(ref, () => ({
     clearFocusedCell: () => {
@@ -253,6 +322,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
     (startRowIndex: number, startColId: string, clipText: string) => {
       if (!clipText || startRowIndex < 0) return;
 
+      const matrix = parseTsv(clipText);
+      if (matrix.length === 0) return;
+
       const editableColsOrder = [
         "unit",
         "quantity",
@@ -260,29 +332,43 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         "unit_price",
         "discount_pct",
         "vat_rate",
+        ...(showMargini ? ["purchase_price", "ric_pct"] : []),
       ];
-      if (showMargini) {
-        editableColsOrder.push("purchase_price");
-        editableColsOrder.push("ric_pct");
-      }
 
       const startColIdx = editableColsOrder.indexOf(startColId);
       if (startColIdx === -1) return;
-
-      const lines = clipText
-        .split(/\r?\n/)
-        .filter((l, idx, arr) => idx < arr.length - 1 || l.length > 0);
-      if (lines.length === 0) return;
 
       setItems((prevItems) => {
         const newItems = [...prevItems];
         let hasChanges = false;
 
-        lines.forEach((line, lineOffset) => {
+        matrix.forEach((cellsRaw, lineOffset) => {
+          const cells = normalizeExcelRowCells(cellsRaw, startColIdx, editableColsOrder);
           const targetRowIndex = startRowIndex + lineOffset;
-          if (targetRowIndex >= newItems.length) return;
+          while (targetRowIndex >= newItems.length) {
+            newItems.push({
+              id: crypto.randomUUID(),
+              ddt_id: "",
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              updated_by: "system",
+              deleted_at: null,
+              sync_status: "pending",
+              row_index: newItems.length + 1,
+              row_kind: "item",
+              unit: "",
+              quantity: "",
+              description: "",
+              unit_price: money(0),
+              base_price: money(0),
+              discount_pct: "",
+              net_amount: money(0),
+              vat_rate: 22,
+              vat_amount: money(0),
+              purchase_price: money(0),
+            });
+          }
 
-          const cells = line.split("\t");
           const targetRow = { ...newItems[targetRowIndex] };
 
           cells.forEach((cellRaw, cellOffset) => {
@@ -344,6 +430,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           newItems[targetRowIndex] = targetRow;
         });
 
+        selectionRangeRef.current = null;
         if (hasChanges && gridRef.current?.api) {
           setTimeout(() => {
             gridRef.current?.api?.refreshCells({ force: true });
@@ -364,22 +451,116 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       const isCtrlOrMeta = e.event.ctrlKey || e.event.metaKey;
       const keyLower = e.event.key?.toLowerCase();
 
-      // COPIA: Ctrl+C (quando non in edit mode)
+      // 1. Shift + Frecce: espansione o contrazione della selezione rettangolare da tastiera stile Excel
+      if (
+        e.event.shiftKey &&
+        (e.event.key === "ArrowDown" ||
+          e.event.key === "ArrowUp" ||
+          e.event.key === "ArrowLeft" ||
+          e.event.key === "ArrowRight") &&
+        !window.__isDDTCellEditing
+      ) {
+        e.event.preventDefault();
+        const focusedCell = gridRef.current?.api?.getFocusedCell();
+        if (!focusedCell) return;
+        const colId =
+          typeof focusedCell.column === "string"
+            ? focusedCell.column
+            : focusedCell.column.getColId();
+        const currentRange = selectionRangeRef.current || {
+          start: { rowIndex: focusedCell.rowIndex, colId },
+          end: { rowIndex: focusedCell.rowIndex, colId },
+        };
+
+        let nextRow = currentRange.end.rowIndex;
+        let nextColId = currentRange.end.colId;
+        const currentColIdx = allVisibleCols.indexOf(nextColId);
+
+        if (e.event.key === "ArrowDown") {
+          nextRow = Math.min(items.length - 1, nextRow + 1);
+        } else if (e.event.key === "ArrowUp") {
+          nextRow = Math.max(0, nextRow - 1);
+        } else if (e.event.key === "ArrowRight" && currentColIdx !== -1) {
+          const nextIdx = Math.min(allVisibleCols.length - 1, currentColIdx + 1);
+          nextColId = allVisibleCols[nextIdx];
+        } else if (e.event.key === "ArrowLeft" && currentColIdx !== -1) {
+          const prevIdx = Math.max(0, currentColIdx - 1);
+          nextColId = allVisibleCols[prevIdx];
+        }
+
+        selectionRangeRef.current = {
+          start: currentRange.start,
+          end: { rowIndex: nextRow, colId: nextColId },
+        };
+        gridRef.current?.api?.ensureIndexVisible(nextRow, null);
+        gridRef.current?.api?.refreshCells({ force: true });
+        return;
+      }
+
+      // 2. Frecce senza Shift o Escape: reset selezione range
+      if (
+        !e.event.shiftKey &&
+        (e.event.key === "ArrowDown" ||
+          e.event.key === "ArrowUp" ||
+          e.event.key === "ArrowLeft" ||
+          e.event.key === "ArrowRight" ||
+          e.event.key === "Escape") &&
+        !window.__isDDTCellEditing
+      ) {
+        if (
+          selectionRangeRef.current &&
+          (selectionRangeRef.current.start.rowIndex !== selectionRangeRef.current.end.rowIndex ||
+            selectionRangeRef.current.start.colId !== selectionRangeRef.current.end.colId)
+        ) {
+          selectionRangeRef.current = null;
+          gridRef.current?.api?.refreshCells({ force: true });
+        }
+      }
+
+      // 3. COPIA: Ctrl+C (quando non in edit mode) - Supporto singola cella o intervallo multi-cella per Excel
       if (isCtrlOrMeta && keyLower === "c" && !window.__isDDTCellEditing) {
+        e.event.preventDefault();
+        const range = selectionRangeRef.current;
+
+        if (
+          range &&
+          (range.start.rowIndex !== range.end.rowIndex ||
+            range.start.colId !== range.end.colId)
+        ) {
+          const minRow = Math.min(range.start.rowIndex, range.end.rowIndex);
+          const maxRow = Math.max(range.start.rowIndex, range.end.rowIndex);
+          const startColIdx = allVisibleCols.indexOf(range.start.colId);
+          const endColIdx = allVisibleCols.indexOf(range.end.colId);
+
+          if (startColIdx !== -1 && endColIdx !== -1) {
+            const minCol = Math.min(startColIdx, endColIdx);
+            const maxCol = Math.max(startColIdx, endColIdx);
+            const matrix: string[][] = [];
+
+            for (let r = minRow; r <= maxRow; r++) {
+              const rowNode = gridRef.current?.api?.getDisplayedRowAtIndex(r);
+              const row = rowNode?.data;
+              if (!row) continue;
+              const rowCells: string[] = [];
+              for (let c = minCol; c <= maxCol; c++) {
+                const cid = allVisibleCols[c];
+                rowCells.push(extractDdtCellValue(row, cid));
+              }
+              matrix.push(rowCells);
+            }
+
+            if (matrix.length > 0) {
+              void navigator.clipboard.writeText(formatTsv(matrix));
+            }
+            return;
+          }
+        }
+
+        // Copia singola cella attiva
         const colId = e.column?.getColId();
         const rowData = e.node?.data;
         if (rowData && colId) {
-          e.event.preventDefault();
-          let textToCopy = "";
-          if (colId === "unit_price" || colId === "purchase_price") {
-            const m = safeMoney(rowData[colId]);
-            textToCopy = isPositivePrice(m) ? m.formatIT(false) : "";
-          } else if (colId === "net_amount" || colId === "vat_amount") {
-            const m = safeMoney(rowData[colId]);
-            textToCopy = m.formatIT(false);
-          } else {
-            textToCopy = String(rowData[colId] ?? "");
-          }
+          const textToCopy = extractDdtCellValue(rowData, colId);
           try {
             await navigator.clipboard.writeText(textToCopy);
           } catch (err) {
@@ -1016,8 +1197,11 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
             }
           }
         }}
+        onCellMouseDown={handleCellMouseDown}
+        onCellMouseOver={handleCellMouseOver}
         onCellEditingStarted={(p) => {
           window.__isDDTCellEditing = true;
+          selectionRangeRef.current = null;
           if (p.rowIndex !== null && p.rowIndex !== undefined) {
             onActiveRowChange?.(p.rowIndex);
             if (p.column) {
@@ -1044,8 +1228,37 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           sortable: false,
           filter: false,
           headerClass: "select-none !cursor-default",
+          cellClassRules: {
+            "custom-range-selected": (params) =>
+              isCellInRange(
+                params.rowIndex,
+                params.column?.getColId(),
+                selectionRangeRef.current,
+                allVisibleCols
+              ),
+          },
         }}
       />
     </div>
   );
 });
+
+function extractDdtCellValue(rowData: DdtItem, colId: string): string {
+  if (colId === "unit_price" || colId === "purchase_price") {
+    const m = safeMoney((rowData as any)[colId]);
+    return isPositivePrice(m) ? m.formatIT(false) : "";
+  } else if (colId === "net_amount" || colId === "vat_amount") {
+    const m = safeMoney((rowData as any)[colId]);
+    return m.formatIT(false);
+  } else if (colId === "ric_pct") {
+    const up = isPositivePrice(rowData.unit_price) ? safeMoney(rowData.unit_price).toNumber() : 0;
+    const pp = isPositivePrice(rowData.purchase_price) ? safeMoney(rowData.purchase_price).toNumber() : 0;
+    if (pp > 0 && up > 0) {
+      const ric = ((up - pp) / pp) * 100;
+      return ric.toFixed(2) + "%";
+    }
+    return "";
+  } else {
+    return String((rowData as any)[colId] ?? "");
+  }
+}

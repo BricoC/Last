@@ -30,6 +30,7 @@ import {
   Sparkles,
   RefreshCw,
   X,
+  Truck,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { useAppUpdaterStore } from "@/shared/stores/useAppUpdaterStore";
@@ -59,6 +60,7 @@ export const ALL_TOPBAR_NAV_MODULES: NavModule[] = [
   { id: "quotes", title: "Preventivi", componentId: "quotes", icon: <Calculator className="w-3.5 h-3.5" /> },
   { id: "offers", title: "Offerte", componentId: "offers", icon: <ClipboardList className="w-3.5 h-3.5" /> },
   { id: "clients", title: "Clienti", componentId: "clients", icon: <Users className="w-3.5 h-3.5" /> },
+  { id: "supplier-price-lists", title: "Listini Fornitori", componentId: "supplier-price-lists", icon: <Truck className="w-3.5 h-3.5" /> },
   { id: "notes", title: "Note", componentId: "notes", icon: <StickyNote className="w-3.5 h-3.5" /> },
 ];
 

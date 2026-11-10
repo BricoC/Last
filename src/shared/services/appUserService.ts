@@ -16,6 +16,7 @@ export const ALL_APP_PAGE_MODULES: AppPageModule[] = [
   { id: "quotes", title: "Preventivi", category: "commerciale" },
   { id: "offers", title: "Offerte", category: "commerciale" },
   { id: "clients", title: "Clienti", category: "commerciale" },
+  { id: "supplier-price-lists", title: "Listini Fornitori", category: "commerciale" },
   { id: "notes", title: "Note", category: "operativo" },
   { id: "or-numbers", title: "OR Numbers", category: "operativo" },
   { id: "ddt-list", title: "DDT List", category: "archivio" },
@@ -39,6 +40,7 @@ export const DEFAULT_TOPBAR_ORDER: string[] = [
   "quotes",
   "offers",
   "clients",
+  "supplier-price-lists",
   "notes",
 ];
 
@@ -125,6 +127,7 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
       "quotes",
       "offers",
       "clients",
+      "supplier-price-lists",
       "or-numbers",
       "ddt-list",
       "ddt-articles",
@@ -154,6 +157,7 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
       "quotes",
       "offers",
       "clients",
+      "supplier-price-lists",
       "or-numbers",
       "ddt-list",
       "ddt-articles",

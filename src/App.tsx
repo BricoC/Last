@@ -16,6 +16,7 @@ import { OrderManagerPage } from "@/features/orders/OrderManagerPage";
 import { OrNumbersPage } from "@/features/or-numbers/OrNumbersPage";
 import { OffersPage } from "@/features/offers/OffersPage";
 import { NotesPage } from "@/features/notes/NotesPage";
+import { SupplierPriceListPage } from "@/features/supplier-price-lists/SupplierPriceListPage";
 import { ManualCloudImportPage } from "@/features/manual-cloud-import/ManualCloudImportPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
@@ -155,6 +156,8 @@ export function App() {
         return <OffersPage windowId={windowId} />;
       case "notes":
         return <NotesPage windowId={windowId} />;
+      case "supplier-price-lists":
+        return <SupplierPriceListPage />;
       case "manual-cloud-import":
         return currentUser?.is_admin ? <ManualCloudImportPage /> : null;
       default:
