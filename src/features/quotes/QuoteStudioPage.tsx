@@ -292,7 +292,6 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   const updateHeader = (updates: Partial<QuoteDraft>) => setDraft((current) => ({ ...current, ...updates }));
   const openQuote = async (quoteId: string) => {
     if (draft.id === quoteId) {
-      setShowArchive(false);
       return;
     }
     if (!(await confirmIfDirty())) return;
@@ -302,7 +301,6 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
         const next = quoteToDraft(quote);
         setDraft(next);
         savedSignature.current = signature(next);
-        setShowArchive(false);
         setMessage("");
       }
     } catch (error) { setMessage(errorMessage(error)); }
@@ -374,7 +372,7 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   };
 
   return <div className="relative flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3 text-[var(--foreground)]">
-    <QuoteStudioHeader status={draft.status ?? "bozza"} viewMode={viewMode} alexMode={alexMode} saving={saving}
+    <QuoteStudioHeader status={draft.status ?? "bozza"} viewMode={viewMode} alexMode={alexMode} saving={saving} isDirty={isDirty}
       archiveCount={quotes.length} trashCount={trashCount} quoteDate={draft.quote_date ?? ""}
       quoteCode={formatQuoteCode(draft.year, draft.quote_number)}
       onStatusChange={(status) => updateHeader({ status })} onViewChange={setViewMode}
@@ -447,7 +445,7 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
       <span>{draft.items.filter(isQuoteDraftItemActive).length} righe compilate su {draft.items.length}</span>
     </footer>
     {message && <div role="status" className="absolute bottom-12 left-4 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs shadow-lg">{message}</div>}
-    {showArchive && <QuoteArchiveSidebar quotes={filteredQuotes} search={archiveSearch} trashCount={trashCount} onSearch={setArchiveSearch}
+    {showArchive && <QuoteArchiveSidebar quotes={filteredQuotes} activeQuoteId={draft.id} search={archiveSearch} trashCount={trashCount} onSearch={setArchiveSearch}
       onClose={() => setShowArchive(false)} onOpen={(id) => void openQuote(id)} onCopy={(id) => void copyQuote(id)} onDelete={(id) => void deleteQuote(id)}
       onOpenTrash={() => { setShowArchive(false); setShowTrash(true); }} />}
     <QuoteTrashModal
