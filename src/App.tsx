@@ -152,7 +152,7 @@ export function App() {
       case "or-numbers":
         return <OrNumbersPage windowId={windowId} />;
       case "offers":
-        return <OffersPage />;
+        return <OffersPage windowId={windowId} />;
       case "notes":
         return <NotesPage windowId={windowId} />;
       case "manual-cloud-import":
