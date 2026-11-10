@@ -1153,6 +1153,12 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
           e.preventDefault();
           e.stopPropagation();
           selectCell(rowId, allVisibleCols[colIdx - 1], true);
+        } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          if (canEdit && colId !== "data_ref") {
+            e.preventDefault();
+            e.stopPropagation();
+            startEditing(rowId, colId, e.key);
+          }
         }
       }
     },
@@ -1166,6 +1172,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       selectCell,
       startEditing,
       cancelCellEdit,
+      canEdit,
     ]
   );
 
@@ -2894,8 +2901,8 @@ const EditableCell: React.FC<EditableCellProps> = memo(
         ) {
           return;
         }
+        tdRef.current.focus({ preventScroll: true });
         if (shouldScroll) {
-          tdRef.current.focus({ preventScroll: true });
           tdRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
         }
       }
@@ -2923,6 +2930,7 @@ const EditableCell: React.FC<EditableCellProps> = memo(
         onMouseDown={(e) => {
           if (e.button === 0) {
             onSelectCell(rowId, colId);
+            tdRef.current?.focus();
           }
         }}
         onClick={(e) => {

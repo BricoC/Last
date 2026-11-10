@@ -34,12 +34,16 @@ export const UnsavedChangesModal: React.FC<UnsavedChangesModalProps> = ({
         e.preventDefault();
         e.stopPropagation();
         onCancel();
+      } else if (e.key === "Enter" && onSave && !isSaving) {
+        e.preventDefault();
+        e.stopPropagation();
+        onSave();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onCancel]);
+  }, [isOpen, onCancel, onSave, isSaving]);
 
   if (!isOpen) return null;
 

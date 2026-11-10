@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ClipboardList,
   Search,
@@ -28,9 +28,11 @@ import { OfferEditModal } from "./components/OfferEditModal";
 import { OffersTrashModal } from "./components/OffersTrashModal";
 import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
+import { registerDirtyCheck, registerWindowCloseGuard } from "@/shared/stores/useWindowStore";
+import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import { cn } from "@/shared/utils/cn";
 
-export const OffersPage: React.FC = () => {
+export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   const { currentUser } = useUserStore();
   const currentUserName = currentUser?.name || "Operatore";
 
@@ -59,6 +61,50 @@ export const OffersPage: React.FC = () => {
   // Stato Cestino Offerte (max 10 elementi)
   const [showTrashModal, setShowTrashModal] = useState(false);
   const [trashCount, setTrashCount] = useState(0);
+
+  // Monitoraggio modifiche non salvate per chiusura finestra / tab
+  const isOfferModalDirtyRef = useRef(false);
+  const saveCurrentOfferModalRef = useRef<(() => Promise<boolean>) | null>(null);
+  const [showTabCloseUnsavedModal, setShowTabCloseUnsavedModal] = useState(false);
+  const tabCloseResolveRef = useRef<((choice: "save" | "discard" | "cancel") => void) | null>(null);
+
+  useEffect(() => {
+    if (!windowId) return;
+    return registerDirtyCheck(windowId, () => isOfferModalDirtyRef.current);
+  }, [windowId]);
+
+  useEffect(() => {
+    if (!windowId) return;
+    return registerWindowCloseGuard(windowId, async () => {
+      if (!isOfferModalDirtyRef.current) return true;
+      const choice = await new Promise<"save" | "discard" | "cancel">((resolve) => {
+        tabCloseResolveRef.current = resolve;
+        setShowTabCloseUnsavedModal(true);
+      });
+      setShowTabCloseUnsavedModal(false);
+      tabCloseResolveRef.current = null;
+
+      if (choice === "cancel") return false;
+      if (choice === "discard") {
+        isOfferModalDirtyRef.current = false;
+        setIsModalOpen(false);
+        return true;
+      }
+      if (choice === "save") {
+        if (saveCurrentOfferModalRef.current) {
+          const ok = await saveCurrentOfferModalRef.current();
+          if (ok) {
+            isOfferModalDirtyRef.current = false;
+            setIsModalOpen(false);
+            return true;
+          }
+          return false;
+        }
+        return true;
+      }
+      return false;
+    });
+  }, [windowId]);
 
   const loadTrashCount = useCallback(async () => {
     try {
@@ -598,10 +644,18 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
             return (
               <div
                 key={item.id}
+                onDoubleClick={(e) => {
+                  const target = e.target as HTMLElement | null;
+                  if (target?.closest("button, input, select, textarea, a")) {
+                    return;
+                  }
+                  handleOpenEdit(item);
+                }}
                 className={cn(
-                  "rounded-lg border border-[var(--border)]/60 bg-[var(--card)]/40 hover:bg-[var(--card)]/80 transition-all px-3 py-2 text-xs shadow-2xs",
+                  "rounded-lg border border-[var(--border)]/60 bg-[var(--card)]/40 hover:bg-[var(--card)]/80 transition-all px-3 py-2 text-xs shadow-2xs select-none cursor-pointer",
                   item.is_urgent && "border-l-4 border-l-fuchsia-500 bg-purple-950/15 ring-1 ring-fuchsia-500/30"
                 )}
+                title="Doppio click per aprire e modificare l'offerta"
               >
                 {/* Riga Unica di Intestazione: Data, Autore, Richiedente, Contatto, Stato, Urgente, Modifica, e Azioni */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-[var(--border)]/40">
@@ -820,11 +874,33 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
       <OfferEditModal
         offer={modalOffer}
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => {
+          isOfferModalDirtyRef.current = false;
+          setIsModalOpen(false);
+        }}
         currentUserName={currentUserName}
         onSave={handleSaveModal}
         onToggleArchive={handleToggleArchive}
         onDelete={handleDelete}
+        onDirtyChange={(dirty) => {
+          isOfferModalDirtyRef.current = dirty;
+        }}
+        onRequestSave={(trigger) => {
+          saveCurrentOfferModalRef.current = trigger;
+        }}
+      />
+
+      {/* Modale Conferma Chiusura Scheda Tab */}
+      <UnsavedChangesModal
+        isOpen={showTabCloseUnsavedModal}
+        title="Modifiche all'offerta"
+        message="Vuoi mantenere le modifiche apportate all'offerta prima di chiudere la scheda?"
+        saveLabel="Mantieni"
+        discardLabel="Non mantenere"
+        cancelLabel="Annulla"
+        onSave={() => tabCloseResolveRef.current?.("save")}
+        onDiscard={() => tabCloseResolveRef.current?.("discard")}
+        onCancel={() => tabCloseResolveRef.current?.("cancel")}
       />
 
       {/* 5. Modale Cestino Offerte (max 10 elementi) */}

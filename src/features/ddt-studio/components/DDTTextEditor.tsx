@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from "react";
+import React, { useState, useEffect, useMemo, useRef, forwardRef, useImperativeHandle, useCallback } from "react";
 import { ICellEditorParams } from "ag-grid-community";
 import { safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 
@@ -17,9 +17,20 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const isDelete = props.eventKey === "Backspace" || props.eventKey === "Delete";
 
   const colId = props.column?.getColId();
-  const isUppercaseCol = colId === "unit" || colId === "um" || colId === "description" || colId === "descrizione" || colId === "code" || colId === "quantity" || colId === "quantita";
+  const isUppercaseCol =
+    colId === "unit" ||
+    colId === "um" ||
+    colId === "description" ||
+    colId === "descrizione" ||
+    colId === "code" ||
+    colId === "quantity" ||
+    colId === "quantita" ||
+    colId === "supplier" ||
+    colId === "fornitore";
   const isDescCol = colId === "description" || colId === "descrizione";
+  const isSupplierCol = colId === "supplier" || colId === "fornitore";
   const cellParams = props.colDef?.cellEditorParams || {};
+  const datalistId = isSupplierCol ? (cellParams.datalistId || "quote-suppliers-autocomplete") : undefined;
   const onDescriptionTyping: ((val: string) => void) | undefined = (props as any).onDescriptionTyping ?? cellParams.onDescriptionTyping;
 
   let startValue = "";
@@ -54,9 +65,22 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const [value, setValue] = useState(startValue);
   const [selectedSuggestionIdx, setSelectedSuggestionIdx] = useState(-1);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const [dropdownPos, setDropdownPos] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  }>({
+    top: 0,
+    bottom: undefined,
+    left: 0,
+    width: 0,
+    maxHeight: 180,
+  });
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const isBackspaceOrDeleteRef = useRef(isDelete);
   const lastTypedLengthRef = useRef(startValue.length);
 
@@ -69,6 +93,17 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     const set = new Set<string>();
     const list: string[] = [];
     const currentRowIdx = props.node?.rowIndex ?? Infinity;
+
+    // 1. Opzioni fornite esplicitamente tramite cellEditorParams (es. lista fornitori)
+    const extraOptions: string[] = Array.isArray(cellParams.options) ? cellParams.options : [];
+    extraOptions.forEach((opt) => {
+      const strVal = String(opt).trim();
+      const upperStr = isUppercaseCol ? strVal.toUpperCase() : strVal;
+      if (upperStr && !set.has(upperStr)) {
+        set.add(upperStr);
+        list.push(upperStr);
+      }
+    });
 
     const aboveNodes: any[] = [];
     const belowNodes: any[] = [];
@@ -104,40 +139,71 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     }
 
     return list;
-  }, [props.api, colId, isUppercaseCol, props.node?.rowIndex, isNumericCol]);
+  }, [props.api, colId, isUppercaseCol, props.node?.rowIndex, isNumericCol, cellParams.options]);
 
   const matchedSuggestions = useMemo(() => {
-    if (!value || !value.trim()) return [];
+    if (!value || !value.trim()) {
+      if ((colId === "supplier" || colId === "fornitore" || colId === "unit" || colId === "um") && candidates.length > 0) {
+        return candidates.slice(0, 60);
+      }
+      return [];
+    }
     const query = value.trim().toUpperCase();
 
     const prefixMatches = candidates.filter((c) => c.toUpperCase().startsWith(query) && c.toUpperCase() !== query);
     const containsMatches = candidates.filter((c) => !c.toUpperCase().startsWith(query) && c.toUpperCase().includes(query));
 
-    return [...prefixMatches, ...containsMatches].slice(0, 7);
-  }, [candidates, value]);
+    return [...prefixMatches, ...containsMatches].slice(0, 60);
+  }, [candidates, value, colId]);
 
   useImperativeHandle(ref, () => ({
     getValue: () => (isUppercaseCol && typeof value === "string" ? value.toUpperCase() : value),
     isPopup: () => false,
   }));
 
+  const updateDropdownPos = useCallback(() => {
+    if (!inputRef.current) return;
+    const rect = inputRef.current.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const spaceBelow = vh - rect.bottom;
+    const spaceAbove = rect.top;
+    const openUpwards = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const availableHeight = Math.max(120, Math.min(220, (openUpwards ? spaceAbove : spaceBelow) - 16));
+
+    setDropdownPos({
+      top: openUpwards ? undefined : rect.bottom + 2,
+      bottom: openUpwards ? vh - rect.top + 2 : undefined,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 300)),
+      width: Math.max(rect.width, colId === "unit" || colId === "um" ? 140 : 280),
+      maxHeight: availableHeight,
+    });
+  }, [colId]);
+
   useEffect(() => {
-    if (inputRef.current) {
-      const rect = inputRef.current.getBoundingClientRect();
-      setDropdownPos({
-        top: rect.bottom + 2,
-        left: rect.left,
-        width: Math.max(rect.width, colId === "unit" || colId === "um" ? 140 : 280),
-      });
+    updateDropdownPos();
+    window.addEventListener("scroll", updateDropdownPos, true);
+    window.addEventListener("resize", updateDropdownPos);
+    return () => {
+      window.removeEventListener("scroll", updateDropdownPos, true);
+      window.removeEventListener("resize", updateDropdownPos);
+    };
+  }, [updateDropdownPos, value, showSuggestions]);
+
+  useEffect(() => {
+    if (selectedSuggestionIdx >= 0 && listRef.current) {
+      const activeChild = listRef.current.children[selectedSuggestionIdx] as HTMLElement | undefined;
+      if (activeChild) {
+        activeChild.scrollIntoView({ block: "nearest" });
+      }
     }
-  }, [value, showSuggestions, colId]);
+  }, [selectedSuggestionIdx]);
 
   useEffect(() => {
     window.__isDDTCellEditing = true;
     if (inputRef.current) {
       inputRef.current.focus();
 
-      if (isTypedChar && startValue.trim().length >= 1) {
+      if (!isSupplierCol && isTypedChar && startValue.trim().length >= 1) {
         const query = startValue.toUpperCase();
         const bestMatch = candidates.find((c) => c.toUpperCase().startsWith(query));
 
@@ -174,7 +240,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
       onDescriptionTyping(nextVal);
     }
 
-    if (!isDescCol && isForwardTyping && nextVal.trim().length >= 1) {
+    if (!isDescCol && !isSupplierCol && isForwardTyping && nextVal.trim().length >= 1) {
       const query = nextVal.toUpperCase();
       const bestMatch = candidates.find((c) => c.toUpperCase().startsWith(query));
 
@@ -193,7 +259,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     }
 
     setValue(nextVal);
-    setShowSuggestions(!isDescCol && nextVal.trim().length >= 1 && matchedSuggestions.length > 0);
+    setShowSuggestions(!isDescCol && !isSupplierCol && nextVal.trim().length >= 1 && matchedSuggestions.length > 0);
     setSelectedSuggestionIdx(-1);
   };
 
@@ -472,6 +538,8 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <input
         ref={inputRef}
+        type="text"
+        list={datalistId}
         value={value}
         maxLength={undefined}
         onChange={handleInputChange}
@@ -495,11 +563,26 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
         }}
       />
 
-      {showSuggestions && matchedSuggestions.length > 0 && (
+      {isSupplierCol && candidates.length > 0 && (
+        <datalist id={datalistId}>
+          {candidates.map((s) => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
+      )}
+
+      {!isSupplierCol && showSuggestions && matchedSuggestions.length > 0 && (
         <div
+          onMouseDown={(e) => {
+            // Evita che il click sulla scrollbar o nel popup tolga il focus all'input
+            e.preventDefault();
+            e.stopPropagation();
+          }}
           style={{
             position: "fixed",
-            top: `${dropdownPos.top}px`,
+            ...(dropdownPos.bottom !== undefined
+              ? { bottom: `${dropdownPos.bottom}px` }
+              : { top: `${dropdownPos.top}px` }),
             left: `${dropdownPos.left}px`,
             minWidth: `${dropdownPos.width}px`,
             maxWidth: "450px",
@@ -509,6 +592,8 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
             borderRadius: "8px",
             boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.7)",
             overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
           <div
@@ -525,11 +610,23 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
               textTransform: "uppercase",
             }}
           >
-            <span>💡 Suggerimenti da righe sopra</span>
+            <span>
+              {colId === "supplier" || colId === "fornitore"
+                ? "🏢 Fornitori"
+                : colId === "unit" || colId === "um"
+                ? "📏 Unità di misura"
+                : "💡 Suggerimenti da righe sopra"}
+            </span>
             <span style={{ fontSize: "9px", color: "#60a5fa", fontFamily: "monospace" }}>Tab / Invio</span>
           </div>
 
-          <div style={{ maxHeight: "180px", overflowY: "auto" }}>
+          <div
+            ref={listRef}
+            onWheel={(e) => {
+              e.stopPropagation();
+            }}
+            style={{ maxHeight: `${dropdownPos.maxHeight}px`, overflowY: "auto" }}
+          >
             {matchedSuggestions.map((item, idx) => {
               const isSelected = idx === selectedSuggestionIdx;
               return (

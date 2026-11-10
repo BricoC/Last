@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   X,
   Calendar,
@@ -16,6 +16,7 @@ import {
 import type { OfferRecord, OfferStatus } from "../types/offer";
 import { OFFER_STATUSES, OFFER_STATUS_STYLES } from "../types/offer";
 import { cn } from "@/shared/utils/cn";
+import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 
 interface OfferEditModalProps {
   offer: OfferRecord | null; // null se è in modalità Creazione ("Nuova Offerta")
@@ -35,6 +36,8 @@ interface OfferEditModalProps {
   onToggleArchive?: (id: string, isArchived: boolean) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
   currentUserName: string;
+  onDirtyChange?: (isDirty: boolean) => void;
+  onRequestSave?: (triggerSave: () => Promise<boolean>) => void;
 }
 
 export const OfferEditModal: React.FC<OfferEditModalProps> = ({
@@ -45,6 +48,8 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
   onToggleArchive,
   onDelete,
   currentUserName,
+  onDirtyChange,
+  onRequestSave,
 }) => {
   const isCreate = !offer;
 
@@ -63,6 +68,9 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
   const [status, setStatus] = useState<OfferStatus>("Da preparare");
   const [isUrgent, setIsUrgent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
+
+  const initialSnapshotRef = useRef<string>("");
 
   // Riferimenti per la navigazione da tastiera tramite TAB ed ENTER
   const dateRef = useRef<HTMLInputElement>(null);
@@ -72,23 +80,52 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
   const saveBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (offer) {
-      setOfferDate(offer.offer_date || getTodayIso());
-      setRequester(offer.requester || "");
-      setContact(offer.contact || "");
-      setItemsText(offer.items_text || "");
-      setStatus(offer.status || "Da preparare");
-      setIsUrgent(Boolean(offer.is_urgent));
-    } else {
-      // Modalità Nuova Offerta (default pulito)
-      setOfferDate(getTodayIso());
-      setRequester("");
-      setContact("");
-      setItemsText("");
-      setStatus("Da preparare");
-      setIsUrgent(false);
+    if (isOpen) {
+      const initDate = offer ? (offer.offer_date || getTodayIso()) : getTodayIso();
+      const initReq = offer ? (offer.requester || "") : "";
+      const initContact = offer ? (offer.contact || "") : "";
+      const initItems = offer ? (offer.items_text || "") : "";
+      const initStatus = offer ? (offer.status || "Da preparare") : "Da preparare";
+      const initUrgent = offer ? Boolean(offer.is_urgent) : false;
+
+      setOfferDate(initDate);
+      setRequester(initReq);
+      setContact(initContact);
+      setItemsText(initItems);
+      setStatus(initStatus);
+      setIsUrgent(initUrgent);
+      setShowUnsavedConfirm(false);
+
+      initialSnapshotRef.current = JSON.stringify({
+        offerDate: initDate,
+        requester: initReq,
+        contact: initContact,
+        itemsText: initItems,
+        status: initStatus,
+        isUrgent: initUrgent,
+      });
     }
   }, [offer, isOpen]);
+
+  const isDirty = useMemo(() => {
+    if (!isOpen) return false;
+    if (!offer) {
+      // Nuova offerta: considerata dirty solo se l'utente ha iniziato a compilare campi
+      return Boolean(requester.trim() || contact.trim() || itemsText.trim());
+    }
+    return (
+      offerDate !== (offer.offer_date || "") ||
+      requester.trim() !== (offer.requester || "").trim() ||
+      contact.trim() !== (offer.contact || "").trim() ||
+      itemsText.trim() !== (offer.items_text || "").trim() ||
+      status !== (offer.status || "Da preparare") ||
+      isUrgent !== Boolean(offer.is_urgent)
+    );
+  }, [isOpen, offer, offerDate, requester, contact, itemsText, status, isUrgent]);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   // All'apertura della modale, posiziona automaticamente il cursore su Richiedente
   useEffect(() => {
@@ -100,13 +137,11 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e?: React.FormEvent): Promise<boolean> => {
     if (e) e.preventDefault();
     if (!requester.trim()) {
       requesterRef.current?.focus();
-      return;
+      return false;
     }
 
     setIsSubmitting(true);
@@ -119,11 +154,44 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
         status,
         is_urgent: isUrgent ? 1 : 0,
       });
+      setShowUnsavedConfirm(false);
       onClose();
+      return true;
+    } catch (err) {
+      console.error("[OfferEditModal] Errore salvataggio:", err);
+      return false;
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [offer, offerDate, requester, contact, itemsText, status, isUrgent, onSave, onClose]);
+
+  useEffect(() => {
+    if (isOpen && onRequestSave) {
+      onRequestSave(() => handleSubmit());
+    }
+  }, [isOpen, onRequestSave, handleSubmit]);
+
+  const handleRequestClose = useCallback(() => {
+    if (isDirty) {
+      setShowUnsavedConfirm(true);
+    } else {
+      onClose();
+    }
+  }, [isDirty, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (showUnsavedConfirm) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleRequestClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, showUnsavedConfirm, handleRequestClose]);
 
   const handleArchiveToggle = async () => {
     if (!offer || !onToggleArchive) return;
@@ -199,12 +267,12 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
     }
   };
 
+  if (!isOpen) return null;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-3 sm:p-5 animate-in fade-in duration-150"
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
+      onClick={handleRequestClose}
     >
       <div
         className="w-[96vw] max-w-6xl h-[92vh] max-h-[92vh] rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl flex flex-col overflow-hidden text-[var(--foreground)]"
@@ -240,7 +308,7 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleRequestClose}
             className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-white transition-colors cursor-pointer"
             title="Chiudi (Esc)"
           >
@@ -476,7 +544,7 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
             <div className="flex items-center gap-2.5">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleRequestClose}
                 disabled={isSubmitting}
                 className="px-4 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--muted-foreground)] hover:text-white hover:bg-[var(--background)] transition-colors cursor-pointer"
               >
@@ -506,6 +574,26 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
           </div>
         </form>
       </div>
+
+      <UnsavedChangesModal
+        isOpen={showUnsavedConfirm}
+        title="Modifiche all'offerta"
+        message="Vuoi mantenere le modifiche apportate all'offerta prima di uscire?"
+        saveLabel="Mantieni"
+        discardLabel="Non mantenere"
+        cancelLabel="Annulla"
+        isSaving={isSubmitting}
+        onSave={async () => {
+          await handleSubmit();
+        }}
+        onDiscard={() => {
+          setShowUnsavedConfirm(false);
+          onClose();
+        }}
+        onCancel={() => {
+          setShowUnsavedConfirm(false);
+        }}
+      />
     </div>
   );
 };

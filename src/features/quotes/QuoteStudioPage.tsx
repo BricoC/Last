@@ -7,6 +7,8 @@ import { QuoteArchiveSidebar } from "./components/QuoteArchiveSidebar";
 import { QuoteTrashModal } from "./components/QuoteTrashModal";
 import { QuoteA4Preview } from "./document/QuoteA4Preview";
 import { quoteRepository } from "./services/quoteRepository";
+import { orderRepository } from "@/features/orders/services/orderRepository";
+import { priceListRepository } from "@/features/price-lists/services/priceListRepository";
 import { exportQuotePdf, copyQuotePdfToClipboard } from "./utils/quoteExportManager";
 import { money } from "@/shared/domain/monetaryValue";
 import { registerWindowCloseGuard, registerDirtyCheck, useWindowStore } from "@/shared/stores/useWindowStore";
@@ -21,6 +23,7 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   const openWindow = useWindowStore((state) => state.openWindow);
   const [draft, setDraft] = useState<QuoteDraft>(createEmptyQuoteDraft);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [suppliers, setSuppliers] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<"calculation" | "customer">("calculation");
   const [alexMode, setAlexMode] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
@@ -64,6 +67,26 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     }
   }, []);
   useEffect(() => { void refreshQuotes(); }, [refreshQuotes]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      orderRepository.getSuppliers().catch(() => []),
+      priceListRepository.getDistinctGeneralSuppliers().catch(() => []),
+    ]).then(([orderSupps, dbSupps]) => {
+      if (!active) return;
+      const merged = Array.from(
+        new Set([
+          ...orderSupps.map((s) => s.name?.trim()).filter(Boolean),
+          ...dbSupps,
+        ])
+      ).sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
+      setSuppliers(merged);
+    }).catch((err) => {
+      console.warn("[QuoteStudio] Errore caricamento fornitori:", err);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (viewMode !== "customer") return;
@@ -250,6 +273,7 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)]">
       {viewMode === "calculation" && <QuoteItemsGrid
         items={draft.items} alexMode={alexMode} globalDiscount={draft.global_discount_pct ?? 0}
+        suppliers={suppliers}
         onUpdateRow={updateGridRow} onReorder={reorderGridRows} onDeleteRow={deleteGridRow} />}
       <QuoteA4Preview draft={draft} inline captureOnly={viewMode !== "customer"} />
     </main>

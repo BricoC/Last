@@ -101,7 +101,8 @@ export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
       let downloaded = 0;
       let total = 0;
 
-      await pendingUpdate.downloadAndInstall((event) => {
+      // Scarica solamente il pacchetto in memoria/cache senza forzare l'installazione o il riavvio
+      await pendingUpdate.download((event) => {
         if (event.event === "Started") {
           total = event.data.contentLength || 0;
           set({ downloadProgress: 0 });
@@ -116,11 +117,11 @@ export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
         }
       });
 
-      // Download completato con successo: pronto per il prossimo riavvio (non riavviare da solo)
+      // Download completato con successo: rimane in standby, pronto per quando l'utente decide di aggiornare
       set({
         status: "ready",
         downloadProgress: 100,
-        isModalOpen: false, // Non forzare popup né riavvii automatici
+        isModalOpen: false, // Non forzare popup invasivi
       });
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -132,9 +133,20 @@ export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
   restartApp: async () => {
     if (!isTauri()) return;
     try {
-      await relaunch();
+      const { pendingUpdate } = get();
+      if (pendingUpdate) {
+        // Applica l'aggiornamento scaricato e riavvia l'app
+        await pendingUpdate.install({ restartAfterInstall: true });
+      } else {
+        await relaunch();
+      }
     } catch (err) {
-      console.error("[AppUpdater] Errore riavvio applicazione:", err);
+      console.error("[AppUpdater] Errore applicazione aggiornamento:", err);
+      try {
+        await relaunch();
+      } catch (e) {
+        console.error("[AppUpdater] Fallback relaunch fallito:", e);
+      }
     }
   },
 

@@ -13,8 +13,9 @@ type GridProps = AgGridReactProps<QuoteGridRow>;
 type TabParams = Parameters<NonNullable<GridProps["tabToNextCell"]>>[0];
 type NavigateParams = Parameters<NonNullable<GridProps["navigateToNextCell"]>>[0];
 
-export function QuoteItemsGrid({ items, alexMode, globalDiscount, onUpdateRow, onReorder, onDeleteRow }: {
+export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = [], onUpdateRow, onReorder, onDeleteRow }: {
   items: QuoteDraftItem[]; alexMode: boolean; globalDiscount: number;
+  suppliers?: string[];
   onUpdateRow: (index: number, row: QuoteDraftItem) => void;
   onReorder: (rows: QuoteDraftItem[]) => void;
   onDeleteRow: (index: number) => void;
@@ -91,11 +92,17 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, onUpdateRow, o
   };
 
   const handleDelete = useCallback((rowIndex: number) => onDeleteRow(rowIndex), [onDeleteRow]);
-  const columnDefs = useMemo<ColDef<QuoteGridRow>[]>(() => createColumns(alexMode, globalDiscount, handleDelete), [alexMode, globalDiscount, handleDelete]);
+  const columnDefs = useMemo<ColDef<QuoteGridRow>[]>(() => createColumns(alexMode, globalDiscount, handleDelete, suppliers), [alexMode, globalDiscount, handleDelete, suppliers]);
   const tabToNextCell = (params: TabParams) => getNextEditableCell(params, activeColumns, items.length);
   const navigateToNextCell = (params: NavigateParams) => getNextCell(params);
 
   return <div className="ag-theme-alpine quote-items-grid h-full min-h-0 w-full flex-1 overflow-hidden">
+    {/* Autocomplete Datalist nativo per Fornitori (identico a Listino Generale e Listino Clienti) */}
+    <datalist id="quote-suppliers-autocomplete">
+      {suppliers.map((s) => (
+        <option key={s} value={s} />
+      ))}
+    </datalist>
     <style>{`
       .quote-items-grid .ag-header-cell-label { justify-content:center; font-weight:700; font-size:11px; color:var(--grid-sheet-text); }
       .quote-items-grid .ag-header, .quote-items-grid .ag-header-cell { user-select:none; cursor:default; }
@@ -118,9 +125,9 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, onUpdateRow, o
   </div>;
 }
 
-function createColumns(alexMode: boolean, discount: number, onDelete: (index: number) => void): ColDef<QuoteGridRow>[] {
+function createColumns(alexMode: boolean, discount: number, onDelete: (index: number) => void, suppliers: string[] = []): ColDef<QuoteGridRow>[] {
   const internal: ColDef<QuoteGridRow>[] = alexMode ? [
-    textColumn("FORNITORE", "supplier", 140), textColumn("ART. FORN.", "supplier_item_code", 115),
+    textColumn("FORNITORE", "supplier", 140, true, suppliers), textColumn("ART. FORN.", "supplier_item_code", 115),
     priceColumn("ACQ. €", "purchase_price", 105, true),
     { headerName: "RIC.%", field: "markup_pct", colId: "markup_pct", width: 95, editable: true, cellEditor: DDTTextEditor,
       valueFormatter: (params) => isBlankRow(params.data) && !params.value ? "" : `${parseNumber(params.value).toFixed(2)}%`,
@@ -160,13 +167,23 @@ function createColumns(alexMode: boolean, discount: number, onDelete: (index: nu
   ];
 }
 
-function textColumn(title: string, field: keyof QuoteDraftItem, width: number, editable = true): ColDef<QuoteGridRow> {
-  return { headerName: title, field: field as keyof QuoteGridRow & string, width, editable, cellEditor: editable ? DDTTextEditor : undefined,
-    ...(field === "quantity" ? {
+function textColumn(title: string, field: keyof QuoteDraftItem, width: number, editable = true, options?: string[]): ColDef<QuoteGridRow> {
+  return {
+    headerName: title,
+    field: field as keyof QuoteGridRow & string,
+    width,
+    editable,
+    cellEditor: editable ? DDTTextEditor : undefined,
+    cellEditorParams: options ? { options, datalistId: "quote-suppliers-autocomplete" } : undefined,
+    ...(field === "supplier" ? {
+      valueParser: (params) => String(params.newValue ?? "").trim().toUpperCase(),
+      valueFormatter: (params) => String(params.value ?? "").toUpperCase(),
+    } : field === "quantity" ? {
       valueParser: (params) => String(params.newValue ?? "").toUpperCase(),
       valueFormatter: (params) => String(params.value ?? "").toUpperCase(),
     } : {}),
-    cellStyle: field === "unit" || field === "quantity" ? { textAlign: "center", fontWeight: 700 } : undefined };
+    cellStyle: field === "unit" || field === "quantity" ? { textAlign: "center", fontWeight: 700 } : undefined,
+  };
 }
 
 function priceColumn(title: string, field: "purchase_price", width: number, cost = false): ColDef<QuoteGridRow> {
