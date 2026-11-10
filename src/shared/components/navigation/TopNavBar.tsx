@@ -86,29 +86,28 @@ export const TopNavBar: React.FC = () => {
     currentVersion,
     status: updaterStatus,
     newVersion: updaterNewVersion,
+    releaseDate: updaterReleaseDate,
+    releaseNotes: updaterReleaseNotes,
+    downloadProgress: updaterDownloadProgress,
     restartApp,
   } = useAppUpdaterStore();
 
-  const [showUpdateReminder, setShowUpdateReminder] = useState(false);
-  const reminderRef = useRef<HTMLDivElement>(null);
+  const [isUpdatePopoverOpen, setIsUpdatePopoverOpen] = useState(false);
+  const updateHoverTimeoutRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (!showUpdateReminder) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (reminderRef.current && !reminderRef.current.contains(e.target as Node)) {
-        setShowUpdateReminder(false);
-      }
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowUpdateReminder(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [showUpdateReminder]);
+  const handleUpdateMouseEnter = () => {
+    if (updateHoverTimeoutRef.current) {
+      window.clearTimeout(updateHoverTimeoutRef.current);
+      updateHoverTimeoutRef.current = null;
+    }
+    setIsUpdatePopoverOpen(true);
+  };
+
+  const handleUpdateMouseLeave = () => {
+    updateHoverTimeoutRef.current = window.setTimeout(() => {
+      setIsUpdatePopoverOpen(false);
+    }, 250);
+  };
 
   const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
   const [dragOverModuleId, setDragOverModuleId] = useState<string | null>(null);
@@ -418,21 +417,30 @@ export const TopNavBar: React.FC = () => {
           </button>
         </div>
 
-        {/* Versione del programma e Reminder Aggiornamento */}
-        <div className="relative flex items-center">
+        {/* Versione del programma e Popover Aggiornamento su Hover */}
+        <div
+          className="relative flex items-center"
+          onMouseEnter={handleUpdateMouseEnter}
+          onMouseLeave={handleUpdateMouseLeave}
+        >
           {currentVersion && (
             updaterStatus === "ready" ? (
               <button
                 type="button"
-                onClick={() => setShowUpdateReminder((prev) => !prev)}
-                className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-amber-500/15 border border-amber-500/50 text-amber-300 hover:bg-amber-500/25 transition-all cursor-pointer shadow-xs"
-                title="Aggiornamento pronto: clicca per dettagli o aggiornare subito"
+                onClick={() => setIsUpdatePopoverOpen((prev) => !prev)}
+                className="px-2 py-0.5 rounded-md font-mono font-bold text-[11px] bg-sky-500/20 border border-sky-400 text-sky-200 shadow-[0_0_10px_rgba(56,189,248,0.35)] hover:bg-sky-500/30 transition-all cursor-pointer select-none"
+                title={`Versione ${currentVersion} - Nuova versione pronta per l'installazione (passa sopra con il mouse per dettagli)`}
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
-                <span>v{currentVersion}</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                <span className="text-[10px] font-sans font-semibold text-amber-200">Aggiornamento pronto</span>
+                {currentVersion}
               </button>
+            ) : updaterStatus === "downloading" ? (
+              <span
+                className="px-2 py-0.5 rounded-md font-mono text-[11px] text-sky-300 bg-sky-950/40 border border-sky-800/60 select-none flex items-center gap-1.5"
+                title={`Scaricamento aggiornamento v${updaterNewVersion || "..."} in background: ${updaterDownloadProgress}%`}
+              >
+                <span>{currentVersion}</span>
+                <span className="text-[10px] text-sky-400/80 font-sans">({updaterDownloadProgress}%)</span>
+              </span>
             ) : (
               <span
                 className="text-[11px] font-mono font-medium text-[var(--muted-foreground)] opacity-70 px-1 py-0.5 select-none"
@@ -443,62 +451,91 @@ export const TopNavBar: React.FC = () => {
             )
           )}
 
-          {/* Popup Reminder Aggiornamento pronto */}
-          {showUpdateReminder && updaterStatus === "ready" && (
+          {/* Popover su Hover quando l'aggiornamento è pronto */}
+          {updaterStatus === "ready" && isUpdatePopoverOpen && (
             <div
-              ref={reminderRef}
-              className="absolute right-0 top-full mt-2 z-50 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-2xl text-[var(--foreground)] animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md"
+              className="absolute right-0 top-full mt-2 z-50 w-84 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-2xl text-[var(--foreground)] animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md"
             >
               <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-[var(--border)]/60">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 shrink-0">
+                  <div className="p-2 rounded-lg bg-sky-500/15 border border-sky-400/30 text-sky-300 shrink-0">
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-white">Aggiornamento Pronto</h4>
-                    <span className="text-[10px] text-amber-300 font-mono font-semibold">
-                      v{currentVersion} → v{updaterNewVersion || "..."}
+                    <h4 className="text-xs font-bold text-white">Nuova Versione Disponibile</h4>
+                    <span className="text-[10px] text-sky-300 font-mono font-semibold">
+                      Pronta per l'installazione
                     </span>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowUpdateReminder(false)}
+                  onClick={() => setIsUpdatePopoverOpen(false)}
                   className="text-[var(--muted-foreground)] hover:text-white p-0.5 rounded cursor-pointer transition-colors"
-                  title="Chiudi promemoria"
+                  title="Chiudi avviso"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              <div className="py-3 text-[11.5px] text-[var(--muted-foreground)] leading-relaxed space-y-2">
-                <p>
-                  Il gestionale è in standby con il nuovo aggiornamento pronto.
-                </p>
-                <div className="p-2.5 rounded-lg bg-[var(--background)]/80 border border-[var(--border)]/70 text-amber-200 font-medium">
-                  💡 La prossima volta che ricaricherai o avvierai il programma sarà eseguito l'aggiornamento.
+              {/* Informazioni sulle versioni e data rilascio */}
+              <div className="py-3 space-y-2.5">
+                <div className="p-2.5 rounded-lg bg-[var(--background)]/80 border border-[var(--border)] flex items-center justify-between font-mono text-xs">
+                  <div>
+                    <span className="text-[9.5px] uppercase text-[var(--muted-foreground)] block font-sans">Attuale</span>
+                    <span className="font-semibold text-zinc-300">v{currentVersion}</span>
+                  </div>
+                  <div className="text-sky-400 px-1 font-sans">→</div>
+                  <div>
+                    <span className="text-[9.5px] uppercase text-sky-400 block font-bold font-sans">Nuova versione</span>
+                    <span className="font-extrabold text-sky-200">v{updaterNewVersion || "..."}</span>
+                  </div>
+                  {updaterReleaseDate && (
+                    <div className="text-right pl-2 border-l border-[var(--border)]/60 font-sans">
+                      <span className="text-[9.5px] uppercase text-[var(--muted-foreground)] block">Rilasciata</span>
+                      <span className="text-[11px] text-zinc-300 font-medium">
+                        {new Date(updaterReleaseDate).toLocaleDateString("it-IT")}
+                      </span>
+                    </div>
+                  )}
                 </div>
+
+                <div className="p-2.5 rounded-lg bg-sky-950/30 border border-sky-800/40 text-[11px] text-sky-200/90 leading-relaxed">
+                  💡 È disponibile la versione <strong>v{updaterNewVersion}</strong>{updaterReleaseDate ? ` del ${new Date(updaterReleaseDate).toLocaleDateString("it-IT")}` : ""}. Il pacchetto è già pronto.
+                  <span className="block mt-1 font-medium text-amber-200/90">
+                    Non verrà installato automaticamente: puoi scegliere tu se e quando aggiornare.
+                  </span>
+                </div>
+
+                {updaterReleaseNotes && (
+                  <div className="p-2 rounded-lg bg-zinc-950/40 border border-[var(--border)]/60 text-[11px] text-zinc-300 max-h-24 overflow-y-auto font-sans leading-relaxed">
+                    <span className="text-[9.5px] uppercase font-bold text-[var(--muted-foreground)] block mb-0.5">
+                      Note di rilascio:
+                    </span>
+                    <div className="whitespace-pre-wrap">{updaterReleaseNotes}</div>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2.5 border-t border-[var(--border)]/60 flex items-center justify-between gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowUpdateReminder(false)}
+                  onClick={() => setIsUpdatePopoverOpen(false)}
                   className="px-2.5 py-1.5 rounded-md text-[11px] text-[var(--muted-foreground)] hover:text-white hover:bg-[var(--background)] transition-colors cursor-pointer"
                 >
-                  Al prossimo avvio
+                  Più tardi
                 </button>
 
                 <button
                   type="button"
                   onClick={() => {
-                    setShowUpdateReminder(false);
+                    setIsUpdatePopoverOpen(false);
                     void restartApp();
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition-all cursor-pointer active:scale-95"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-md transition-all cursor-pointer active:scale-95"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Aggiorna ora</span>
+                  <span>Installa e Riavvia Ora</span>
                 </button>
               </div>
             </div>

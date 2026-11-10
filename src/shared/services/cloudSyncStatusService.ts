@@ -137,7 +137,7 @@ class CloudSyncStatusService {
       const ddtRows = await db.select<
         { year: number; doc_number: number; date: string; client_name: string }[]
       >(
-        `SELECT year, doc_number, date, client_name 
+        `SELECT year, doc_number, doc_date as date, client_name 
          FROM ddt_documents 
          WHERE deleted_at IS NULL AND doc_number IS NOT NULL 
          ORDER BY year DESC, doc_number DESC 
@@ -204,7 +204,7 @@ class CloudSyncStatusService {
     try {
       const [ddtFetch, genFetch, cliFetch] = await Promise.allSettled([
         fetch(
-          `${projectUrl}/rest/v1/ddt?select=anno,numero,cliente,data,created_at,ultima_modifica&order=id.desc&limit=1`,
+          `${projectUrl}/rest/v1/ddt?select=anno,numero,cliente,data,created_at,ultima_modifica&order=anno.desc,numero.desc&limit=1`,
           { headers }
         ),
         fetch(
@@ -323,8 +323,22 @@ class CloudSyncStatusService {
     }
     // Regola C: Se non è mai stato registrato uno scaricamento locale su questa macchina
     else if (!localLastSyncDate && remoteLatestDate) {
-      hasPendingRemoteChanges = true;
-      alignmentMessage = "Nessuna sincronizzazione recente registrata in locale";
+      if (
+        localLatestDdt &&
+        remoteLatestDdt &&
+        (localLatestDdt.year > remoteLatestDdt.year ||
+          (localLatestDdt.year === remoteLatestDdt.year && localLatestDdt.number >= remoteLatestDdt.number))
+      ) {
+        hasPendingRemoteChanges = false;
+        alignmentMessage = "Programma allineato a Supabase";
+        try {
+          localStorage.setItem("last_supabase_sync_timestamp", new Date().toISOString());
+          localStorage.setItem("last_supabase_sync_summary", "DDT e listini allineati");
+        } catch {}
+      } else {
+        hasPendingRemoteChanges = true;
+        alignmentMessage = "Nessuna sincronizzazione recente registrata in locale";
+      }
     }
 
     return {
