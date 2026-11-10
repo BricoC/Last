@@ -36,6 +36,8 @@ export interface DDTArticoliTableProps {
   onDescriptionEditingStopped?: () => void;
   onActiveRowChange?: (rowIndex: number | null) => void;
   onActiveCellChange?: (rowIndex: number, colId: string) => void;
+  isSearchModalOpen?: boolean;
+  onFocusSearchModal?: () => void;
 }
 
 export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTableProps>(({
@@ -49,6 +51,8 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
   onDescriptionEditingStopped,
   onActiveRowChange,
   onActiveCellChange,
+  isSearchModalOpen = false,
+  onFocusSearchModal,
 }, ref) => {
   const gridRef = useRef<AgGridReact<DdtItem>>(null);
 
@@ -525,6 +529,25 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       }
 
       const currentColId = previousCellPosition.column.getColId();
+
+      // Se siamo sulla descrizione e premiamo TAB in avanti con il pannello cerca articoli aperto, spostiamo il focus sulla ricerca articoli
+      const searchContainer = document.getElementById("ddt-search-modal-container");
+      if (
+        (currentColId === "description" || currentColId === "descrizione") &&
+        !backwards &&
+        (isSearchModalOpen || searchContainer)
+      ) {
+        setTimeout(() => {
+          gridRef.current?.api?.clearFocusedCell?.();
+          onFocusSearchModal?.();
+          const target =
+            (document.querySelector("#ddt-search-modal-container [data-list-container='true']") as HTMLElement) ||
+            document.getElementById("ddt-search-modal-container");
+          target?.focus();
+        }, 50);
+        return null;
+      }
+
       let colIdx = editableCols.indexOf(currentColId);
       let rowIndex = previousCellPosition.rowIndex;
 
@@ -626,7 +649,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => (p.newValue ? String(p.newValue).trim().toUpperCase() : ""),
         valueFormatter: (p: any) => {
-          if (isTextOnlyRow(p.data)) return "";
+          if (p.data?.row_kind === "note" && isTextOnlyRow(p.data)) return "";
           return p.value ? String(p.value).trim().toUpperCase() : "";
         },
         cellStyle: {
@@ -646,7 +669,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         cellEditor: DDTTextEditor,
         valueParser: (p: any) => (p.newValue === "" ? "" : p.newValue),
         valueFormatter: (p: any) => {
-          if (isTextOnlyRow(p.data)) return "";
+          if (p.data?.row_kind === "note" && isTextOnlyRow(p.data)) return "";
           return p.value !== "" && p.value !== null && p.value !== undefined ? String(p.value).trim() : "";
         },
         cellStyle: {
@@ -665,6 +688,8 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         cellEditor: DDTTextEditor,
         cellEditorParams: {
           onDescriptionTyping,
+          isSearchModalOpen,
+          onFocusSearchModal,
         },
         valueParser: (p: any) => (p.newValue ? String(p.newValue).toUpperCase() : ""),
         valueFormatter: (p: any) => (p.value ? String(p.value).toUpperCase() : ""),
@@ -868,11 +893,18 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
       editable: false,
       sortable: false,
       cellRenderer: (p: any) => {
+        const d = p.data;
         const hasContent = Boolean(
-          p.data?.description?.trim() ||
-          isPositivePrice(p.data?.unit_price) ||
-          isPositivePrice(p.data?.purchase_price) ||
-          (p.data?.vat_rate !== "" && p.data?.vat_rate !== null && p.data?.vat_rate !== undefined)
+          (d?.description && String(d.description).trim() !== "") ||
+          (d?.code && String(d.code).trim() !== "") ||
+          (d?.unit && String(d.unit).trim() !== "") ||
+          (d?.quantity && String(d.quantity).trim() !== "") ||
+          (d?.discount_pct && String(d.discount_pct).trim() !== "") ||
+          (d?.vat_rate !== "" && d?.vat_rate !== null && d?.vat_rate !== undefined) ||
+          isPositivePrice(d?.unit_price) ||
+          isPositivePrice(d?.base_price) ||
+          isPositivePrice(d?.purchase_price) ||
+          (d?.notes && String(d.notes).trim() !== "")
         );
         if (!hasContent) return null;
 
@@ -890,7 +922,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
     });
 
     return cols;
-  }, [showMargini, handleDeleteRow, onDescriptionTyping]);
+  }, [showMargini, handleDeleteRow, onDescriptionTyping, isSearchModalOpen, onFocusSearchModal]);
 
   // Gestione incolla nativo su contenitore griglia
   const handleContainerPaste = useCallback(

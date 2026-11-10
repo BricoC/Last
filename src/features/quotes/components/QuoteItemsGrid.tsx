@@ -71,9 +71,197 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
     update(event.rowIndex, row);
   };
 
+  const applyPasteToGrid = useCallback(
+    (startRowIndex: number, startColId: string, clipText: string) => {
+      if (!clipText || startRowIndex < 0) return;
+
+      const editableColsOrder = [
+        ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct", "base_unit_price"] : []),
+        "unit",
+        "quantity",
+        "description",
+        "unit_price",
+        "discount_pct",
+        "availability",
+        "vat_rate",
+      ];
+
+      const startColIdx = editableColsOrder.indexOf(startColId);
+      if (startColIdx === -1) return;
+
+      const lines = clipText
+        .split(/\r?\n/)
+        .filter((l, idx, arr) => idx < arr.length - 1 || l.length > 0);
+      if (lines.length === 0) return;
+
+      const updated = [...items];
+      let hasChanges = false;
+
+      lines.forEach((line, lineOffset) => {
+        const targetRowIndex = startRowIndex + lineOffset;
+        if (targetRowIndex >= updated.length) return;
+
+        const cells = line.split("\t");
+        const targetRow = { ...updated[targetRowIndex] };
+
+        cells.forEach((cellRaw, cellOffset) => {
+          const targetColIdx = startColIdx + cellOffset;
+          if (targetColIdx >= editableColsOrder.length) return;
+
+          const colId = editableColsOrder[targetColIdx];
+          const val = cellRaw.trim();
+
+          if (colId === "supplier") {
+            targetRow.supplier = val.toUpperCase();
+            hasChanges = true;
+          } else if (colId === "supplier_item_code") {
+            targetRow.supplier_item_code = val.toUpperCase();
+            hasChanges = true;
+          } else if (colId === "purchase_price") {
+            targetRow.purchase_price = money(val).toCanonicalString();
+            if (targetRow.base_unit_price) {
+              targetRow.markup_pct = calculateMarkup(targetRow.base_unit_price, targetRow.purchase_price);
+            }
+            hasChanges = true;
+          } else if (colId === "markup_pct") {
+            targetRow.markup_pct = parseNumber(val);
+            targetRow.base_unit_price = "";
+            targetRow.forced_unit_price = "";
+            hasChanges = true;
+          } else if (colId === "base_unit_price") {
+            targetRow.base_unit_price = money(val).toCanonicalString();
+            targetRow.forced_unit_price = "";
+            targetRow.markup_pct = calculateMarkup(targetRow.base_unit_price, targetRow.purchase_price);
+            hasChanges = true;
+          } else if (colId === "unit") {
+            targetRow.unit = val.toUpperCase();
+            hasChanges = true;
+          } else if (colId === "quantity") {
+            targetRow.quantity = val.toUpperCase();
+            hasChanges = true;
+          } else if (colId === "description") {
+            targetRow.description = val.toUpperCase();
+            hasChanges = true;
+          } else if (colId === "unit_price") {
+            targetRow.forced_unit_price = money(val).toCanonicalString();
+            targetRow.discount_pct = 0;
+            hasChanges = true;
+          } else if (colId === "discount_pct") {
+            targetRow.discount_pct = parseNumber(val);
+            targetRow.forced_unit_price = "";
+            hasChanges = true;
+          } else if (colId === "availability") {
+            targetRow.availability = val;
+            hasChanges = true;
+          } else if (colId === "vat_rate") {
+            targetRow.vat_rate = parseVatRate(val);
+            hasChanges = true;
+          }
+        });
+
+        updated[targetRowIndex] = targetRow;
+      });
+
+      if (hasChanges) {
+        onReorder(updated);
+        if (gridRef.current?.api) {
+          setTimeout(() => {
+            gridRef.current?.api?.refreshCells({ force: true });
+          }, 0);
+        }
+      }
+    },
+    [alexMode, items, onReorder]
+  );
+
+  const handleContainerPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (window.__isDDTCellEditing) return;
+      const focusedCell = gridRef.current?.api?.getFocusedCell();
+      if (!focusedCell) return;
+      const clipText = e.clipboardData?.getData("text/plain");
+      if (!clipText) return;
+      e.preventDefault();
+      const colId = typeof focusedCell.column === "string" ? focusedCell.column : focusedCell.column.getColId();
+      applyPasteToGrid(focusedCell.rowIndex, colId, clipText);
+    },
+    [applyPasteToGrid]
+  );
+
   const handleKeyDown: NonNullable<GridProps["onCellKeyDown"]> = (event) => {
     const keyEvent = event.event;
     if (!(keyEvent instanceof KeyboardEvent) || !event.data || event.rowIndex === null || !("column" in event)) return;
+
+    const isCtrlOrMeta = keyEvent.ctrlKey || keyEvent.metaKey;
+    const keyLower = keyEvent.key.toLowerCase();
+
+    // COPIA: Ctrl+C sulla cella attiva (copia valore testuale pulito per poterlo incollare in altre celle)
+    if (isCtrlOrMeta && keyLower === "c" && !window.__isDDTCellEditing) {
+      const colId = event.column?.getColId();
+      const rowData = event.node?.data;
+      if (rowData && colId) {
+        keyEvent.preventDefault();
+        let textToCopy = "";
+        if (colId === "purchase_price") {
+          const m = money(rowData.purchase_price || 0);
+          textToCopy = m.isZero() ? "" : m.formatIT(false);
+        } else if (colId === "base_unit_price") {
+          const m = calculateBase(rowData);
+          textToCopy = m.isZero() ? "" : m.formatIT(false);
+        } else if (colId === "unit_price" || colId === "forced_unit_price") {
+          const m = calculateEffectivePrice(rowData, globalDiscount);
+          textToCopy = m.isZero() ? "" : m.formatIT(false);
+        } else if (colId === "net_amount") {
+          const m = calculateAmount(rowData, globalDiscount);
+          textToCopy = m.isZero() ? "" : m.formatIT(false);
+        } else if (colId === "markup_pct") {
+          textToCopy = rowData.markup_pct !== null && rowData.markup_pct !== undefined ? String(rowData.markup_pct) : "";
+        } else if (colId === "discount_pct") {
+          textToCopy = rowData.discount_pct ? String(rowData.discount_pct) : "";
+        } else if (colId === "vat_rate") {
+          textToCopy = rowData.vat_rate ? String(rowData.vat_rate) : "";
+        } else if (colId === "unit") {
+          textToCopy = rowData.unit || "";
+        } else if (colId === "quantity") {
+          textToCopy = String(rowData.quantity ?? "");
+        } else if (colId === "description") {
+          textToCopy = rowData.description || "";
+        } else if (colId === "supplier") {
+          textToCopy = rowData.supplier || "";
+        } else if (colId === "supplier_item_code") {
+          textToCopy = rowData.supplier_item_code || "";
+        } else if (colId === "availability") {
+          textToCopy = rowData.availability || "";
+        } else {
+          textToCopy = String((rowData as any)[colId] ?? "");
+        }
+        try {
+          void navigator.clipboard.writeText(textToCopy);
+        } catch (err) {
+          console.warn("[QuoteItemsGrid] Errore copia clipboard:", err);
+        }
+      }
+      return;
+    }
+
+    // INCOLLA: Ctrl+V sulla cella attiva
+    if (isCtrlOrMeta && keyLower === "v" && !window.__isDDTCellEditing) {
+      if (event.column?.isCellEditable(event.node)) {
+        keyEvent.preventDefault();
+        void (async () => {
+          try {
+            const clipText = await navigator.clipboard.readText();
+            if (clipText && event.rowIndex !== null) {
+              applyPasteToGrid(event.rowIndex, event.column.getColId(), clipText);
+            }
+          } catch (err) {
+            console.warn("[QuoteItemsGrid] Errore incolla clipboard:", err);
+          }
+        })();
+      }
+      return;
+    }
+
     if ((keyEvent.key === "Delete" || keyEvent.key === "Backspace") && !window.__isDDTCellEditing) {
       if (!event.column.isCellEditable(event.node)) return;
       const row = { ...event.data };
@@ -92,17 +280,14 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
   };
 
   const handleDelete = useCallback((rowIndex: number) => onDeleteRow(rowIndex), [onDeleteRow]);
-  const columnDefs = useMemo<ColDef<QuoteGridRow>[]>(() => createColumns(alexMode, globalDiscount, handleDelete, suppliers), [alexMode, globalDiscount, handleDelete, suppliers]);
+  const columnDefs = useMemo<ColDef<QuoteGridRow>[]>(
+    () => createColumns(alexMode, globalDiscount, handleDelete, suppliers),
+    [alexMode, globalDiscount, handleDelete, suppliers]
+  );
   const tabToNextCell = (params: TabParams) => getNextEditableCell(params, activeColumns, items.length);
   const navigateToNextCell = (params: NavigateParams) => getNextCell(params);
 
-  return <div className="ag-theme-alpine quote-items-grid h-full min-h-0 w-full flex-1 overflow-hidden">
-    {/* Autocomplete Datalist nativo per Fornitori (identico a Listino Generale e Listino Clienti) */}
-    <datalist id="quote-suppliers-autocomplete">
-      {suppliers.map((s) => (
-        <option key={s} value={s} />
-      ))}
-    </datalist>
+  return <div onPaste={handleContainerPaste} className="ag-theme-alpine quote-items-grid h-full min-h-0 w-full flex-1 overflow-hidden">
     <style>{`
       .quote-items-grid .ag-header-cell-label { justify-content:center; font-weight:700; font-size:11px; color:var(--grid-sheet-text); }
       .quote-items-grid .ag-header, .quote-items-grid .ag-header-cell { user-select:none; cursor:default; }
@@ -125,10 +310,15 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
   </div>;
 }
 
-function createColumns(alexMode: boolean, discount: number, onDelete: (index: number) => void, suppliers: string[] = []): ColDef<QuoteGridRow>[] {
+function createColumns(
+  alexMode: boolean,
+  discount: number,
+  onDelete: (index: number) => void,
+  suppliers: string[] = []
+): ColDef<QuoteGridRow>[] {
   const internal: ColDef<QuoteGridRow>[] = alexMode ? [
     textColumn("FORNITORE", "supplier", 140, true, suppliers), textColumn("ART. FORN.", "supplier_item_code", 115),
-    priceColumn("ACQ. €", "purchase_price", 105, true),
+    priceColumn("ACQ. €", "purchase_price", 115, true),
     { headerName: "RIC.%", field: "markup_pct", colId: "markup_pct", width: 95, editable: true, cellEditor: DDTTextEditor,
       valueFormatter: (params) => isBlankRow(params.data) && !params.value ? "" : `${parseNumber(params.value).toFixed(2)}%`,
       valueParser: (params) => parseNumber(params.newValue), cellStyle: { textAlign: "right" } },
@@ -161,9 +351,26 @@ function createColumns(alexMode: boolean, discount: number, onDelete: (index: nu
     { headerName: "IVA", field: "vat_rate", width: 70, editable: true, cellEditor: DDTTextEditor,
       valueFormatter: (params) => isBlankRow(params.data) ? "" : `${params.value}%`,
       valueParser: (params) => parseVatRate(params.newValue), cellStyle: { textAlign: "center" } },
-    { headerName: "", colId: "actions", width: 44, maxWidth: 48, pinned: "right", editable: false,
-      cellRenderer: (params: ICellRendererParams<QuoteGridRow>) => isBlankRow(params.data) ? null : <button type="button" title="Elimina riga" onClick={() => onDelete(params.node.rowIndex ?? 0)}
-        className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)] hover:text-[var(--destructive)]"><Trash2 className="h-3.5 w-3.5" /></button> },
+    {
+      headerName: "",
+      colId: "actions",
+      width: 44,
+      minWidth: 40,
+      maxWidth: 48,
+      pinned: "right",
+      editable: false,
+      cellRenderer: (params: ICellRendererParams<QuoteGridRow>) =>
+        isBlankRow(params.data) ? null : (
+          <button
+            type="button"
+            title="Elimina riga"
+            onClick={() => onDelete(params.node.rowIndex ?? 0)}
+            className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)] hover:text-[var(--destructive)] transition-colors cursor-pointer"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        ),
+    },
   ];
 }
 
@@ -174,7 +381,7 @@ function textColumn(title: string, field: keyof QuoteDraftItem, width: number, e
     width,
     editable,
     cellEditor: editable ? DDTTextEditor : undefined,
-    cellEditorParams: options ? { options, datalistId: "quote-suppliers-autocomplete" } : undefined,
+    cellEditorParams: options ? { options } : undefined,
     ...(field === "supplier" ? {
       valueParser: (params) => String(params.newValue ?? "").trim().toUpperCase(),
       valueFormatter: (params) => String(params.value ?? "").toUpperCase(),
@@ -187,8 +394,17 @@ function textColumn(title: string, field: keyof QuoteDraftItem, width: number, e
 }
 
 function priceColumn(title: string, field: "purchase_price", width: number, cost = false): ColDef<QuoteGridRow> {
-  return { headerName: title, field, width, editable: true, cellEditor: DDTTextEditor, valueParser: (params) => money(params.newValue).toCanonicalString(),
-    valueFormatter: (params) => formatMoney(params.value), cellClass: cost ? "quote-cost-cell" : undefined, cellStyle: { textAlign: "right" } };
+  return {
+    headerName: title,
+    field,
+    width,
+    editable: true,
+    cellEditor: DDTTextEditor,
+    valueParser: (params) => money(params.newValue).toCanonicalString(),
+    valueFormatter: (params) => formatMoney(params.value, 5, 5),
+    cellClass: cost ? "quote-cost-cell" : undefined,
+    cellStyle: { textAlign: "right" },
+  };
 }
 
 function calculateBase(row: QuoteDraftItem) {
@@ -222,13 +438,24 @@ function rowHasPrice(row: QuoteDraftItem): boolean {
 }
 
 function isBlankRow(row?: QuoteDraftItem): boolean {
-  return !row || !(row.description.trim() || row.supplier || row.supplier_item_code || rowHasPrice(row) || row.quantity);
+  return !row || !(
+    (row.description && row.description.trim() !== "") ||
+    (row.supplier && row.supplier.trim() !== "") ||
+    (row.supplier_item_code && row.supplier_item_code.trim() !== "") ||
+    (row.code && row.code.trim() !== "") ||
+    (row.unit && row.unit.trim() !== "") ||
+    (row.quantity && String(row.quantity).trim() !== "") ||
+    (row.discount_pct && Number(row.discount_pct) !== 0) ||
+    (row.availability && row.availability.trim() !== "") ||
+    (row.notes && row.notes.trim() !== "") ||
+    rowHasPrice(row)
+  );
 }
 
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown, minDec = 4, maxDec = 4): string {
   if (value === null || value === undefined || value === "") return "";
   const result = money(String(value));
-  return result.isZero() ? "" : result.formatIT(true, 4, 4);
+  return result.isZero() ? "" : result.formatIT(true, minDec, maxDec);
 }
 
 function parseNumber(value: unknown): number {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, Check, ChevronDown, Copy, Eye, FileText, Plus, Save, Sparkles, Trash2, Truck } from "lucide-react";
+import { Archive, Check, ChevronDown, Copy, Eye, FileText, Plus, Save, Search, Sparkles, Trash2, Truck } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/utils/cn";
 import type { QuoteStatus } from "../models/quote";
@@ -10,7 +10,7 @@ export function QuoteStudioHeader(props: {
   copyingPdf?: boolean; copySuccess?: boolean;
   onStatusChange: (status: QuoteStatus) => void;
   onViewChange: (mode: "calculation" | "customer") => void;
-  onAlexToggle: () => void; onArchive: () => void; onOpenTrash?: () => void; onSave: () => void;
+  onAlexToggle: () => void; onArchive: () => void; onOpenLibrary?: () => void; onOpenTrash?: () => void; onSave: () => void;
   onNew: () => void; onPdf: () => void; onCopyPdf?: () => void; onConvert: () => void; onFillRandomRows: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -37,7 +37,9 @@ export function QuoteStudioHeader(props: {
           onChange={(event) => props.onStatusChange(event.target.value as QuoteStatus)}
           className="rounded-full border border-[var(--primary)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--primary)]">
           <option value="bozza">Bozza</option><option value="inviato">Inviato</option><option value="confermato">Confermato</option><option value="rifiutato">Rifiutato</option>
-        </select></div>
+        </select>
+        <Button size="sm" variant="outline" onClick={props.onNew} title="Nuovo preventivo"><Plus className="mr-1 h-3.5 w-3.5" />Nuovo</Button>
+      </div>
         <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">Preventivo {formatDate(props.quoteDate)}{props.quoteCode ? ` • ${props.quoteCode}` : ""}</p>
       </div>
     </div>
@@ -48,12 +50,16 @@ export function QuoteStudioHeader(props: {
       </div>
       <Button size="sm" variant={props.alexMode ? "secondary" : "outline"} onClick={props.onAlexToggle}>✦ Alex</Button>
       <Button size="sm" variant="outline" onClick={props.onArchive}><Archive className="mr-1 h-3.5 w-3.5" />Archivio <span className="ml-1 rounded-full bg-[var(--background)] px-1.5">{props.archiveCount}</span></Button>
+      {props.onOpenLibrary && (
+        <Button size="sm" variant="outline" onClick={props.onOpenLibrary} title="Ricerca articoli e storico preventivi (F4)">
+          <Search className="mr-1 h-3.5 w-3.5 text-sky-400" />Cerca Articoli (F4)
+        </Button>
+      )}
       {props.onOpenTrash && (
         <Button size="sm" variant="outline" onClick={props.onOpenTrash} title="Cestino preventivi eliminati (max 5)">
           <Trash2 className="mr-1 h-3.5 w-3.5 text-red-400" />Cestino <span className="ml-1 rounded-full bg-[var(--background)] px-1.5">{props.trashCount ?? 0}</span>
         </Button>
       )}
-      <Button size="sm" variant="outline" onClick={props.onNew}><Plus className="mr-1 h-3.5 w-3.5" />Nuovo</Button>
       <Button size="sm" variant="outline" disabled={props.saving} onClick={props.onSave}><Save className="mr-1 h-3.5 w-3.5" />{props.saving ? "Salva…" : "Salva"}</Button>
       <Button size="sm" variant="danger" onClick={props.onPdf}>PDF</Button>
       {props.onCopyPdf && (
@@ -67,7 +73,7 @@ export function QuoteStudioHeader(props: {
               ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-300 shadow-xs"
               : "border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 hover:text-white"
           )}
-          title="Genera e copia il PDF del preventivo negli appunti di Windows per incollarlo in un'email o cartella (Ctrl+C)"
+          title="Genera e copia il PDF del preventivo negli appunti di Windows per incollarlo in un'email o cartella"
         >
           {props.copyingPdf ? (
             <>
@@ -82,7 +88,7 @@ export function QuoteStudioHeader(props: {
           ) : (
             <>
               <Copy className="h-3.5 w-3.5" />
-              <span>Copia PDF (Ctrl+C)</span>
+              <span>Copia PDF</span>
             </>
           )}
         </button>

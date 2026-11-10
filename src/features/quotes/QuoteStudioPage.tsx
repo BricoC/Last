@@ -4,11 +4,11 @@ import { QuoteStudioHeader } from "./components/QuoteStudioHeader";
 import { QuoteClientFields } from "./components/QuoteClientFields";
 import { QuoteItemsGrid } from "./components/QuoteItemsGrid";
 import { QuoteArchiveSidebar } from "./components/QuoteArchiveSidebar";
+import { QuoteItemSearchPanel } from "./components/QuoteItemSearchPanel";
 import { QuoteTrashModal } from "./components/QuoteTrashModal";
 import { QuoteA4Preview } from "./document/QuoteA4Preview";
 import { quoteRepository } from "./services/quoteRepository";
 import { orderRepository } from "@/features/orders/services/orderRepository";
-import { priceListRepository } from "@/features/price-lists/services/priceListRepository";
 import { exportQuotePdf, copyQuotePdfToClipboard } from "./utils/quoteExportManager";
 import { money } from "@/shared/domain/monetaryValue";
 import { registerWindowCloseGuard, registerDirtyCheck, useWindowStore } from "@/shared/stores/useWindowStore";
@@ -27,6 +27,7 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
   const [viewMode, setViewMode] = useState<"calculation" | "customer">("calculation");
   const [alexMode, setAlexMode] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [trashCount, setTrashCount] = useState(0);
   const [archiveSearch, setArchiveSearch] = useState("");
@@ -53,6 +54,12 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
 
   useEffect(() => { savedSignature.current = signature(draft); }, []);
 
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(""), 3500);
+    return () => clearTimeout(timer);
+  }, [message]);
+
   const refreshQuotes = useCallback(async () => {
     try {
       const [allQuotes, tCount] = await Promise.all([
@@ -70,22 +77,21 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      orderRepository.getSuppliers().catch(() => []),
-      priceListRepository.getDistinctGeneralSuppliers().catch(() => []),
-    ]).then(([orderSupps, dbSupps]) => {
-      if (!active) return;
-      const merged = Array.from(
-        new Set([
-          ...orderSupps.map((s) => s.name?.trim()).filter(Boolean),
-          ...dbSupps,
-        ])
-      ).sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
-      setSuppliers(merged);
-    }).catch((err) => {
-      console.warn("[QuoteStudio] Errore caricamento fornitori:", err);
-    });
-    return () => { active = false; };
+    orderRepository
+      .getSuppliers()
+      .then((orderSupps) => {
+        if (!active) return;
+        const cleanSuppliers = Array.from(
+          new Set(orderSupps.map((s) => s.name?.trim()).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
+        setSuppliers(cleanSuppliers);
+      })
+      .catch((err) => {
+        console.warn("[QuoteStudio] Errore caricamento fornitori:", err);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -109,6 +115,51 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     } catch (error) { setMessage(errorMessage(error)); return false; }
     finally { setSaving(false); }
   }, [draft, refreshQuotes]);
+
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftRef = useRef(draft);
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+  const saveRef = useRef(save);
+  useEffect(() => { saveRef.current = save; }, [save]);
+
+  // Salvataggio automatico ogni 10 minuti dal primo inserimento/modifica
+  useEffect(() => {
+    if (!isDirty) {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (!autoSaveTimerRef.current) {
+      autoSaveTimerRef.current = setTimeout(async () => {
+        autoSaveTimerRef.current = null;
+        const currentDraft = draftRef.current;
+        const hasContent = Boolean(
+          currentDraft.client_name?.trim() ||
+          currentDraft.items.some(isQuoteDraftItemActive)
+        );
+        if (hasContent && isDirtyRef.current) {
+          try {
+            await saveRef.current();
+            setMessage("✓ Preventivo salvato automaticamente (10 min).");
+          } catch (e) {
+            console.warn("[QuoteStudio] Errore salvataggio automatico 10m:", e);
+          }
+        }
+      }, 10 * 60 * 1000);
+    }
+  }, [isDirty]);
+
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const confirmIfDirty = useCallback(async (): Promise<boolean> => {
     if (!isDirtyRef.current) return true;
@@ -156,6 +207,88 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     const next = [...current.items]; next.splice(index, 1); next.push(createEmptyQuoteItem());
     return { ...current, items: next };
   });
+
+  const handleInsertLibraryItem = useCallback((itemData: Partial<QuoteDraftItem>) => {
+    setDraft((current) => {
+      const nextItems = [...current.items];
+      const firstEmptyIndex = nextItems.findIndex((it) => !isQuoteDraftItemActive(it));
+      const newRow: QuoteDraftItem = {
+        ...createEmptyQuoteItem(),
+        description: itemData.description || "",
+        unit: itemData.unit || "NR",
+        quantity: itemData.quantity || "1",
+        supplier: itemData.supplier || "",
+        supplier_item_code: itemData.supplier_item_code || "",
+        code: itemData.code || "",
+        purchase_price: itemData.purchase_price || "0",
+        markup_pct: itemData.markup_pct ?? 0,
+        base_unit_price: itemData.base_unit_price || "",
+        forced_unit_price: itemData.forced_unit_price || "",
+        discount_pct: itemData.discount_pct ?? 0,
+        vat_rate: itemData.vat_rate ?? 22,
+        availability: "", // Disponibilità rimossa dall'autoinserimento (inserimento manuale richiesto)
+        notes: itemData.notes || "",
+      };
+      if (firstEmptyIndex !== -1) {
+        nextItems[firstEmptyIndex] = newRow;
+      } else {
+        nextItems.push(newRow);
+      }
+      return { ...current, items: nextItems };
+    });
+  }, []);
+
+  const [searchPanelWidth, setSearchPanelWidth] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("quote_search_panel_width");
+      if (saved) {
+        const val = parseInt(saved, 10);
+        if (!isNaN(val) && val >= 320 && val <= 850) return val;
+      }
+    }
+    return 480;
+  });
+
+  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = searchPanelWidth;
+    let rafId: number | null = null;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const delta = startX - moveEvent.clientX;
+        const newWidth = Math.max(320, Math.min(850, startWidth + delta));
+        setSearchPanelWidth(newWidth);
+      });
+    };
+
+    const onMouseUp = (upEvent: MouseEvent) => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      const delta = startX - upEvent.clientX;
+      const finalWidth = Math.max(320, Math.min(850, startWidth + delta));
+      setSearchPanelWidth(finalWidth);
+      localStorage.setItem("quote_search_panel_width", String(finalWidth));
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [searchPanelWidth]);
+
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      if (e.key === "F4") {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowSearchPanel((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalShortcuts, true);
+    return () => window.removeEventListener("keydown", handleGlobalShortcuts, true);
+  }, []);
   const updateHeader = (updates: Partial<QuoteDraft>) => setDraft((current) => ({ ...current, ...updates }));
   const openQuote = async (quoteId: string) => {
     if (draft.id === quoteId) {
@@ -226,22 +359,6 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     }
   }, [draft, copyingPdf]);
 
-  useEffect(() => {
-    const handleCopyKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
-        const target = e.target as HTMLElement | null;
-        const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-        const selectedText = window.getSelection()?.toString();
-        if (!selectedText && !isInput) {
-          e.preventDefault();
-          e.stopPropagation();
-          void handleCopyPdf();
-        }
-      }
-    };
-    window.addEventListener("keydown", handleCopyKeyDown);
-    return () => window.removeEventListener("keydown", handleCopyKeyDown);
-  }, [handleCopyPdf]);
   const fillRandomRows = () => {
     const emptyRows = draft.items.flatMap((item, index) => isQuoteDraftItemActive(item) ? [] : [index]);
     if (emptyRows.length < 15) {
@@ -261,7 +378,15 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
       archiveCount={quotes.length} trashCount={trashCount} quoteDate={draft.quote_date ?? ""}
       quoteCode={formatQuoteCode(draft.year, draft.quote_number)}
       onStatusChange={(status) => updateHeader({ status })} onViewChange={setViewMode}
-      onAlexToggle={() => setAlexMode((value) => !value)} onArchive={() => setShowArchive((value) => !value)}
+      onAlexToggle={() => setAlexMode((value) => !value)}
+      onArchive={() => {
+        setShowSearchPanel(false);
+        setShowArchive((value) => !value);
+      }}
+      onOpenLibrary={() => {
+        setShowArchive(false);
+        setShowSearchPanel((value) => !value);
+      }}
       onOpenTrash={() => setShowTrash(true)}
       onSave={() => void save()} onNew={() => void handleNewQuote()}
       onPdf={() => void printPdf()} onCopyPdf={() => void handleCopyPdf()}
@@ -270,15 +395,55 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     <QuoteKpiBanner items={draft.items} discount={draft.global_discount_pct ?? 0} alexMode={alexMode}
       onDiscountChange={(value) => updateHeader({ global_discount_pct: value })} />
     <QuoteClientFields draft={draft} onChange={updateHeader} />
-    <main className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)]">
-      {viewMode === "calculation" && <QuoteItemsGrid
-        items={draft.items} alexMode={alexMode} globalDiscount={draft.global_discount_pct ?? 0}
-        suppliers={suppliers}
-        onUpdateRow={updateGridRow} onReorder={reorderGridRows} onDeleteRow={deleteGridRow} />}
-      <QuoteA4Preview draft={draft} inline captureOnly={viewMode !== "customer"} />
-    </main>
+
+    {/* Sezione Centrale Griglia con Pannello Ricerca Docked (F4) */}
+    <div className="flex min-h-0 flex-1 flex-row overflow-hidden rounded-lg border border-[var(--border)]">
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {viewMode === "calculation" && (
+          <QuoteItemsGrid
+            items={draft.items}
+            alexMode={alexMode}
+            globalDiscount={draft.global_discount_pct ?? 0}
+            suppliers={suppliers}
+            onUpdateRow={updateGridRow}
+            onReorder={reorderGridRows}
+            onDeleteRow={deleteGridRow}
+          />
+        )}
+        <QuoteA4Preview draft={draft} inline captureOnly={viewMode !== "customer"} />
+      </main>
+
+      {/* Destra: Splitter e Pannello Cerca Articoli Docked (F4) */}
+      {showSearchPanel && (
+        <>
+          <div
+            onMouseDown={handleSplitterMouseDown}
+            className="w-1.5 hover:w-2 bg-[var(--border)] hover:bg-[var(--primary)] cursor-col-resize shrink-0 transition-colors z-10 flex items-center justify-center select-none group"
+            title="Trascina per ridimensionare tabella e cerca articoli"
+          >
+            <div className="w-0.5 h-8 bg-[var(--muted-foreground)]/40 group-hover:bg-white rounded" />
+          </div>
+
+          <div
+            style={{ width: `${searchPanelWidth}px` }}
+            className="h-full shrink-0 flex flex-col border-l border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-lg"
+          >
+            <QuoteItemSearchPanel
+              isOpen={showSearchPanel}
+              onClose={() => setShowSearchPanel(false)}
+              currentClientName={draft.client_name}
+              alexMode={alexMode}
+              suppliers={suppliers}
+              onInsertItem={handleInsertLibraryItem}
+              onShowMessage={(msg) => setMessage(msg)}
+            />
+          </div>
+        </>
+      )}
+    </div>
+
     <footer className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-[10px] text-[var(--muted-foreground)]">
-      <span>F1 = Prima riga · Tab / Invio = Spostamento · Canc = Svuota cella · Trascina # per riordinare</span>
+      <span>F1 = Prima riga · Tab / Invio = Spostamento · Canc = Svuota cella · F4 = Cerca articoli · Trascina # per riordinare</span>
       <span>{draft.items.filter(isQuoteDraftItemActive).length} righe compilate su {draft.items.length}</span>
     </footer>
     {message && <div role="status" className="absolute bottom-12 left-4 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs shadow-lg">{message}</div>}

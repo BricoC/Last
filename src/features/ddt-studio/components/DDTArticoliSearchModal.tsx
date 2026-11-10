@@ -385,9 +385,16 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
     });
     setPendingInsert(null);
     setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }, 50);
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.select();
+      }
+    }, 60);
+    setTimeout(() => {
+      if (inputRef.current && document.activeElement === inputRef.current) {
+        inputRef.current.select();
+      }
+    }, 150);
   };
 
   const formatEuro = (val: number | null | undefined, digits: number = 2) => {
@@ -566,7 +573,9 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
 
           <div
             ref={listContainerRef}
+            data-list-container="true"
             tabIndex={0}
+            onKeyDown={handleKeyDown}
             className={`flex-1 overflow-y-auto overflow-x-hidden outline-none ${activePane === "list" ? "ring-1 ring-blue-500/40" : ""}`}
           >
             {isLoading ? (
@@ -664,7 +673,9 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
 
           <div
             ref={historyContainerRef}
+            data-history-container="true"
             tabIndex={0}
+            onKeyDown={handleKeyDown}
             className={`flex-1 overflow-y-auto overflow-x-hidden outline-none ${activePane === "history" ? "ring-1 ring-emerald-500/40" : ""}`}
           >
             {visibleHistoryItems.length === 0 ? (
