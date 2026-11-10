@@ -32,6 +32,157 @@ export async function getSupabaseCredentials(): Promise<SupabaseConfig | null> {
   return null;
 }
 
+function parseDataJson(raw: any): Record<string, any> {
+  if (!raw) return {};
+  if (typeof raw === "object") return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function extractAndNormalizeItems(dataJson: Record<string, any>): any[] {
+  if (Array.isArray(dataJson.items) && dataJson.items.length > 0) {
+    return dataJson.items.map((it: any, idx: number) => ({
+      id: it.id || crypto.randomUUID(),
+      row_index: it.row_index ?? idx + 1,
+      product_id: it.product_id || null,
+      supplier: it.supplier || null,
+      supplier_item_code: it.supplier_item_code || null,
+      code: it.code || null,
+      description: it.description || "",
+      unit: it.unit || "NR",
+      quantity: String(it.quantity ?? "1"),
+      purchase_price_subunits: Number(it.purchase_price_subunits) || 0,
+      markup_pct: it.markup_pct != null ? String(it.markup_pct) : null,
+      base_unit_price_subunits: Number(it.base_unit_price_subunits) || 0,
+      effective_unit_price_subunits: Number(it.effective_unit_price_subunits ?? it.base_unit_price_subunits) || 0,
+      forced_unit_price_subunits: it.forced_unit_price_subunits != null ? Number(it.forced_unit_price_subunits) : null,
+      discount_pct: String(it.discount_pct ?? "0"),
+      effective_markup_pct: it.effective_markup_pct != null ? String(it.effective_markup_pct) : null,
+      margin_pct: it.margin_pct != null ? String(it.margin_pct) : null,
+      net_amount_subunits: Number(it.net_amount_subunits) || 0,
+      cost_total_subunits: Number(it.cost_total_subunits ?? it.purchase_price_subunits) || 0,
+      gross_profit_subunits: Number(it.gross_profit_subunits) || 0,
+      vat_rate: [0, 4, 10, 22].includes(Number(it.vat_rate)) ? Number(it.vat_rate) : 22,
+      vat_amount_subunits: Number(it.vat_amount_subunits) || 0,
+      availability: it.availability || null,
+      notes: it.notes || null,
+    }));
+  }
+
+  // Supporto retrocompatibilità preventivi precedente versione ("righe")
+  if (Array.isArray(dataJson.righe) && dataJson.righe.length > 0) {
+    return dataJson.righe.map((riga: any, idx: number) => {
+      const purchaseSubunits = Math.round((Number(riga.prezzo_acquisto) || 0) * 100000);
+      const baseSubunits = Math.round((Number(riga.prezzo_unitario_base) || 0) * 100000);
+      const effSubunits = Math.round((Number(riga.prezzo_unitario_effettivo ?? riga.prezzo_unitario_base) || 0) * 100000);
+      const forcedSubunits = riga.prezzo_unitario_forzato != null ? Math.round(Number(riga.prezzo_unitario_forzato) * 100000) : null;
+      const netSubunits = Math.round((Number(riga.importo_netto) || 0) * 100000);
+      const costSubunits = Math.round((Number(riga.costo_totale_riga) || 0) * 100000);
+      const profitSubunits = Math.round((Number(riga.ricavo_riga) || 0) * 100000);
+      const vatRate = [0, 4, 10, 22].includes(Number(riga.iva)) ? Number(riga.iva) : 22;
+      const vatSubunits = Math.round(Number(riga.importo_iva) || (netSubunits * (vatRate / 100)));
+
+      return {
+        id: riga.id || crypto.randomUUID(),
+        row_index: riga.riga_nr ?? idx + 1,
+        product_id: null,
+        supplier: riga.fornitore || null,
+        supplier_item_code: riga.articolo_fornitore || null,
+        code: riga.codice_articolo || null,
+        description: riga.descrizione || "",
+        unit: riga.um || "NR",
+        quantity: String(riga.quantita ?? "1"),
+        purchase_price_subunits: purchaseSubunits,
+        markup_pct: riga.ricarico_pct != null ? String(riga.ricarico_pct) : null,
+        base_unit_price_subunits: baseSubunits,
+        effective_unit_price_subunits: effSubunits,
+        forced_unit_price_subunits: forcedSubunits,
+        discount_pct: String(riga.sconto_pct ?? "0"),
+        effective_markup_pct: riga.ricarico_effettivo_pct != null ? String(riga.ricarico_effettivo_pct) : null,
+        margin_pct: riga.margine_pct != null ? String(riga.margine_pct) : null,
+        net_amount_subunits: netSubunits,
+        cost_total_subunits: costSubunits,
+        gross_profit_subunits: profitSubunits,
+        vat_rate: vatRate,
+        vat_amount_subunits: vatSubunits,
+        availability: riga.disponibilita || null,
+        notes: riga.note || null,
+      };
+    });
+  }
+
+  return [];
+}
+
+async function syncQuoteItemsIntoDb(
+  db: any,
+  quoteId: string,
+  items: any[],
+  createdAt: string,
+  updatedAt: string
+): Promise<void> {
+  if (!items || items.length === 0) return;
+  await db.execute("DELETE FROM quote_items WHERE quote_id = $1", [quoteId]);
+  for (let idx = 0; idx < items.length; idx++) {
+    const it = items[idx];
+    await db.execute(
+      `INSERT OR REPLACE INTO quote_items (
+        id, quote_id, row_index, product_id, supplier, supplier_item_code,
+        code, description, unit, quantity, purchase_price_subunits,
+        markup_pct, base_unit_price_subunits, effective_unit_price_subunits, forced_unit_price_subunits,
+        discount_pct, effective_markup_pct, margin_pct, net_amount_subunits,
+        cost_total_subunits, gross_profit_subunits, vat_rate, vat_amount_subunits,
+        availability, notes, created_at, updated_at, updated_by, deleted_at, sync_status
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15,
+        $16, $17, $18, $19,
+        $20, $21, $22, $23,
+        $24, $25, $26, $27, $28, $29, 'synced'
+      )`,
+      [
+        it.id || crypto.randomUUID(),
+        quoteId,
+        it.row_index ?? idx + 1,
+        it.product_id || null,
+        it.supplier || null,
+        it.supplier_item_code || null,
+        it.code || null,
+        it.description || "",
+        it.unit || "NR",
+        String(it.quantity ?? "1"),
+        Number(it.purchase_price_subunits) || 0,
+        it.markup_pct != null ? String(it.markup_pct) : null,
+        Number(it.base_unit_price_subunits) || 0,
+        Number(it.effective_unit_price_subunits ?? it.base_unit_price_subunits) || 0,
+        it.forced_unit_price_subunits != null ? Number(it.forced_unit_price_subunits) : null,
+        String(it.discount_pct ?? "0"),
+        it.effective_markup_pct != null ? String(it.effective_markup_pct) : null,
+        it.margin_pct != null ? String(it.margin_pct) : null,
+        Number(it.net_amount_subunits) || 0,
+        Number(it.cost_total_subunits) || 0,
+        Number(it.gross_profit_subunits) || 0,
+        [0, 4, 10, 22].includes(Number(it.vat_rate)) ? Number(it.vat_rate) : 22,
+        Number(it.vat_amount_subunits) || 0,
+        it.availability || null,
+        it.notes || null,
+        createdAt || new Date().toISOString(),
+        updatedAt || new Date().toISOString(),
+        "supabase",
+        null,
+      ]
+    );
+  }
+}
+
 export class QuoteSyncService {
   /**
    * Converte un oggetto Quote di Last nel payload per la tabella preventivi su Supabase
@@ -216,8 +367,8 @@ export class QuoteSyncService {
           [r.id]
         );
 
-        const dataJson = r.data_json && typeof r.data_json === "object" ? r.data_json : {};
-        const items: any[] = Array.isArray(dataJson.items) ? dataJson.items : [];
+        const dataJson = parseDataJson(r.data_json);
+        const items = extractAndNormalizeItems(dataJson);
 
         // Inserisci o aggiorna la testata
         await db.execute(
@@ -320,60 +471,18 @@ export class QuoteSyncService {
           ]
         );
 
-        // Se l'elemento è nuovo e contiene righe salvate in dataJson, reinseriscile in quote_items
-        if (local.length === 0 && items.length > 0) {
-          for (let idx = 0; idx < items.length; idx++) {
-            const it = items[idx];
-            await db.execute(
-              `INSERT OR REPLACE INTO quote_items (
-                id, quote_id, row_index, product_id, supplier, supplier_item_code,
-                code, description, unit, quantity, purchase_price_subunits,
-                markup_pct, base_unit_price_subunits, forced_unit_price_subunits,
-                discount_pct, net_unit_price_subunits, net_amount_subunits,
-                vat_rate, vat_amount_subunits, gross_amount_subunits,
-                total_cost_subunits, gross_profit_subunits, margin_pct,
-                availability, notes, created_at, updated_at, updated_by, sync_status
-              ) VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11,
-                $12, $13, $14,
-                $15, $16, $17,
-                $18, $19, $20,
-                $21, $22, $23,
-                $24, $25, $26, $27, $28, 'synced'
-              )`,
-              [
-                it.id || crypto.randomUUID(),
-                r.id,
-                it.row_index ?? idx,
-                it.product_id || null,
-                it.supplier || null,
-                it.supplier_item_code || null,
-                it.code || null,
-                it.description || "",
-                it.unit || "NR",
-                String(it.quantity || "1"),
-                Number(it.purchase_price_subunits) || 0,
-                String(it.markup_pct || "0"),
-                Number(it.base_unit_price_subunits) || 0,
-                it.forced_unit_price_subunits != null ? Number(it.forced_unit_price_subunits) : null,
-                String(it.discount_pct || "0"),
-                Number(it.effective_unit_price_subunits || it.base_unit_price_subunits) || 0,
-                Number(it.net_amount_subunits) || 0,
-                Number(it.vat_rate) || 22,
-                Number(it.vat_amount_subunits) || 0,
-                Number(it.net_amount_subunits || 0) + Number(it.vat_amount_subunits || 0),
-                Number(it.cost_total_subunits || it.purchase_price_subunits) || 0,
-                Number(it.gross_profit_subunits) || 0,
-                it.margin_pct != null ? String(it.margin_pct) : null,
-                it.availability || null,
-                it.notes || null,
-                r.created_at || new Date().toISOString(),
-                r.updated_at || new Date().toISOString(),
-                "supabase",
-              ]
-            );
-          }
+        // Verifica quante righe attive sono memorizzate in locale
+        const existingItems = await db.select<{ count: number }[]>(
+          "SELECT count(*) as count FROM quote_items WHERE quote_id = $1 AND deleted_at IS NULL",
+          [r.id]
+        );
+        const localItemCount = existingItems[0]?.count ?? 0;
+        const remoteUpdatedAt = new Date(r.updated_at || r.created_at || 0).getTime();
+        const localUpdatedAt = local[0] ? new Date(local[0].updated_at || 0).getTime() : 0;
+
+        // Se non ci sono righe locali o il record remoto è più recente, sincronizza le righe
+        if ((localItemCount === 0 || remoteUpdatedAt >= localUpdatedAt) && items.length > 0) {
+          await syncQuoteItemsIntoDb(db, r.id, items, r.created_at || new Date().toISOString(), r.updated_at || new Date().toISOString());
         }
 
         imported++;
@@ -383,6 +492,142 @@ export class QuoteSyncService {
     } catch (err) {
       console.warn("[QuoteSyncService] Errore pull preventivi da Supabase:", err);
       return 0;
+    }
+  }
+
+  /**
+   * Scarica un singolo preventivo da Supabase per ID, aggiorna SQLite locale (testata e righe)
+   */
+  public static async pullQuoteById(id: string): Promise<boolean> {
+    try {
+      const creds = await getSupabaseCredentials();
+      if (!creds) return false;
+
+      const url = `${creds.projectUrl}/rest/v1/preventivi?id=eq.${encodeURIComponent(id)}&select=*`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          apikey: creds.anonKey,
+          Authorization: `Bearer ${creds.anonKey}`,
+        },
+      });
+
+      if (!res.ok) return false;
+      const rows = await res.json();
+      if (!Array.isArray(rows) || rows.length === 0) return false;
+
+      const r = rows[0];
+      const db = await getDatabase();
+      const dataJson = parseDataJson(r.data_json);
+      const items = extractAndNormalizeItems(dataJson);
+
+      await db.execute(
+        `INSERT INTO quotes (
+          id, quote_number, year, quote_date, status,
+          client_id, client_name, client_address, client_city, client_postal_code,
+          client_province, client_vat, client_fiscal_code, client_sdi, client_pec,
+          client_phones_json, destination_name, destination_address, destination_city,
+          subject, global_discount_pct, validity_days, payment_method, delivery_date,
+          delivery_terms, default_supplier, internal_notes, customer_notes,
+          total_taxable_subunits, total_vat_subunits, total_document_subunits,
+          total_cost_subunits, total_profit_subunits,
+          created_at, updated_at, updated_by, deleted_at, sync_status
+        ) VALUES (
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15,
+          $16, $17, $18, $19,
+          $20, $21, $22, $23, $24,
+          $25, $26, $27, $28,
+          $29, $30, $31,
+          $32, $33,
+          $34, $35, $36, $37, 'synced'
+        )
+        ON CONFLICT(id) DO UPDATE SET
+          quote_number = excluded.quote_number,
+          year = excluded.year,
+          quote_date = excluded.quote_date,
+          status = excluded.status,
+          client_id = excluded.client_id,
+          client_name = excluded.client_name,
+          client_address = excluded.client_address,
+          client_city = excluded.client_city,
+          client_postal_code = excluded.client_postal_code,
+          client_province = excluded.client_province,
+          client_vat = excluded.client_vat,
+          client_fiscal_code = excluded.client_fiscal_code,
+          client_sdi = excluded.client_sdi,
+          client_pec = excluded.client_pec,
+          client_phones_json = excluded.client_phones_json,
+          destination_name = excluded.destination_name,
+          destination_address = excluded.destination_address,
+          destination_city = excluded.destination_city,
+          subject = excluded.subject,
+          global_discount_pct = excluded.global_discount_pct,
+          validity_days = excluded.validity_days,
+          payment_method = excluded.payment_method,
+          delivery_date = excluded.delivery_date,
+          delivery_terms = excluded.delivery_terms,
+          default_supplier = excluded.default_supplier,
+          internal_notes = excluded.internal_notes,
+          customer_notes = excluded.customer_notes,
+          total_taxable_subunits = excluded.total_taxable_subunits,
+          total_vat_subunits = excluded.total_vat_subunits,
+          total_document_subunits = excluded.total_document_subunits,
+          total_cost_subunits = excluded.total_cost_subunits,
+          total_profit_subunits = excluded.total_profit_subunits,
+          updated_at = excluded.updated_at,
+          updated_by = excluded.updated_by,
+          deleted_at = excluded.deleted_at,
+          sync_status = 'synced'`,
+        [
+          r.id,
+          r.quote_number != null ? Number(r.quote_number) : null,
+          Number(r.anno) || new Date().getFullYear(),
+          r.data || new Date().toISOString().split("T")[0],
+          r.stato || "bozza",
+          dataJson.client_id || null,
+          r.cliente || "",
+          dataJson.client_address || null,
+          dataJson.client_city || null,
+          dataJson.client_postal_code || null,
+          dataJson.client_province || null,
+          dataJson.client_vat || null,
+          dataJson.client_fiscal_code || null,
+          dataJson.client_sdi || null,
+          dataJson.client_pec || null,
+          JSON.stringify(dataJson.client_phones || []),
+          dataJson.destination_name || null,
+          dataJson.destination_address || null,
+          dataJson.destination_city || null,
+          r.oggetto || "",
+          String(r.sconto_globale_pct || "0"),
+          Number(r.validita_giorni) || 30,
+          r.pagamento || null,
+          r.data_consegna || null,
+          dataJson.delivery_terms || null,
+          dataJson.default_supplier || null,
+          dataJson.internal_notes || null,
+          dataJson.customer_notes || null,
+          Math.round((Number(r.totale_imponibile) || 0) * 100000),
+          Math.round((Number(r.totale_iva) || 0) * 100000),
+          Math.round((Number(r.totale_documento) || 0) * 100000),
+          Math.round((Number(r.totale_costo) || 0) * 100000),
+          Math.round((Number(r.totale_profitto) || 0) * 100000),
+          r.created_at || new Date().toISOString(),
+          r.updated_at || new Date().toISOString(),
+          r.updated_by || "supabase",
+          r.deleted_at || null,
+        ]
+      );
+
+      if (items.length > 0) {
+        await syncQuoteItemsIntoDb(db, r.id, items, r.created_at || new Date().toISOString(), r.updated_at || new Date().toISOString());
+      }
+      return true;
+    } catch (err) {
+      console.warn("[QuoteSyncService] Errore pullQuoteById:", err);
+      return false;
     }
   }
 

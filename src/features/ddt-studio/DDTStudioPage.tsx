@@ -339,11 +339,12 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   }, []);
 
   const handleDescriptionEditingStopped = useCallback(() => {
-    // Se la cella descrizione si chiude normalmente (Enter, Tab, click fuori), resetta il testo di ricerca
+    // Se il pannello cerca articoli è aperto, mantieni il testo digitato così l'utente può esplorare e cliccare
+    if (isSearchModalOpen) return;
     if (!isF3NavigatingRef.current) {
       setSearchQuery("");
     }
-  }, []);
+  }, [isSearchModalOpen]);
 
   const [searchPanelWidth, setSearchPanelWidth] = useState<number>(() => {
     if (typeof window !== "undefined") {
@@ -885,20 +886,36 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     purchase_price?: number;
     vat_rate?: number;
   }) => {
+    let insertedIdx = -1;
     setItems((prev) => {
       const copy = [...prev];
+      const isUnfilledRow = (row: DdtItem) => {
+        const hasCode = Boolean(row.code && row.code.trim().length > 0);
+        const hasPrice = isPositivePrice(row.unit_price) || isPositivePrice(row.purchase_price);
+        const hasQty = Boolean(row.quantity && row.quantity.trim().length > 0 && row.quantity.trim() !== "0");
+        if (hasCode || hasPrice || hasQty) return false;
+        if (!row.description || !row.description.trim()) return true;
+        if (searchQuery && row.description.trim().toUpperCase() === searchQuery.trim().toUpperCase()) return true;
+        return false;
+      };
+
+      let targetIdx = -1;
       const activeIdx = activeRowIndexRef.current;
-      let targetIdx = activeIdx !== null && activeIdx >= 0 && activeIdx < copy.length ? activeIdx : -1;
-      if (targetIdx === -1) {
-        targetIdx = copy.findIndex(
-          (it) => !it.description?.trim().length && !isPositivePrice(it.unit_price)
-        );
+      if (activeIdx !== null && activeIdx >= 0 && activeIdx < copy.length && isUnfilledRow(copy[activeIdx])) {
+        targetIdx = activeIdx;
+      } else {
+        const startSearch = activeIdx !== null && activeIdx >= 0 ? activeIdx : 0;
+        targetIdx = copy.findIndex((it, idx) => idx >= startSearch && isUnfilledRow(it));
+        if (targetIdx === -1) {
+          targetIdx = copy.findIndex(isUnfilledRow);
+        }
       }
       if (targetIdx === -1) targetIdx = 0;
+      insertedIdx = targetIdx;
 
       const price = money(article.unit_price || 0);
       const purchasePrice = money(article.purchase_price || 0);
-      const q = article.quantity || "1";
+      const q = String(article.quantity || "1").trim() || "1";
 
       let effectivePrice = price;
       const markupClean = globalMarkup.trim().replace("%", "").replace(",", ".");
@@ -912,6 +929,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
       copy[targetIdx] = {
         ...copy[targetIdx],
+        row_kind: "item",
         code: article.code || "",
         description: (article.description || "").toUpperCase(),
         unit: article.unit || "NR",
@@ -926,10 +944,17 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         purchase_price: purchasePrice,
       };
 
+      activeRowIndexRef.current = Math.min(targetIdx + 1, copy.length - 1);
       return copy;
     });
 
-    setSearchQuery("");
+    if (insertedIdx >= 0) {
+      const nextIdx = insertedIdx + 1;
+      setTimeout(() => {
+        tableRef.current?.focusCell(nextIdx, "description", false);
+      }, 50);
+    }
+
     showToast(`Inserito: ${article.description}`);
   };
 
@@ -1227,6 +1252,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                     onDescriptionEditingStopped={handleDescriptionEditingStopped}
                     onActiveRowChange={handleActiveRowChange}
                     onActiveCellChange={handleActiveCellChange}
+                    isSearchModalOpen={isSearchModalOpen}
+                    onFocusSearchModal={() => setF3FocusTrigger((p) => p + 1)}
                   />
                 </div>
 

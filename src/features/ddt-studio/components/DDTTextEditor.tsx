@@ -30,7 +30,6 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const isDescCol = colId === "description" || colId === "descrizione";
   const isSupplierCol = colId === "supplier" || colId === "fornitore";
   const cellParams = props.colDef?.cellEditorParams || {};
-  const datalistId = isSupplierCol ? (cellParams.datalistId || "quote-suppliers-autocomplete") : undefined;
   const onDescriptionTyping: ((val: string) => void) | undefined = (props as any).onDescriptionTyping ?? cellParams.onDescriptionTyping;
 
   let startValue = "";
@@ -104,6 +103,11 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
         list.push(upperStr);
       }
     });
+
+    // Se per la colonna fornitore sono fornite opzioni esplicite dall'anagrafica, usa SOLO quelle ufficiali
+    if (isSupplierCol && extraOptions.length > 0) {
+      return list;
+    }
 
     const aboveNodes: any[] = [];
     const belowNodes: any[] = [];
@@ -203,7 +207,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     if (inputRef.current) {
       inputRef.current.focus();
 
-      if (!isSupplierCol && isTypedChar && startValue.trim().length >= 1) {
+      if (isTypedChar && startValue.trim().length >= 1) {
         const query = startValue.toUpperCase();
         const bestMatch = candidates.find((c) => c.toUpperCase().startsWith(query));
 
@@ -240,7 +244,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
       onDescriptionTyping(nextVal);
     }
 
-    if (!isDescCol && !isSupplierCol && isForwardTyping && nextVal.trim().length >= 1) {
+    if (!isDescCol && isForwardTyping && nextVal.trim().length >= 1) {
       const query = nextVal.toUpperCase();
       const bestMatch = candidates.find((c) => c.toUpperCase().startsWith(query));
 
@@ -259,16 +263,22 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     }
 
     setValue(nextVal);
-    setShowSuggestions(!isDescCol && !isSupplierCol && nextVal.trim().length >= 1 && matchedSuggestions.length > 0);
+    setShowSuggestions(!isDescCol && nextVal.trim().length >= 1 && matchedSuggestions.length > 0);
     setSelectedSuggestionIdx(-1);
   };
 
-  const applySuggestion = (suggestedText: string) => {
-    setValue(suggestedText);
+  const applySuggestion = (suggestedText: string, shouldCommit: boolean = false) => {
+    const finalVal = isUppercaseCol && typeof suggestedText === "string" ? suggestedText.toUpperCase() : suggestedText;
+    setValue(finalVal);
     setShowSuggestions(false);
-    if (inputRef.current) {
+    if (props.node && colId) {
+      props.node.setDataValue(colId, finalVal);
+    }
+    if (shouldCommit) {
+      props.api?.stopEditing(false);
+    } else if (inputRef.current) {
       inputRef.current.focus();
-      const len = suggestedText.length;
+      const len = finalVal.length;
       inputRef.current.setSelectionRange(len, len);
     }
   };
@@ -336,21 +346,39 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
         setSelectedSuggestionIdx((prev) => (prev > 0 ? prev - 1 : matchedSuggestions.length - 1));
         return;
       }
-      if (e.key === "Tab" || (e.key === "Enter" && selectedSuggestionIdx >= 0)) {
-        if (selectedSuggestionIdx >= 0 && selectedSuggestionIdx < matchedSuggestions.length) {
-          e.preventDefault();
-          e.stopPropagation();
-          applySuggestion(matchedSuggestions[selectedSuggestionIdx]);
-          return;
-        }
-      }
     }
 
-    // 1. Tasto Tab / Shift+Tab (movimento orizzontale a capo stile Excel)
+    // 1. Tasto Tab / Shift+Tab (movimento orizzontale a capo stile Excel o focus verso ricerca articoli)
     if (e.key === "Tab") {
+      let finalVal = value;
+      if (showSuggestions && selectedSuggestionIdx >= 0 && selectedSuggestionIdx < matchedSuggestions.length) {
+        finalVal = matchedSuggestions[selectedSuggestionIdx];
+        setValue(finalVal);
+      }
+
       e.preventDefault();
       e.stopPropagation();
       setShowSuggestions(false);
+
+      if (props.node && colId) {
+        props.node.setDataValue(colId, isUppercaseCol && typeof finalVal === "string" ? finalVal.toUpperCase() : finalVal);
+      }
+
+      // Se siamo sulla colonna descrizione ed è aperto il pannello cerca articoli, con TAB ci spostiamo direttamente su di esso
+      const searchContainer = document.getElementById("ddt-search-modal-container");
+      if (!e.shiftKey && isDescCol && (cellParams.isSearchModalOpen || searchContainer)) {
+        props.api?.stopEditing(false);
+        props.api?.clearFocusedCell?.();
+        setTimeout(() => {
+          cellParams.onFocusSearchModal?.();
+          const target =
+            (document.querySelector("#ddt-search-modal-container [data-list-container='true']") as HTMLElement) ||
+            document.getElementById("ddt-search-modal-container");
+          target?.focus();
+        }, 50);
+        return;
+      }
+
       props.api?.stopEditing(false);
 
       const displayed = props.api?.getAllDisplayedColumns ? props.api.getAllDisplayedColumns() : [];
@@ -402,17 +430,20 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
 
     // 2. Tasto Invio / Shift+Invio (conferma e scende/sale di riga stile Excel)
     if (e.key === "Enter") {
+      let finalVal = value;
       if (showSuggestions && selectedSuggestionIdx >= 0 && selectedSuggestionIdx < matchedSuggestions.length) {
-        e.preventDefault();
-        e.stopPropagation();
-        applySuggestion(matchedSuggestions[selectedSuggestionIdx]);
-        return;
+        finalVal = matchedSuggestions[selectedSuggestionIdx];
+        setValue(finalVal);
       }
 
       e.preventDefault();
       e.stopPropagation();
       e.nativeEvent?.stopImmediatePropagation?.();
       setShowSuggestions(false);
+
+      if (props.node && colId) {
+        props.node.setDataValue(colId, isUppercaseCol && typeof finalVal === "string" ? finalVal.toUpperCase() : finalVal);
+      }
       props.api?.stopEditing(false);
 
       const currentColId = props.column.getColId();
@@ -441,6 +472,13 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
 
     // 3. Frecce Su / Giù
     if (e.key === "ArrowDown" && !showSuggestions) {
+      if (isSupplierCol && candidates.length > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowSuggestions(true);
+        setSelectedSuggestionIdx(0);
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       props.api?.stopEditing(false);
@@ -539,7 +577,6 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
       <input
         ref={inputRef}
         type="text"
-        list={datalistId}
         value={value}
         maxLength={undefined}
         onChange={handleInputChange}
@@ -563,15 +600,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
         }}
       />
 
-      {isSupplierCol && candidates.length > 0 && (
-        <datalist id={datalistId}>
-          {candidates.map((s) => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
-      )}
-
-      {!isSupplierCol && showSuggestions && matchedSuggestions.length > 0 && (
+      {showSuggestions && matchedSuggestions.length > 0 && (
         <div
           onMouseDown={(e) => {
             // Evita che il click sulla scrollbar o nel popup tolga il focus all'input
@@ -634,7 +663,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
                   key={idx}
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    applySuggestion(item);
+                    applySuggestion(item, true);
                   }}
                   onMouseEnter={() => setSelectedSuggestionIdx(idx)}
                   style={{

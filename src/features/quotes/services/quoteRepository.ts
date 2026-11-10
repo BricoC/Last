@@ -62,15 +62,41 @@ export class QuoteRepository {
 
   public async getQuoteById(id: string): Promise<Quote | null> {
     const db = await getDatabase();
-    const quotes = await db.select<QuoteRow[]>(
+    let quotes = await db.select<QuoteRow[]>(
       "SELECT * FROM quotes WHERE id = $1 AND deleted_at IS NULL",
       [id]
     );
+    if (!quotes[0]) {
+      try {
+        await QuoteSyncService.pullQuoteById(id);
+      } catch (err) {
+        console.warn("[QuoteRepository] pullQuoteById non riuscito:", err);
+      }
+      quotes = await db.select<QuoteRow[]>(
+        "SELECT * FROM quotes WHERE id = $1 AND deleted_at IS NULL",
+        [id]
+      );
+    }
     if (!quotes[0]) return null;
-    const rows = await db.select<QuoteItemRow[]>(
+
+    let rows = await db.select<QuoteItemRow[]>(
       "SELECT * FROM quote_items WHERE quote_id = $1 AND deleted_at IS NULL ORDER BY row_index ASC",
       [id]
     );
+
+    // Se in locale non ci sono righe attive, tenta il recupero immediato da Supabase Cloud
+    if (rows.length === 0) {
+      try {
+        await QuoteSyncService.pullQuoteById(id);
+      } catch (err) {
+        console.warn("[QuoteRepository] pullQuoteById per righe vuote non riuscito:", err);
+      }
+      rows = await db.select<QuoteItemRow[]>(
+        "SELECT * FROM quote_items WHERE quote_id = $1 AND deleted_at IS NULL ORDER BY row_index ASC",
+        [id]
+      );
+    }
+
     return this.mapQuote(quotes[0], rows.map(this.mapItem));
   }
 
