@@ -195,4 +195,12 @@ button, a, [role="button"], .cursor-pointer {
   }
 }
 
+/* Stile per selezione multi-cella stile Excel (sia DDT Studio che Preventivi) */
+.ag-theme-alpine .ag-cell.custom-range-selected,
+.ag-theme-alpine-dark .ag-cell.custom-range-selected,
+.custom-range-selected {
+  background-color: rgba(56, 189, 248, 0.22) !important;
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.75) !important;
+}
+
 

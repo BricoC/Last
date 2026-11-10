@@ -5,6 +5,7 @@ import { Trash2 } from "lucide-react";
 import { money } from "@/shared/domain/monetaryValue";
 import DDTTextEditor from "@/features/ddt-studio/components/DDTTextEditor";
 import type { QuoteDraftItem } from "../models/quoteDraft";
+import { isCellInRange, parseTsv, formatTsv, normalizeExcelRowCells, type CellRange } from "@/shared/utils/gridClipboardHelper";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 
@@ -26,6 +27,65 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
     ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct", "base_unit_price"] : []),
     "unit", "quantity", "description", "unit_price", "discount_pct", "availability", "vat_rate",
   ], [alexMode]);
+
+  const allVisibleCols = useMemo(() => [
+    ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct", "base_unit_price"] : []),
+    "unit", "quantity", "description", "unit_price", "discount_pct", "net_amount", "availability", "vat_rate",
+  ], [alexMode]);
+
+  const isMouseDownRef = useRef(false);
+  const selectionRangeRef = useRef<CellRange | null>(null);
+
+  useEffect(() => {
+    const onGlobalMouseUp = () => {
+      isMouseDownRef.current = false;
+    };
+    window.addEventListener("mouseup", onGlobalMouseUp);
+    return () => window.removeEventListener("mouseup", onGlobalMouseUp);
+  }, []);
+
+  const handleCellMouseDown = useCallback((e: any) => {
+    if (window.__isDDTCellEditing) return;
+    if (!e.event || e.event.button !== 0) return;
+    const colId = e.column?.getColId();
+    const rowIndex = e.rowIndex;
+    if (rowIndex === null || rowIndex === undefined || !colId || colId === "delete" || colId === "row_index") return;
+
+    if (e.event.shiftKey && selectionRangeRef.current) {
+      selectionRangeRef.current = {
+        start: selectionRangeRef.current.start,
+        end: { rowIndex, colId },
+      };
+      gridRef.current?.api?.refreshCells({ force: true });
+    } else {
+      isMouseDownRef.current = true;
+      selectionRangeRef.current = {
+        start: { rowIndex, colId },
+        end: { rowIndex, colId },
+      };
+      gridRef.current?.api?.refreshCells({ force: true });
+    }
+  }, []);
+
+  const handleCellMouseOver = useCallback((e: any) => {
+    if (!isMouseDownRef.current || window.__isDDTCellEditing) return;
+    const colId = e.column?.getColId();
+    const rowIndex = e.rowIndex;
+    if (rowIndex === null || rowIndex === undefined || !colId || colId === "delete" || colId === "row_index") return;
+
+    if (selectionRangeRef.current) {
+      if (
+        selectionRangeRef.current.end.rowIndex !== rowIndex ||
+        selectionRangeRef.current.end.colId !== colId
+      ) {
+        selectionRangeRef.current = {
+          start: selectionRangeRef.current.start,
+          end: { rowIndex, colId },
+        };
+        gridRef.current?.api?.refreshCells({ force: true });
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const focusFirstRow = (event: KeyboardEvent) => {
@@ -75,6 +135,9 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
     (startRowIndex: number, startColId: string, clipText: string) => {
       if (!clipText || startRowIndex < 0) return;
 
+      const matrix = parseTsv(clipText);
+      if (matrix.length === 0) return;
+
       const editableColsOrder = [
         ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct", "base_unit_price"] : []),
         "unit",
@@ -89,27 +152,35 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
       const startColIdx = editableColsOrder.indexOf(startColId);
       if (startColIdx === -1) return;
 
-      const lines = clipText
-        .split(/\r?\n/)
-        .filter((l, idx, arr) => idx < arr.length - 1 || l.length > 0);
-      if (lines.length === 0) return;
-
       const updated = [...items];
       let hasChanges = false;
 
-      lines.forEach((line, lineOffset) => {
+      matrix.forEach((cellsRaw, lineOffset) => {
+        const cells = normalizeExcelRowCells(cellsRaw, startColIdx, editableColsOrder);
         const targetRowIndex = startRowIndex + lineOffset;
-        if (targetRowIndex >= updated.length) return;
+        while (targetRowIndex >= updated.length) {
+          updated.push({
+            description: "",
+            code: "",
+            unit: "NR",
+            quantity: "",
+            purchase_price: "0",
+            markup_pct: 0,
+            base_unit_price: "",
+            forced_unit_price: "",
+            discount_pct: 0,
+            vat_rate: 22,
+          });
+        }
 
-        const cells = line.split("\t");
         const targetRow = { ...updated[targetRowIndex] };
 
-        cells.forEach((cellRaw, cellOffset) => {
+        cells.forEach((cellVal, cellOffset) => {
           const targetColIdx = startColIdx + cellOffset;
           if (targetColIdx >= editableColsOrder.length) return;
 
           const colId = editableColsOrder[targetColIdx];
-          const val = cellRaw.trim();
+          const val = cellVal.trim();
 
           if (colId === "supplier") {
             targetRow.supplier = val.toUpperCase();
@@ -164,6 +235,7 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
 
       if (hasChanges) {
         onReorder(updated);
+        selectionRangeRef.current = null;
         if (gridRef.current?.api) {
           setTimeout(() => {
             gridRef.current?.api?.refreshCells({ force: true });
@@ -195,46 +267,116 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
     const isCtrlOrMeta = keyEvent.ctrlKey || keyEvent.metaKey;
     const keyLower = keyEvent.key.toLowerCase();
 
-    // COPIA: Ctrl+C sulla cella attiva (copia valore testuale pulito per poterlo incollare in altre celle)
+    // 1. Shift + Frecce: espansione della selezione a intervallo rettangolare stile Excel
+    if (
+      keyEvent.shiftKey &&
+      (keyEvent.key === "ArrowDown" ||
+        keyEvent.key === "ArrowUp" ||
+        keyEvent.key === "ArrowLeft" ||
+        keyEvent.key === "ArrowRight") &&
+      !window.__isDDTCellEditing
+    ) {
+      keyEvent.preventDefault();
+      const focusedCell = gridRef.current?.api?.getFocusedCell();
+      if (!focusedCell) return;
+      const colId =
+        typeof focusedCell.column === "string"
+          ? focusedCell.column
+          : focusedCell.column.getColId();
+      const currentRange = selectionRangeRef.current || {
+        start: { rowIndex: focusedCell.rowIndex, colId },
+        end: { rowIndex: focusedCell.rowIndex, colId },
+      };
+
+      let nextRow = currentRange.end.rowIndex;
+      let nextColId = currentRange.end.colId;
+      const currentColIdx = allVisibleCols.indexOf(nextColId);
+
+      if (keyEvent.key === "ArrowDown") {
+        nextRow = Math.min(items.length - 1, nextRow + 1);
+      } else if (keyEvent.key === "ArrowUp") {
+        nextRow = Math.max(0, nextRow - 1);
+      } else if (keyEvent.key === "ArrowRight" && currentColIdx !== -1) {
+        const nextIdx = Math.min(allVisibleCols.length - 1, currentColIdx + 1);
+        nextColId = allVisibleCols[nextIdx];
+      } else if (keyEvent.key === "ArrowLeft" && currentColIdx !== -1) {
+        const prevIdx = Math.max(0, currentColIdx - 1);
+        nextColId = allVisibleCols[prevIdx];
+      }
+
+      selectionRangeRef.current = {
+        start: currentRange.start,
+        end: { rowIndex: nextRow, colId: nextColId },
+      };
+      gridRef.current?.api?.ensureIndexVisible(nextRow, null);
+      gridRef.current?.api?.refreshCells({ force: true });
+      return;
+    }
+
+    // 2. Frecce senza Shift o Escape: reset selezione range
+    if (
+      !keyEvent.shiftKey &&
+      (keyEvent.key === "ArrowDown" ||
+        keyEvent.key === "ArrowUp" ||
+        keyEvent.key === "ArrowLeft" ||
+        keyEvent.key === "ArrowRight" ||
+        keyEvent.key === "Escape") &&
+      !window.__isDDTCellEditing
+    ) {
+      if (
+        selectionRangeRef.current &&
+        (selectionRangeRef.current.start.rowIndex !== selectionRangeRef.current.end.rowIndex ||
+          selectionRangeRef.current.start.colId !== selectionRangeRef.current.end.colId)
+      ) {
+        selectionRangeRef.current = null;
+        gridRef.current?.api?.refreshCells({ force: true });
+      }
+    }
+
+    // 3. COPIA: Ctrl+C singola cella o intervallo multi-cella compatibile Excel (TSV)
     if (isCtrlOrMeta && keyLower === "c" && !window.__isDDTCellEditing) {
+      keyEvent.preventDefault();
+      const range = selectionRangeRef.current;
+
+      if (
+        range &&
+        (range.start.rowIndex !== range.end.rowIndex ||
+          range.start.colId !== range.end.colId)
+      ) {
+        const minRow = Math.min(range.start.rowIndex, range.end.rowIndex);
+        const maxRow = Math.max(range.start.rowIndex, range.end.rowIndex);
+        const startColIdx = allVisibleCols.indexOf(range.start.colId);
+        const endColIdx = allVisibleCols.indexOf(range.end.colId);
+
+        if (startColIdx !== -1 && endColIdx !== -1) {
+          const minCol = Math.min(startColIdx, endColIdx);
+          const maxCol = Math.max(startColIdx, endColIdx);
+          const matrix: string[][] = [];
+
+          for (let r = minRow; r <= maxRow; r++) {
+            const rowNode = gridRef.current?.api?.getDisplayedRowAtIndex(r);
+            const row = rowNode?.data;
+            if (!row) continue;
+            const rowCells: string[] = [];
+            for (let c = minCol; c <= maxCol; c++) {
+              const cid = allVisibleCols[c];
+              rowCells.push(extractQuoteCellValue(row, cid, globalDiscount));
+            }
+            matrix.push(rowCells);
+          }
+
+          if (matrix.length > 0) {
+            void navigator.clipboard.writeText(formatTsv(matrix));
+          }
+          return;
+        }
+      }
+
+      // Fallback su cella singola attiva
       const colId = event.column?.getColId();
       const rowData = event.node?.data;
       if (rowData && colId) {
-        keyEvent.preventDefault();
-        let textToCopy = "";
-        if (colId === "purchase_price") {
-          const m = money(rowData.purchase_price || 0);
-          textToCopy = m.isZero() ? "" : m.formatIT(false);
-        } else if (colId === "base_unit_price") {
-          const m = calculateBase(rowData);
-          textToCopy = m.isZero() ? "" : m.formatIT(false);
-        } else if (colId === "unit_price" || colId === "forced_unit_price") {
-          const m = calculateEffectivePrice(rowData, globalDiscount);
-          textToCopy = m.isZero() ? "" : m.formatIT(false);
-        } else if (colId === "net_amount") {
-          const m = calculateAmount(rowData, globalDiscount);
-          textToCopy = m.isZero() ? "" : m.formatIT(false);
-        } else if (colId === "markup_pct") {
-          textToCopy = rowData.markup_pct !== null && rowData.markup_pct !== undefined ? String(rowData.markup_pct) : "";
-        } else if (colId === "discount_pct") {
-          textToCopy = rowData.discount_pct ? String(rowData.discount_pct) : "";
-        } else if (colId === "vat_rate") {
-          textToCopy = rowData.vat_rate ? String(rowData.vat_rate) : "";
-        } else if (colId === "unit") {
-          textToCopy = rowData.unit || "";
-        } else if (colId === "quantity") {
-          textToCopy = String(rowData.quantity ?? "");
-        } else if (colId === "description") {
-          textToCopy = rowData.description || "";
-        } else if (colId === "supplier") {
-          textToCopy = rowData.supplier || "";
-        } else if (colId === "supplier_item_code") {
-          textToCopy = rowData.supplier_item_code || "";
-        } else if (colId === "availability") {
-          textToCopy = rowData.availability || "";
-        } else {
-          textToCopy = String((rowData as any)[colId] ?? "");
-        }
+        const textToCopy = extractQuoteCellValue(rowData, colId, globalDiscount);
         try {
           void navigator.clipboard.writeText(textToCopy);
         } catch (err) {
@@ -244,7 +386,7 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
       return;
     }
 
-    // INCOLLA: Ctrl+V sulla cella attiva
+    // 4. INCOLLA: Ctrl+V sulla cella attiva (singola o multi-cella/colonna da Excel)
     if (isCtrlOrMeta && keyLower === "v" && !window.__isDDTCellEditing) {
       if (event.column?.isCellEditable(event.node)) {
         keyEvent.preventDefault();
@@ -299,15 +441,64 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
       .quote-items-grid .quote-cost-cell { background:var(--grid-sheet-acquisition); color:var(--grid-sheet-cost-text); font-weight:700; }
     `}</style>
     <AgGridReact<QuoteGridRow> ref={gridRef} rowData={rowData} getRowId={(params) => params.data.id || String(params.data.row_index)}
-      columnDefs={columnDefs} defaultColDef={{ resizable: true, sortable: false, filter: false, headerClass: "select-none" }}
+      columnDefs={columnDefs}
+      defaultColDef={{
+        resizable: true,
+        sortable: false,
+        filter: false,
+        headerClass: "select-none",
+        cellClassRules: {
+          "custom-range-selected": (params) =>
+            isCellInRange(params.rowIndex, params.column?.getColId(), selectionRangeRef.current, allVisibleCols),
+        },
+      }}
+      onCellMouseDown={handleCellMouseDown}
+      onCellMouseOver={handleCellMouseOver}
       rowDragManaged onRowDragEnd={handleRowDragEnd} animateRows suppressScrollOnNewData
       rowHeight={34} headerHeight={36} stopEditingWhenCellsLoseFocus
       enterNavigatesVertically enterNavigatesVerticallyAfterEdit tabToNextCell={tabToNextCell}
       navigateToNextCell={navigateToNextCell} onCellValueChanged={handleCellChanged} onCellKeyDown={handleKeyDown}
-      onCellEditingStarted={() => { window.__isDDTCellEditing = true; }}
+      onCellEditingStarted={() => { window.__isDDTCellEditing = true; selectionRangeRef.current = null; }}
       onCellEditingStopped={() => { window.setTimeout(() => { window.__isDDTCellEditing = false; }, 200); }}
       suppressMovableColumns />
   </div>;
+}
+
+function extractQuoteCellValue(rowData: QuoteGridRow, colId: string, globalDiscount: number): string {
+  if (colId === "purchase_price") {
+    const m = money(rowData.purchase_price || 0);
+    return m.isZero() ? "" : m.formatIT(false);
+  } else if (colId === "base_unit_price") {
+    const m = calculateBase(rowData);
+    return m.isZero() ? "" : m.formatIT(false);
+  } else if (colId === "unit_price" || colId === "forced_unit_price") {
+    const m = calculateEffectivePrice(rowData, globalDiscount);
+    return m.isZero() ? "" : m.formatIT(false);
+  } else if (colId === "net_amount") {
+    const m = calculateAmount(rowData, globalDiscount);
+    return m.isZero() ? "" : m.formatIT(false);
+  } else if (colId === "markup_pct") {
+    return rowData.markup_pct !== null && rowData.markup_pct !== undefined && Number(rowData.markup_pct) !== 0
+      ? String(rowData.markup_pct)
+      : "";
+  } else if (colId === "discount_pct") {
+    return rowData.discount_pct ? String(rowData.discount_pct) : "";
+  } else if (colId === "vat_rate") {
+    return rowData.vat_rate ? String(rowData.vat_rate) : "";
+  } else if (colId === "unit") {
+    return rowData.unit || "";
+  } else if (colId === "quantity") {
+    return String(rowData.quantity ?? "");
+  } else if (colId === "description") {
+    return rowData.description || "";
+  } else if (colId === "supplier") {
+    return rowData.supplier || "";
+  } else if (colId === "supplier_item_code") {
+    return rowData.supplier_item_code || "";
+  } else if (colId === "availability") {
+    return rowData.availability || "";
+  }
+  return String((rowData as any)[colId] ?? "");
 }
 
 function createColumns(
