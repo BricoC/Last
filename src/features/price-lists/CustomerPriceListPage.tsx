@@ -12,7 +12,6 @@ import {
   RefreshCw,
   X,
   ArrowUpDown,
-  Tag,
   AlertCircle,
   Filter,
   Save,
@@ -1034,39 +1033,48 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         ))}
       </datalist>
 
-      {/* Barra Superiore / Toolbar */}
-      <div className="p-3 border-b border-[var(--border)] bg-[var(--card)] flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20">
-            <Tag className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-base font-bold text-[var(--foreground)]">Listini Clienti</h1>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[var(--accent)] text-[var(--foreground)] border border-[var(--border)]">
-                {filteredItems.length} di {totalDbCount} voci
-              </span>
-            </div>
-            <p className="text-[11px] text-[var(--muted-foreground)] flex items-center gap-2">
-              {unsavedCount > 0 ? (
-                <span className="text-amber-400 font-semibold flex items-center gap-1 animate-pulse">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  {unsavedCount} {unsavedCount === 1 ? "modifica non salvata" : "modifiche non salvate"}
-                </span>
-              ) : lastSavedTime ? (
-                <span className="text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Salvato {formatDateTime(lastSavedTime)}
-                </span>
-              ) : (
-                "Pronto. Modifica le celle direttamente in stile Excel."
-              )}
-            </p>
-          </div>
+      {/* Toolbar Unificata (1 riga con tutto, stile pulito Listino Generale) */}
+      <div className="p-2.5 border-b border-[var(--border)] bg-[var(--card)] flex items-center space-x-2.5 shrink-0">
+        {/* Ricerca F4 a sinistra - flex-1 a tutta larghezza */}
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="w-4 h-4 text-[var(--muted-foreground)] absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={search}
+            onFocus={() => setActiveCell(null)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setVisibleCount(BATCH_SIZE);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const q = search.trim().toLowerCase();
+                if (q === "glory to mankind" || q === "glory of mankind" || q === "gloria all'umanita" || q === "gloria all'umanità") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.nativeEvent?.stopImmediatePropagation?.();
+                  setSearch("");
+                  triggerNier();
+                }
+              }
+            }}
+            placeholder="Cerca cliente, fornitore, descrizione, codice... (F4)"
+            className="w-full pl-9 pr-8 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-medium"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        {/* Controlli Destra: Cestino, Colonne, Annulla, Salva */}
-        <div className="flex items-center space-x-2">
+        {/* Controlli e Filtri a destra */}
+        <div className="flex items-center space-x-2 text-xs shrink-0">
           {/* Cestino */}
           <button
             type="button"
@@ -1096,7 +1104,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             type="button"
             onClick={() => void loadData()}
             disabled={loading || isSaving}
-            className="p-1.5 rounded-md border border-[var(--border)] hover:bg-[var(--accent)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
+            className="p-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
             title="Ricarica da database"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -1133,28 +1141,44 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             </div>
           )}
 
-          {/* Salva Modifiche */}
+          {/* Salva Modifiche / Salvato (Stile Listino Generale) */}
           {canEdit && (
             <button
               type="button"
               onClick={() => void saveAllPendingChanges()}
               disabled={unsavedCount === 0 || isSaving}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all shadow-sm ${
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold shadow-xs transition-colors ${
                 unsavedCount > 0
-                  ? "bg-amber-500 hover:bg-amber-600 text-black cursor-pointer animate-pulse"
-                  : "bg-[var(--muted)] text-[var(--muted-foreground)] opacity-50 cursor-not-allowed"
+                  ? "bg-amber-500 hover:bg-amber-600 text-black cursor-pointer animate-pulse font-bold"
+                  : "bg-[var(--background)] border border-[var(--border)] text-[var(--muted-foreground)] opacity-70 cursor-default"
               }`}
+              title={
+                unsavedCount > 0
+                  ? `Salva ${unsavedCount} modifiche`
+                  : lastSavedTime
+                  ? `Salvato ${formatDateTime(lastSavedTime)}`
+                  : "Tutte le modifiche sono salvate"
+              }
             >
-              <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
-              <span>{isSaving ? "Salvataggio..." : `Salva Modifiche ${unsavedCount > 0 ? `(${unsavedCount})` : ""}`}</span>
+              {isSaving ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Salvataggio...</span>
+                </>
+              ) : unsavedCount > 0 ? (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Salva Modifiche ({unsavedCount})</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Salvato</span>
+                </>
+              )}
             </button>
           )}
-        </div>
-      </div>
 
-      {/* Barra Filtri: Selezione Cliente (con Dark Mode compatibile) + Ricerca F4 + Tab */}
-      <div className="p-2.5 border-b border-[var(--border)] bg-[var(--background)] flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
-        <div className="flex items-center space-x-2">
           {/* Tendina Clienti Custom con tema scuro e ricerca integrata */}
           <div className="relative" ref={clientDropdownRef}>
             <button
@@ -1166,7 +1190,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
               className="flex items-center space-x-2 bg-[#181a20] hover:bg-[#20242c] px-2.5 py-1.5 rounded-md border border-[var(--border)] shadow-xs text-xs font-semibold text-gray-200 transition-colors"
             >
               <Filter className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <span className="truncate max-w-[200px]">
+              <span className="truncate max-w-[160px]">
                 {selectedClientFilter === "TUTTI"
                   ? `TUTTI I CLIENTI (${distinctClients.length})`
                   : selectedClientFilter}
@@ -1175,7 +1199,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             </button>
 
             {isClientDropdownOpen && (
-              <div className="absolute left-0 mt-1 w-80 bg-[#16181e] border border-[var(--border)] rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute right-0 mt-1 w-80 bg-[#16181e] border border-[var(--border)] rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
                 {/* Input di ricerca rapida */}
                 <div className="p-2 border-b border-[var(--border)]/70 bg-[#121418]">
                   <div className="relative">
@@ -1249,7 +1273,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
           </div>
 
           {/* Tab */}
-          <div className="flex items-center bg-[var(--card)] p-0.5 rounded-md border border-[var(--border)]">
+          <div className="flex items-center bg-[var(--background)] p-0.5 rounded-md border border-[var(--border)]">
             <button
               type="button"
               onClick={() => setActiveTab("tutti")}
@@ -1284,41 +1308,13 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
               Senza Prezzo
             </button>
           </div>
-        </div>
 
-        {/* Ricerca F4 */}
-        <div className="relative min-w-[260px] max-w-sm flex-1">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" />
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={search}
-            onFocus={() => setActiveCell(null)}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const q = search.trim().toLowerCase();
-                if (q === "glory to mankind" || q === "glory of mankind" || q === "gloria all'umanita" || q === "gloria all'umanità") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.nativeEvent?.stopImmediatePropagation?.();
-                  setSearch("");
-                  triggerNier();
-                }
-              }
-            }}
-            placeholder="Cerca cliente, fornitore, descrizione, codice... (F4)"
-            className="w-full pl-8 pr-7 py-1 text-xs bg-[var(--card)] border border-[var(--border)] rounded-md outline-none text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)]"
-          />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+          {/* Conteggio righe semplice tipo Listino Generale */}
+          <span className="px-2.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] font-semibold text-[var(--primary)] whitespace-nowrap">
+            {filteredItems.length !== totalDbCount
+              ? `Voci: ${filteredItems.length} di ${totalDbCount}`
+              : `Voci: ${totalDbCount}`}
+          </span>
         </div>
       </div>
 
