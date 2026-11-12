@@ -28,6 +28,8 @@ import { isPageAllowedForUser } from "@/shared/services/appUserService";
 import { UserPasswordModal } from "@/shared/components/ui/UserPasswordModal";
 import { DdtBatchExportRunner } from "@/features/ddt-studio/components/DdtBatchExportRunner";
 import { AppUpdaterRunner } from "@/shared/components/updater/AppUpdaterRunner";
+import { IllidanCinematicOverlay } from "@/shared/easter-eggs/IllidanCinematicOverlay";
+import { EasterEggVaultModal } from "@/shared/easter-eggs/EasterEggVaultModal";
 
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 import { checkAndExecuteDailyBackup } from "@/features/settings/services/backupService";
@@ -200,6 +202,10 @@ export function App() {
 
       {/* Runner Controllo & Download Aggiornamenti Automatici in Background */}
       <AppUpdaterRunner />
+
+      {/* Easter Egg Vault & Illidan Cinematic Overlay */}
+      <IllidanCinematicOverlay />
+      <EasterEggVaultModal />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import type { ColDef, ICellRendererParams, RowDragEndEvent } from "ag-grid-commu
 import { Trash2 } from "lucide-react";
 import { money } from "@/shared/domain/monetaryValue";
 import DDTTextEditor from "@/features/ddt-studio/components/DDTTextEditor";
+import { formatCascadeDiscountDisplay } from "@/features/ddt-studio/utils/ddtCalculations";
 import type { QuoteDraftItem } from "../models/quoteDraft";
 import { isCellInRange, parseTsv, formatTsv, normalizeExcelRowCells, type CellRange } from "@/shared/utils/gridClipboardHelper";
 import "ag-grid-community/styles/ag-grid.css";
@@ -24,12 +25,12 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
   const gridRef = useRef<AgGridReact<QuoteGridRow>>(null);
   const rowData = useMemo(() => items.map((item, index) => ({ ...item, row_index: index + 1 })), [items]);
   const activeColumns = useMemo(() => [
-    ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct", "base_unit_price"] : []),
+    ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct"] : []),
     "unit", "quantity", "description", "unit_price", "discount_pct", "availability", "vat_rate",
   ], [alexMode]);
 
   const allVisibleCols = useMemo(() => [
-    ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct", "base_unit_price"] : []),
+    ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct"] : []),
     "unit", "quantity", "description", "unit_price", "discount_pct", "net_amount", "availability", "vat_rate",
   ], [alexMode]);
 
@@ -117,14 +118,24 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
       if (row.base_unit_price) row.markup_pct = calculateMarkup(row.base_unit_price, row.purchase_price);
     }
     else if (field === "markup_pct") {
-      row.markup_pct = parseNumber(value); row.base_unit_price = ""; row.forced_unit_price = "";
-    } else if (field === "base_unit_price") {
-      row.base_unit_price = money(value).toCanonicalString(); row.forced_unit_price = "";
-      row.markup_pct = calculateMarkup(row.base_unit_price, row.purchase_price);
-    } else if (field === "unit_price") {
-      row.forced_unit_price = money(value).toCanonicalString(); row.discount_pct = 0;
+      row.markup_pct = parseNumber(value);
+      row.forced_unit_price = "";
+      const cost = money(row.purchase_price || 0);
+      if (!cost.isZero() && row.markup_pct !== null && row.markup_pct !== undefined) {
+        row.base_unit_price = cost.plus(cost.times(row.markup_pct).dividedBy(100)).toCanonicalString();
+      }
+    } else if (field === "base_unit_price" || field === "unit_price") {
+      row.base_unit_price = money(value).toCanonicalString();
+      row.forced_unit_price = "";
+      if (row.purchase_price && !money(row.purchase_price).isZero()) {
+        row.markup_pct = calculateMarkup(row.base_unit_price, row.purchase_price);
+      }
     } else if (field === "discount_pct") {
-      row.discount_pct = parseNumber(value); row.forced_unit_price = "";
+      row.discount_pct = parseNumber(value);
+      if (!row.base_unit_price && row.forced_unit_price) {
+        row.base_unit_price = row.forced_unit_price;
+      }
+      row.forced_unit_price = "";
     } else if (field === "vat_rate") row.vat_rate = parseVatRate(value);
     else if (field === "quantity") row.quantity = String(value ?? "");
     else if (field === "supplier" || field === "supplier_item_code" || field === "availability") row[field] = String(value ?? "");
@@ -139,7 +150,7 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
       if (matrix.length === 0) return;
 
       const editableColsOrder = [
-        ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct", "base_unit_price"] : []),
+        ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct"] : []),
         "unit",
         "quantity",
         "description",
@@ -196,13 +207,18 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
             hasChanges = true;
           } else if (colId === "markup_pct") {
             targetRow.markup_pct = parseNumber(val);
-            targetRow.base_unit_price = "";
             targetRow.forced_unit_price = "";
+            const cost = money(targetRow.purchase_price || 0);
+            if (!cost.isZero() && targetRow.markup_pct !== null && targetRow.markup_pct !== undefined) {
+              targetRow.base_unit_price = cost.plus(cost.times(targetRow.markup_pct).dividedBy(100)).toCanonicalString();
+            }
             hasChanges = true;
-          } else if (colId === "base_unit_price") {
+          } else if (colId === "base_unit_price" || colId === "unit_price") {
             targetRow.base_unit_price = money(val).toCanonicalString();
             targetRow.forced_unit_price = "";
-            targetRow.markup_pct = calculateMarkup(targetRow.base_unit_price, targetRow.purchase_price);
+            if (targetRow.purchase_price && !money(targetRow.purchase_price).isZero()) {
+              targetRow.markup_pct = calculateMarkup(targetRow.base_unit_price, targetRow.purchase_price);
+            }
             hasChanges = true;
           } else if (colId === "unit") {
             targetRow.unit = val.toUpperCase();
@@ -213,12 +229,11 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
           } else if (colId === "description") {
             targetRow.description = val.toUpperCase();
             hasChanges = true;
-          } else if (colId === "unit_price") {
-            targetRow.forced_unit_price = money(val).toCanonicalString();
-            targetRow.discount_pct = 0;
-            hasChanges = true;
           } else if (colId === "discount_pct") {
             targetRow.discount_pct = parseNumber(val);
+            if (!targetRow.base_unit_price && targetRow.forced_unit_price) {
+              targetRow.base_unit_price = targetRow.forced_unit_price;
+            }
             targetRow.forced_unit_price = "";
             hasChanges = true;
           } else if (colId === "availability") {
@@ -468,11 +483,8 @@ function extractQuoteCellValue(rowData: QuoteGridRow, colId: string, globalDisco
   if (colId === "purchase_price") {
     const m = money(rowData.purchase_price || 0);
     return m.isZero() ? "" : m.formatIT(false);
-  } else if (colId === "base_unit_price") {
+  } else if (colId === "base_unit_price" || colId === "unit_price" || colId === "forced_unit_price") {
     const m = calculateBase(rowData);
-    return m.isZero() ? "" : m.formatIT(false);
-  } else if (colId === "unit_price" || colId === "forced_unit_price") {
-    const m = calculateEffectivePrice(rowData, globalDiscount);
     return m.isZero() ? "" : m.formatIT(false);
   } else if (colId === "net_amount") {
     const m = calculateAmount(rowData, globalDiscount);
@@ -513,11 +525,6 @@ function createColumns(
     { headerName: "RIC.%", field: "markup_pct", colId: "markup_pct", width: 95, editable: true, cellEditor: DDTTextEditor,
       valueFormatter: (params) => isBlankRow(params.data) && !params.value ? "" : `${parseNumber(params.value).toFixed(2)}%`,
       valueParser: (params) => parseNumber(params.newValue), cellStyle: { textAlign: "right" } },
-    { headerName: "BASE €", field: "base_unit_price", colId: "base_unit_price", width: 105, editable: true, cellEditor: DDTTextEditor,
-      valueGetter: (params) => params.data ? calculateBase(params.data).toCanonicalString() : "",
-      valueSetter: (params) => { if (!params.data) return false; params.data.base_unit_price = money(params.newValue).toCanonicalString(); return true; },
-      valueParser: (params) => money(params.newValue).toCanonicalString(),
-      valueFormatter: (params) => formatMoney(params.value), cellStyle: { textAlign: "right" } },
   ] : [];
   return [
     { headerName: "#", field: "row_index", width: 58, minWidth: 50, maxWidth: 68, pinned: "left", rowDrag: true, editable: false,
@@ -527,13 +534,21 @@ function createColumns(
     { ...textColumn("DESCRIZIONE ARTICOLO / PRESTAZIONE", "description", 260, true), flex: 1,
       valueParser: (params) => String(params.newValue ?? "").trim().toUpperCase(),
       valueFormatter: (params) => String(params.value ?? "").toUpperCase() },
-    { headerName: "NETTO €", field: "forced_unit_price", colId: "unit_price", width: 118, editable: true, cellEditor: DDTTextEditor,
-      valueGetter: (params) => params.data ? calculateEffectivePrice(params.data, discount).toCanonicalString() : "",
-      valueSetter: (params) => { if (!params.data) return false; params.data.forced_unit_price = money(params.newValue).toCanonicalString(); params.data.discount_pct = 0; return true; },
+    { headerName: "PREZZO €", field: "base_unit_price", colId: "unit_price", width: 118, editable: true, cellEditor: DDTTextEditor,
+      valueGetter: (params) => params.data ? calculateBase(params.data).toCanonicalString() : "",
+      valueSetter: (params) => {
+        if (!params.data) return false;
+        params.data.base_unit_price = money(params.newValue).toCanonicalString();
+        params.data.forced_unit_price = "";
+        if (params.data.purchase_price && !money(params.data.purchase_price).isZero()) {
+          params.data.markup_pct = calculateMarkup(params.data.base_unit_price, params.data.purchase_price);
+        }
+        return true;
+      },
       valueParser: (params) => money(params.newValue).toCanonicalString(), valueFormatter: (params) => formatMoney(params.value),
       cellStyle: { textAlign: "right" } },
     { headerName: "SC.%", field: "discount_pct", width: 78, editable: true, cellEditor: DDTTextEditor,
-      valueFormatter: (params) => isBlankRow(params.data) && !params.value ? "" : `${parseNumber(params.value).toFixed(2)}%`,
+      valueFormatter: (params) => formatCascadeDiscountDisplay(params.value),
       valueParser: (params) => parseNumber(params.newValue), cellStyle: { textAlign: "center" } },
     { headerName: "IMPORTO €", colId: "net_amount", width: 125, editable: false,
       valueGetter: (params) => params.data ? calculateAmount(params.data, discount).toCanonicalString() : "",
@@ -599,7 +614,18 @@ function priceColumn(title: string, field: "purchase_price", width: number, cost
 }
 
 function calculateBase(row: QuoteDraftItem) {
-  return row.base_unit_price ? money(row.base_unit_price) : money(row.purchase_price).plus(money(row.purchase_price).times(parseNumber(row.markup_pct)).dividedBy(100));
+  if (row.base_unit_price && !money(row.base_unit_price).isZero()) {
+    return money(row.base_unit_price);
+  }
+  if (row.forced_unit_price && !money(row.forced_unit_price).isZero()) {
+    return money(row.forced_unit_price);
+  }
+  const purchase = money(row.purchase_price || 0);
+  if (!purchase.isZero()) {
+    const markup = parseNumber(row.markup_pct);
+    return purchase.plus(purchase.times(markup).dividedBy(100));
+  }
+  return money(0);
 }
 
 function calculateMarkup(basePrice: string, costPrice: string): number | null {
@@ -608,8 +634,8 @@ function calculateMarkup(basePrice: string, costPrice: string): number | null {
 }
 
 function calculateEffectivePrice(row: QuoteDraftItem, globalDiscount: number) {
-  if (row.forced_unit_price) return money(row.forced_unit_price);
-  return calculateBase(row).applyDiscount(parseNumber(row.discount_pct)).applyDiscount(globalDiscount);
+  const base = calculateBase(row);
+  return base.applyDiscount(parseNumber(row.discount_pct)).applyDiscount(globalDiscount);
 }
 
 function calculateAmount(row: QuoteDraftItem, globalDiscount: number) {
@@ -661,10 +687,12 @@ function parseVatRate(value: unknown): QuoteDraftItem["vat_rate"] {
 
 function clearQuoteField(row: QuoteGridRow, field: string): void {
   if (field === "purchase_price") row.purchase_price = "0";
-  else if (field === "base_unit_price") row.base_unit_price = "";
-  else if (field === "unit_price") row.forced_unit_price = "";
+  else if (field === "base_unit_price" || field === "unit_price") {
+    row.base_unit_price = "";
+    row.forced_unit_price = "";
+  }
   else if (field === "markup_pct") { row.markup_pct = 0; row.base_unit_price = ""; row.forced_unit_price = ""; }
-  else if (field === "discount_pct") { row.discount_pct = 0; row.forced_unit_price = ""; }
+  else if (field === "discount_pct") { row.discount_pct = 0; }
   else if (field === "vat_rate") row.vat_rate = 22;
   else if (field === "quantity") row.quantity = "";
   else if (field === "unit" || field === "description" || field === "supplier" || field === "supplier_item_code" || field === "availability") row[field] = "";

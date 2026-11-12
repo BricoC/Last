@@ -57,7 +57,7 @@ export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages,
             <td className="border-r px-2 py-1 text-center font-bold text-slate-700 uppercase" style={{ borderColor: "var(--document-table-border)" }}>{item.unit || "NR"}</td>
             <td className="border-r px-2 py-1 text-center font-bold text-slate-900" style={{ borderColor: "var(--document-table-border)" }}>{item.quantity || "1"}</td>
             <td className="border-r px-2.5 py-1 font-semibold leading-tight text-slate-800" style={{ borderColor: "var(--document-table-border)" }}>{item.description}</td>
-            <td className="border-r px-2.5 py-1 text-right font-mono text-slate-700" style={{ borderColor: "var(--document-table-border)" }}>{calculation.effective_unit_price.isZero() ? "" : calculation.effective_unit_price.formatIT(true, 4, 4)}</td>
+            <td className="border-r px-2.5 py-1 text-right font-mono text-slate-700" style={{ borderColor: "var(--document-table-border)" }}>{calculation.base_unit_price.isZero() ? "" : calculation.base_unit_price.formatIT(true, 4, 4)}</td>
             <td className="border-r px-2 py-1 text-center font-mono text-slate-600" style={{ borderColor: "var(--document-table-border)" }}>{item.discount_pct ? `${item.discount_pct}%` : ""}</td>
             <td className="border-r px-2.5 py-1 text-right font-mono font-bold text-slate-900" style={{ borderColor: "var(--document-table-border)" }}>{calculation.net_amount.isZero() ? "" : calculation.net_amount.formatIT(true, 4, 4)}</td>
             <td className="px-2 py-1 text-center text-[10px] font-medium text-slate-700">{item.availability || ""}</td>

@@ -88,13 +88,20 @@ export function quoteToDraft(quote: Quote): QuoteDraft {
 export function toQuoteInput(draft: QuoteDraft): QuoteDraftInput {
   return {
     ...draft,
-    items: draft.items.filter(isQuoteDraftItemActive).map((item) => ({
-      ...item,
-      quantity: String(item.quantity ?? "").trim() || "1",
-      purchase_price: money(item.purchase_price),
-      base_unit_price: item.base_unit_price ? money(item.base_unit_price) : null,
-      forced_unit_price: item.forced_unit_price ? money(item.forced_unit_price) : null,
-    })),
+    items: draft.items.filter(isQuoteDraftItemActive).map((item) => {
+      const baseMoney = item.base_unit_price
+        ? money(item.base_unit_price)
+        : item.forced_unit_price
+        ? money(item.forced_unit_price)
+        : null;
+      return {
+        ...item,
+        quantity: String(item.quantity ?? "").trim() || "1",
+        purchase_price: money(item.purchase_price),
+        base_unit_price: baseMoney,
+        forced_unit_price: item.discount_pct ? null : (item.forced_unit_price ? money(item.forced_unit_price) : null),
+      };
+    }),
   };
 }
 

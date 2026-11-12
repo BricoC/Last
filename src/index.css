@@ -203,4 +203,35 @@ button, a, [role="button"], .cursor-pointer {
   box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.75) !important;
 }
 
+/* Animazione Terremoto Demoniaco Illidan */
+@keyframes illidan-shake {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  10% { transform: translate(-6px, -4px) rotate(-1deg); }
+  20% { transform: translate(6px, 4px) rotate(1deg); }
+  30% { transform: translate(-5px, 3px) rotate(-0.5deg); }
+  40% { transform: translate(5px, -3px) rotate(0.5deg); }
+  50% { transform: translate(-3px, 2px) rotate(-1deg); }
+  60% { transform: translate(4px, -2px) rotate(1deg); }
+  70% { transform: translate(-2px, 2px) rotate(0deg); }
+  80% { transform: translate(2px, -1px) rotate(0deg); }
+  90% { transform: translate(-1px, 1px) rotate(0deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+.animate-illidan-shake {
+  animation: illidan-shake 0.35s ease-in-out infinite;
+}
+
+/* Animazione Scuotimento Orizzontale per Errore Password */
+@keyframes horizontal-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+.animate-shake {
+  animation: horizontal-shake 0.35s ease-in-out;
+}
+
+
 

@@ -36,3 +36,6 @@ scratch/
 test-results/
 playwright-report/
 tests/e2e/screenshots/
+ 
+inspect-*.mjs
+query-db.py

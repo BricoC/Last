@@ -240,7 +240,11 @@ export async function getDdtMonthlyReportData(
   const ddtRows: DdtReportDocumentRow[] = ddtDbRows.map((row) => {
     const taxable = subunitsToEuro(row.total_taxable_subunits);
     const vat = subunitsToEuro(row.total_vat_subunits);
-    const totalDoc = subunitsToEuro(row.total_document_subunits);
+    // Se il totale documento sorgente è 0 o vuoto ma imponibile o imposta sono disponibili, calcola imponibile + imposta
+    let totalDoc = subunitsToEuro(row.total_document_subunits);
+    if ((totalDoc === 0 || !row.total_document_subunits) && (taxable !== 0 || vat !== 0)) {
+      totalDoc = Number((taxable + vat).toFixed(2));
+    }
 
     sumTaxable += taxable;
     sumVat += vat;
@@ -735,7 +739,10 @@ export async function getMonthlyFullDdtDocuments(
       internal_notes: row.internal_notes || undefined,
       total_taxable: MonetaryValue.fromSubunits(row.total_taxable_subunits || 0),
       total_vat: MonetaryValue.fromSubunits(row.total_vat_subunits || 0),
-      total_document: MonetaryValue.fromSubunits(row.total_document_subunits || 0),
+      total_document: MonetaryValue.fromSubunits(
+        row.total_document_subunits ||
+          ((row.total_taxable_subunits || 0) + (row.total_vat_subunits || 0))
+      ),
       created_at: row.created_at,
       updated_at: row.updated_at,
       updated_by: row.updated_by,

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Client, ClientPhone, ClientDestination } from "../../models/client";
 import { matchesSearchToken, matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { deduplicateDestinations } from "../../utils/destinationUtils";
+import { rankClientsBySearch } from "../../utils/clientSearchUtils";
 
 describe("Client Model & Repository Consistency Rules", () => {
   it("rispetta la struttura BaseEntity e il tracciamento audit", () => {
@@ -166,5 +167,101 @@ describe("Client Model & Repository Consistency Rules", () => {
     expect(result).toHaveLength(2);
     expect(result.some((d) => d.luogo.includes("CARTIERE"))).toBe(true);
     expect(result.some((d) => d.luogo.includes("ROMANA"))).toBe(true);
+  });
+
+  it("ricerca multi-parola intelligente: 'cart ca' trova solo Cartiere Cardella e Cartiere Carrara escludendo falsi positivi", () => {
+    const makeClient = (id: string, name: string, city?: string): Client => ({
+      id,
+      business_name: name,
+      city: city ?? "",
+      phones: [],
+      destinations: [],
+      price_lists: [],
+      is_active: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: "system",
+      deleted_at: null,
+      sync_status: "synced",
+    });
+
+    const sampleClients: Client[] = [
+      makeClient("1", "ANDER CARTONGESSO SOC. COOPERATIVA"),
+      makeClient("2", "CARTIERE CARDELLA", "SAN PIETRO A VICO"),
+      makeClient("3", "CARTIERE CARRARA", "TASSIGNANO"),
+      makeClient("4", "CARTOGRAFICA GALEOTTI", "GUAMO"),
+      makeClient("5", "FLORY CART 2.0 DI S. GHILARDUCCI & CO", "TASSIGNANO"),
+      makeClient("6", "FLORYCART 2.0"),
+    ];
+
+    // "cart ca" deve matchare ESCLUSIVAMENTE Cartiere Cardella e Cartiere Carrara
+    const resultsCartCa = rankClientsBySearch(sampleClients, "cart ca");
+    expect(resultsCartCa.map((c) => c.business_name)).toEqual([
+      "CARTIERE CARDELLA",
+      "CARTIERE CARRARA",
+    ]);
+
+    // "cart" restituisce tutti ma con Cartiere in cima (prefisso su business_name)
+    const resultsCart = rankClientsBySearch(sampleClients, "cart");
+    expect(resultsCart[0].business_name).toBe("CARTIERE CARDELLA");
+    expect(resultsCart[1].business_name).toBe("CARTIERE CARRARA");
+    expect(resultsCart[2].business_name).toBe("CARTOGRAFICA GALEOTTI");
+    expect(resultsCart.some((c) => c.business_name.includes("ANDER"))).toBe(true);
+    expect(resultsCart.some((c) => c.business_name.includes("FLORY"))).toBe(true);
+
+    // "cart tass" trova solo Carrara e Flory Cart (in città Tassignano)
+    const resultsCartTass = rankClientsBySearch(sampleClients, "cart tass");
+    expect(resultsCartTass.map((c) => c.business_name)).toEqual([
+      "CARTIERE CARRARA",
+      "FLORY CART 2.0 DI S. GHILARDUCCI & CO",
+    ]);
+
+    // Acronimi e sigle senza punti (es. "camm" trova "C.A.M.M.")
+    const cammClient = makeClient("7", "C.A.M.M. TRASPORTI");
+    const resultsCamm = rankClientsBySearch([...sampleClients, cammClient], "camm");
+    expect(resultsCamm.map((c) => c.business_name)).toEqual(["C.A.M.M. TRASPORTI"]);
+  });
+
+  it("ricerca 'car carr': trova CARTIERE CARRARA in vetta ed esclude categoricamente Polistirolo 2000 e Tenace Automation", () => {
+    const makeClient = (id: string, name: string, city?: string, address?: string): Client => ({
+      id,
+      business_name: name,
+      city: city ?? "",
+      address: address ?? "",
+      phones: [],
+      destinations: [],
+      price_lists: [],
+      is_active: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: "system",
+      deleted_at: null,
+      sync_status: "synced",
+    });
+
+    const clients: Client[] = [
+      makeClient("1", "CARTIERE CARRARA", "TASSIGNANO", "VIA CAV. LAV. MARIO CARRARA"),
+      makeClient("2", "CARRARA LAB", "TASSIGNANO", "VIA CAV. LAV. MARIO CARRARA"),
+      makeClient("3", "CARROZZERIA ELISA", "CARRAIA", "VIA DI CARRAIA"),
+      makeClient("4", "VERIPLAST CARRAIA", "CARRAIA", "VIA DI CARRAIA"),
+      makeClient("5", "POLISTIROLO 2000", "CARRAIA", "VIA DI CARRAIA"),
+      makeClient("6", "TENACE AUTOMATION", "CARRAIA", "VIA DI CARRAIA"),
+    ];
+
+    const results = rankClientsBySearch(clients, "car carr");
+    const names = results.map((c) => c.business_name);
+
+    // CARTIERE CARRARA deve essere al 1° posto assoluto
+    expect(names[0]).toBe("CARTIERE CARRARA");
+
+    // POLISTIROLO 2000 e TENACE AUTOMATION NON devono MAI comparire
+    expect(names).not.toContain("POLISTIROLO 2000");
+    expect(names).not.toContain("TENACE AUTOMATION");
+
+    // CARRARA LAB ha solo 1 parola che matcha ('carrara') e non deve matchare un query a 2 token distinti
+    expect(names).not.toContain("CARRARA LAB");
+
+    // VERIPLAST CARRAIA non può riutilizzare 'carraia' due volte per 'car' e 'carr'
+    expect(names).not.toContain("VERIPLAST CARRAIA");
   });
 });

@@ -40,6 +40,8 @@ import { cn } from "@/shared/utils/cn";
 import { useEscClose } from "@/shared/hooks/useEscClose";
 import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { copyMultipleDdtPdfsByIds } from "@/features/ddt-studio/utils/ddtPdfClipboard";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
+import { NedryLockOverlay } from "@/shared/easter-eggs/NedryLockOverlay";
 
 const MONTH_NAMES = [
   "Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
@@ -123,6 +125,93 @@ export const DashboardPage: React.FC = () => {
     };
   });
   const [isRibaModalOpen, setIsRibaModalOpen] = useState(false);
+
+  // Easter Egg Box & Dennis Nedry Lock
+  const { playIllidanCinematic, isNedryLocked, setNedryLocked, resetNedryLock } = useEasterEggStore();
+  const [secretBoxClicks, setSecretBoxClicks] = useState(0);
+  const [secretPassword, setSecretPassword] = useState("");
+  const [secretInputShake, setSecretInputShake] = useState(false);
+  const [secretFailedAttempts, setSecretFailedAttempts] = useState(0);
+  const [showNedryModal, setShowNedryModal] = useState(false);
+  const [userIconClicks, setUserIconClicks] = useState(0);
+  const secretInputRef = useRef<HTMLInputElement>(null);
+  const secretClickResetTimer = useRef<NodeJS.Timeout | null>(null);
+  const userIconResetTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSecretBoxClick = () => {
+    if (secretClickResetTimer.current) {
+      clearTimeout(secretClickResetTimer.current);
+    }
+
+    const nextClicks = secretBoxClicks + 1;
+    setSecretBoxClicks(nextClicks);
+
+    if (nextClicks >= 15) {
+      if (isNedryLocked) {
+        setShowNedryModal(true);
+        setSecretBoxClicks(0);
+      } else {
+        setTimeout(() => {
+          secretInputRef.current?.focus();
+        }, 100);
+      }
+    } else {
+      // Se ci si ferma di premere per più di 400ms, si annulla istantaneamente tutto e si ricomincia da capo
+      secretClickResetTimer.current = setTimeout(() => {
+        setSecretBoxClicks(0);
+      }, 400);
+    }
+  };
+
+  const handleSecretKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      setSecretBoxClicks(0);
+      setSecretPassword("");
+      return;
+    }
+
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const clean = secretPassword.trim().toLowerCase();
+      if (clean === "you are not prepared") {
+        setSecretBoxClicks(0);
+        setSecretPassword("");
+        setSecretFailedAttempts(0);
+        playIllidanCinematic();
+      } else {
+        setSecretInputShake(true);
+        setSecretPassword("");
+        const nextFails = secretFailedAttempts + 1;
+        setSecretFailedAttempts(nextFails);
+        setTimeout(() => setSecretInputShake(false), 400);
+
+        if (nextFails >= 3) {
+          setNedryLocked(true);
+          setShowNedryModal(true);
+          setSecretBoxClicks(0);
+          setSecretFailedAttempts(0);
+        }
+      }
+    }
+  };
+
+  const handleUserIconClick = () => {
+    if (userIconResetTimer.current) {
+      clearTimeout(userIconResetTimer.current);
+    }
+
+    const next = userIconClicks + 1;
+    setUserIconClicks(next);
+
+    if (next >= 5) {
+      resetNedryLock();
+      setUserIconClicks(0);
+    } else {
+      userIconResetTimer.current = setTimeout(() => {
+        setUserIconClicks(0);
+      }, 3000);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -419,6 +508,40 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)] p-3 gap-2.5 select-none font-sans">
+      {/* 1. Oscuramento progressivo da 6 a 14 click */}
+      {secretBoxClicks >= 6 && secretBoxClicks < 15 && (
+        <div
+          className="fixed inset-0 z-40 bg-black pointer-events-none"
+          style={{ opacity: (secretBoxClicks - 5) / 10 }}
+        />
+      )}
+
+      {/* 2. Oscuramento totale al 15° click con SOLO la textbox minimale al centro */}
+      {secretBoxClicks >= 15 && !isNedryLocked && (
+        <div
+          onClick={() => secretInputRef.current?.focus()}
+          className="fixed inset-0 z-50 bg-black flex items-center justify-center cursor-default select-none animate-in fade-in duration-200"
+        >
+          <input
+            ref={secretInputRef}
+            type="text"
+            value={secretPassword}
+            onChange={(e) => setSecretPassword(e.target.value)}
+            onKeyDown={handleSecretKeyDown}
+            className={cn(
+              "w-72 sm:w-96 text-center text-lg font-mono bg-transparent text-emerald-300 border-b-2 border-zinc-800 focus:border-emerald-500 focus:outline-hidden py-2 px-4 tracking-widest transition-all",
+              secretInputShake && "border-red-500 text-red-400 animate-shake"
+            )}
+            autoFocus
+            spellCheck={false}
+            autoComplete="off"
+          />
+        </div>
+      )}
+
+      {/* 3. Pop-up Dennis Nedry se bloccato o dopo 3 tentativi errati */}
+      <NedryLockOverlay isOpen={showNedryModal} onClose={() => setShowNedryModal(false)} />
+
       {/* 0. Banner / Widget Setup Rapido Primo Avvio (Compare solo se mancano dati o al primo avvio) */}
       <DashboardFirstSetupWidget onSetupCompleted={() => void loadData()} />
 
@@ -1095,6 +1218,12 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Box vuoto anonimo e staccato per Easter Egg */}
+        <div
+          onClick={handleSecretBoxClick}
+          className="w-7 h-7 rounded-lg bg-[var(--card)]/50 border border-[var(--border)]/40 select-none cursor-default shrink-0"
+        />
+
         {/* Destra: Tasto Ri.Ba. Banca, Tasto Storico Articoli, Menù a tendina Multi-selezione Anni & Ricarica */}
         <div className="flex items-center space-x-2 shrink-0">
           {/* Pulsante Ri.Ba. Banca */}
@@ -1704,7 +1833,13 @@ export const DashboardPage: React.FC = () => {
           <div className="flex items-center justify-between shrink-0 mb-2">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-[var(--foreground)] uppercase tracking-wider flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-emerald-400" />
+                <span
+                  onClick={handleUserIconClick}
+                  className="inline-flex items-center cursor-default select-none"
+                  title=""
+                >
+                  <Users className="w-3.5 h-3.5 text-emerald-400" />
+                </span>
                 Fatturato Clienti per Anno
               </span>
               <span className="text-[10px] text-[var(--muted-foreground)]">

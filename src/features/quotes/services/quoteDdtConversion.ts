@@ -16,8 +16,9 @@ export function buildQuoteDdtConversion(input: QuoteDraftInput, ddtId: string) {
       deleted_at: null, sync_status: "pending", ddt_id: ddtId, row_index: index + 1,
       product_id: item.product_id ?? undefined, code: item.code ?? undefined,
       description: item.description.trim(), unit: item.unit?.trim() || "NR", quantity: String(item.quantity),
-      unit_price: calculated.effective_unit_price, base_price: calculated.effective_unit_price,
-      discount_pct: "0", net_amount: calculated.net_amount, vat_rate: item.vat_rate,
+      unit_price: item.discount_pct ? calculated.base_unit_price : calculated.effective_unit_price,
+      base_price: calculated.base_unit_price,
+      discount_pct: item.discount_pct ? String(item.discount_pct) : "0", net_amount: calculated.net_amount, vat_rate: item.vat_rate,
       vat_amount: calculated.vat_amount, purchase_price: item.purchase_price ?? money(0),
     };
   });
