@@ -31,6 +31,8 @@ import { useUserStore } from "@/shared/stores/useUserStore";
 import { registerDirtyCheck, registerWindowCloseGuard } from "@/shared/stores/useWindowStore";
 import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import { cn } from "@/shared/utils/cn";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
+import { MgsAlertOverlay } from "@/shared/easter-eggs/MgsAlertOverlay";
 
 export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   const { currentUser } = useUserStore();
@@ -47,6 +49,21 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   // Ricerca e filtri
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>("ALL");
+
+  // Easter Egg MGS Alert
+  const { isMgsAlertActive, startMgsAlert, stopMgsAlert } = useEasterEggStore();
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Scorciatoia [Ctrl + Shift + 1] o [Ctrl + Shift + !] per l'Alert
+      if (e.ctrlKey && e.shiftKey && (e.key === "1" || e.key === "!")) {
+        e.preventDefault();
+        startMgsAlert();
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [startMgsAlert]);
 
   // Modale Unificata (per Creazione ed Edizione)
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -563,6 +580,13 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && searchQuery.trim().toLowerCase() === "stop" && isMgsAlertActive) {
+                  e.preventDefault();
+                  setSearchQuery("");
+                  stopMgsAlert();
+                }
+              }}
               className="w-full pl-9 pr-8 py-1.5 text-xs rounded-lg border border-[var(--border)] bg-[var(--background)] text-white focus:outline-hidden focus:border-blue-500"
             />
             {searchQuery && (
@@ -912,6 +936,9 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
           void loadTrashCount();
         }}
       />
+
+      {/* Easter Egg MGS Alert Overlay */}
+      <MgsAlertOverlay isActive={isMgsAlertActive} onStop={stopMgsAlert} />
     </div>
   );
 };

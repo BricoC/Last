@@ -15,6 +15,7 @@ import {
   MonthSummaryCount,
 } from "../services/ddtReportService";
 import { useDdtBatchExportStore } from "../stores/useDdtBatchExportStore";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 import { cn } from "@/shared/utils/cn";
 
 export interface DDTMonthlyReportModalProps {
@@ -44,6 +45,14 @@ export const DDTMonthlyReportModal: React.FC<DDTMonthlyReportModalProps> = ({
 
   const isVisible = propIsOpen !== undefined ? propIsOpen || storeIsOpen : storeIsOpen;
   const currentYear = propYear ?? storeYear ?? new Date().getFullYear();
+
+  // Easter Egg Final Fantasy VII (Victory Fanfare al completamento del report)
+  const { triggerFf7 } = useEasterEggStore();
+  useEffect(() => {
+    if (successMsg) {
+      triggerFf7();
+    }
+  }, [successMsg, triggerFf7]);
 
   const handleClose = () => {
     if (propOnClose) propOnClose();

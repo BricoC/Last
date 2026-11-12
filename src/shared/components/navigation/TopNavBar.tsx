@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 import { isPageAllowedForUser, DEFAULT_TOPBAR_ORDER } from "@/shared/services/appUserService";
 import {
   LayoutGrid,
@@ -83,6 +84,32 @@ export const TopNavBar: React.FC = () => {
     requestSwitchUser,
     updateCurrentUserTopbarOrder,
   } = useUserStore();
+
+  // Easter Egg Super Mario Bros (Click ripetuti su Dashboard)
+  const { isMarioActive, triggerMario, hitMarioBlock } = useEasterEggStore();
+  const dashboardClicksRef = useRef(0);
+  const dashboardClickTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleDashboardClick = () => {
+    // Se Mario è già attivo: ogni click successivo colpisce il blocco per le monete (fino a 7 volte)!
+    if (isMarioActive) {
+      hitMarioBlock();
+      return;
+    }
+
+    if (dashboardClickTimerRef.current) {
+      clearTimeout(dashboardClickTimerRef.current);
+    }
+    dashboardClicksRef.current += 1;
+    if (dashboardClicksRef.current >= 9) {
+      dashboardClicksRef.current = 0;
+      triggerMario();
+    } else {
+      dashboardClickTimerRef.current = setTimeout(() => {
+        dashboardClicksRef.current = 0;
+      }, 2500);
+    }
+  };
 
   const {
     currentVersion,
@@ -312,13 +339,16 @@ export const TopNavBar: React.FC = () => {
                   setDraggedModuleId(null);
                   setDragOverModuleId(null);
                 }}
-                onClick={() =>
+                onClick={() => {
+                  if (mod.id === "dashboard") {
+                    handleDashboardClick();
+                  }
                   openWindow({
                     id: mod.id,
                     title: mod.title,
                     componentId: mod.componentId,
-                  })
-                }
+                  });
+                }}
                 title={`${mod.title} (Trascina per riordinare)`}
                 className={cn(
                   "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap shrink-0 select-none cursor-pointer",
