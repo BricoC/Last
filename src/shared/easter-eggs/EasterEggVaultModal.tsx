@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useEasterEggStore } from "./useEasterEggStore";
 import {
   X,
@@ -10,27 +10,42 @@ import {
   Cpu,
   Trophy,
   Sparkles,
+  Radio,
+  Timer,
 } from "lucide-react";
 
 type CategoryFilter = "all" | "wow" | "mgs" | "ff" | "sf" | "nier" | "mslug" | "mario";
 
 export const EasterEggVaultModal: React.FC = () => {
-  const { isVaultOpen, closeVault, playIllidanCinematic } = useEasterEggStore();
+  const {
+    isVaultOpen,
+    closeVault,
+    playIllidanCinematic,
+    startMgsAlert,
+    openMgsCodec,
+    triggerStreetFighter,
+    triggerFf7,
+    triggerFf9Moguo,
+    triggerNier,
+    triggerMetalSlug,
+    triggerMario,
+  } = useEasterEggStore();
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>("all");
 
-  useEffect(() => {
-    if (!isVaultOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        closeVault();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isVaultOpen, closeVault]);
+  // Nota: Nessun listener su Escape per chiudere il Vault!
+  // Come richiesto esplicitamente dall'utente, dal Vault si esce SOLO premendo il tasto di chiusura.
 
   if (!isVaultOpen) return null;
+
+  const codecCharacters = [
+    { freq: "140.85", name: "Campbell" },
+    { freq: "140.96", name: "Mei Ling" },
+    { freq: "141.12", name: "Otacon" },
+    { freq: "141.80", name: "Miller" },
+    { freq: "140.15", name: "Meryl" },
+    { freq: "141.52", name: "Nastasha" },
+    { freq: "140.48", name: "Gray Fox" },
+  ];
 
   const easterEggs = [
     {
@@ -47,7 +62,6 @@ export const EasterEggVaultModal: React.FC = () => {
         "Dashboard ➔ Clicca 15 volte sul quadratino vuoto tra i DDT emessi e la Ri.Ba ➔ Digita 'you are not prepared'.",
       ready: true,
       onTest: () => {
-        closeVault();
         playIllidanCinematic();
       },
     },
@@ -60,10 +74,50 @@ export const EasterEggVaultModal: React.FC = () => {
       color: "border-red-500/30 bg-red-950/15",
       accent: "text-red-400",
       description:
-        "Il classico punto esclamativo rosso con suono BWUMPH! e la mitica radio Codec verde con Campbell, Mei Ling, Otacon, Miller, Meryl, Nastasha e Gray Fox.",
+        "Il classico punto esclamativo rosso con suono BWUMPH!, timer d'allerta a 99.99 e la mitica radio Codec verde con tutte le 7 frequenze radio originali PS1 1998.",
       trigger:
-        "Scorciatoia globale [Ctrl + Shift + 1] per l'Alert; Frequenze 140.85, 140.96, ecc. nella ricerca del Listino Generale.",
-      ready: false,
+        "Offerte ➔ [Ctrl + Shift + 1] per l'Alert (ferma con 'stop' + Invio). Listino Generale ➔ Digita frequenze 140.85, 140.96, ecc. e premi [Invio].",
+      ready: true,
+      customControls: (
+        <div className="flex flex-col gap-2 w-full">
+          {/* Prova Alert e Conto alla Rovescia */}
+          <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-red-950/40 border border-red-500/30">
+            <span className="text-[11px] font-mono text-red-300 flex items-center gap-1.5 font-bold">
+              <Timer className="w-3.5 h-3.5 text-red-400" />
+              <span>Allerta '!' & Timer 99.99:</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => startMgsAlert()}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[11px] font-bold shadow-xs cursor-pointer transition-colors active:scale-95"
+            >
+              <Play className="w-3 h-3 fill-current" />
+              <span>Avvia Alert</span>
+            </button>
+          </div>
+
+          {/* Tutte le 7 frequenze Codec */}
+          <div className="p-2 rounded-lg bg-emerald-950/30 border border-emerald-500/30 flex flex-col gap-1.5">
+            <span className="text-[11px] font-mono text-emerald-300 flex items-center gap-1.5 font-bold">
+              <Radio className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Sintonizza Codec (Tutte le 7 frequenze):</span>
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {codecCharacters.map((c) => (
+                <button
+                  key={c.freq}
+                  type="button"
+                  onClick={() => openMgsCodec(c.freq)}
+                  className="px-2 py-0.5 rounded bg-emerald-900/60 hover:bg-emerald-600 text-emerald-200 hover:text-white border border-emerald-500/40 text-[10px] font-mono font-bold transition-colors cursor-pointer"
+                  title={`Ascolta frequenza ${c.freq} (${c.name})`}
+                >
+                  {c.freq} ({c.name})
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ),
     },
     {
       id: "ff7-victory",
@@ -74,10 +128,13 @@ export const EasterEggVaultModal: React.FC = () => {
       color: "border-sky-500/30 bg-sky-950/15",
       accent: "text-sky-400",
       description:
-        "Cloud low-poly originale fa roteare la Buster Sword con il jingle leggendario della Fanfara di Vittoria.",
+        "Cloud low-poly originale fa roteare la Buster Sword con il jingle leggendario della Fanfara di Vittoria e schermata ricompense FFVII.",
       trigger:
         "DDT Studio ➔ Modale 'Report Excel & Archivio PDF Mesi' ➔ Al completamento con successo dell'esportazione.",
-      ready: false,
+      ready: true,
+      onTest: () => {
+        triggerFf7();
+      },
     },
     {
       id: "ff9-moguri",
@@ -88,24 +145,47 @@ export const EasterEggVaultModal: React.FC = () => {
       color: "border-amber-500/30 bg-amber-950/15",
       accent: "text-amber-400",
       description:
-        "Il piccolo Moguri svolazzante col pom-pom rosso si arrabbia se provi a salvare compulsivamente un DDT già definitivo.",
+        "Il piccolo Moguri svolazzante col pom-pom rosso si arrabbia e si infiamma se provi a salvare compulsivamente un DDT già definitivo (si chiude solo con CONTINUA).",
       trigger:
-        "DDT Studio ➔ Clicca 9 volte sul pulsante 'The One' quando è disabilitato.",
-      ready: false,
+        "DDT Studio ➔ Clicca 9 volte sul pulsante 'The One' quando è già disabilitato.",
+      ready: true,
+      onTest: () => {
+        triggerFf9Moguo();
+      },
     },
     {
       id: "sf-hadouken",
       category: "sf",
-      title: "Ryu: Hadouken energetico",
+      title: "Ryu: Hadouken & Shoryuken",
       game: "Street Fighter II (Capcom)",
       icon: <Gamepad2 className="w-5 h-5 text-blue-400" />,
       color: "border-blue-500/30 bg-blue-950/15",
       accent: "text-blue-400",
       description:
-        "Ryu lancia un'ondata di energia blu brillante che attraversa orizzontalmente lo schermo con scuotimento e audio arcade.",
+        "Ryu scaglia il leggendario Hadouken energetico blu brillante o il possente Shoryuken fiammeggiante con audio originale arcade Capcom e scuotimento dello schermo.",
       trigger:
-        "Dashboard ➔ Box 'DDT del Mese' ➔ Nella casella di ricerca premi [↓] poi [→] poi [Invio] (oppure scrivi 'hadouken').",
-      ready: false,
+        "Dashboard ➔ Box 'DDT del Mese' ➔ Nella casella digita con le freccette: [↓][↓][→][→] A + Invio per Hadouken, oppure [→][↓][↓][→] A + Invio per Shoryuken.",
+      ready: true,
+      customControls: (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => triggerStreetFighter("hadouken")}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs cursor-pointer transition-colors active:scale-95"
+          >
+            <Play className="w-3 h-3 fill-current" />
+            <span>HADOUKEN</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => triggerStreetFighter("shoryuken")}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-xs cursor-pointer transition-colors active:scale-95"
+          >
+            <Play className="w-3 h-3 fill-current" />
+            <span>SHORYUKEN</span>
+          </button>
+        </div>
+      ),
     },
     {
       id: "nier-pod",
@@ -116,10 +196,13 @@ export const EasterEggVaultModal: React.FC = () => {
       color: "border-stone-500/30 bg-stone-900/40",
       accent: "text-stone-300",
       description:
-        "Finestra di avviso monolitica YoRHa per inattività/parola d'ordine e falso finale con titoli di coda neri di 5 secondi.",
+        "Finestra di avviso monolitica YoRHa del Pod 042 con voce robotica a sintesi vocale e falso finale [D]dt con musica originale e titoli di coda rapidi.",
       trigger:
-        "Listino Clienti ➔ Cerca 'glory to mankind' (oppure 1h di inattività); Chiudi l'app tra i 7 e 9 secondi esatti dall'avvio.",
-      ready: false,
+        "Listino Clienti o Rubrica Clienti ➔ Cerca 'glory to mankind' e premi Invio.",
+      ready: true,
+      onTest: () => {
+        triggerNier();
+      },
     },
     {
       id: "mslug-pow",
@@ -130,24 +213,30 @@ export const EasterEggVaultModal: React.FC = () => {
       color: "border-yellow-500/30 bg-yellow-950/15",
       accent: "text-yellow-400",
       description:
-        "Il prigioniero in boxer bianchi fa l'inchino e grida 'THANK YOU!', e la cassa di munizioni cade per le copie massive.",
+        "Il prigioniero in boxer fa l'inchino e grida 'THANK YOU!', rilasciando la cassa munizioni dorata con la voce arcade 'HEAVY MACHINE GUN!'.",
       trigger:
-        "Al riavvio dopo una nuova release di aggiornamento; Copiando più di 10 DDT contemporaneamente nel box DDT del mese.",
-      ready: false,
+        "DDT Studio ➔ Menu Altre Azioni ➔ Tieni premuto Shift e clicca su 'Duplica DDT'.",
+      ready: true,
+      onTest: () => {
+        triggerMetalSlug();
+      },
     },
     {
       id: "mario-1up",
       category: "mario",
-      title: "Fungo 1-UP & Arpeggio Magico",
+      title: "Blocco '?' & 7 Monete Saltellanti",
       game: "Super Mario Bros (Nintendo)",
       icon: <Sparkles className="w-5 h-5 text-emerald-400" />,
       color: "border-emerald-500/30 bg-emerald-950/15",
       accent: "text-emerald-400",
       description:
-        "Arpeggio squillante retro e sbucata del fungo verde 1-UP dall'intestazione del gestionale.",
+        "Blocco punto di domanda retrò NES che rilascia monete rotanti con l'iconico effetto 'ding!' fino a 7 volte, chiudendosi solo premendo ESC.",
       trigger:
-        "Top Navigation Bar ➔ Clicca 10 volte su 'Dashboard', poi dall'11ª volta per 9 click consecutivi.",
-      ready: false,
+        "Top Navigation Bar ➔ Clicca 9 volte su 'Dashboard' per far apparire il blocco, poi continua a cliccare Dashboard per le 7 monete.",
+      ready: true,
+      onTest: () => {
+        triggerMario();
+      },
     },
   ];
 
@@ -184,7 +273,7 @@ export const EasterEggVaultModal: React.FC = () => {
             type="button"
             onClick={closeVault}
             className="p-2 rounded-lg text-[var(--muted-foreground)] hover:text-white hover:bg-zinc-800/60 transition-colors cursor-pointer"
-            title="Chiudi Vault (Esc)"
+            title="Chiudi Vault"
           >
             <X className="w-5 h-5" />
           </button>
@@ -270,7 +359,9 @@ export const EasterEggVaultModal: React.FC = () => {
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-end">
-                  {egg.ready && egg.onTest ? (
+                  {"customControls" in egg && egg.customControls ? (
+                    egg.customControls
+                  ) : egg.ready && "onTest" in egg && egg.onTest ? (
                     <button
                       type="button"
                       onClick={egg.onTest}
@@ -281,7 +372,7 @@ export const EasterEggVaultModal: React.FC = () => {
                     </button>
                   ) : (
                     <span className="text-[11px] text-[var(--muted-foreground)] italic">
-                      Disponibile a breve nel prossimo step
+                      In Arrivo
                     </span>
                   )}
                 </div>
@@ -292,11 +383,13 @@ export const EasterEggVaultModal: React.FC = () => {
 
         {/* Footer */}
         <div className="p-4 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-xs text-[var(--muted-foreground)]">
-          <span>Premi [Esc] per tornare al gestionale</span>
+          <span className="text-[11px] font-mono text-zinc-400">
+            Per uscire dal Vault, premi il tasto &quot;Chiudi Vault&quot;
+          </span>
           <button
             type="button"
             onClick={closeVault}
-            className="px-4 py-1.5 rounded-lg bg-[var(--card)] hover:bg-zinc-800 text-[var(--foreground)] border border-[var(--border)] font-medium cursor-pointer transition-colors"
+            className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer transition-colors shadow-sm"
           >
             Chiudi Vault
           </button>

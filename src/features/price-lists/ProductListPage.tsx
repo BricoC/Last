@@ -38,6 +38,7 @@ import {
   ALL_GENERAL_COLUMNS,
 } from "./hooks/useColumnVisibility";
 import { ColumnVisibilityMenu } from "./components/ColumnVisibilityMenu";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 import {
   BulkEditToolbar,
   BulkOperationPayload,
@@ -311,6 +312,9 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // MGS Easter Egg Codec
+  const { openMgsCodec } = useEasterEggStore();
 
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -1459,6 +1463,19 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
             onChange={(e) => {
               setSearch(e.target.value);
               setVisibleCount(BATCH_SIZE);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const clean = search.trim();
+                const validFreqs = ["140.85", "140.96", "141.12", "141.80", "140.15", "141.52", "140.48"];
+                if (validFreqs.includes(clean)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.nativeEvent?.stopImmediatePropagation?.();
+                  setSearch("");
+                  openMgsCodec(clean);
+                }
+              }
             }}
             placeholder="Quick Filter (F4 per cercare, Categoria, Codice, Fornitore, Descrizione)..."
             className="w-full pl-9 pr-8 py-1.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded-md text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-medium"

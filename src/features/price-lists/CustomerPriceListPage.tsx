@@ -35,6 +35,7 @@ import { CustomerPriceListTrashModal } from "./components/CustomerPriceListTrash
 import { useClientColumnVisibility } from "./hooks/useColumnVisibility";
 import { ColumnVisibilityMenu } from "./components/ColumnVisibilityMenu";
 import { round5 } from "./utils/priceFormulas";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 
 const BATCH_SIZE = 150;
 
@@ -256,6 +257,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const { triggerNier } = useEasterEggStore();
 
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const [sortField, setSortField] = useState<SortField>("cliente");
@@ -1293,6 +1295,18 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             value={search}
             onFocus={() => setActiveCell(null)}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const q = search.trim().toLowerCase();
+                if (q === "glory to mankind" || q === "glory of mankind" || q === "gloria all'umanita" || q === "gloria all'umanità") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.nativeEvent?.stopImmediatePropagation?.();
+                  setSearch("");
+                  triggerNier();
+                }
+              }
+            }}
             placeholder="Cerca cliente, fornitore, descrizione, codice... (F4)"
             className="w-full pl-8 pr-7 py-1 text-xs bg-[var(--card)] border border-[var(--border)] rounded-md outline-none text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)]"
           />

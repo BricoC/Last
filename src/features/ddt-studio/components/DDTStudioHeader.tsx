@@ -16,6 +16,7 @@ import {
 import { DdtDocument } from "../models/ddt";
 import { cn } from "@/shared/utils/cn";
 import { DDTMonthlyReportModal } from "./DDTMonthlyReportModal";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 
 export interface DDTStudioHeaderProps {
   ddt: Partial<DdtDocument>;
@@ -66,6 +67,11 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Easter Egg Final Fantasy IX & Metal Slug
+  const { triggerFf9Moguo, triggerMetalSlug } = useEasterEggStore();
+  const theOneClicksRef = useRef(0);
+  const theOneClickResetTimer = useRef<NodeJS.Timeout | null>(null);
+
   const currentYear = selectedYear || ddt.year || new Date().getFullYear();
 
   // Premendo ESC ritorna sempre alla vista Editor
@@ -90,6 +96,25 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   }, []);
 
   const isConfirmed = ddt.status === "confermato" && ddt.doc_number !== null;
+  const isTheOneDisabled = Boolean(isConfirmed || isSaving || isPrinting);
+
+  const handleTheOneContainerClick = () => {
+    if (!isTheOneDisabled) return;
+
+    if (theOneClickResetTimer.current) {
+      clearTimeout(theOneClickResetTimer.current);
+    }
+
+    theOneClicksRef.current += 1;
+    if (theOneClicksRef.current >= 9) {
+      theOneClicksRef.current = 0;
+      triggerFf9Moguo();
+    } else {
+      theOneClickResetTimer.current = setTimeout(() => {
+        theOneClicksRef.current = 0;
+      }, 3000);
+    }
+  };
 
   return (
     <div className="h-12 border-b border-[var(--border)] bg-[var(--card)] px-3 flex items-center justify-between shrink-0 select-none">
@@ -171,25 +196,31 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
       {/* Destra: Azioni The One, Salva, Draft, Stampa, Altro */}
       <div className="flex items-center space-x-2">
         {/* The One (Emissione con progressivo + Stampa 3 copie immediata) */}
-        <button
-          type="button"
-          disabled={isConfirmed || isSaving || isPrinting}
-          onClick={onTheOne}
-          className={cn(
-            "h-7 px-2.5 rounded text-xs font-bold flex items-center space-x-1.5 transition-all shadow-sm select-none",
-            isConfirmed || isSaving || isPrinting
-              ? "bg-purple-950/20 text-purple-400/30 border border-purple-900/20 opacity-40 cursor-not-allowed"
-              : "bg-purple-600 hover:bg-purple-500 text-white border border-purple-400/50 shadow-purple-900/20 cursor-default active:scale-95"
-          )}
-          title={
-            isConfirmed
-              ? "The One è disabilitato perché questo DDT è già stato salvato con numero definitivo"
-              : "The One: Salva DDT con numero progressivo e stampa immediatamente 3 copie"
-          }
+        <div
+          onClick={handleTheOneContainerClick}
+          className="relative inline-flex items-center"
         >
-          <Sparkles className={cn("w-3.5 h-3.5", !isConfirmed && "text-purple-200 animate-pulse")} />
-          <span>The One</span>
-        </button>
+          <button
+            type="button"
+            disabled={isTheOneDisabled}
+            onClick={onTheOne}
+            style={isTheOneDisabled ? { pointerEvents: "none" } : undefined}
+            className={cn(
+              "h-7 px-2.5 rounded text-xs font-bold flex items-center space-x-1.5 transition-all shadow-sm select-none",
+              isTheOneDisabled
+                ? "bg-purple-950/20 text-purple-400/30 border border-purple-900/20 opacity-40 cursor-not-allowed"
+                : "bg-purple-600 hover:bg-purple-500 text-white border border-purple-400/50 shadow-purple-900/20 cursor-default active:scale-95"
+            )}
+            title={
+              isConfirmed
+                ? "The One è disabilitato perché questo DDT è già stato salvato con numero definitivo"
+                : "The One: Salva DDT con numero progressivo e stampa immediatamente 3 copie"
+            }
+          >
+            <Sparkles className={cn("w-3.5 h-3.5", !isConfirmed && "text-purple-200 animate-pulse")} />
+            <span>The One</span>
+          </button>
+        </div>
 
         {/* Salva DDT (Verde) */}
         <button
@@ -278,11 +309,16 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
               )}
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
                   setDropdownOpen(false);
-                  onDuplicateDdt();
+                  if (e.shiftKey || e.altKey) {
+                    triggerMetalSlug();
+                  } else {
+                    onDuplicateDdt();
+                  }
                 }}
                 className="w-full text-left px-3 py-1.5 text-xs text-[var(--foreground)] hover:bg-[var(--background)] flex items-center space-x-2"
+                title="Shift+Click per Easter Egg Metal Slug"
               >
                 <Copy className="w-3.5 h-3.5 text-blue-400" />
                 <span>Duplica DDT</span>

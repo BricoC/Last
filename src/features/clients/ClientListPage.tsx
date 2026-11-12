@@ -23,6 +23,7 @@ import { clientSyncService, SyncClientsResult } from "./services/clientSyncServi
 import { ClientFormPanel } from "./components/ClientFormPanel";
 import { ClientMergeModal } from "./components/ClientMergeModal";
 import { DDTClientArticleHistoryModal } from "@/features/ddt-studio/components/DDTClientArticleHistoryModal";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 
 type FilterTab = "all" | "active" | "with_list" | "inactive";
 
@@ -43,6 +44,7 @@ export function ClientListPage() {
   const [historyClientName, setHistoryClientName] = useState<string | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const { triggerNier } = useEasterEggStore();
 
   // Scorciatoia F4 per focalizzare la ricerca rapida
   useEffect(() => {
@@ -220,6 +222,18 @@ export function ClientListPage() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const q = query.trim().toLowerCase();
+                  if (q === "glory to mankind" || q === "glory of mankind" || q === "gloria all'umanita" || q === "gloria all'umanità") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.nativeEvent?.stopImmediatePropagation?.();
+                    setQuery("");
+                    triggerNier();
+                  }
+                }
+              }}
               placeholder="Cerca cliente, P.IVA, città o listino (F4)..."
               className="h-8.5 w-72 rounded-md border border-[var(--border)] bg-[var(--background)] pl-8 pr-12 text-xs text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] font-medium"
             />

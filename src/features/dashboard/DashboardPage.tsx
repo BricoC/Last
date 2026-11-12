@@ -126,17 +126,19 @@ export const DashboardPage: React.FC = () => {
   });
   const [isRibaModalOpen, setIsRibaModalOpen] = useState(false);
 
-  // Easter Egg Box & Dennis Nedry Lock
-  const { playIllidanCinematic, isNedryLocked, setNedryLocked, resetNedryLock } = useEasterEggStore();
+  // Easter Egg Box & Dennis Nedry Pop-up
+  const { playIllidanCinematic, triggerStreetFighter } = useEasterEggStore();
   const [secretBoxClicks, setSecretBoxClicks] = useState(0);
   const [secretPassword, setSecretPassword] = useState("");
   const [secretInputShake, setSecretInputShake] = useState(false);
   const [secretFailedAttempts, setSecretFailedAttempts] = useState(0);
   const [showNedryModal, setShowNedryModal] = useState(false);
-  const [userIconClicks, setUserIconClicks] = useState(0);
   const secretInputRef = useRef<HTMLInputElement>(null);
   const secretClickResetTimer = useRef<NodeJS.Timeout | null>(null);
-  const userIconResetTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Street Fighter Easter Egg Combo Tracking (Hadouken & Shoryuken)
+  const sfKeyHistoryRef = useRef<string[]>([]);
+  const lastSfKeyTimeRef = useRef<number>(0);
 
   const handleSecretBoxClick = () => {
     if (secretClickResetTimer.current) {
@@ -147,14 +149,9 @@ export const DashboardPage: React.FC = () => {
     setSecretBoxClicks(nextClicks);
 
     if (nextClicks >= 15) {
-      if (isNedryLocked) {
-        setShowNedryModal(true);
-        setSecretBoxClicks(0);
-      } else {
-        setTimeout(() => {
-          secretInputRef.current?.focus();
-        }, 100);
-      }
+      setTimeout(() => {
+        secretInputRef.current?.focus();
+      }, 100);
     } else {
       // Se ci si ferma di premere per più di 400ms, si annulla istantaneamente tutto e si ricomincia da capo
       secretClickResetTimer.current = setTimeout(() => {
@@ -186,30 +183,11 @@ export const DashboardPage: React.FC = () => {
         setTimeout(() => setSecretInputShake(false), 400);
 
         if (nextFails >= 3) {
-          setNedryLocked(true);
           setShowNedryModal(true);
           setSecretBoxClicks(0);
           setSecretFailedAttempts(0);
         }
       }
-    }
-  };
-
-  const handleUserIconClick = () => {
-    if (userIconResetTimer.current) {
-      clearTimeout(userIconResetTimer.current);
-    }
-
-    const next = userIconClicks + 1;
-    setUserIconClicks(next);
-
-    if (next >= 5) {
-      resetNedryLock();
-      setUserIconClicks(0);
-    } else {
-      userIconResetTimer.current = setTimeout(() => {
-        setUserIconClicks(0);
-      }, 3000);
     }
   };
 
@@ -387,6 +365,73 @@ export const DashboardPage: React.FC = () => {
     });
   }, [monthDdts, monthDdtSearch]);
 
+  // Gestione Combo Easter Egg Street Fighter (Hadouken e Shoryuken) nella barra di ricerca DDT del Mese
+  const handleMonthDdtKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const now = performance.now();
+    // Resetta la sequenza se trascorrono più di 4 secondi tra un tasto e l'altro
+    if (now - lastSfKeyTimeRef.current > 4000) {
+      sfKeyHistoryRef.current = [];
+    }
+    lastSfKeyTimeRef.current = now;
+
+    if (e.key === "Backspace") {
+      sfKeyHistoryRef.current.pop();
+    }
+
+    const key = e.key;
+    if (
+      ["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(key) ||
+      key.length === 1 ||
+      key === "Enter"
+    ) {
+      const normKey = key.length === 1 ? key.toLowerCase() : key;
+      sfKeyHistoryRef.current.push(normKey);
+      if (sfKeyHistoryRef.current.length > 16) {
+        sfKeyHistoryRef.current.shift();
+      }
+    }
+
+    if (e.key === "Enter") {
+      const hist = sfKeyHistoryRef.current;
+      // Notazione compressa: D = Down, R = Right, L = Left, U = Up, a = a, enter = enter
+      const simplified = hist
+        .map((k) => {
+          if (k === "ArrowDown") return "D";
+          if (k === "ArrowRight") return "R";
+          if (k === "ArrowLeft") return "L";
+          if (k === "ArrowUp") return "U";
+          return k.toLowerCase();
+        })
+        .join("");
+
+      // Shoryuken: [→][↓][↓][→] A + Invio (o varianti con 1-2 frecce giù)
+      const isShoryuken = /(?:RD+R+aenter|shoryukenenter)$/i.test(simplified);
+
+      // Hadouken: [↓][↓][→][→] A + Invio (o varianti [↓][→] A + Invio non iniziate da [→])
+      const isHadouken = !isShoryuken && /(?:D+R+aenter|hadoukenenter)$/i.test(simplified);
+
+      if (isShoryuken) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.nativeEvent?.stopImmediatePropagation?.();
+        setMonthDdtSearch("");
+        sfKeyHistoryRef.current = [];
+        triggerStreetFighter("shoryuken");
+        return;
+      }
+
+      if (isHadouken) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.nativeEvent?.stopImmediatePropagation?.();
+        setMonthDdtSearch("");
+        sfKeyHistoryRef.current = [];
+        triggerStreetFighter("hadouken");
+        return;
+      }
+    }
+  };
+
   // Gestione navigazione con freccia dx/sx nel popup DDT del mese
   const currentQuickDdtIndex = useMemo(() => {
     if (!selectedQuickDdtId) return -1;
@@ -517,7 +562,7 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {/* 2. Oscuramento totale al 15° click con SOLO la textbox minimale al centro */}
-      {secretBoxClicks >= 15 && !isNedryLocked && (
+      {secretBoxClicks >= 15 && (
         <div
           onClick={() => secretInputRef.current?.focus()}
           className="fixed inset-0 z-50 bg-black flex items-center justify-center cursor-default select-none animate-in fade-in duration-200"
@@ -1221,7 +1266,7 @@ export const DashboardPage: React.FC = () => {
         {/* Box vuoto anonimo e staccato per Easter Egg */}
         <div
           onClick={handleSecretBoxClick}
-          className="w-7 h-7 rounded-lg bg-[var(--card)]/50 border border-[var(--border)]/40 select-none cursor-default shrink-0"
+          className="w-7 h-7 rounded-lg bg-[var(--card)]/40 hover:bg-[var(--card)]/80 border border-[var(--border)]/30 hover:border-slate-500/40 hover:shadow-xs transition-colors duration-200 select-none cursor-pointer shrink-0"
         />
 
         {/* Destra: Tasto Ri.Ba. Banca, Tasto Storico Articoli, Menù a tendina Multi-selezione Anni & Ricarica */}
@@ -1833,13 +1878,7 @@ export const DashboardPage: React.FC = () => {
           <div className="flex items-center justify-between shrink-0 mb-2">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-[var(--foreground)] uppercase tracking-wider flex items-center gap-1.5">
-                <span
-                  onClick={handleUserIconClick}
-                  className="inline-flex items-center cursor-default select-none"
-                  title=""
-                >
-                  <Users className="w-3.5 h-3.5 text-emerald-400" />
-                </span>
+                <Users className="w-3.5 h-3.5 text-emerald-400" />
                 Fatturato Clienti per Anno
               </span>
               <span className="text-[10px] text-[var(--muted-foreground)]">
@@ -1971,6 +2010,7 @@ export const DashboardPage: React.FC = () => {
                   type="text"
                   value={monthDdtSearch}
                   onChange={(e) => setMonthDdtSearch(e.target.value)}
+                  onKeyDown={handleMonthDdtKeyDown}
                   placeholder="Cerca N°, cliente o destinazione..."
                   className="w-full bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-[10px] rounded pl-6 pr-5 py-0.5 outline-none focus:border-[var(--primary)] transition-colors placeholder:text-[var(--muted-foreground)]/60"
                 />

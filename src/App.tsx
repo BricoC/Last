@@ -30,12 +30,41 @@ import { DdtBatchExportRunner } from "@/features/ddt-studio/components/DdtBatchE
 import { AppUpdaterRunner } from "@/shared/components/updater/AppUpdaterRunner";
 import { IllidanCinematicOverlay } from "@/shared/easter-eggs/IllidanCinematicOverlay";
 import { EasterEggVaultModal } from "@/shared/easter-eggs/EasterEggVaultModal";
+import { MgsCodecOverlay } from "@/shared/easter-eggs/MgsCodecOverlay";
+import { StreetFighterOverlay } from "@/shared/easter-eggs/StreetFighterOverlay";
+import { Ff9MoguoOverlay } from "@/shared/easter-eggs/Ff9MoguoOverlay";
+import { NierAutomataOverlay } from "@/shared/easter-eggs/NierAutomataOverlay";
+import { SuperMarioOverlay } from "@/shared/easter-eggs/SuperMarioOverlay";
+import { MetalSlugOverlay } from "@/shared/easter-eggs/MetalSlugOverlay";
+import { Ff7VictoryOverlay } from "@/shared/easter-eggs/Ff7VictoryOverlay";
+import { MgsAlertOverlay } from "@/shared/easter-eggs/MgsAlertOverlay";
+import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 import { checkAndExecuteDailyBackup } from "@/features/settings/services/backupService";
 
 export function App() {
   const { applyToDom } = useThemeStore();
+  const {
+    isMgsCodecOpen,
+    activeCodecFreq,
+    closeMgsCodec,
+    streetFighterMove,
+    closeStreetFighter,
+    isFf9MoguoActive,
+    ff9MoguoStage,
+    closeFf9Moguo,
+    isNierActive,
+    closeNier,
+    isMarioActive,
+    closeMario,
+    isMetalSlugActive,
+    closeMetalSlug,
+    isFf7Active,
+    closeFf7,
+    isMgsAlertActive,
+    stopMgsAlert,
+  } = useEasterEggStore();
   const {
     currentUser,
     users,
@@ -203,9 +232,43 @@ export function App() {
       {/* Runner Controllo & Download Aggiornamenti Automatici in Background */}
       <AppUpdaterRunner />
 
-      {/* Easter Egg Vault & Illidan Cinematic Overlay */}
+      {/* Easter Egg Vault, Illidan Cinematic Overlay, MGS Codec & Street Fighter */}
       <IllidanCinematicOverlay />
       <EasterEggVaultModal />
+      <MgsCodecOverlay
+        isOpen={isMgsCodecOpen}
+        frequency={activeCodecFreq}
+        onClose={closeMgsCodec}
+      />
+      <StreetFighterOverlay
+        move={streetFighterMove}
+        onClose={closeStreetFighter}
+      />
+      <Ff9MoguoOverlay
+        isActive={isFf9MoguoActive}
+        stage={ff9MoguoStage}
+        onClose={closeFf9Moguo}
+      />
+      <NierAutomataOverlay
+        isActive={isNierActive}
+        onClose={closeNier}
+      />
+      <SuperMarioOverlay
+        isActive={isMarioActive}
+        onClose={closeMario}
+      />
+      <MetalSlugOverlay
+        isActive={isMetalSlugActive}
+        onClose={closeMetalSlug}
+      />
+      <Ff7VictoryOverlay
+        isActive={isFf7Active}
+        onClose={closeFf7}
+      />
+      <MgsAlertOverlay
+        isActive={isMgsAlertActive}
+        onStop={stopMgsAlert}
+      />
     </div>
   );
 }
