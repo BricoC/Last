@@ -121,7 +121,10 @@ export function mapHeaderForLocal(header: CloudHeader): LocalImportHeader {
     packagesCount: header.colli || null, weightKg: header.peso_kg === null ? null : String(header.peso_kg),
     carrier: header.vettore || null, internalNotes: header.note || null,
     totalTaxableSubunits: subunits(header.totale_imponibile), totalVatSubunits: subunits(header.totale_iva),
-    totalDocumentSubunits: subunits(header.totale_documento), createdAt: header.created_at || now,
+    totalDocumentSubunits:
+      subunits(header.totale_documento) ||
+      (subunits(header.totale_imponibile) + subunits(header.totale_iva)),
+    createdAt: header.created_at || now,
     updatedAt: header.ultima_modifica || header.created_at || now,
   };
 }

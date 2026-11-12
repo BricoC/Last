@@ -1,52 +1,16 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import { Client, ClientPhone, CreateClientInput } from "../models/client";
-import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
+import { rankClientsBySearch } from "../utils/clientSearchUtils";
 import { deduplicateDestinations } from "../utils/destinationUtils";
 
 export class ClientRepository {
   public async getClients(search = ""): Promise<Client[]> {
     const db = await getDatabase();
-    let query = `
-      SELECT * FROM clients 
-      WHERE deleted_at IS NULL
-    `;
-    const params: string[] = [];
-
-    const searchSql = buildMultiTermSqlSearch(
-      search,
-      ["business_name", "vat_number", "fiscal_code", "city"],
-      { stripPunctuation: true }
+    const rows = await db.select<ClientRow[]>(
+      "SELECT * FROM clients WHERE deleted_at IS NULL ORDER BY business_name ASC"
     );
-    if (searchSql.sql) {
-      query += ` AND (${searchSql.sql})`;
-      params.push(...searchSql.params);
-      
-      const cleanTerm = search.trim().toLowerCase();
-      const punctCleanTerm = cleanTerm.replace(/[.\-_'\s]/g, "");
-
-      params.push(cleanTerm);
-      const rawIdx = params.length;
-
-      params.push(punctCleanTerm);
-      const cleanIdx = params.length;
-      
-      query += ` ORDER BY 
-        CASE 
-          WHEN LOWER(business_name) LIKE $${rawIdx} || '%' THEN 1
-          WHEN REPLACE(REPLACE(LOWER(business_name), '.', ''), ' ', '') LIKE $${cleanIdx} || '%' THEN 2
-          WHEN LOWER(business_name) LIKE '%' || $${rawIdx} || '%' THEN 3
-          WHEN REPLACE(REPLACE(LOWER(business_name), '.', ''), ' ', '') LIKE '%' || $${cleanIdx} || '%' THEN 4
-          ELSE 5
-        END ASC,
-        business_name ASC LIMIT 1000`;
-    } else {
-      query += " ORDER BY business_name ASC LIMIT 1000";
-    }
-
-    const rows = params.length > 0
-      ? await db.select<ClientRow[]>(query, params)
-      : await db.select<ClientRow[]>(query);
-    return rows.map((r) => this.mapRowToClient(r));
+    const clients = rows.map((r) => this.mapRowToClient(r));
+    return rankClientsBySearch(clients, search);
   }
 
   public async getClientById(id: string): Promise<Client | null> {

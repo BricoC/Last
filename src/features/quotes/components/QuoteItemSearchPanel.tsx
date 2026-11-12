@@ -245,11 +245,11 @@ export function QuoteItemSearchPanel({
     if (!pendingInsert) return;
 
     const qty = insertQuantity.trim() ? insertQuantity.trim() : "1";
-    const salePrice = pendingInsert.forced_unit_price
-      ? money(pendingInsert.forced_unit_price).toCanonicalString()
-      : pendingInsert.base_unit_price
+    const salePrice = pendingInsert.base_unit_price && !pendingInsert.base_unit_price.isZero()
       ? money(pendingInsert.base_unit_price).toCanonicalString()
-      : pendingInsert.effective_unit_price
+      : pendingInsert.forced_unit_price && !pendingInsert.forced_unit_price.isZero()
+      ? money(pendingInsert.forced_unit_price).toCanonicalString()
+      : pendingInsert.effective_unit_price && !pendingInsert.effective_unit_price.isZero()
       ? money(pendingInsert.effective_unit_price).toCanonicalString()
       : "";
 
@@ -262,8 +262,8 @@ export function QuoteItemSearchPanel({
       code: pendingInsert.code || "",
       purchase_price: pendingInsert.purchase_price ? money(pendingInsert.purchase_price).toCanonicalString() : "0",
       markup_pct: pendingInsert.markup_pct ?? 0,
-      base_unit_price: pendingInsert.base_unit_price ? money(pendingInsert.base_unit_price).toCanonicalString() : "",
-      forced_unit_price: salePrice,
+      base_unit_price: salePrice,
+      forced_unit_price: "",
       discount_pct: pendingInsert.discount_pct ?? 0,
       vat_rate: pendingInsert.vat_rate ?? 22,
       availability: "",
@@ -496,9 +496,9 @@ export function QuoteItemSearchPanel({
             type="button"
             onClick={() => handlePanelSortToggle("price")}
             className="text-right flex items-center justify-end hover:text-[var(--foreground)] cursor-pointer"
-            title="Prezzo vendita netto (4 decimali)"
+            title="Prezzo unitario vendita (4 decimali)"
           >
-            <span>Netto €</span>
+            <span>Prezzo €</span>
             {renderSortArrow(panelSortField === "price", panelSortDir)}
           </button>
           <button
@@ -534,7 +534,9 @@ export function QuoteItemSearchPanel({
           ) : (
             sortedUniqueItems.map((item, idx) => {
               const isSelected = idx === selectedRowIdx;
-              const salePrice = item.forced_unit_price ?? item.effective_unit_price;
+              const salePrice = item.base_unit_price && !item.base_unit_price.isZero()
+                ? item.base_unit_price
+                : (item.forced_unit_price ?? item.effective_unit_price);
               const quoteCode = formatQuoteCode(item.year, item.quote_number);
 
               return (
@@ -708,9 +710,9 @@ export function QuoteItemSearchPanel({
                   type="button"
                   onClick={() => handleOccurSortToggle("sale_price")}
                   className="text-right flex items-center justify-end hover:text-white cursor-pointer"
-                  title="Prezzo vendita netto (4 decimali)"
+                  title="Prezzo unitario vendita (4 decimali)"
                 >
-                  <span>Netto €</span>
+                  <span>Prezzo €</span>
                   {renderSortArrow(occurSortField === "sale_price", occurSortDir)}
                 </button>
                 <div className="text-center">#</div>
@@ -733,7 +735,9 @@ export function QuoteItemSearchPanel({
                 ) : (
                   sortedOccurrences.map((occ, idx) => {
                     const isSelected = idx === selectedOccurIdx;
-                    const salePrice = occ.forced_unit_price ?? occ.effective_unit_price;
+                    const salePrice = occ.base_unit_price && !occ.base_unit_price.isZero()
+                      ? occ.base_unit_price
+                      : (occ.forced_unit_price ?? occ.effective_unit_price);
                     const qCode = formatQuoteCode(occ.year, occ.quote_number);
                     const purchasePrice = occ.purchase_price;
                     let markupPct: number | null = null;
@@ -865,7 +869,7 @@ export function QuoteItemSearchPanel({
                 <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono">
                   {pendingInsert.supplier && <span>Fornitore: <strong className="text-slate-200">{pendingInsert.supplier}</strong></span>}
                   <span>UM: <strong className="text-slate-200">{pendingInsert.unit || "NR"}</strong></span>
-                  <span>Netto: <strong className="text-emerald-400">{(pendingInsert.forced_unit_price ?? pendingInsert.effective_unit_price).formatIT(true, 4, 4)}</strong></span>
+                  <span>Prezzo: <strong className="text-emerald-400">{(pendingInsert.base_unit_price && !pendingInsert.base_unit_price.isZero() ? pendingInsert.base_unit_price : (pendingInsert.forced_unit_price ?? pendingInsert.effective_unit_price)).formatIT(true, 4, 4)}</strong></span>
                 </div>
               </div>
             </div>

@@ -39,7 +39,7 @@ export const SoftwareUpdateSettingsPanel: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[var(--border)]">
           <div className="flex items-center space-x-3.5">
             <div className="w-12 h-12 rounded-xl bg-[var(--background)] border border-[var(--border)] flex items-center justify-center p-1.5 shrink-0 shadow-xs">
-              <img src="/logo.svg" alt="Last" className="w-full h-full object-contain" />
+              <img src="/logo.svg" alt="Last" className="w-full h-full object-contain pointer-events-none" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
@@ -123,75 +123,68 @@ export const SoftwareUpdateSettingsPanel: React.FC = () => {
                   style={{ width: `${downloadProgress}%` }}
                 />
               </div>
-              <p className="text-[11px] text-[var(--muted-foreground)]">
-                Puoi continuare a utilizzare normalmente il gestionale; non ci saranno blocchi o rallentamenti.
-              </p>
             </div>
-          ) : status === "up-to-date" ? (
-            <div className="p-3.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20 flex items-center space-x-3 text-xs text-emerald-400">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Il gestionale è aggiornato all'ultima versione disponibile. Non ci sono aggiornamenti in sospeso.</span>
-            </div>
-          ) : status === "error" ? (
-            <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-start space-x-3 text-xs text-amber-400">
-              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          ) : errorMessage ? (
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-3">
+              <AlertCircle className="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
               <div>
-                <p className="font-semibold">Nessun nuovo rilascio disponibile o rete non raggiungibile</p>
-                <p className="text-[11px] text-[var(--muted-foreground)] mt-0.5">
-                  {errorMessage || "Verifica la connessione a Internet o attendi la pubblicazione di una nuova release."}
-                </p>
+                <h4 className="text-sm font-bold text-amber-400">Verifica completata con avviso</h4>
+                <p className="text-xs text-[var(--muted-foreground)] mt-0.5 leading-relaxed">{errorMessage}</p>
               </div>
             </div>
           ) : (
-            <div className="p-3 rounded-lg bg-[var(--background)] border border-[var(--border)] text-xs text-[var(--muted-foreground)] flex items-center justify-between">
-              <span>Controllo automatico attivo all'avvio dell'applicazione ogni volta che si avvia il programma.</span>
-              <span className="font-mono text-[11px] text-[var(--foreground)]">Ultimo controllo: all'avvio</span>
+            <div className="flex items-center space-x-2 text-xs text-emerald-400 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>Il gestionale è aggiornato all'ultima versione disponibile. Non ci sono aggiornamenti in sospeso.</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Riquadri Informativi e Garanzie di Sicurezza */}
+      {/* Griglia Schede Informative */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4.5 space-y-2">
-          <div className="flex items-center space-x-2 text-emerald-400">
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-2 shadow-xs">
+          <div className="flex items-center space-x-2 text-emerald-400 font-semibold text-xs">
             <Database className="w-4 h-4" />
-            <h4 className="text-xs font-bold text-[var(--foreground)]">Database SQLite Intatto</h4>
+            <span>Database SQLite Intatto</span>
           </div>
-          <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
-            L'aggiornatore sostituisce esclusivamente il codice dell'applicazione. Il tuo database locale (<code className="text-[10px] text-[var(--foreground)]">LastData.db</code>), i backup, le tabelle e i documenti restano protetti e inalterati al 100%.
+          <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
+            L'aggiornatore sostituisce esclusivamente il codice dell'applicazione. Il tuo database locale (
+            <code className="text-xs text-[var(--foreground)] font-mono">LastData.db</code>), i backup, le tabelle e i documenti restano protetti e inalterati al 100%.
           </p>
         </div>
 
-        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4.5 space-y-2">
-          <div className="flex items-center space-x-2 text-blue-400">
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-2 shadow-xs">
+          <div className="flex items-center space-x-2 text-blue-400 font-semibold text-xs">
             <ShieldCheck className="w-4 h-4" />
-            <h4 className="text-xs font-bold text-[var(--foreground)]">Firma Crittografica</h4>
+            <span>Firma Crittografica</span>
           </div>
-          <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+          <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
             Ogni pacchetto di aggiornamento deve essere firmato crittograficamente con la tua chiave privata. Se un file venisse manomesso, l'applicazione rifiuterebbe l'installazione.
           </p>
         </div>
 
-        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4.5 space-y-2">
-          <div className="flex items-center space-x-2 text-purple-400">
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 space-y-2 shadow-xs">
+          <div className="flex items-center space-x-2 text-purple-400 font-semibold text-xs">
             <DownloadCloud className="w-4 h-4" />
-            <h4 className="text-xs font-bold text-[var(--foreground)]">Stile Windows Update</h4>
+            <span>Stile Windows Update</span>
           </div>
-          <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+          <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
             Il download avviene in modo completamente silenzioso in background senza interrompere le attività alla cassa o in ufficio. Un popup ti avvisa quando è pronto il riavvio rapido.
           </p>
         </div>
       </div>
 
-      {/* Riferimento Repository e Documentazione */}
-      <div className="p-4 rounded-xl bg-[var(--background)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[var(--muted-foreground)]">
+      {/* Box Note Tecniche */}
+      <div className="bg-[var(--card)]/50 border border-[var(--border)] rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs text-[var(--muted-foreground)] gap-2">
         <div>
-          <span className="font-semibold text-[var(--foreground)] block">Canale di Rilascio Ufficiale:</span>
-          <span className="font-mono text-[11px]">https://github.com/BricoC/Last/releases</span>
+          <span className="font-semibold text-[var(--foreground)]">Canale di Rilascio Ufficiale:</span>
+          <p className="font-mono text-[11px] text-[var(--muted-foreground)] mt-0.5">
+            https://github.com/BricoC/Last/releases
+          </p>
         </div>
-        <div className="flex items-center space-x-2 text-[11px]">
-          <span>Per i dettagli su come generare un rilascio, consulta la guida nella sezione Note.</span>
+        <div className="text-[11px]">
+          Per i dettagli su come generare un rilascio, consulta la guida nella sezione Note.
         </div>
       </div>
     </div>
