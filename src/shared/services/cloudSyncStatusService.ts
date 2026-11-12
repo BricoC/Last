@@ -131,6 +131,8 @@ class CloudSyncStatusService {
 
     let localLatestDdt: CloudSyncStatusInfo["localLatestDdt"] = null;
     let localLatestListino: CloudSyncStatusInfo["localLatestListino"] = null;
+    let localMaxCliUpdatedAt: Date | null = null;
+    let localMaxGenUpdatedAt: Date | null = null;
 
     try {
       const db = await getDatabase();
@@ -167,6 +169,22 @@ class CloudSyncStatusService {
           description: listinoRows[0].descrizione || "",
           updatedAt: listinoRows[0].updated_at || null,
         };
+        if (listinoRows[0].updated_at) {
+          const d = new Date(listinoRows[0].updated_at);
+          if (!isNaN(d.getTime())) localMaxGenUpdatedAt = d;
+        }
+      }
+
+      const cliRows = await db.select<{ updated_at: string }[]>(
+        `SELECT updated_at 
+         FROM listini_clienti 
+         WHERE updated_at IS NOT NULL AND updated_at != '' 
+         ORDER BY updated_at DESC 
+         LIMIT 1;`
+      );
+      if (cliRows.length > 0 && cliRows[0].updated_at) {
+        const d = new Date(cliRows[0].updated_at);
+        if (!isNaN(d.getTime())) localMaxCliUpdatedAt = d;
       }
     } catch (err) {
       console.warn("[CloudSyncStatus] Errore lettura dati locali SQLite:", err);
@@ -301,6 +319,28 @@ class CloudSyncStatusService {
     let hasPendingRemoteChanges = false;
     let alignmentMessage = "Programma allineato a Supabase";
 
+    // Verifica se il database locale SQLite è già aggiornato rispetto alle ultime date rilevate sul Cloud
+    // (es. se la migrazione o il salvataggio è partito da questo stesso PC, o se i dati locali sono già più recenti o identici)
+    const isLocalDdtUpToDate =
+      !remoteLatestDdt ||
+      !localLatestDdt ||
+      localLatestDdt.year > remoteLatestDdt.year ||
+      (localLatestDdt.year === remoteLatestDdt.year && localLatestDdt.number >= remoteLatestDdt.number);
+
+    let isLocalDataAlreadyUpToDate = false;
+    if (isLocalDdtUpToDate && remoteLatestDate) {
+      // Controlla se la modifica Cloud più recente corrisponde a dati che il DB locale ha già
+      const localMaxDate = Math.max(
+        localLastSyncDate?.getTime() || 0,
+        localMaxGenUpdatedAt?.getTime() || 0,
+        localMaxCliUpdatedAt?.getTime() || 0
+      );
+      // Tolleranza di 5 secondi per disallineamenti di clock o conversioni millisecondi
+      if (localMaxDate > 0 && localMaxDate >= remoteLatestDate.getTime() - 5000) {
+        isLocalDataAlreadyUpToDate = true;
+      }
+    }
+
     // Regola A: Se su Supabase esiste un DDT con numero superiore al massimo locale
     if (
       remoteLatestDdt &&
@@ -311,24 +351,31 @@ class CloudSyncStatusService {
       hasPendingRemoteChanges = true;
       alignmentMessage = `Nuovo DDT n. ${remoteLatestDdt.number} presente sul Cloud (locale fermo al n. ${localLatestDdt.number})`;
     }
-    // Regola B: Se l'attività remota è più recente dell'ultimo scaricamento locale (con 3s di tolleranza)
+    // Regola B: Se i dati locali (SQLite) sono già uguali o più recenti dell'attività del Cloud
+    else if (isLocalDataAlreadyUpToDate) {
+      hasPendingRemoteChanges = false;
+      alignmentMessage = "Programma aggiornato: allineato con l'ultima attività del Cloud";
+      // Auto-aggiorna il timestamp nel browser per evitare falsi positivi futuri
+      try {
+        if (remoteLatestDate) {
+          localStorage.setItem("last_supabase_sync_timestamp", remoteLatestDate.toISOString());
+          localStorage.setItem("last_supabase_sync_summary", "Dati locali già allineati al Cloud");
+        }
+      } catch {}
+    }
+    // Regola C: Se l'attività remota è più recente dell'ultimo scaricamento locale (con 5s di tolleranza)
     else if (remoteLatestDate && localLastSyncDate) {
       const diffMs = remoteLatestDate.getTime() - localLastSyncDate.getTime();
-      if (diffMs > 3000) {
+      if (diffMs > 5000) {
         hasPendingRemoteChanges = true;
         alignmentMessage = `Modifiche rilevate sul Cloud (${formatRelativeTime(remoteLatestDate)}): ${remoteLatestSummary || "Nuovi dati"}`;
       } else {
         alignmentMessage = "Programma aggiornato: allineato con l'ultima attività del Cloud";
       }
     }
-    // Regola C: Se non è mai stato registrato uno scaricamento locale su questa macchina
+    // Regola D: Se non è mai stato registrato uno scaricamento locale su questa macchina
     else if (!localLastSyncDate && remoteLatestDate) {
-      if (
-        localLatestDdt &&
-        remoteLatestDdt &&
-        (localLatestDdt.year > remoteLatestDdt.year ||
-          (localLatestDdt.year === remoteLatestDdt.year && localLatestDdt.number >= remoteLatestDdt.number))
-      ) {
+      if (isLocalDdtUpToDate) {
         hasPendingRemoteChanges = false;
         alignmentMessage = "Programma allineato a Supabase";
         try {
