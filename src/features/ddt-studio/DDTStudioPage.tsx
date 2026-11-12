@@ -889,6 +889,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     let insertedIdx = -1;
     setItems((prev) => {
       const copy = [...prev];
+      // Una riga è considerata "vuota/disponibile" se non ha codice, né prezzo, né quantità,
+      // e la sua descrizione è vuota (oppure coincideva con la stringa di ricerca digitata nel campo)
       const isUnfilledRow = (row: DdtItem) => {
         const hasCode = Boolean(row.code && row.code.trim().length > 0);
         const hasPrice = isPositivePrice(row.unit_price) || isPositivePrice(row.purchase_price);
@@ -899,6 +901,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         return false;
       };
 
+      // Come in Excel:
+      // 1. Se l'utente ha selezionato una riga specifica ed è vuota, usa quella.
+      // 2. Altrimenti cerca a partire da quella riga (o dall'inizio) la prima riga con descrizione vuota.
+      // 3. Se tutte le righe successive sono piene, cerca la prima riga vuota dall'inizio.
       let targetIdx = -1;
       const activeIdx = activeRowIndexRef.current;
       if (activeIdx !== null && activeIdx >= 0 && activeIdx < copy.length && isUnfilledRow(copy[activeIdx])) {
@@ -910,7 +916,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           targetIdx = copy.findIndex(isUnfilledRow);
         }
       }
-      if (targetIdx === -1) targetIdx = 0;
+      if (targetIdx === -1) targetIdx = copy.length - 1;
       insertedIdx = targetIdx;
 
       const price = money(article.unit_price || 0);
@@ -927,12 +933,15 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       const vat = article.vat_rate !== undefined && article.vat_rate !== null && String(article.vat_rate).trim() !== "" ? article.vat_rate : "";
       const { netAmount, vatAmount } = calculateRowAmounts(q, effectivePrice, disc, vat);
 
+      // Unità di misura ereditata dall'articolo/storico (es. MT., KG., NR., CF.)
+      const determinedUnit = (article.unit && article.unit.trim()) ? article.unit.trim() : "NR.";
+
       copy[targetIdx] = {
         ...copy[targetIdx],
         row_kind: "item",
         code: article.code || "",
         description: (article.description || "").toUpperCase(),
-        unit: article.unit || "NR",
+        unit: determinedUnit,
         quantity: q,
         unit_price: effectivePrice,
         base_price: price,
@@ -944,15 +953,20 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         purchase_price: purchasePrice,
       };
 
+      // Sposta il puntatore alla riga successiva per l'eventuale prossimo articolo
       activeRowIndexRef.current = Math.min(targetIdx + 1, copy.length - 1);
       return copy;
     });
 
     if (insertedIdx >= 0) {
       const nextIdx = insertedIdx + 1;
-      setTimeout(() => {
-        tableRef.current?.focusCell(nextIdx, "description", false);
-      }, 50);
+      // Se il pannello di ricerca è chiuso, sposta il cursore sulla riga successiva della tabella.
+      // Se il pannello è aperto, lasciamo il focus sulla ricerca articoli (input text) con testo evidenziato.
+      if (!isSearchModalOpen) {
+        setTimeout(() => {
+          tableRef.current?.focusCell(nextIdx, "description", false);
+        }, 50);
+      }
     }
 
     showToast(`Inserito: ${article.description}`);

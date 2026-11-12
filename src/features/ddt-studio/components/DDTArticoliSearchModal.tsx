@@ -66,8 +66,8 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
   const [clientItems, setClientItems] = useState<ListinoClienteRow[]>([]);
   const [historyItems, setHistoryItems] = useState<ClientArticleHistoryRow[]>([]);
 
-  // Navigazione tastiera & focus ('list' in alto, 'history' in basso)
-  const [activePane, setActivePane] = useState<"list" | "history">("list");
+  // Navigazione tastiera & focus ('history' in alto, 'list' in basso)
+  const [activePane, setActivePane] = useState<"history" | "list">("history");
   const [selectedListIdx, setSelectedListIdx] = useState(0);
   const [selectedHistIdx, setSelectedHistIdx] = useState(0);
 
@@ -81,9 +81,30 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
   const listContainerRef = useRef<HTMLDivElement>(null);
   const historyContainerRef = useRef<HTMLDivElement>(null);
 
-  // Quando viene premuto F3, sposta il focus immediatamente sulla prima voce della tabella in alto
+  // Quando il pannello si apre (tramite F4, tasto Cerca Articoli o cambio stato isOpen),
+  // porta automaticamente il focus sull'input di ricerca articoli e seleziona il testo presente
   useEffect(() => {
     if (!isOpen || pendingInsert) return;
+
+    const focusInput = () => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.select();
+      }
+    };
+
+    focusInput();
+    const t1 = setTimeout(focusInput, 30);
+    const t2 = setTimeout(focusInput, 100);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [isOpen, pendingInsert]);
+
+  // Quando viene premuto specificamente F3, sposta il focus sulla prima voce della tabella in alto
+  useEffect(() => {
+    if (!isOpen || pendingInsert || !f3FocusTrigger) return;
 
     // Se il listino cliente non ha risultati ma il listino generale sì, passa a Generale
     if (sourceTab === "cliente" && filteredClientItems.length === 0 && filteredGeneralItems.length > 0) {
@@ -109,7 +130,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [f3FocusTrigger, isOpen, pendingInsert]);
+  }, [f3FocusTrigger]);
 
   // Notifica lo stato di apertura/chiusura del popup quantità al genitore per bloccare shortcut F3/F4
   useEffect(() => {
@@ -384,17 +405,15 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
       quantity: insertQuantity.trim() || "1",
     });
     setPendingInsert(null);
-    setTimeout(() => {
+    const restoreInputFocusAndSelect = () => {
       if (inputRef.current) {
         inputRef.current.focus();
         inputRef.current.select();
       }
-    }, 60);
-    setTimeout(() => {
-      if (inputRef.current && document.activeElement === inputRef.current) {
-        inputRef.current.select();
-      }
-    }, 150);
+    };
+    setTimeout(restoreInputFocusAndSelect, 30);
+    setTimeout(restoreInputFocusAndSelect, 100);
+    setTimeout(restoreInputFocusAndSelect, 250);
   };
 
   const formatEuro = (val: number | null | undefined, digits: number = 2) => {
@@ -516,13 +535,13 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
               if (e.key === "Tab") {
                 e.preventDefault();
                 e.stopPropagation();
-                setActivePane("list");
-                setSelectedListIdx(0);
+                setActivePane("history");
+                setSelectedHistIdx(0);
                 containerRef.current?.focus();
               } else if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setActivePane("list");
-                setSelectedListIdx(0);
+                setActivePane("history");
+                setSelectedHistIdx(0);
                 containerRef.current?.focus();
               } else if (e.key === "Enter") {
                 e.preventDefault();
@@ -551,10 +570,92 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
         </div>
       </div>
 
-      {/* 3. Sezione Dati Split (Tabella Listino sopra + Tabella Storico sotto a uguale altezza 50/50) */}
+      {/* 3. Sezione Dati Split (Tabella Storico sopra + Tabella Listino sotto a uguale altezza 50/50) */}
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        {/* TABELLA 1: LISTINO GENERALE O CLIENTE (50% altezza) */}
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden border-b border-[var(--border)]">
+        {/* TABELLA 1 (IN ALTO): STORICO PREZZI PRATICATI AL CLIENTE */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden border-b border-[var(--border)] bg-[var(--background)]/40">
+          <div className="px-3 py-1 bg-[var(--background)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] flex justify-between items-center shrink-0">
+            <div className="flex items-center space-x-2">
+              <span className="text-emerald-400 font-bold">
+                Storico Prezzi Praticati {displayClientName && `a ${displayClientName}`}
+              </span>
+              {activePane === "history" && (
+                <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                  ATTIVO ↑↓
+                </span>
+              )}
+            </div>
+            <span className="font-mono text-[10px]">
+              {visibleHistoryItems.length < historyItems.length
+                ? `Mostrati ${visibleHistoryItems.length} di ${historyItems.length}`
+                : `${historyItems.length} ddt precedenti`}
+            </span>
+          </div>
+
+          <div
+            ref={historyContainerRef}
+            data-history-container="true"
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            className={`flex-1 overflow-y-auto overflow-x-hidden outline-none ${activePane === "history" ? "ring-1 ring-emerald-500/40" : ""}`}
+          >
+            {visibleHistoryItems.length === 0 ? (
+              <div className="p-3 text-center text-xs text-[var(--muted-foreground)]">
+                Nessun prezzo storico trovato nei DDT precedenti per questo cliente.
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 bg-[var(--card)] z-10 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-semibold">
+                  <tr>
+                    <th className="px-2 py-1 text-left w-20">Data</th>
+                    <th className="px-2 py-1 text-left">Descrizione</th>
+                    <th className="px-2.5 py-1 text-right w-24">Prezzo (€)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
+                  {visibleHistoryItems.map((h, idx) => {
+                    const isSelected = activePane === "history" && selectedHistIdx === idx;
+                    const priceVal = h.unitPriceSubunits / 100000;
+
+                    return (
+                      <tr
+                        key={`${h.ddtId}_${idx}`}
+                        data-active={isSelected ? "true" : undefined}
+                        onClick={() => {
+                          setActivePane("history");
+                          setSelectedHistIdx(idx);
+                        }}
+                        onDoubleClick={handleOpenQuantityModal}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected
+                            ? "bg-emerald-600 text-white font-bold"
+                            : "hover:bg-[var(--card)] text-[var(--foreground)]"
+                        }`}
+                      >
+                        <td className="px-2 py-1 text-[var(--muted-foreground)] whitespace-nowrap text-[10.5px]">
+                          {formatDdtViewDate(h.date)}
+                        </td>
+                        <td className="px-2 py-1 font-sans truncate max-w-[200px]" title={h.description}>
+                          <span className="text-[var(--foreground)]">{h.description}</span>
+                        </td>
+                        <td
+                          className={`px-2.5 py-1 text-right font-bold whitespace-nowrap ${
+                            isSelected ? "text-white" : "text-emerald-400"
+                          }`}
+                        >
+                          {formatEuro(priceVal, 2)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* TABELLA 2 (IN BASSO): LISTINO GENERALE O CLIENTE */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="px-3 py-1 bg-[var(--background)]/80 text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] flex justify-between items-center shrink-0">
             <div className="flex items-center space-x-2">
               <span>{sourceTab === "generale" ? "Listino Generale Articoli" : `Listino Cliente (${displayClientName})`}</span>
@@ -650,88 +751,6 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
             )}
           </div>
         </div>
-
-        {/* TABELLA 2: STORICO PREZZI PRATICATI AL CLIENTE (50% altezza) */}
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-[var(--background)]/40">
-          <div className="px-3 py-1 bg-[var(--background)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] border-b border-[var(--border)] flex justify-between items-center shrink-0">
-            <div className="flex items-center space-x-2">
-              <span className="text-emerald-400 font-bold">
-                Storico Prezzi Praticati {displayClientName && `a ${displayClientName}`}
-              </span>
-              {activePane === "history" && (
-                <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
-                  ATTIVO ↑↓
-                </span>
-              )}
-            </div>
-            <span className="font-mono text-[10px]">
-              {visibleHistoryItems.length < historyItems.length
-                ? `Mostrati ${visibleHistoryItems.length} di ${historyItems.length}`
-                : `${historyItems.length} ddt precedenti`}
-            </span>
-          </div>
-
-          <div
-            ref={historyContainerRef}
-            data-history-container="true"
-            tabIndex={0}
-            onKeyDown={handleKeyDown}
-            className={`flex-1 overflow-y-auto overflow-x-hidden outline-none ${activePane === "history" ? "ring-1 ring-emerald-500/40" : ""}`}
-          >
-            {visibleHistoryItems.length === 0 ? (
-              <div className="p-3 text-center text-xs text-[var(--muted-foreground)]">
-                Nessun prezzo storico trovato nei DDT precedenti per questo cliente.
-              </div>
-            ) : (
-              <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 bg-[var(--card)] z-10 text-[10px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-semibold">
-                  <tr>
-                    <th className="px-2 py-1 text-left w-20">Data</th>
-                    <th className="px-2 py-1 text-left">Descrizione</th>
-                    <th className="px-2.5 py-1 text-right w-24">Prezzo (€)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border)]/30 font-mono text-[11px]">
-                  {visibleHistoryItems.map((h, idx) => {
-                    const isSelected = activePane === "history" && selectedHistIdx === idx;
-                    const priceVal = h.unitPriceSubunits / 100000;
-
-                    return (
-                      <tr
-                        key={`${h.ddtId}_${idx}`}
-                        data-active={isSelected ? "true" : undefined}
-                        onClick={() => {
-                          setActivePane("history");
-                          setSelectedHistIdx(idx);
-                        }}
-                        onDoubleClick={handleOpenQuantityModal}
-                        className={`cursor-pointer transition-colors ${
-                          isSelected
-                            ? "bg-emerald-600 text-white font-bold"
-                            : "hover:bg-[var(--card)] text-[var(--foreground)]"
-                        }`}
-                      >
-                        <td className="px-2 py-1 text-[var(--muted-foreground)] whitespace-nowrap text-[10.5px]">
-                          {formatDdtViewDate(h.date)}
-                        </td>
-                        <td className="px-2 py-1 font-sans truncate max-w-[200px]" title={h.description}>
-                          <span className="text-[var(--foreground)]">{h.description}</span>
-                        </td>
-                        <td
-                          className={`px-2.5 py-1 text-right font-bold whitespace-nowrap ${
-                            isSelected ? "text-white" : "text-emerald-400"
-                          }`}
-                        >
-                          {formatEuro(priceVal, 2)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* 4. Footer Pannello con Azioni Rapide */}
@@ -804,7 +823,12 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
             </div>
 
             <div className="flex items-center justify-between py-1">
-              <label className="text-sm font-bold text-white">Specifica Quantità:</label>
+              <div className="flex flex-col">
+                <label className="text-sm font-bold text-white">Specifica Quantità:</label>
+                <span className="text-[11px] text-slate-400">
+                  U.M. automatica: <strong className="text-amber-400">{pendingInsert.unit || "NR."}</strong>
+                </span>
+              </div>
               <input
                 ref={qtyInputRef}
                 type="number"
