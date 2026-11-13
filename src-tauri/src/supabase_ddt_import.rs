@@ -3,6 +3,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager};
@@ -260,6 +261,7 @@ pub async fn import_supabase_ddt_into_local(
         Ok((imported_headers, imported_lines)) => {
             sqlx::query("COMMIT").execute(&mut *connection).await
                 .map_err(|error| format!("Commit importazione non riuscito (backup disponibile in {backup_name}): {error}"))?;
+            rotate_pre_import_backups(&data_dir, 5);
             Ok(DdtImportResult {
                 imported_headers,
                 imported_lines,
@@ -331,4 +333,49 @@ async fn import_transaction(
         .execute(&mut *connection).await.map_err(|error| format!("Importazione riga DDT {} fallita: {error}", line.id))?;
     }
     Ok((headers.len(), lines.len()))
+}
+
+/// Mantiene al massimo `max_backups` file di backup pre-importazione nel database locale,
+/// rimuovendo a rotazione i più vecchi ed eliminando eventuali vecchi snapshot legacy.
+pub fn rotate_pre_import_backups(data_dir: &Path, max_backups: usize) {
+    let entries = match fs::read_dir(data_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    let mut backup_files: Vec<(std::path::PathBuf, SystemTime)> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                let is_pre_import = file_name.starts_with("LastData.pre-supabase-ddt-import-")
+                    && file_name.ends_with(".db");
+                let is_legacy_pre = (file_name.starts_with("LastData.pre-")
+                    || file_name.starts_with("LastData.db.pre-")
+                    || file_name.starts_with("LastData_backup_20261028_"))
+                    && file_name.ends_with(".db");
+
+                if is_pre_import {
+                    let modified = entry
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .unwrap_or(SystemTime::UNIX_EPOCH);
+                    backup_files.push((path, modified));
+                } else if is_legacy_pre {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
+
+    // Ordina dal più recente al più vecchio
+    backup_files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Se ci sono più di max_backups, rimuovi i più vecchi
+    if backup_files.len() > max_backups {
+        for (path, _) in &backup_files[max_backups..] {
+            let _ = fs::remove_file(path);
+        }
+    }
 }

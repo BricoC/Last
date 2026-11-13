@@ -58,3 +58,31 @@ export const formatDdtViewDate = (value?: string | null): string => {
 };
 
 export const formatDdtNumber = (number: number | null, series: string) => number === null ? "Bozza" : `${series ? `${series}/` : ""}${number}`;
+
+export const DDT_MONTH_OPTIONS = ITALIAN_MONTHS.map((name, idx) => ({
+  value: idx + 1,
+  label: `${String(idx + 1).padStart(2, "0")} - ${name}`,
+}));
+
+/**
+ * Estrae il numero del mese (1-12) da una stringa data (supporta ISO YYYY-MM-DD e DD/MM/YYYY)
+ */
+export const getRowMonth = (dateStr?: string | null): number | null => {
+  if (!dateStr) return null;
+  const clean = dateStr.split("T")[0].split(" ")[0].trim();
+  if (clean.includes("-")) {
+    const parts = clean.split("-");
+    if (parts.length >= 2) {
+      const m = parseInt(parts[1], 10);
+      return isNaN(m) ? null : m;
+    }
+  } else if (clean.includes("/")) {
+    const parts = clean.split("/");
+    if (parts.length === 3) {
+      const m = parseInt(parts[1], 10);
+      return isNaN(m) ? null : m;
+    }
+  }
+  return null;
+};
+
