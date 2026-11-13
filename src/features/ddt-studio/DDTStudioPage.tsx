@@ -187,6 +187,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [closePrompt, setClosePrompt] = useState<((choice: DdtCloseChoice) => void) | null>(null);
   const savedSignature = React.useRef<string | null>(null);
+  const printPortalRef = React.useRef<HTMLDivElement>(null);
   const ddtLoadRequest = React.useRef(0);
 
   // Stato Cestino DDT Studio (15 voci) & Conflitti
@@ -772,7 +773,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       // 2. Stampa 3 copie immediate senza preview
       setIsPrinting(true);
       await new Promise((resolve) => setTimeout(resolve, 200));
-      await executeDdtPrint(3);
+      await executeDdtPrint(3, printPortalRef.current);
       showToast(`The One completato: DDT #${identifier} emesso e 3 copie inviate alla stampante!`);
     } catch (e: any) {
       console.error("Errore The One:", e);
@@ -978,7 +979,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     setIsPrinting(true);
     showToast(`Invio stampa di ${copies} ${copies === 1 ? "copia" : "copie"} in corso...`);
     try {
-      await executeDdtPrint(copies);
+      await executeDdtPrint(copies, printPortalRef.current);
       showToast(`Stampa inviata alla stampante predefinita (${copies} ${copies === 1 ? "copia" : "copie"})`);
     } catch (e: any) {
       console.error("Errore stampa:", e);
@@ -993,7 +994,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     setIsExportingPdf(true);
     showToast("Generazione PDF multipagina del DDT in corso...");
     try {
-      const { filename } = await exportDdtPdfToDesktop(ddt);
+      const { filename } = await exportDdtPdfToDesktop(ddt, printPortalRef.current);
       showToast(`PDF salvato sul Desktop: ${filename}`);
     } catch (e: any) {
       console.error("Errore salvataggio PDF:", e);
@@ -1016,7 +1017,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     setTimeout(async () => {
       try {
         setIsExportingPdf(true);
-        const pdfRes = await exportDdtPdfToDesktop(testDoc);
+        const pdfRes = await exportDdtPdfToDesktop(testDoc, printPortalRef.current);
         showToast(`PDF salvato su Desktop: ${pdfRes.filename}`);
       } catch (err: any) {
         console.error("Errore salvataggio test:", err);
@@ -1382,7 +1383,9 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       {typeof document !== "undefined" &&
         createPortal(
           <div
-            id="ddt-print-portal"
+            ref={printPortalRef}
+            id={`ddt-print-portal-${windowId || ddt.id || "main"}`}
+            className="ddt-print-portal"
             style={{
               position: "fixed",
               left: "-99999px",

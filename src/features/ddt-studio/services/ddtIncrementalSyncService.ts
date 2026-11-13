@@ -31,6 +31,7 @@ export interface IncrementalSyncResult {
   newHeadersCount: number;
   newLinesCount: number;
   recoveredGapsCount?: number;
+  updatedHistoricalCount?: number;
   unresolvedGaps?: NumberingGapInfo[];
   backupPath: string | null;
   error?: string;
@@ -38,6 +39,41 @@ export interface IncrementalSyncResult {
 
 class DdtIncrementalSyncService {
   private isSyncing = false;
+
+  private async fetchLinesWithPagination(
+    projectUrl: string,
+    anonKey: string,
+    year: number,
+    numbers: number[]
+  ): Promise<CloudLine[]> {
+    if (numbers.length === 0) return [];
+    const allLines: CloudLine[] = [];
+    const PAGE_LIMIT = 1000;
+    let offset = 0;
+
+    while (true) {
+      const linesUrl = new URL(`/rest/v1/ddt_righe`, projectUrl);
+      linesUrl.searchParams.set("anno", `eq.${year}`);
+      linesUrl.searchParams.set("numero_ddt", `in.(${numbers.join(",")})`);
+      linesUrl.searchParams.set("select", LINE_FIELDS);
+      linesUrl.searchParams.set("order", "numero_ddt.asc,riga_nr.asc");
+      linesUrl.searchParams.set("limit", String(PAGE_LIMIT));
+      linesUrl.searchParams.set("offset", String(offset));
+
+      const linesRes = await fetch(linesUrl.toString(), {
+        headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      });
+
+      if (!linesRes.ok) break;
+      const fetchedLines = (await linesRes.json()) as CloudLine[];
+      if (!fetchedLines || fetchedLines.length === 0) break;
+      allLines.push(...fetchedLines);
+      if (fetchedLines.length < PAGE_LIMIT) break;
+      offset += PAGE_LIMIT;
+    }
+
+    return allLines;
+  }
 
   public async syncNewDdtsFromSupabase(): Promise<IncrementalSyncResult> {
     if (this.isSyncing) {
@@ -64,6 +100,7 @@ class DdtIncrementalSyncService {
       const newLines: CloudLine[] = [];
       const unresolvedGaps: NumberingGapInfo[] = [];
       let totalRecoveredGaps = 0;
+      let totalUpdatedHistorical = 0;
 
       for (const year of activeYears) {
         // 2a. Recupera tutti i doc_number esistenti in locale per l'anno per identificare sia il massimo che eventuali buchi
@@ -220,27 +257,139 @@ class DdtIncrementalSyncService {
 
         newHeaders.push(...fetchedHeadersForYear);
 
-        // 2d. Fetch mirato delle righe per TUTTI i numeri individuati (nuovi + buchi recuperati) in chunk
+        // 2d. Fetch mirato delle righe per TUTTI i numeri individuati (nuovi + buchi recuperati) in chunk con paginazione
         const distinctNumbers = Array.from(new Set(fetchedHeadersForYear.map((h) => Number(h.numero))));
         const CHUNK = 50;
         for (let i = 0; i < distinctNumbers.length; i += CHUNK) {
           const chunk = distinctNumbers.slice(i, i + CHUNK);
-          const linesUrl = new URL(`/rest/v1/ddt_righe`, projectUrl);
-          linesUrl.searchParams.set("anno", `eq.${year}`);
-          linesUrl.searchParams.set("numero_ddt", `in.(${chunk.join(",")})`);
-          linesUrl.searchParams.set("select", LINE_FIELDS);
-          linesUrl.searchParams.set("order", "numero_ddt.asc,riga_nr.asc");
+          const lines = await this.fetchLinesWithPagination(projectUrl, anonKey, year, chunk);
+          if (lines.length > 0) {
+            newLines.push(...lines);
+          }
+        }
 
-          const linesRes = await fetch(linesUrl.toString(), {
+        // 2e. Verifica e riconciliazione modifiche storiche per DDT già esistenti (es. correzione prezzi/quantità su Supabase)
+        try {
+          const modUrl = new URL(`/rest/v1/ddt`, projectUrl);
+          modUrl.searchParams.set("anno", `eq.${year}`);
+          modUrl.searchParams.set("select", HEADER_FIELDS);
+          modUrl.searchParams.set("order", "ultima_modifica.desc.nullslast");
+          modUrl.searchParams.set("limit", "50");
+
+          const modRes = await fetch(modUrl.toString(), {
             headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
           });
 
-          if (linesRes.ok) {
-            const fetchedLines = (await linesRes.json()) as CloudLine[];
-            if (fetchedLines && fetchedLines.length > 0) {
-              newLines.push(...fetchedLines);
+          if (modRes.ok) {
+            const recentModHeaders = (await modRes.json()) as CloudHeader[];
+            for (const remoteH of recentModHeaders) {
+              const num = Number(remoteH.numero);
+              if (!num || !localNums.has(num)) continue;
+
+              const localRows = await db.select<Array<{
+                id: string;
+                total_document_subunits: number;
+                total_taxable_subunits: number;
+                total_vat_subunits: number;
+                updated_at: string;
+                order_reference: string | null;
+                internal_notes: string | null;
+                sync_status: string;
+              }>>(
+                `SELECT id, total_document_subunits, total_taxable_subunits, total_vat_subunits, updated_at, order_reference, internal_notes, sync_status
+                 FROM ddt_documents
+                 WHERE year = $1 AND doc_number = $2 AND deleted_at IS NULL
+                 LIMIT 1`,
+                [year, num]
+              );
+
+              if (localRows.length === 0) continue;
+              const loc = localRows[0];
+              // Non sovrascrivere bozze o modifiche locali pendenti
+              if (loc.sync_status === "pending") continue;
+
+              const remoteTotDoc = Math.round((Number(remoteH.totale_documento) || 0) * 100000);
+              const remoteTaxable = Math.round((Number(remoteH.totale_imponibile) || 0) * 100000);
+              const remoteVat = Math.round((Number(remoteH.totale_iva) || 0) * 100000);
+              const remoteModified = remoteH.ultima_modifica || remoteH.created_at || "";
+
+              const isTotalDiff = Math.abs((loc.total_document_subunits || 0) - remoteTotDoc) > 10;
+              const isTimestampNewer = Boolean(remoteModified && loc.updated_at && remoteModified > loc.updated_at);
+
+              if (isTotalDiff || isTimestampNewer) {
+                console.log(`[Sync Incrementale] Rilevata modifica su DDT storico ${num}/${year} (totale: ${loc.total_document_subunits} -> ${remoteTotDoc})`);
+
+                // Preserva riferimento d'ordine o note se già compilati localmente in Last
+                const resolvedOrderRef = (loc.order_reference && loc.order_reference.trim())
+                  ? loc.order_reference
+                  : (remoteH.nr_vs_ordine || null);
+
+                await db.execute(
+                  `UPDATE ddt_documents 
+                   SET status = $1, payment_method = $2, transport_reason = $3, carriage_terms = $4,
+                       packages_count = $5, weight_kg = $6, carrier = $7, operator = $8,
+                       total_taxable_subunits = $9, total_vat_subunits = $10, total_document_subunits = $11,
+                       order_reference = $12, updated_at = $13
+                   WHERE id = $14`,
+                  [
+                    remoteH.stato || "emessa",
+                    remoteH.pagamento || null,
+                    remoteH.causale || "Vendita",
+                    remoteH.porto || "Franco stabilimento",
+                    remoteH.colli || null,
+                    remoteH.peso_kg === null ? null : String(remoteH.peso_kg),
+                    remoteH.vettore || null,
+                    remoteH.operatore || null,
+                    remoteTaxable,
+                    remoteVat,
+                    remoteTotDoc,
+                    resolvedOrderRef,
+                    remoteModified || new Date().toISOString(),
+                    loc.id,
+                  ]
+                );
+
+                if (isTotalDiff) {
+                  const updatedLines = await this.fetchLinesWithPagination(projectUrl, anonKey, year, [num]);
+                  if (updatedLines.length > 0) {
+                    await db.execute("DELETE FROM ddt_items WHERE ddt_id = $1", [loc.id]);
+                    for (let rIdx = 0; rIdx < updatedLines.length; rIdx++) {
+                      const mapped = mapLineForLocal(updatedLines[rIdx], loc.id, rIdx + 1);
+                      await db.execute(
+                        `INSERT OR REPLACE INTO ddt_items (
+                          id, ddt_id, row_index, description, row_kind, unit, quantity,
+                          unit_price_subunits, discount_pct, net_amount_subunits, vat_rate,
+                          vat_amount_subunits, purchase_price_subunits, created_at, updated_at,
+                          updated_by, sync_status
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'supabase-read-only-import','synced')`,
+                        [
+                          mapped.id,
+                          loc.id,
+                          mapped.rowIndex,
+                          mapped.description,
+                          mapped.rowKind,
+                          mapped.unit,
+                          mapped.quantity,
+                          mapped.unitPriceSubunits,
+                          mapped.discountPct,
+                          mapped.netAmountSubunits,
+                          mapped.vatRate,
+                          mapped.vatAmountSubunits,
+                          mapped.purchasePriceSubunits,
+                          mapped.createdAt,
+                          mapped.updatedAt,
+                        ]
+                      );
+                    }
+                  }
+                }
+
+                totalUpdatedHistorical++;
+              }
             }
           }
+        } catch (histErr) {
+          console.warn(`[Sync Incrementale] Controllo modifiche storiche anno ${year} warning:`, histErr);
         }
       }
 
@@ -353,13 +502,17 @@ class DdtIncrementalSyncService {
         }
       }
 
-      // 3. Se non ci sono nuovi DDT su Supabase e non c'erano righe da recuperare, chiudi all'istante
+      // 3. Se non ci sono nuovi DDT su Supabase e non c'erano righe da recuperare né storici modificati, chiudi all'istante
       if (newHeaders.length === 0) {
+        if (totalUpdatedHistorical > 0 && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+        }
         return {
           newHeadersCount: 0,
           newLinesCount: 0,
           backupPath: null,
           recoveredGapsCount: 0,
+          updatedHistoricalCount: totalUpdatedHistorical,
           unresolvedGaps: unresolvedGaps.length > 0 ? unresolvedGaps : undefined,
         };
       }
@@ -418,6 +571,7 @@ class DdtIncrementalSyncService {
         newHeadersCount: importResult.importedHeaders,
         newLinesCount: importResult.importedLines,
         recoveredGapsCount: totalRecoveredGaps,
+        updatedHistoricalCount: totalUpdatedHistorical,
         unresolvedGaps: unresolvedGaps.length > 0 ? unresolvedGaps : undefined,
         backupPath: importResult.backupPath,
       };

@@ -59,16 +59,27 @@ export function dataUrlToBytes(dataUrl: string): number[] {
 
 /**
  * Seleziona gli elementi DOM delle pagine A4 pronti per la cattura/stampa.
- * Se l'utente ha la vista anteprima A4 aperta a video, cattura direttamente quella per perfetta aderenza visiva.
+ * Se passato un container specifico (es. ref del portale della finestra attiva),
+ * seleziona SOLO le pagine di quella specifica istanza isolando le finestre concorrenti.
  */
-export function getCapturePageElements(): HTMLElement[] {
+export function getCapturePageElements(container?: HTMLElement | null): HTMLElement[] {
+  if (container) {
+    if (container.classList?.contains("ddt-a4-page")) {
+      return [container];
+    }
+    const inContainer = container.querySelectorAll(".ddt-a4-page");
+    if (inContainer && inContainer.length > 0) {
+      return Array.from(inContainer) as HTMLElement[];
+    }
+  }
+
   // 1. Se l'utente ha la vista anteprima A4 aperta a video (.py-4 .ddt-a4-page), cattura direttamente quella
   const visiblePages = document.querySelectorAll(".py-4 .ddt-a4-page");
   if (visiblePages && visiblePages.length > 0) {
     return Array.from(visiblePages) as HTMLElement[];
   }
   // 2. Altrimenti cerca nel portale dedicato alla stampa
-  const portalPages = document.querySelectorAll("#ddt-print-portal .ddt-a4-page");
+  const portalPages = document.querySelectorAll(".ddt-print-portal .ddt-a4-page, #ddt-print-portal .ddt-a4-page");
   if (portalPages && portalPages.length > 0) {
     return Array.from(portalPages) as HTMLElement[];
   }
@@ -112,13 +123,14 @@ export async function capturePageToPng(
  * Se ci sono più pagine, salva ciascuna pagina con suffisso numerato.
  */
 export async function exportDdtImageToDesktop(
-  ddt: Partial<DdtDocument>
+  ddt: Partial<DdtDocument>,
+  container?: HTMLElement | null
 ): Promise<{ filename: string; path: string }> {
   if ((document as any).fonts?.ready) {
     await (document as any).fonts.ready;
   }
 
-  const pages = getCapturePageElements();
+  const pages = getCapturePageElements(container);
   if (pages.length === 0) {
     throw new Error("Nessuna pagina A4 trovata nel documento.");
   }
@@ -208,13 +220,14 @@ export async function generatePdfBase64FromElements(
  * garantendo un PDF multipagina perfetto al 100% rispetto all'anteprima video.
  */
 export async function exportDdtPdfToDesktop(
-  ddt: Partial<DdtDocument>
+  ddt: Partial<DdtDocument>,
+  container?: HTMLElement | null
 ): Promise<{ filename: string; path: string }> {
   if ((document as any).fonts?.ready) {
     await (document as any).fonts.ready;
   }
 
-  const pages = getCapturePageElements();
+  const pages = getCapturePageElements(container);
   if (pages.length === 0) {
     throw new Error("Nessuna pagina A4 trovata nel documento.");
   }
@@ -246,12 +259,15 @@ export async function exportDdtPdfToDesktop(
  * Invia la stampa diretta silenziosa con fascicolazione su un solo lato (Simplex) e numero di copie.
  * Cattura le pagine usando la medesima rasterizzazione nativa per fedeltà assoluta al preview.
  */
-export async function executeDdtPrint(copies: number = 1): Promise<void> {
+export async function executeDdtPrint(
+  copies: number = 1,
+  container?: HTMLElement | null
+): Promise<void> {
   if ((document as any).fonts?.ready) {
     await (document as any).fonts.ready;
   }
 
-  const pages = getCapturePageElements();
+  const pages = getCapturePageElements(container);
   if (pages.length === 0) {
     throw new Error("Nessuna pagina A4 trovata per la stampa.");
   }
