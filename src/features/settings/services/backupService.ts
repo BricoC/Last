@@ -751,8 +751,6 @@ export async function restoreModularBackup(
       }
     }
 
-    await db.execute("BEGIN TRANSACTION;");
-
     for (const table of tablesToRestore) {
       const rows = pkg.tables[table];
       if (!Array.isArray(rows) || rows.length === 0) {
@@ -765,26 +763,38 @@ export async function restoreModularBackup(
       }
 
       let count = 0;
-      for (const row of rows) {
-        const keys = Object.keys(row);
+      const CHUNK_SIZE = 50;
+      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+        const chunk = rows.slice(i, i + CHUNK_SIZE);
+        if (chunk.length === 0) continue;
+
+        const keys = Object.keys(chunk[0]);
         if (keys.length === 0) continue;
-
         const columns = keys.map((k) => `"${k}"`).join(", ");
-        const placeholders = keys.map((_, idx) => `$${idx + 1}`).join(", ");
-        const values = keys.map((k) => row[k]);
 
-        const sql = `INSERT OR REPLACE INTO ${table} (${columns}) VALUES (${placeholders});`;
-        await db.execute(sql, values);
-        count++;
+        const valuePlaceholders: string[] = [];
+        const flatValues: unknown[] = [];
+        let pIndex = 1;
+
+        for (const row of chunk) {
+          const rowPlaceholders: string[] = [];
+          for (const k of keys) {
+            rowPlaceholders.push(`$${pIndex++}`);
+            flatValues.push(row[k] ?? null);
+          }
+          valuePlaceholders.push(`(${rowPlaceholders.join(", ")})`);
+          count++;
+        }
+
+        const sql = `INSERT OR REPLACE INTO ${table} (${columns}) VALUES ${valuePlaceholders.join(", ")};`;
+        await db.execute(sql, flatValues);
       }
 
       restoredCounts[table] = count;
     }
 
-    await db.execute("COMMIT;");
     return { success: true, restoredCounts };
   } catch (err) {
-    await db.execute("ROLLBACK;");
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[backupService] Errore ripristino modulare:", msg);
     return { success: false, restoredCounts: {}, error: msg };

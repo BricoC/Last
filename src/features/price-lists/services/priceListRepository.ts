@@ -345,77 +345,77 @@ export class PriceListRepository {
   async saveGeneralRows(rows: ListinoGeneraleRow[]): Promise<void> {
     if (rows.length === 0) return;
     const db = await getDatabase();
-    const CHUNK_SIZE = 250;
+    const CHUNK_SIZE = 50;
     for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const valueClauses: string[] = [];
+      const params: unknown[] = [];
+
+      chunk.forEach((row, rIdx) => {
+        const offset = rIdx * 23;
+        const placeholders = Array.from({ length: 23 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
+        valueClauses.push(`(${placeholders})`);
+
+        params.push(
+          row.id,
+          row.source_table || "listino_generale",
+          row.cat ?? null,
+          row.fornitore ?? null,
+          row.codice_articolo ?? null,
+          row.data_ref ?? null,
+          row.descrizione || "",
+          row.um ?? "NR.",
+          cleanNum5(row.perc_pub),
+          cleanNum5(row.prezzo_pubblico),
+          cleanNum5(row.perc_prof),
+          cleanNum5(row.prezzo_profess),
+          cleanNum5(row.perc_fatt),
+          cleanNum5(row.prezzo_fattura),
+          cleanNum5(row.prezzo_acquisto),
+          cleanNum5(row.aumento),
+          cleanNum5(row.r1),
+          cleanNum5(row.maga),
+          cleanNum5(row.r2),
+          cleanNum5(row.perc_iva ?? 0.22),
+          row.note ?? null,
+          row.created_at || new Date().toISOString(),
+          row.updated_at || new Date().toISOString(),
+        );
+      });
+
       try {
-        await db.execute("BEGIN TRANSACTION;");
-      } catch {}
-      try {
-        for (const row of chunk) {
-          await db.execute(
-            `INSERT INTO listino_generale (
-              id, source_table, cat, fornitore, codice_articolo, data_ref,
-              descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
-              perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
-              perc_iva, note, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-            ON CONFLICT(id) DO UPDATE SET
-              cat = excluded.cat,
-              fornitore = excluded.fornitore,
-              codice_articolo = excluded.codice_articolo,
-              data_ref = excluded.data_ref,
-              descrizione = excluded.descrizione,
-              um = excluded.um,
-              perc_pub = excluded.perc_pub,
-              prezzo_pubblico = excluded.prezzo_pubblico,
-              perc_prof = excluded.perc_prof,
-              prezzo_profess = excluded.prezzo_profess,
-              perc_fatt = excluded.perc_fatt,
-              prezzo_fattura = excluded.prezzo_fattura,
-              prezzo_acquisto = excluded.prezzo_acquisto,
-              aumento = excluded.aumento,
-              r1 = excluded.r1,
-              maga = excluded.maga,
-              r2 = excluded.r2,
-              perc_iva = excluded.perc_iva,
-              note = excluded.note,
-              updated_at = excluded.updated_at;`,
-            [
-              row.id,
-              row.source_table || "listino_generale",
-              row.cat ?? null,
-              row.fornitore ?? null,
-              row.codice_articolo ?? null,
-              row.data_ref ?? null,
-              row.descrizione || "",
-              row.um ?? "NR.",
-              cleanNum5(row.perc_pub),
-              cleanNum5(row.prezzo_pubblico),
-              cleanNum5(row.perc_prof),
-              cleanNum5(row.prezzo_profess),
-              cleanNum5(row.perc_fatt),
-              cleanNum5(row.prezzo_fattura),
-              cleanNum5(row.prezzo_acquisto),
-              cleanNum5(row.aumento),
-              cleanNum5(row.r1),
-              cleanNum5(row.maga),
-              cleanNum5(row.r2),
-              cleanNum5(row.perc_iva ?? 0.22),
-              row.note ?? null,
-              row.created_at || new Date().toISOString(),
-              row.updated_at || new Date().toISOString(),
-            ]
-          );
-        }
-        try {
-          await db.execute("COMMIT;");
-        } catch {}
+        const sql = `INSERT INTO listino_generale (
+          id, source_table, cat, fornitore, codice_articolo, data_ref,
+          descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
+          perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
+          perc_iva, note, created_at, updated_at
+        ) VALUES ${valueClauses.join(", ")}
+        ON CONFLICT(id) DO UPDATE SET
+          cat = excluded.cat,
+          fornitore = excluded.fornitore,
+          codice_articolo = excluded.codice_articolo,
+          data_ref = excluded.data_ref,
+          descrizione = excluded.descrizione,
+          um = excluded.um,
+          perc_pub = excluded.perc_pub,
+          prezzo_pubblico = excluded.prezzo_pubblico,
+          perc_prof = excluded.perc_prof,
+          prezzo_profess = excluded.prezzo_profess,
+          perc_fatt = excluded.perc_fatt,
+          prezzo_fattura = excluded.prezzo_fattura,
+          prezzo_acquisto = excluded.prezzo_acquisto,
+          aumento = excluded.aumento,
+          r1 = excluded.r1,
+          maga = excluded.maga,
+          r2 = excluded.r2,
+          perc_iva = excluded.perc_iva,
+          note = excluded.note,
+          updated_at = excluded.updated_at;`;
+
+        await db.execute(sql, params);
       } catch (err) {
-        try {
-          await db.execute("ROLLBACK;");
-        } catch {}
         console.error("[PriceListRepository] Errore salvataggio chunk listino generale:", err);
+        throw err;
       }
     }
   }
@@ -560,68 +560,68 @@ export class PriceListRepository {
   async saveClientRows(rows: ListinoClienteRow[]): Promise<void> {
     if (rows.length === 0) return;
     const db = await getDatabase();
-    const CHUNK_SIZE = 250;
+    const CHUNK_SIZE = 50;
     for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const valueClauses: string[] = [];
+      const params: unknown[] = [];
+
+      chunk.forEach((row, rIdx) => {
+        const offset = rIdx * 18;
+        const placeholders = Array.from({ length: 18 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
+        valueClauses.push(`(${placeholders})`);
+
+        params.push(
+          row.id,
+          row.cliente,
+          row.fornitore ?? null,
+          row.codice_articolo ?? null,
+          row.descrizione,
+          cleanNum5(row.prezzo_fattura),
+          cleanNum5(row.prezzo_acquisto),
+          cleanNum5(row.acquisto_eur),
+          cleanNum5(row.perc_acquisto),
+          row.data_acquisto ?? null,
+          row.acquisto_old ?? null,
+          cleanNum5(row.ricarico),
+          row.data_ref ?? null,
+          row.note ?? null,
+          row.note1 ?? null,
+          row.note2 ?? null,
+          row.created_at || new Date().toISOString(),
+          row.updated_at || new Date().toISOString(),
+        );
+      });
+
       try {
-        await db.execute("BEGIN TRANSACTION;");
-      } catch {}
-      try {
-        for (const row of chunk) {
-          await db.execute(
-            `INSERT INTO listini_clienti (
-              id, cliente, fornitore, codice_articolo, descrizione,
-              prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto,
-              data_acquisto, acquisto_old, ricarico, data_ref,
-              note, note1, note2, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-            ON CONFLICT(id) DO UPDATE SET
-              cliente = excluded.cliente,
-              fornitore = excluded.fornitore,
-              codice_articolo = excluded.codice_articolo,
-              descrizione = excluded.descrizione,
-              prezzo_fattura = excluded.prezzo_fattura,
-              prezzo_acquisto = excluded.prezzo_acquisto,
-              acquisto_eur = excluded.acquisto_eur,
-              perc_acquisto = excluded.perc_acquisto,
-              data_acquisto = excluded.data_acquisto,
-              acquisto_old = excluded.acquisto_old,
-              ricarico = excluded.ricarico,
-              data_ref = excluded.data_ref,
-              note = excluded.note,
-              note1 = excluded.note1,
-              note2 = excluded.note2,
-              updated_at = excluded.updated_at;`,
-            [
-              row.id,
-              row.cliente,
-              row.fornitore ?? null,
-              row.codice_articolo ?? null,
-              row.descrizione,
-              cleanNum5(row.prezzo_fattura),
-              cleanNum5(row.prezzo_acquisto),
-              cleanNum5(row.acquisto_eur),
-              cleanNum5(row.perc_acquisto),
-              row.data_acquisto ?? null,
-              row.acquisto_old ?? null,
-              cleanNum5(row.ricarico),
-              row.data_ref ?? null,
-              row.note ?? null,
-              row.note1 ?? null,
-              row.note2 ?? null,
-              row.created_at || new Date().toISOString(),
-              row.updated_at || new Date().toISOString(),
-            ]
-          );
-        }
-        try {
-          await db.execute("COMMIT;");
-        } catch {}
+        const sql = `INSERT INTO listini_clienti (
+          id, cliente, fornitore, codice_articolo, descrizione,
+          prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto,
+          data_acquisto, acquisto_old, ricarico, data_ref,
+          note, note1, note2, created_at, updated_at
+        ) VALUES ${valueClauses.join(", ")}
+        ON CONFLICT(id) DO UPDATE SET
+          cliente = excluded.cliente,
+          fornitore = excluded.fornitore,
+          codice_articolo = excluded.codice_articolo,
+          descrizione = excluded.descrizione,
+          prezzo_fattura = excluded.prezzo_fattura,
+          prezzo_acquisto = excluded.prezzo_acquisto,
+          acquisto_eur = excluded.acquisto_eur,
+          perc_acquisto = excluded.perc_acquisto,
+          data_acquisto = excluded.data_acquisto,
+          acquisto_old = excluded.acquisto_old,
+          ricarico = excluded.ricarico,
+          data_ref = excluded.data_ref,
+          note = excluded.note,
+          note1 = excluded.note1,
+          note2 = excluded.note2,
+          updated_at = excluded.updated_at;`;
+
+        await db.execute(sql, params);
       } catch (err) {
-        try {
-          await db.execute("ROLLBACK;");
-        } catch {}
         console.error("[PriceListRepository] Errore salvataggio chunk listini clienti:", err);
+        throw err;
       }
     }
   }
