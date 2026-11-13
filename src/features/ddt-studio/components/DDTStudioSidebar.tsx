@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Search, Calendar, Plus, PanelLeftClose, ChevronRight, Trash2, LoaderCircle } from "lucide-react";
+import { Search, Calendar, Plus, ChevronRight, Trash2, LoaderCircle } from "lucide-react";
 import { DdtArchiveEntry } from "../models/ddt";
 import { toDateIT } from "../utils/ddtCalculations";
 import { cn } from "@/shared/utils/cn";
@@ -192,49 +192,32 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   // SE LA SIDEBAR È APERTA: Vista completa con ricerca, filtri e dettagli
   return (
     <aside className="w-64 border-r border-[var(--border)] bg-[var(--card)] flex flex-col h-full shrink-0 select-none transition-all duration-200 z-10">
-      {/* Header Sidebar: Ricerca & Anno & Tasto Riduci */}
+      {/* Header Sidebar: Anno & Ricerca */}
       <div className="p-2.5 border-b border-[var(--border)] space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-1.5">
-            <span className="text-xs font-bold text-[var(--foreground)] uppercase tracking-wider">
-              Archivio DDT
-            </span>
-            {isLoading && (
-              <LoaderCircle className="w-3 h-3 text-[var(--primary)] animate-spin" />
-            )}
-          </div>
-
-          <div className="flex items-center space-x-1">
-            {/* Selettore Anno */}
-            <div className="flex items-center space-x-1">
-              <Calendar className="w-3 h-3 text-[var(--muted-foreground)]" />
-              <select
-                value={selectedYear === null ? "all" : selectedYear}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedYear(val === "all" ? null : parseInt(val, 10));
-                }}
-                className="bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-xs rounded px-1.5 py-0.5 outline-none font-semibold cursor-pointer"
-              >
-                <option value="all">Tutti gli anni</option>
-                {availableYears.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Tasto Riduci */}
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(false)}
-              className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors cursor-pointer"
-              title="Riduci a barra compatta"
+        <div className="flex items-center justify-between gap-2">
+          {/* Selettore Anno */}
+          <div className="flex items-center space-x-1.5 flex-1 min-w-0">
+            <Calendar className="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" />
+            <select
+              value={selectedYear === null ? "all" : selectedYear}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedYear(val === "all" ? null : parseInt(val, 10));
+              }}
+              className="w-full bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] text-xs rounded px-1.5 py-1 outline-none font-semibold cursor-pointer"
             >
-              <PanelLeftClose className="w-3.5 h-3.5" />
-            </button>
+              <option value="all">Tutti gli anni</option>
+              {availableYears.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
           </div>
+
+          {isLoading && (
+            <LoaderCircle className="w-3.5 h-3.5 text-[var(--primary)] animate-spin shrink-0" />
+          )}
         </div>
 
         {/* Input Ricerca con debounce */}

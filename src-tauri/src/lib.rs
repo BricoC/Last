@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use tauri::Manager;
 
 mod backup_commands;
 mod ddt_commands;
@@ -439,6 +440,12 @@ fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                supabase_ddt_import::rotate_pre_import_backups(&data_dir, 5);
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
