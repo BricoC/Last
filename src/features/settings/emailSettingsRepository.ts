@@ -19,15 +19,15 @@ export type EmailSettingsInput = EmailSettings;
 export const SETTINGS_ID = "email_config";
 
 export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
-  carrara_to: "alessio.piccinini@cartierecarrara.com",
-  carrara_cc: "federica.bianchi@cartierecarrara.com",
-  wepa_salanetti_to: "Roberto.Lazzareschi@wepa.eu",
-  wepa_salanetti_cc: "Massimiliano.Giusti@wepa.eu",
-  wepa_ralletta_to: "Davide.Petrucci@wepa.eu",
-  wepa_ralletta_cc: "Massimiliano.Giusti@wepa.eu",
-  bank_to: "rachele.neri@bpc.bcc.it",
-  bank_cc: "capannori@bpc.bcc.it",
-  accountant_to: "contabilita@studiotaddeucci.it",
+  carrara_to: "",
+  carrara_cc: "",
+  wepa_salanetti_to: "",
+  wepa_salanetti_cc: "",
+  wepa_ralletta_to: "",
+  wepa_ralletta_cc: "",
+  bank_to: "",
+  bank_cc: "",
+  accountant_to: "",
   accountant_cc: "",
 };
 

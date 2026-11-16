@@ -61,8 +61,8 @@ export const RibaModal: React.FC<RibaModalProps> = ({
 
   const isPaid = ribaInfo.isPaid;
   const isUrgent = ribaInfo.daysToDeadline <= 5 && !isPaid;
-  const bankTo = emailSettings?.bank_to?.trim() || "rachele.neri@bpc.bcc.it";
-  const bankCc = emailSettings?.bank_cc?.trim() || "capannori@bpc.bcc.it";
+  const bankTo = emailSettings?.bank_to?.trim() || "";
+  const bankCc = emailSettings?.bank_cc?.trim() || "";
 
   const handleSendEmail = async () => {
     setSending(true);
@@ -215,7 +215,9 @@ export const RibaModal: React.FC<RibaModalProps> = ({
           <div className="p-3 rounded-xl bg-[var(--background)]/40 border border-[var(--border)]/70 text-xs space-y-1.5">
             <div className="flex items-center justify-between text-[11px]">
               <span className="text-[var(--muted-foreground)] font-semibold">Banca Destinatario:</span>
-              <span className="font-mono text-white font-bold">{bankTo}</span>
+              <span className={`font-mono font-bold ${bankTo ? "text-white" : "text-amber-400 italic"}`}>
+                {bankTo || "Non configurata nelle Impostazioni"}
+              </span>
             </div>
             {bankCc && (
               <div className="flex items-center justify-between text-[11px]">

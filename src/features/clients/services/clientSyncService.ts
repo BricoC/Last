@@ -93,6 +93,33 @@ export class ClientSyncService {
 
     const db = await getDatabase();
 
+    // Ottimizzazione P1: Pre-caricamento in memoria di tutti i clienti locali in una Map per eliminare query N+1
+    const existingRows = await db.select<{ id: string; business_name: string; price_lists_json: string | null }[]>(
+      "SELECT id, business_name, price_lists_json FROM clients WHERE deleted_at IS NULL"
+    );
+    const existingMap = new Map<string, { id: string; price_lists_json: string | null }>();
+    for (const r of existingRows) {
+      existingMap.set(r.business_name.trim().toLowerCase(), r);
+    }
+
+    interface PreparedClientWrite {
+      id: string;
+      businessName: string;
+      address: string | null;
+      city: string | null;
+      province: string | null;
+      vatNumber: string | null;
+      fiscalCode: string | null;
+      sdiCode: string | null;
+      paymentMethod: string | null;
+      destinationsJson: string;
+      phonesJson: string;
+      priceListsJson: string;
+      isUpdate: boolean;
+    }
+
+    const writes: PreparedClientWrite[] = [];
+
     for (const row of rows) {
       const businessName = (row.cliente || "").trim();
       if (!businessName) continue;
@@ -149,16 +176,13 @@ export class ClientSyncService {
         });
       }
 
-      // Trova o crea ID locale univoco
-      const existing = await db.select<{ id: string; price_lists_json: string | null }[]>(
-        "SELECT id, price_lists_json FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL",
-        [businessName]
-      );
+      // Ricerca rapida in memoria O(1)
+      const existing = existingMap.get(businessName.toLowerCase());
 
       let priceLists: string[] = [];
-      if (existing.length > 0 && existing[0].price_lists_json) {
+      if (existing && existing.price_lists_json) {
         try {
-          const parsed = JSON.parse(existing[0].price_lists_json);
+          const parsed = JSON.parse(existing.price_lists_json);
           if (Array.isArray(parsed) && parsed.length > 0) {
             priceLists = parsed;
           }
@@ -173,25 +197,95 @@ export class ClientSyncService {
         if (priceLists.length > 0) matchedPriceLists++;
       }
 
-      const clientId = existing.length > 0 ? existing[0].id : crypto.randomUUID();
+      const clientId = existing ? existing.id : crypto.randomUUID();
 
-      await clientRepository.createOrUpdateClient({
+      writes.push({
         id: clientId,
-        business_name: businessName,
-        address: row.indirizzo || undefined,
-        city: city || undefined,
-        province: province || undefined,
-        vat_number: row.piva || undefined,
-        fiscal_code: row.cod_fiscale || undefined,
-        sdi_code: row.sdi || undefined,
-        payment_method: row.pagamento || undefined,
-        destinations,
-        phones,
-        price_lists: priceLists,
-        is_active: true,
+        businessName,
+        address: row.indirizzo || null,
+        city: city || null,
+        province: province || null,
+        vatNumber: row.piva || null,
+        fiscalCode: row.cod_fiscale || null,
+        sdiCode: row.sdi || null,
+        paymentMethod: row.pagamento || null,
+        destinationsJson: JSON.stringify(destinations),
+        phonesJson: JSON.stringify(phones),
+        priceListsJson: JSON.stringify(priceLists),
+        isUpdate: !!existing,
       });
 
-      imported++;
+      if (!existing) {
+        existingMap.set(businessName.toLowerCase(), {
+          id: clientId,
+          price_lists_json: JSON.stringify(priceLists),
+        });
+      }
+    }
+
+    // Esecuzione batch in una singola transazione atomica SQLite
+    const now = new Date().toISOString();
+    await db.execute("BEGIN IMMEDIATE");
+    try {
+      for (const w of writes) {
+        if (w.isUpdate) {
+          await db.execute(
+            `UPDATE clients SET
+              business_name = $1, address = $2, city = $3, province = $4,
+              vat_number = $5, fiscal_code = $6, sdi_code = $7, payment_method = $8,
+              destinations_json = $9, phones_json = $10, price_lists_json = $11,
+              is_active = 1, updated_at = $12, updated_by = 'supabase_sync',
+              sync_status = 'synced'
+            WHERE id = $13 AND deleted_at IS NULL`,
+            [
+              w.businessName,
+              w.address,
+              w.city,
+              w.province,
+              w.vatNumber,
+              w.fiscalCode,
+              w.sdiCode,
+              w.paymentMethod,
+              w.destinationsJson,
+              w.phonesJson,
+              w.priceListsJson,
+              now,
+              w.id,
+            ]
+          );
+        } else {
+          await db.execute(
+            `INSERT INTO clients (
+              id, business_name, address, city, province, vat_number,
+              fiscal_code, sdi_code, payment_method, destinations_json,
+              phones_json, price_lists_json, is_active, created_at,
+              updated_at, updated_by, sync_status
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $13, 'supabase_sync', 'synced'
+            )`,
+            [
+              w.id,
+              w.businessName,
+              w.address,
+              w.city,
+              w.province,
+              w.vatNumber,
+              w.fiscalCode,
+              w.sdiCode,
+              w.paymentMethod,
+              w.destinationsJson,
+              w.phonesJson,
+              w.priceListsJson,
+              now,
+            ]
+          );
+        }
+        imported++;
+      }
+      await db.execute("COMMIT");
+    } catch (err) {
+      await db.execute("ROLLBACK");
+      throw err;
     }
 
     return {
@@ -202,9 +296,11 @@ export class ClientSyncService {
   }
 
   /**
-   * Salva o sincronizza un singolo cliente su Supabase Cloud
+   * Salva o sincronizza un singolo cliente su Supabase Cloud.
+   * Se il cliente è stato rinominato, ricerca per vecchio nome su Supabase per aggiornare il record esistente anziché duplicarlo.
+   * Al successo dell'operazione, aggiorna lo stato locale SQLite a 'synced'.
    */
-  public async pushClientToSupabase(client: Client): Promise<void> {
+  public async pushClientToSupabase(client: Client, oldBusinessName?: string): Promise<boolean> {
     try {
       const creds = await this.getCredentials();
       const localita = [client.city, client.province].filter(Boolean).join(" - ");
@@ -221,48 +317,86 @@ export class ClientSyncService {
         destinazioni: client.destinations || [],
       };
 
-      // Cerca se esiste già per nome
-      const checkUrl = new URL("/rest/v1/clienti", creds.projectUrl);
-      checkUrl.searchParams.set("cliente", `eq.${client.business_name.toUpperCase()}`);
+      let supId: number | null = null;
+      const searchNames: string[] = [];
+      if (oldBusinessName && oldBusinessName.trim().toUpperCase() !== client.business_name.trim().toUpperCase()) {
+        searchNames.push(oldBusinessName.trim().toUpperCase());
+      }
+      searchNames.push(client.business_name.trim().toUpperCase());
 
-      const checkRes = await fetch(checkUrl.toString(), {
-        headers: {
-          apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
-        },
-      });
-
-      if (checkRes.ok) {
-        const found = await checkRes.json();
-        if (Array.isArray(found) && found.length > 0) {
-          const supId = found[0].id;
-          const patchUrl = new URL(`/rest/v1/clienti?id=eq.${supId}`, creds.projectUrl);
-          await fetch(patchUrl.toString(), {
-            method: "PATCH",
-            headers: {
-              apikey: creds.anonKey,
-              Authorization: `Bearer ${creds.anonKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-          });
-          return;
+      for (const nameToSearch of searchNames) {
+        const checkUrl = new URL("/rest/v1/clienti", creds.projectUrl);
+        checkUrl.searchParams.set("cliente", `eq.${nameToSearch}`);
+        const checkRes = await fetch(checkUrl.toString(), {
+          headers: {
+            apikey: creds.anonKey,
+            Authorization: `Bearer ${creds.anonKey}`,
+          },
+        });
+        if (checkRes.ok) {
+          const found = await checkRes.json();
+          if (Array.isArray(found) && found.length > 0 && typeof found[0]?.id === "number") {
+            supId = found[0].id;
+            break;
+          }
         }
       }
 
-      // Altrimenti INSERT
-      const insertUrl = new URL("/rest/v1/clienti", creds.projectUrl);
-      await fetch(insertUrl.toString(), {
-        method: "POST",
-        headers: {
-          apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      // Fallback: se non trovato per nome ma presente P.IVA, cerca per P.IVA
+      if (supId === null && client.vat_number && client.vat_number.trim().length >= 8) {
+        const vatUrl = new URL("/rest/v1/clienti", creds.projectUrl);
+        vatUrl.searchParams.set("piva", `eq.${client.vat_number.trim()}`);
+        const vatRes = await fetch(vatUrl.toString(), {
+          headers: {
+            apikey: creds.anonKey,
+            Authorization: `Bearer ${creds.anonKey}`,
+          },
+        });
+        if (vatRes.ok) {
+          const foundVat = await vatRes.json();
+          if (Array.isArray(foundVat) && foundVat.length > 0 && typeof foundVat[0]?.id === "number") {
+            supId = foundVat[0].id;
+          }
+        }
+      }
+
+      let res: Response;
+      if (supId !== null) {
+        const patchUrl = new URL(`/rest/v1/clienti?id=eq.${supId}`, creds.projectUrl);
+        res = await fetch(patchUrl.toString(), {
+          method: "PATCH",
+          headers: {
+            apikey: creds.anonKey,
+            Authorization: `Bearer ${creds.anonKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        const insertUrl = new URL("/rest/v1/clienti", creds.projectUrl);
+        res = await fetch(insertUrl.toString(), {
+          method: "POST",
+          headers: {
+            apikey: creds.anonKey,
+            Authorization: `Bearer ${creds.anonKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      if (res.ok) {
+        const db = await getDatabase();
+        await db.execute(
+          "UPDATE clients SET sync_status = 'synced' WHERE id = $1",
+          [client.id]
+        );
+        return true;
+      }
+      return false;
     } catch (err) {
       console.warn("[ClientSyncService] Salvataggio Supabase non riuscito (proseguito in locale):", err);
+      return false;
     }
   }
 
@@ -387,27 +521,77 @@ export class ClientSyncService {
     }
 
     let added = 0;
-    for (const [name, data] of missingClients.entries()) {
-      const autoPriceLists = this.autoMatchPriceLists(name, availablePriceLists);
-      const destinationsList = deduplicateDestinations(Array.from(data.destinationsMap.values()));
+    const now = new Date().toISOString();
+    const savedClients: Client[] = [];
 
-      const saved = await clientRepository.createOrUpdateClient({
-        business_name: name,
-        address: data.address || undefined,
-        city: data.city || undefined,
-        province: data.province || undefined,
-        vat_number: data.vat_number || undefined,
-        fiscal_code: data.fiscal_code || undefined,
-        sdi_code: data.sdi_code || undefined,
-        payment_method: data.payment_method || undefined,
-        destinations: destinationsList,
-        price_lists: autoPriceLists,
-        is_active: true,
-      });
+    // Ottimizzazione P1: Esecuzione in una singola transazione atomica SQLite
+    await db.execute("BEGIN IMMEDIATE");
+    try {
+      for (const [name, data] of missingClients.entries()) {
+        const autoPriceLists = this.autoMatchPriceLists(name, availablePriceLists);
+        const destinationsList = deduplicateDestinations(Array.from(data.destinationsMap.values()));
+        const id = crypto.randomUUID();
+        const destinationsJson = JSON.stringify(destinationsList);
+        const priceListsJson = JSON.stringify(autoPriceLists);
+        const phonesJson = JSON.stringify([]);
 
-      // Sincronizza anche su Supabase Cloud
+        await db.execute(
+          `INSERT INTO clients (
+            id, business_name, address, city, province, vat_number,
+            fiscal_code, sdi_code, payment_method, destinations_json,
+            price_lists_json, phones_json, is_active, created_at,
+            updated_at, updated_by, sync_status
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $13, 'ddt_import', 'pending'
+          )`,
+          [
+            id,
+            name,
+            data.address || null,
+            data.city || null,
+            data.province || null,
+            data.vat_number || null,
+            data.fiscal_code || null,
+            data.sdi_code || null,
+            data.payment_method || null,
+            destinationsJson,
+            priceListsJson,
+            phonesJson,
+            now,
+          ]
+        );
+
+        savedClients.push({
+          id,
+          business_name: name,
+          address: data.address || undefined,
+          city: data.city || undefined,
+          province: data.province || undefined,
+          vat_number: data.vat_number || undefined,
+          fiscal_code: data.fiscal_code || undefined,
+          sdi_code: data.sdi_code || undefined,
+          payment_method: data.payment_method || undefined,
+          destinations: destinationsList,
+          phones: [],
+          price_lists: autoPriceLists,
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+          updated_by: "ddt_import",
+          deleted_at: null,
+          sync_status: "pending",
+        });
+        added++;
+      }
+      await db.execute("COMMIT");
+    } catch (err) {
+      await db.execute("ROLLBACK");
+      throw err;
+    }
+
+    // Sincronizza in background su Supabase Cloud dopo il commit locale
+    for (const saved of savedClients) {
       void this.pushClientToSupabase(saved);
-      added++;
     }
 
     return { added };

@@ -5,6 +5,8 @@ import React, {
   useRef,
   useCallback,
   memo,
+  forwardRef,
+  useImperativeHandle,
 } from "react";
 import {
   Trash2,
@@ -26,6 +28,7 @@ import { useClientColumnVisibility } from "../hooks/useColumnVisibility";
 import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
 import { round5 } from "../utils/priceFormulas";
 import { isClientMatching } from "@/features/ddt-studio/utils/clientPriceListMatcher";
+import { PriceListSectionHandle } from "../types/priceListSectionHandle";
 
 const BATCH_SIZE = 150;
 
@@ -117,15 +120,23 @@ export interface CustomerPriceListEmbeddedSectionProps {
   }) => void;
 }
 
-export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbeddedSectionProps> = ({
+export const CustomerPriceListEmbeddedSection = forwardRef<
+  PriceListSectionHandle,
+  CustomerPriceListEmbeddedSectionProps
+>(({
   currentClientName,
   currentClientPls,
   globalSearch = "",
   layoutMode = "horizontal",
   onSelectArticle,
-}) => {
+}, ref) => {
   const { currentUser } = useUserStore();
-  const canEdit = Boolean(currentUser?.is_admin || currentUser?.can_edit_price_lists);
+  const isAlexOrAdmin = Boolean(
+    currentUser?.is_admin ||
+    currentUser?.name?.trim().toLowerCase() === "alex" ||
+    currentUser?.can_edit_price_lists
+  );
+  const canEdit = isAlexOrAdmin;
 
   const {
     columns,
@@ -610,6 +621,39 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
     setInitialEditChar(undefined);
   }, []);
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      isEditingCell: () => editingCell !== null,
+      cancelCellEdit: () => {
+        cancelCellEdit();
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      },
+      hasUnsavedChanges: () => dirtyRows.size > 0,
+      saveChanges: async () => {
+        await saveAllPendingChanges();
+      },
+      discardChanges: () => {
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        setItems((prev) =>
+          prev
+            .filter((r) => !r.id.startsWith("temp_new_"))
+            .map((r) => originalRowsSnapshot.get(r.id) || r)
+        );
+        setDirtyRows(new Map());
+        setUndoStack([]);
+        setNewTopRow(createBlankClientRow(currentClientName));
+        setEditingCell(null);
+        setInitialEditChar(undefined);
+      },
+    }),
+    [editingCell, cancelCellEdit, dirtyRows, saveAllPendingChanges, originalRowsSnapshot, currentClientName]
+  );
+
   // Spostamento cella attiva (frecce, tab, enter)
   const moveActiveCell = useCallback(
     (direction: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight") => {
@@ -1032,8 +1076,9 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
               )}
             </tr>
 
-            {/* RIGA FISSA SUPERIORE PER NUOVO ARTICOLO (newTopRow) */}
-            <tr className="bg-emerald-500/10 border-b-2 border-emerald-500/40 text-[var(--foreground)] font-mono text-[11px]">
+            {/* RIGA FISSA SUPERIORE PER NUOVO ARTICOLO (newTopRow) - Solo per Alex o Admin */}
+            {canEdit && (
+              <tr className="bg-emerald-500/10 border-b-2 border-emerald-500/40 text-[var(--foreground)] font-mono text-[11px]">
               {isVisible("actions") && (
                 <td className="px-2 py-1.5 text-center border-r border-[var(--border)]/40">
                   <span title="Nuova riga: inserisci i dati per salvare" className="text-emerald-400 font-bold">
@@ -1272,6 +1317,7 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
                 />
               )}
             </tr>
+            )}
           </thead>
 
           {/* RIGHE TABELLA */}
@@ -1283,12 +1329,6 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
               return (
                 <tr
                   key={item.id}
-                  onDoubleClick={(e) => {
-                    // Se il doppio clic non proviene da un input già in modifica, inserisce nel DDT
-                    if ((e.target as HTMLElement).tagName !== "INPUT") {
-                      handleInsertIntoDdt(item);
-                    }
-                  }}
                   className={`hover:bg-amber-500/10 cursor-pointer transition-colors group ${
                     isNewlyAdded
                       ? "bg-emerald-500/5 font-semibold"
@@ -1296,7 +1336,7 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
                       ? "bg-amber-500/5"
                       : ""
                   }`}
-                  title="Doppio clic o pulsante ➕ per inserire nel DDT. Clicca su una cella per modificarla."
+                  title="Fai clic o doppio clic su una cella per modificarla"
                 >
                   {/* # Colonna Azioni: Cestino & Inserisci nel DDT */}
                   {isVisible("actions") && (
@@ -1585,7 +1625,9 @@ export const CustomerPriceListEmbeddedSection: React.FC<CustomerPriceListEmbedde
       />
     </div>
   );
-};
+});
+
+CustomerPriceListEmbeddedSection.displayName = "CustomerPriceListEmbeddedSection";
 
 // Componente Editor Input Cella con supporto Autocomplete (Clienti & Fornitori)
 interface CellInputEditorProps {
@@ -1613,6 +1655,7 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
 }) => {
   const [localValue, setLocalValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isCancelledRef = useRef(false);
 
   useEffect(() => {
     if (inputRef.current) {
@@ -1641,10 +1684,16 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
         list={datalistId}
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
-        onBlur={() => onCommit(rowId, colId, localValue)}
+        onBlur={() => {
+          if (isCancelledRef.current) return;
+          onCommit(rowId, colId, localValue);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
+            e.stopPropagation();
+            e.nativeEvent.stopImmediatePropagation();
+            isCancelledRef.current = true;
             onCancel();
             return;
           }

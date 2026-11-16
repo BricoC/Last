@@ -13,8 +13,6 @@ import {
   CheckCircle2,
   Check,
 } from "lucide-react";
-import { ListinoGeneraleRow } from "@/features/price-lists/models/priceList";
-import { priceListRepository } from "@/features/price-lists/services/priceListRepository";
 import { getDdtArticleViewRows, DdtArticleViewRow } from "../services/ddtReadModelsRepository";
 import { DdtItem } from "../models/ddt";
 import { formatDdtViewDate } from "../services/ddtViewFormatting";
@@ -23,6 +21,9 @@ import { money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue
 import { calculateRowAmounts } from "../utils/ddtCalculations";
 import { resolveClientPriceLists } from "../utils/clientPriceListMatcher";
 import { CustomerPriceListEmbeddedSection } from "@/features/price-lists/components/CustomerPriceListEmbeddedSection";
+import { GeneralPriceListEmbeddedSection } from "@/features/price-lists/components/GeneralPriceListEmbeddedSection";
+import { PriceListSectionHandle } from "@/features/price-lists/types/priceListSectionHandle";
+import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 
 export interface DDTMultiListinoModalProps {
   isOpen: boolean;
@@ -77,11 +78,18 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
   const [currentClientPls, setCurrentClientPls] = useState<Set<string>>(new Set());
 
   // Dati delle finestre
-  const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>([]);
   const [historyRows, setHistoryRows] = useState<DdtArticleViewRow[]>([]);
 
   // Grid ref per tabella Articoli nel DDT (Finestra 4 - AG Grid puro come la tabella DDT principale)
   const currentDdtGridRef = useRef<AgGridReact<DdtItem>>(null);
+
+  // Ref per le sezioni Listino Generale e Listino Clienti
+  const generalSectionRef = useRef<PriceListSectionHandle>(null);
+  const customerSectionRef = useRef<PriceListSectionHandle>(null);
+
+  // Stato per dialogo di conferma modifiche non salvate all'uscita
+  const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
+  const [isSavingOnExit, setIsSavingOnExit] = useState(false);
 
   // Filtra DDT corrente con ricerca
   const [filterCurrentWithSearch, setFilterCurrentWithSearch] = useState(false);
@@ -94,16 +102,19 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Paginazione progressiva per Storico Articoli per apertura istantanea
+  const [visibleHistoryCount, setVisibleHistoryCount] = useState(60);
+
+  // Reset del caricamento progressivo al variare della ricerca o alla riapertura
+  useEffect(() => {
+    setVisibleHistoryCount(60);
+  }, [globalSearch, isOpen]);
+
   // Caricamento dati iniziali
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [gen, hist] = await Promise.all([
-        priceListRepository.searchGeneral("", 10000),
-        getDdtArticleViewRows(),
-      ]);
-
-      setGeneralItems(gen);
+      const hist = await getDdtArticleViewRows();
       setHistoryRows(hist);
 
       if (currentClientName && currentClientName.trim()) {
@@ -136,47 +147,57 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
     }
   }, [isOpen]);
 
-  // Gestione tasto ESC globale: non chiudere se una cella è attiva/in edit mode
+  // Controllo modifiche non salvate prima della chiusura del popup Alex
+  const handleAttemptClose = useCallback(() => {
+    const hasGen = generalSectionRef.current?.hasUnsavedChanges() ?? false;
+    const hasCli = customerSectionRef.current?.hasUnsavedChanges() ?? false;
+    if (hasGen || hasCli) {
+      setShowUnsavedConfirm(true);
+    } else {
+      onClose();
+    }
+  }, [onClose]);
+
+  const handleConfirmSaveAndClose = async () => {
+    setIsSavingOnExit(true);
+    try {
+      if (generalSectionRef.current?.hasUnsavedChanges()) {
+        await generalSectionRef.current.saveChanges();
+      }
+      if (customerSectionRef.current?.hasUnsavedChanges()) {
+        await customerSectionRef.current.saveChanges();
+      }
+      setShowUnsavedConfirm(false);
+      onClose();
+    } catch (err) {
+      console.error("Errore salvataggio modifiche all'uscita:", err);
+    } finally {
+      setIsSavingOnExit(false);
+    }
+  };
+
+  const handleDiscardAndClose = () => {
+    generalSectionRef.current?.discardChanges();
+    customerSectionRef.current?.discardChanges();
+    setShowUnsavedConfirm(false);
+    onClose();
+  };
+
+  // Gestione tasto ESC globale: non chiudere se una cella è attiva/in edit mode, e chiedi conferma se ci sono modifiche
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        // 1. Cella in fase di digitazione / modifica (inline editing)
-        const isEditingCell = Boolean(
-          window.__isDDTCellEditing ||
-          document.querySelector(".ag-cell-inline-editing, .ag-cell-editing, .ag-popup-editor") ||
-          (currentDdtGridRef.current?.api?.getEditingCells?.()?.length ?? 0) > 0 ||
-          (document.activeElement && document.activeElement.closest(".alex-ddt-grid") && document.activeElement.tagName === "INPUT")
-        );
-
-        if (isEditingCell) {
+        // 1. Popup di conferma modifiche pendenti aperto: ESC chiude la conferma e resta nel popup Alex
+        if (showUnsavedConfirm) {
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
-          window.__isDDTCellEditing = false;
-          currentDdtGridRef.current?.api?.stopEditing(true);
+          setShowUnsavedConfirm(false);
           return;
         }
 
-        // 2. Cella selezionata / attiva nella tabella (focus)
-        const focusedCell = currentDdtGridRef.current?.api?.getFocusedCell();
-        const isGridFocused = Boolean(
-          focusedCell ||
-          (document.activeElement && document.activeElement.closest(".alex-ddt-grid"))
-        );
-
-        if (isGridFocused) {
-          e.preventDefault();
-          e.stopPropagation();
-          e.stopImmediatePropagation();
-          currentDdtGridRef.current?.api?.clearFocusedCell();
-          if (document.activeElement instanceof HTMLElement) {
-            document.activeElement.blur();
-          }
-          return;
-        }
-
-        // 3. Popup quantità di inserimento
+        // 2. Popup quantità di inserimento articolo
         if (pendingInsert) {
           e.preventDefault();
           e.stopPropagation();
@@ -185,15 +206,66 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
           return;
         }
 
-        // 4. Nessuna cella attiva/in modifica: chiudi il popup Alex!
+        // 3. Cella attualmente in modifica (inline editing su qualsiasi tabella o input)
+        const isGenEditing = generalSectionRef.current?.isEditingCell() ?? false;
+        const isCliEditing = customerSectionRef.current?.isEditingCell() ?? false;
+        const isDdtGridEditing = Boolean(
+          window.__isDDTCellEditing ||
+          document.querySelector(".ag-cell-inline-editing, .ag-cell-editing, .ag-popup-editor") ||
+          (currentDdtGridRef.current?.api?.getEditingCells?.()?.length ?? 0) > 0 ||
+          (document.activeElement && document.activeElement.closest(".alex-ddt-grid") && document.activeElement.tagName === "INPUT")
+        );
+        const activeEl = document.activeElement;
+        const isTableInputFocused = Boolean(
+          activeEl &&
+          (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.getAttribute("contenteditable") === "true") &&
+          activeEl.closest("table, .ag-root, .alex-ddt-grid")
+        );
+
+        if (isGenEditing || isCliEditing || isDdtGridEditing || isTableInputFocused) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+
+          if (isGenEditing) {
+            generalSectionRef.current?.cancelCellEdit();
+          }
+          if (isCliEditing) {
+            customerSectionRef.current?.cancelCellEdit();
+          }
+          if (isDdtGridEditing) {
+            window.__isDDTCellEditing = false;
+            currentDdtGridRef.current?.api?.stopEditing(true);
+          }
+          if (activeEl instanceof HTMLElement) {
+            activeEl.blur();
+          }
+          return; // ESC ha annullato la digitazione della cella! NON chiudere il popup Alex!
+        }
+
+        // 4. Focus su cella AG Grid (senza editor aperto)
+        const focusedCell = currentDdtGridRef.current?.api?.getFocusedCell();
+        if (focusedCell) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          currentDdtGridRef.current?.api?.clearFocusedCell();
+          if (activeEl instanceof HTMLElement) {
+            activeEl.blur();
+          }
+          return;
+        }
+
+        // 5. Nessuna cella attiva in modifica: verifica se ci sono modifiche da salvare prima di uscire
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        e.stopImmediatePropagation();
+        handleAttemptClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [isOpen, pendingInsert, onClose]);
+  }, [isOpen, pendingInsert, showUnsavedConfirm, handleAttemptClose]);
 
   // Focus automatico sul popup quantità
   useEffect(() => {
@@ -207,15 +279,6 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
 
   // Token ricerca unificata
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
-
-  // 1. Filtraggio Finestra Listino Generale (9763)
-  const filteredGeneral = useMemo(() => {
-    if (searchTokens.length === 0) return generalItems;
-    return generalItems.filter((item) => {
-      const text = `${item.descrizione} ${item.codice_articolo || ""} ${item.fornitore || ""}`.toLowerCase();
-      return searchTokens.every((token) => text.includes(token));
-    });
-  }, [generalItems, searchTokens]);
 
   // 3. Filtraggio Finestra Storico DDT (~31k vendite)
   const filteredHistory = useMemo(() => {
@@ -750,11 +813,6 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
     })}`;
   };
 
-  const formatPercent = (val: number | null | undefined) => {
-    if (val == null) return "—";
-    return `${Math.round(val * 100)}%`;
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -896,7 +954,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
               {/* Chiusura */}
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleAttemptClose}
                 className="p-1 rounded text-[var(--muted-foreground)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
                 title="Chiudi modale (Esc)"
               >
@@ -916,80 +974,19 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                 : "flex divide-x divide-[var(--border)]"
             }`}
           >
-            {/* FINESTRA 1: Listino Generale (Blu) */}
+            {/* FINESTRA 1: Listino Generale (Blu - Editabile stile Excel con riga inserimento nuovo articolo in cima) */}
             {showGen && (
-              <div
-                className={`flex flex-col overflow-hidden bg-[var(--card)] ${
-                  layoutMode === "horizontal" ? "flex-1 min-h-[140px]" : "flex-1 min-w-[280px]"
-                }`}
-              >
-                <div className="px-3 py-1 bg-blue-950/40 border-b border-blue-500/30 flex items-center justify-between text-xs text-blue-300 shrink-0">
-                  <span className="font-bold flex items-center space-x-1">
-                    <span>Listino Generale</span>
-                    <span className="text-[10px] opacity-80">({filteredGeneral.length} voci)</span>
-                  </span>
-                </div>
-
-                <div className="flex-1 overflow-auto">
-                  <table className="w-full border-collapse text-xs whitespace-nowrap">
-                    <thead className="bg-[var(--background)] sticky top-0 text-[11.5px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-bold">
-                      <tr>
-                        <th className="px-2.5 py-1.5 text-left w-20">Fornit</th>
-                        <th className="px-2.5 py-1.5 text-left w-24">Art</th>
-                        <th className="px-2 py-1.5 text-center w-16">Data</th>
-                        <th className="px-3 py-1.5 text-left">Descrizione</th>
-                        <th className="px-2 py-1.5 text-center w-12">UM</th>
-                        <th className="px-2.5 py-1.5 text-right w-16">% Pub</th>
-                        <th className="px-3 py-1.5 text-right w-24">Pubblico</th>
-                        <th className="px-2.5 py-1.5 text-right w-16">% Prof</th>
-                        <th className="px-3 py-1.5 text-right w-24">Profess</th>
-                        <th className="px-2.5 py-1.5 text-right w-16">% Fatt</th>
-                        <th className="px-3 py-1.5 text-right w-24 bg-blue-500/10 text-amber-300 font-bold">Fattura</th>
-                        <th className="px-3 py-1.5 text-right w-24">Acquisto</th>
-                        <th className="px-2 py-1.5 text-center w-12">IVA</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border)]/30 font-mono text-xs">
-                      {filteredGeneral.slice(0, 200).map((item) => (
-                        <tr
-                          key={item.id}
-                          onDoubleClick={() => {
-                            handleOpenInsert({
-                              code: item.codice_articolo || undefined,
-                              description: item.descrizione,
-                              unit: item.um || "NR.",
-                              unit_price: item.prezzo_fattura || item.prezzo_pubblico || 0,
-                              purchase_price: item.prezzo_acquisto || 0,
-                              vat_rate: Math.round((item.perc_iva || 0.22) * 100),
-                            });
-                          }}
-                          className="hover:bg-blue-600/15 cursor-pointer transition-colors group"
-                          title="Doppio clic per inserire nel DDT"
-                        >
-                          <td className="px-2.5 py-1.5 text-[var(--muted-foreground)] truncate max-w-[75px]">{item.fornitore || "—"}</td>
-                          <td className="px-2.5 py-1.5 font-bold text-blue-400 truncate max-w-[90px]">{item.codice_articolo || "—"}</td>
-                          <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)] text-[11px]">{item.data_ref || "—"}</td>
-                          <td className="px-3 py-1.5 font-sans text-[var(--foreground)] truncate max-w-[320px] text-[12.5px] font-medium" title={item.descrizione}>{item.descrizione}</td>
-                          <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">{item.um || "NR"}</td>
-                          <td className="px-2.5 py-1.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_pub)}</td>
-                          <td className="px-3 py-1.5 text-right font-medium">{formatEuro(item.prezzo_pubblico, 2)}</td>
-                          <td className="px-2.5 py-1.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_prof)}</td>
-                          <td className="px-3 py-1.5 text-right font-medium">{formatEuro(item.prezzo_profess, 2)}</td>
-                          <td className="px-2.5 py-1.5 text-right text-[var(--muted-foreground)]">{formatPercent(item.perc_fatt)}</td>
-                          <td className="px-3 py-1.5 text-right font-bold text-amber-300 bg-blue-500/10">{formatEuro(item.prezzo_fattura, 2)}</td>
-                          <td className="px-3 py-1.5 text-right text-[var(--muted-foreground)]">{formatEuro(item.prezzo_acquisto, 2)}</td>
-                          <td className="px-2 py-1.5 text-center text-[var(--muted-foreground)]">{formatPercent(item.perc_iva)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <GeneralPriceListEmbeddedSection
+                ref={generalSectionRef}
+                globalSearch={globalSearch}
+                layoutMode={layoutMode}
+              />
             )}
 
             {/* FINESTRA 2: Listino Clienti (Giallo/Ambra - Editabile stile Excel con pulsanti e cestino) */}
             {showCli && (
               <CustomerPriceListEmbeddedSection
+                ref={customerSectionRef}
                 currentClientName={currentClientName}
                 currentClientPls={currentClientPls}
                 globalSearch={globalSearch}
@@ -1012,7 +1009,15 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                   </span>
                 </div>
 
-                <div className="flex-1 overflow-auto">
+                <div
+                  className="flex-1 overflow-auto"
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+                      setVisibleHistoryCount((prev) => Math.min(prev + 60, filteredHistory.length));
+                    }
+                  }}
+                >
                   <table className="w-full border-collapse text-xs whitespace-nowrap">
                     <thead className="bg-[var(--background)] sticky top-0 text-[11.5px] uppercase text-[var(--muted-foreground)] border-b border-[var(--border)] font-bold">
                       <tr>
@@ -1026,7 +1031,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--border)]/30 font-mono text-xs">
-                      {filteredHistory.slice(0, 200).map((row) => {
+                      {filteredHistory.slice(0, visibleHistoryCount).map((row) => {
                         const priceVal = row.unitPriceSubunits / 100000;
                         const acqVal = (row.purchasePriceSubunits || 0) / 100000;
                         const ricaricoPct = acqVal > 0 ? ((priceVal - acqVal) / acqVal) * 100 : null;
@@ -1224,13 +1229,13 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
           <div className="px-4 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-xs text-[var(--muted-foreground)] shrink-0">
             <div className="flex items-center space-x-2">
               <span className="font-semibold text-[var(--foreground)]">
-                Doppio clic su qualsiasi articolo di qualsiasi finestra per inserirlo all'istante nel DDT!
+                Doppio clic su qualsiasi articolo dello storico per inserirlo all'istante nel DDT • Clicca o fai doppio clic sui listini per modificare o inserire articoli
               </span>
             </div>
 
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleAttemptClose}
               className="px-4 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--background)] text-[var(--foreground)] font-bold text-xs transition-colors"
             >
               Chiudi (Esc)
@@ -1315,6 +1320,20 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* Popup di conferma modifiche non salvate nei listini prima di uscire */}
+      <UnsavedChangesModal
+        isOpen={showUnsavedConfirm}
+        title="Modifiche ai listini non salvate"
+        message="Sono state apportate modifiche a uno o più articoli nei listini prezzi. Vuoi mantenere le modifiche o annullarle prima di uscire?"
+        saveLabel="Mantieni modifiche"
+        discardLabel="Annulla modifiche"
+        cancelLabel="Continua a modificare"
+        isSaving={isSavingOnExit}
+        onSave={handleConfirmSaveAndClose}
+        onDiscard={handleDiscardAndClose}
+        onCancel={() => setShowUnsavedConfirm(false)}
+      />
     </>
   );
 };

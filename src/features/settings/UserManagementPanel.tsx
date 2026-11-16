@@ -182,6 +182,14 @@ export const UserManagementPanel: React.FC = () => {
         finalHash = "";
       }
 
+      const effectivePages = editingUser.is_admin ? [...DEFAULT_ALLOWED_PAGES] : editingUser.allowed_pages;
+      let finalTopbarOrder = [...(editingUser.topbar_order && editingUser.topbar_order.length > 0 ? editingUser.topbar_order : DEFAULT_TOPBAR_ORDER)];
+      if (effectivePages.includes("ddt-studio")) {
+        finalTopbarOrder = finalTopbarOrder.filter((id) => id !== "ddt-studio");
+        const dashIdx = finalTopbarOrder.indexOf("dashboard");
+        finalTopbarOrder.splice(dashIdx !== -1 ? dashIdx + 1 : 1, 0, "ddt-studio");
+      }
+
       const updatedUser: AppUser = {
         ...editingUser,
         require_password: editRequirePassword,
@@ -190,7 +198,8 @@ export const UserManagementPanel: React.FC = () => {
         can_access_settings: editingUser.is_admin ? true : editingUser.can_access_settings,
         can_edit_price_lists: editingUser.is_admin ? true : editingUser.can_edit_price_lists,
         can_edit_or_numbers: editingUser.is_admin ? true : editingUser.can_edit_or_numbers,
-        allowed_pages: editingUser.is_admin ? [...DEFAULT_ALLOWED_PAGES] : editingUser.allowed_pages,
+        allowed_pages: effectivePages,
+        topbar_order: finalTopbarOrder,
       };
 
       await updateUser(updatedUser);
@@ -222,10 +231,24 @@ export const UserManagementPanel: React.FC = () => {
   const togglePageInEditing = (pageId: string) => {
     if (!editingUser || editingUser.is_admin) return;
     const current = editingUser.allowed_pages || [];
-    const next = current.includes(pageId)
-      ? current.filter((p) => p !== pageId)
-      : [...current, pageId];
-    setEditingUser({ ...editingUser, allowed_pages: next });
+    const isEnabling = !current.includes(pageId);
+    const next = isEnabling
+      ? [...current, pageId]
+      : current.filter((p) => p !== pageId);
+
+    // Gestione topbar_order: se la pagina viene abilitata, inseriscila in un punto visibile
+    let nextOrder = [...(editingUser.topbar_order || DEFAULT_TOPBAR_ORDER)];
+    if (isEnabling) {
+      if (pageId === "ddt-studio") {
+        nextOrder = nextOrder.filter((id) => id !== "ddt-studio");
+        const dashIdx = nextOrder.indexOf("dashboard");
+        nextOrder.splice(dashIdx !== -1 ? dashIdx + 1 : 1, 0, "ddt-studio");
+      } else if (!nextOrder.includes(pageId)) {
+        nextOrder.push(pageId);
+      }
+    }
+
+    setEditingUser({ ...editingUser, allowed_pages: next, topbar_order: nextOrder });
   };
 
   const selectAllPagesEditing = () => {

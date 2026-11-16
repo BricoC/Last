@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { ICellEditorParams } from "ag-grid-community";
 
 declare global {
@@ -24,6 +24,7 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const [value, setValue] = useState<string>(String(startValue));
   const valueRef = useRef<string>(String(startValue));
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectionRef = useRef<{ start: number | null; end: number | null }>({ start: null, end: null });
 
   // Quick edit vs Deep edit:
   // Se l'utente digita un carattere o cancella, le frecce muovono la cella stile Excel.
@@ -31,8 +32,24 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const isDeepEdit = !isTypedChar && !isDelete && (!props.eventKey || props.eventKey === "F2" || props.eventKey === "Enter");
   const isQuickEdit = useRef(!isDeepEdit);
 
-  const updateValue = (v: string) => {
-    const next = isUppercaseCol ? v.toUpperCase() : v;
+  // Ripristina la posizione esatta del cursore dopo la trasformazione uppercase e il re-render di React
+  useLayoutEffect(() => {
+    if (selectionRef.current.start !== null && inputRef.current) {
+      inputRef.current.setSelectionRange(
+        selectionRef.current.start,
+        selectionRef.current.end ?? selectionRef.current.start
+      );
+      selectionRef.current = { start: null, end: null };
+    }
+  });
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawVal = e.target.value;
+    const caretStart = e.target.selectionStart;
+    const caretEnd = e.target.selectionEnd;
+    const next = isUppercaseCol ? rawVal.toUpperCase() : rawVal;
+
+    selectionRef.current = { start: caretStart, end: caretEnd };
     valueRef.current = next;
     setValue(next);
   };
@@ -46,8 +63,12 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     afterGuiAttached: () => {
       if (inputRef.current) {
         inputRef.current.focus();
-        const len = inputRef.current.value.length;
-        inputRef.current.setSelectionRange(len, len);
+        if (isTypedChar || props.eventKey === "F2") {
+          const len = inputRef.current.value.length;
+          inputRef.current.setSelectionRange(len, len);
+        } else if (props.eventKey === "Enter") {
+          inputRef.current.select();
+        }
       }
     },
     focusIn: () => {
@@ -61,8 +82,12 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     window.__isOrderCellEditing = true;
     if (inputRef.current) {
       inputRef.current.focus();
-      const len = inputRef.current.value.length;
-      inputRef.current.setSelectionRange(len, len);
+      if (isTypedChar || props.eventKey === "F2") {
+        const len = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(len, len);
+      } else if (props.eventKey === "Enter") {
+        inputRef.current.select();
+      }
     }
     return () => {
       window.__isOrderCellEditing = false;
@@ -109,7 +134,7 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
     <input
       ref={inputRef}
       value={value}
-      onChange={(e) => updateValue(e.target.value)}
+      onChange={handleInputChange}
       onKeyDown={onKeyDown}
       style={{
         width: "100%",

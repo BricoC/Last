@@ -201,8 +201,15 @@ export async function prepareAndSendRibaEmail(info: {
 }): Promise<{ success: boolean; sentAt?: string; error?: string }> {
   try {
     const settings = await getEmailSettings();
-    const to = settings.bank_to.trim() || "rachele.neri@bpc.bcc.it";
-    const cc = settings.bank_cc.trim() || "capannori@bpc.bcc.it";
+    const to = settings.bank_to.trim();
+    const cc = settings.bank_cc.trim();
+
+    if (!to) {
+      return {
+        success: false,
+        error: "Nessun indirizzo email configurato per la banca. Vai in Impostazioni per configurarlo.",
+      };
+    }
     const subject = `Autorizzazione pagamento Ri.Ba. scadenza ${info.deadlineStr}`;
 
     const bodyHtml = `

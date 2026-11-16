@@ -855,8 +855,8 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
                   <div className="pt-2">
                     <div
                       className={cn(
-                        "font-mono text-xs text-[var(--foreground)] leading-relaxed whitespace-pre-wrap select-text pl-1",
-                        !isExpanded && hasMultipleLines && "max-h-16 overflow-hidden"
+                        "font-mono text-sm text-[var(--foreground)] leading-relaxed whitespace-pre-wrap select-text pl-1",
+                        !isExpanded && hasMultipleLines && "max-h-24 overflow-hidden"
                       )}
                     >
                       {item.items_text}

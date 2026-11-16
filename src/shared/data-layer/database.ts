@@ -403,6 +403,78 @@ const MIGRATIONS: Migration[] = [
       await migrateSupplierPriceListsSchemaV27(db);
     },
   },
+  {
+    version: 28,
+    name: "add_sdi_code_to_company_settings",
+    up: async (db: Database) => {
+      try {
+        await db.execute("ALTER TABLE company_settings ADD COLUMN sdi_code TEXT NOT NULL DEFAULT 'M5UXCR1';");
+      } catch {
+        // Colonna già presente se migrata
+      }
+    },
+  },
+  {
+    version: 29,
+    name: "seed_client_price_lists_from_known_aliases",
+    up: async (db: Database) => {
+      const aliases: Record<string, string[]> = {
+        "CARTIERE CARRARA": ["LIST_CARMA"],
+        "TREVITECH": ["LIST_TREVI"],
+        "WEPA ITALIA": ["LIST_WEPA LISTINO"],
+        "FALEGNAMERIA BARSELLA": ["LIST_BARSELLA"],
+        "FRUGOLI": ["LIST_FRUGOLI"],
+        "CORAZZA": ["LIST_CORAZZA"],
+        "DEL DEBBIO": ["LIST_DEL DEBBIO"],
+        "FALCHETTI": ["LIST_FALCHETTI"],
+        "LUCCHESI": ["LIST_LUCCHESI"],
+        "PAPER GROUP": ["LIST_PAPER GROUP"],
+        "SAN MARCO": ["LIST_SAN MARCO"],
+        "SCA": ["LIST_SCA"],
+        "TOSCOLI": ["LIST_TOSCOLI"],
+        "VALMET": ["LIST_VALMET"],
+        "VOITH": ["LIST_VOITH"],
+        "ARTE DEL SERRAMENTO": ["LIST_ARTE DEL SERRAMENTO"],
+        "ASSEM": ["LIST_ASSEM"],
+        "KARTOGROUP": ["LIST_KARTOGROUP"],
+        "CAMM": ["LIST_C.A.M.M."],
+        "C.A.M.M.": ["LIST_C.A.M.M."],
+      };
+
+      for (const [name, lists] of Object.entries(aliases)) {
+        await db.execute(
+          `UPDATE clients 
+           SET price_lists_json = $1 
+           WHERE (price_lists_json IS NULL OR price_lists_json = '[]' OR price_lists_json = '')
+             AND deleted_at IS NULL
+             AND (
+               UPPER(TRIM(business_name)) = UPPER($2)
+               OR UPPER(TRIM(business_name)) LIKE '%' || UPPER($2) || '%'
+             )`,
+          [JSON.stringify(lists), name]
+        );
+      }
+    },
+  },
+  {
+    version: 30,
+    name: "clear_placeholder_email_settings",
+    up: async (db: Database) => {
+      await db.execute(`
+        UPDATE email_settings SET
+          carrara_to = CASE WHEN carrara_to LIKE '%@cartierecarrara.com' THEN '' ELSE carrara_to END,
+          carrara_cc = CASE WHEN carrara_cc LIKE '%@cartierecarrara.com' THEN '' ELSE carrara_cc END,
+          wepa_salanetti_to = CASE WHEN wepa_salanetti_to LIKE '%@wepa.eu' THEN '' ELSE wepa_salanetti_to END,
+          wepa_salanetti_cc = CASE WHEN wepa_salanetti_cc LIKE '%@wepa.eu' THEN '' ELSE wepa_salanetti_cc END,
+          wepa_ralletta_to = CASE WHEN wepa_ralletta_to LIKE '%@wepa.eu' THEN '' ELSE wepa_ralletta_to END,
+          wepa_ralletta_cc = CASE WHEN wepa_ralletta_cc LIKE '%@wepa.eu' THEN '' ELSE wepa_ralletta_cc END,
+          bank_to = CASE WHEN bank_to LIKE '%@bpc.bcc.it' THEN '' ELSE bank_to END,
+          bank_cc = CASE WHEN bank_cc LIKE '%@bpc.bcc.it' THEN '' ELSE bank_cc END,
+          accountant_to = CASE WHEN accountant_to LIKE '%@studiotaddeucci.it' THEN '' ELSE accountant_to END
+        WHERE id = 'email_config';
+      `);
+    },
+  },
 ];
 
 /**
@@ -421,6 +493,12 @@ export async function getDatabase(): Promise<Database> {
   initPromise = (async () => {
     try {
       const db = await Database.load(DB_FILENAME);
+
+      // Ottimizzazioni PRAGMA SQLite per concorrenza multi-connessione e integrità referenziale
+      await db.execute("PRAGMA journal_mode = WAL;");
+      await db.execute("PRAGMA synchronous = NORMAL;");
+      await db.execute("PRAGMA busy_timeout = 5000;");
+      await db.execute("PRAGMA foreign_keys = ON;");
 
       // Esecuzione migrazioni versionate
       await runMigrations(db);

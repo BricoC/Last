@@ -11,9 +11,10 @@
 1. **DATI NATIVI (SQLite Locale + Supabase Cloud):**
    - Nessuna dipendenza da file esterni in lettura. L'intero database risiede localmente in **SQLite** (offline-first) e si sincronizza con **Supabase** in cloud. *(L'esportazione di PDF ed Excel per l'utente finale resta supportata).*
 
-2. **TIMESTAMP UTC & SOFT DELETE OBBLIGATORIO:**
+2. **TIMESTAMP UTC & SOFT DELETE OBBLIGATORIO (deleted_at in-place):**
    - Qualsiasi record traccia `created_at`, `updated_at` (ISO 8601 UTC) e `updated_by`.
-   - Divieto assoluto di `DELETE` fisico: le eliminazioni avvengono solo tramite Soft Delete (`deleted_at = NOW_UTC()`), impedendo la ricomparsa di record eliminati tra diverse postazioni.
+   - Divieto assoluto di `DELETE` fisico: le eliminazioni avvengono solo tramite Soft Delete in-place (`deleted_at = NOW_UTC()`), impedendo la ricomparsa di record eliminati tra diverse postazioni.
+   - **Regola Cestini per Nuovi Moduli:** Non creare tabelle separate per il cestino (es. niente tabelle `_trash` o `_cestino`). Tutti i nuovi moduli devono utilizzare la colonna standard `deleted_at` in-place sulla tabella principale, con eventuale pulizia automatica FIFO tramite trigger o repository (come implementato in `ddtRepository.pruneTrash()`).
 
 3. **REGISTRO DI COMPONENTI E HOOK (No Doppioni):**
    - Prima di creare un nuovo componente UI o custom hook, è **obbligatorio consultare il Registro Centrale** (`src/shared/registry/`).
@@ -23,9 +24,10 @@
    - Tutti i colori, forme (border-radius), ombre e stili UI derivano **esclusivamente dai token definiti nei Settings**. Nessun colore hardcoded nei componenti.
    - Nuovi pattern o varianti visive vanno prima registrati nei Settings, diventando la base per tutto il gestionale.
 
-5. **TABELLE DATI EXCEL-LIKE (Glide Data Grid):**
-   - Tutte le tabelle adottano **Glide Data Grid** (Canvas virtualizzato, gratuito MIT).
-   - Esperienza Excel nativa obbligatoria: navigazione con frecce, selezione a blocchi di celle, fill handle (trascinamento per duplicare) e copia/incolla matrice bidirezionale con Excel reale (Ctrl+C / Ctrl+V).
+5. **TABELLE DATI E GRIGLIE EXCEL-LIKE (AG Grid & Tabelle Virtualizzate):**
+   - Tutte le tabelle di editing dati ad alta densità (DDT Studio, Preventivi, matrici complesse) adottano **AG Grid** (`ag-grid-react`).
+   - Esperienza Excel nativa: navigazione a cursore/frecce, cell editor personalizzati, selezione a blocchi rettangolari da tastiera e mouse, e copia/incolla matrice bidirezionale con Microsoft Excel (Ctrl+C / Ctrl+V TSV).
+   - Nelle viste archivio e di consultazione (DDT List, Listini, Prodotti) si adottano tabelle virtualizzate / progressive con paginazione a scroll fluido (`visibleCount`).
 
 6. **NESSUN HARDCODING:**
    - Percorsi, credenziali, parametri email e costanti devono risiedere nei Settings o nel `.env`.
@@ -44,7 +46,7 @@
 - **State Management (UI):** **Zustand** (Store atomici ultra-leggeri per tab, layout split-screen, tema, utente, notifiche. Zero boilerplate; i dati di business risiedono in SQLite e sono interrogati on-demand, mai duplicati in RAM).
 - **Componenti UI:** **shadcn/ui (Radix Primitives) + TailwindCSS** (Componenti nel codice sorgente, accessibili, ultra-leggeri, governati al 100% dalle variabili CSS del Theme Engine).
 - **Split-Screen & Layout:** **`react-resizable-panels`** (Pannelli affiancati fluidi e ridimensionabili col mouse con memoria delle dimensioni).
-- **Data Grids:** **Glide Data Grid** (Canvas virtualizzato a 60 FPS, esperienza Excel reale).
+- **Data Grids:** **AG Grid (`ag-grid-react`)** per griglie operative + Tabelle virtualizzate/progressive a scroll fluido.
 - **Stampa e Generazione Documenti:** **Template A4 Vettoriale Millimetrico** (Layout A4 a misure fisse in millimetri, CSS `@media print` a 300 DPI nativo; testo, bordi e codici a barre nitidissimi per DDT e Preventivi identici al documento commerciale aziendale).
 - **Database Locale:** **SQLite embedded** (`LastData.db` via `tauri-plugin-sql` in `%APPDATA%\Last\`, auto-creato, invisibile e a zero configurazione).
 - **Database Cloud:** **Supabase** (PostgreSQL)

@@ -3,7 +3,7 @@ import { getCompanySettings, saveCompanySettings, type CompanySettingsInput } fr
 
 const emptySettings: CompanySettingsInput = {
   business_name: "", address: "", postal_code: "", city: "", province: "",
-  vat_number: "", fiscal_code: "", phone: "", email: "", logo_data_url: null,
+  vat_number: "", fiscal_code: "", sdi_code: "", phone: "", email: "", logo_data_url: null,
 };
 
 export function CompanySettingsPanel() {
@@ -39,6 +39,7 @@ export function CompanySettingsPanel() {
       <Field label="Provincia" value={values.province} onChange={(value) => set("province", value)} />
       <Field label="Partita IVA" value={values.vat_number} onChange={(value) => set("vat_number", value)} />
       <Field label="Codice fiscale" value={values.fiscal_code} onChange={(value) => set("fiscal_code", value)} />
+      <Field label="Codice Univoco / SDI" value={values.sdi_code || ""} onChange={(value) => set("sdi_code", value)} />
       <Field label="Telefono" value={values.phone} onChange={(value) => set("phone", value)} />
       <Field label="Email" value={values.email} onChange={(value) => set("email", value)} />
       <label className="text-xs text-[var(--muted-foreground)]">Logo aziendale

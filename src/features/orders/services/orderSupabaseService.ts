@@ -1070,20 +1070,64 @@ export class OrderSupabaseService {
     try {
       const db = await getDatabase();
       const rows = await db.select<any[]>("SELECT * FROM suppliers ORDER BY name ASC");
-      return rows.map((r) => ({
-        id: r.id,
-        supabase_id: r.supabase_id,
-        name: r.name || "",
-        representative: r.representative || "",
-        email: r.email || "",
-        phone: r.phone || "",
-        address: r.address || "",
-        vat_number: r.vat_number || "",
-        notes: r.notes || "",
-        created_at: r.created_at || new Date().toISOString(),
-        updated_at: r.updated_at || new Date().toISOString(),
-        sync_status: r.sync_status || "synced",
-      }));
+      const map = new Map<string, Supplier>();
+
+      for (const r of rows) {
+        if (r.name && r.name.trim()) {
+          map.set(r.name.trim().toUpperCase(), {
+            id: r.id,
+            supabase_id: r.supabase_id,
+            name: r.name.trim(),
+            representative: r.representative || "",
+            email: r.email || "",
+            phone: r.phone || "",
+            address: r.address || "",
+            vat_number: r.vat_number || "",
+            notes: r.notes || "",
+            created_at: r.created_at || new Date().toISOString(),
+            updated_at: r.updated_at || new Date().toISOString(),
+            sync_status: r.sync_status || "synced",
+          });
+        }
+      }
+
+      // Integrazione/fallback: arricchisce l'elenco con fornitori usati in ordini, listino articoli o fatture
+      try {
+        const fallbackQueries = [
+          "SELECT DISTINCT supplier_name as name FROM orders WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != ''",
+          "SELECT DISTINCT fornitore as name FROM listino_articoli WHERE fornitore IS NOT NULL AND TRIM(fornitore) != ''",
+          "SELECT DISTINCT supplier_name as name FROM supplier_invoices WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != ''",
+        ];
+        for (const q of fallbackQueries) {
+          try {
+            const extra = await db.select<{ name: string }[]>(q);
+            for (const item of extra) {
+              const cleanName = item.name?.trim();
+              if (cleanName && !map.has(cleanName.toUpperCase())) {
+                map.set(cleanName.toUpperCase(), {
+                  id: `sup_${cleanName.replace(/\s+/g, "_")}`,
+                  name: cleanName,
+                  representative: "",
+                  email: "",
+                  phone: "",
+                  address: "",
+                  vat_number: "",
+                  notes: "",
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  sync_status: "synced",
+                });
+              }
+            }
+          } catch {
+            // Se una tabella non è ancora creata, prosegue con le altre
+          }
+        }
+      } catch {
+        // Ignora errori query extra
+      }
+
+      return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
     } catch {
       return [];
     }

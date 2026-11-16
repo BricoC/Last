@@ -498,7 +498,7 @@ export const OfferEditModal: React.FC<OfferEditModalProps> = ({
               value={itemsText}
               onChange={(e) => setItemsText(e.target.value)}
               onKeyDown={handleKeyDownItems}
-              className="flex-1 w-full p-4 text-xs font-mono rounded-lg border border-[var(--border)] bg-[var(--background)] text-white focus:outline-hidden focus:border-[var(--primary)] leading-relaxed resize-y select-text min-h-[220px]"
+              className="flex-1 w-full p-4 text-sm font-mono rounded-lg border border-[var(--border)] bg-[var(--background)] text-white focus:outline-hidden focus:border-[var(--primary)] leading-relaxed resize-y select-text min-h-[220px]"
             />
           </div>
 

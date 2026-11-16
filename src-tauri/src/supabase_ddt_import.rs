@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
     collections::{HashMap, HashSet},
     fs,
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_sql::{DbInstances, DbPool};
+
+const DATABASE_KEY: &str = "sqlite:LastData.db";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,24 +114,21 @@ async fn local_headers(
 #[tauri::command]
 pub async fn import_supabase_ddt_into_local(
     app: AppHandle,
+    db_instances: State<'_, DbInstances>,
     payload: DdtImportPayload,
 ) -> Result<DdtImportResult, String> {
     let data_dir = app
         .path()
         .app_data_dir()
         .map_err(|_| "Cartella dati Last non disponibile".to_string())?;
-    let db_path = data_dir.join("LastData.db");
-    if !db_path.exists() {
-        return Err("Database locale Last non trovato".into());
-    }
-    let options = SqliteConnectOptions::new()
-        .filename(&db_path)
-        .create_if_missing(false);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_with(options)
-        .await
-        .map_err(|error| format!("Impossibile aprire il database locale Last: {error}"))?;
+
+    let pool = {
+        let instances = db_instances.0.read().await;
+        match instances.get(DATABASE_KEY) {
+            Some(DbPool::Sqlite(pool)) => pool.clone(),
+            None => return Err("Il database Last non è stato inizializzato".to_string()),
+        }
+    };
     let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
     let local = local_headers(&mut connection).await?;
     let local_by_id: HashMap<String, &LocalHeader> = local

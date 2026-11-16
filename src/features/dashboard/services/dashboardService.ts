@@ -368,15 +368,20 @@ export class DashboardService {
        LIMIT 50`
     );
 
-    // Controllo margini per questi recenti
-    const ddtIds = recentDdtRows.map((r) => `'${r.id}'`).join(",");
+    // Controllo margini per questi recenti tramite JOIN sicura (zero interpolazione stringhe)
     const marginCheckMap = new Map<string, boolean>();
-    if (ddtIds.length > 0) {
+    if (recentDdtRows.length > 0) {
       const marginSummary = await db.select<{ ddt_id: string; has_cost: number }[]>(
-        `SELECT ddt_id, MIN(CASE WHEN unit_price_subunits > 0 THEN (purchase_price_subunits > 0) ELSE 1 END) AS has_cost
-         FROM ddt_items
-         WHERE deleted_at IS NULL AND ddt_id IN (${ddtIds})
-         GROUP BY ddt_id`
+        `SELECT i.ddt_id, MIN(CASE WHEN i.unit_price_subunits > 0 THEN (i.purchase_price_subunits > 0) ELSE 1 END) AS has_cost
+         FROM ddt_items i
+         JOIN (
+           SELECT id FROM ddt_documents
+           WHERE deleted_at IS NULL AND doc_number IS NOT NULL AND status <> 'bozza'
+           ORDER BY doc_date DESC, doc_number DESC
+           LIMIT 50
+         ) d ON d.id = i.ddt_id
+         WHERE i.deleted_at IS NULL
+         GROUP BY i.ddt_id`
       );
       marginSummary.forEach((m) => {
         marginCheckMap.set(m.ddt_id, Number(m.has_cost) === 1);
@@ -853,19 +858,24 @@ export class DashboardService {
 
     if (rows.length === 0) return [];
 
-    const ddtIds = rows.map((r) => `'${r.id}'`).join(",");
+    // Controllo margini con query parametrizzata in JOIN (zero interpolazione stringhe)
     const marginCheckMap = new Map<string, boolean>();
-    if (ddtIds.length > 0) {
-      const marginSummary = await db.select<{ ddt_id: string; has_cost: number }[]>(
-        `SELECT ddt_id, MIN(CASE WHEN unit_price_subunits > 0 THEN (purchase_price_subunits > 0) ELSE 1 END) AS has_cost
-         FROM ddt_items
-         WHERE deleted_at IS NULL AND ddt_id IN (${ddtIds})
-         GROUP BY ddt_id`
-      );
-      marginSummary.forEach((m) => {
-        marginCheckMap.set(m.ddt_id, Number(m.has_cost) === 1);
-      });
-    }
+    const marginSummary = await db.select<{ ddt_id: string; has_cost: number }[]>(
+      `SELECT i.ddt_id, MIN(CASE WHEN i.unit_price_subunits > 0 THEN (i.purchase_price_subunits > 0) ELSE 1 END) AS has_cost
+       FROM ddt_items i
+       JOIN ddt_documents d ON d.id = i.ddt_id
+       WHERE i.deleted_at IS NULL
+         AND d.deleted_at IS NULL
+         AND d.status <> 'bozza'
+         AND d.doc_number IS NOT NULL
+         AND d.year = $1
+         AND CAST(strftime('%m', d.doc_date) AS INTEGER) = $2
+       GROUP BY i.ddt_id`,
+      [year, month]
+    );
+    marginSummary.forEach((m) => {
+      marginCheckMap.set(m.ddt_id, Number(m.has_cost) === 1);
+    });
 
     return rows.map((r) => {
       const dName = (r.destination_name || "").trim();

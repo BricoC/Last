@@ -227,9 +227,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
       inputRef.current.setSelectionRange(String(startValue).length, String(startValue).length);
     }
     return () => {
-      setTimeout(() => {
-        window.__isDDTCellEditing = false;
-      }, 200);
+      window.__isDDTCellEditing = false;
     };
   }, [startValue, candidates, isTypedChar]);
 

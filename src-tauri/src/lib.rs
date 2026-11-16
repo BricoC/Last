@@ -74,8 +74,10 @@ fn list_files_in_folder(
     extensions: Option<Vec<String>>,
 ) -> Result<Vec<ExcelFileInfo>, String> {
     use std::path::Path;
-    let target_dir =
-        folder_path.unwrap_or_else(|| r"D:\BricoClassFiles\Offline\ListiniClienti".to_string());
+    let target_dir = match folder_path {
+        Some(p) if !p.trim().is_empty() => p,
+        _ => return Err("Nessun percorso cartella specificato".to_string()),
+    };
     let path = Path::new(&target_dir);
     if !path.exists() || !path.is_dir() {
         return Err(format!(

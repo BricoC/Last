@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Search, Calendar, Plus, ChevronRight, Trash2, LoaderCircle } from "lucide-react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Search, Calendar, Plus, ChevronRight, Trash2, LoaderCircle, X } from "lucide-react";
 import { DdtArchiveEntry } from "../models/ddt";
 import { toDateIT } from "../utils/ddtCalculations";
 import { cn } from "@/shared/utils/cn";
@@ -48,6 +48,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   const [deleteError, setDeleteError] = useState(false);
   const [searchTerm, setSearchTerm] = useState(search);
   const [visibleCount, setVisibleCount] = useState(SIDEBAR_BATCH_SIZE);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Sincronizza stato di ricerca locale quando cambia la prop
   useEffect(() => {
@@ -220,16 +221,32 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
           )}
         </div>
 
-        {/* Input Ricerca con debounce */}
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2 top-2" />
+        {/* Input Ricerca con debounce e pulsante clear */}
+        <div className="relative flex items-center">
+          <Search className="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2 pointer-events-none" />
           <input
+            ref={searchInputRef}
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Cerca numero o cliente..."
-            className="w-full pl-7 pr-2 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-medium"
+            className="w-full pl-7 pr-7 py-1 text-xs bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--primary)] font-medium"
           />
+          {searchTerm.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchTerm("");
+                setSearch("");
+                searchInputRef.current?.focus();
+              }}
+              className="absolute right-1.5 p-0.5 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] transition-colors cursor-pointer"
+              title="Cancella ricerca"
+              aria-label="Cancella ricerca"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

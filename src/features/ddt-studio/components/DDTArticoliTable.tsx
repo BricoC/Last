@@ -1211,9 +1211,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
           }
         }}
         onCellEditingStopped={(p) => {
-          setTimeout(() => {
-            window.__isDDTCellEditing = false;
-          }, 200);
+          window.__isDDTCellEditing = false;
           if (p.column?.getColId() === "description" || p.column?.getColId() === "descrizione") {
             onDescriptionEditingStopped?.();
           }

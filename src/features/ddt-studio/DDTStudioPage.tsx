@@ -1039,6 +1039,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       if (cleanDisc === "") {
         setItems((prev) =>
           prev.map((item) => {
+            // Salta immediatamente le righe vuote per evitare ricalcoli costosi
+            if (!item.description?.trim() && !isPositivePrice(item.unit_price)) {
+              return item;
+            }
             const restoredDisc =
               item.base_discount_pct !== undefined ? item.base_discount_pct : (item.discount_pct || "");
             const hasPrice = isPositivePrice(item.unit_price);
@@ -1063,6 +1067,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       // Applica il nuovo sconto preservando lo sconto originale prima dell'inizio della sovrascrittura
       setItems((prev) =>
         prev.map((item) => {
+          // Salta immediatamente le righe vuote per evitare ricalcoli costosi
+          if (!item.description?.trim() && !isPositivePrice(item.unit_price)) {
+            return item;
+          }
           const originalBase =
             item.base_discount_pct !== undefined ? item.base_discount_pct : (item.discount_pct || "");
           const hasPrice = isPositivePrice(item.unit_price);
@@ -1094,6 +1102,9 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       if (trimmed === "") {
         setItems((prev) =>
           prev.map((item) => {
+            if (!item.description?.trim() && !isPositivePrice(item.unit_price) && !item.base_price) {
+              return item;
+            }
             if (item.base_price && isPositivePrice(item.base_price)) {
               const restoredPrice = item.base_price;
               const { netAmount, vatAmount } = calculateRowAmounts(
@@ -1126,6 +1137,9 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       const multiplier = 1 + num / 100;
       setItems((prev) =>
         prev.map((item) => {
+          if (!item.description?.trim() && !isPositivePrice(item.unit_price) && !item.base_price) {
+            return item;
+          }
           const base =
             item.base_price && isPositivePrice(item.base_price)
               ? item.base_price

@@ -1,6 +1,7 @@
-import { forwardRef } from "react";
+import { forwardRef, useState, useEffect, useMemo } from "react";
 import { DdtDocument, DdtItem } from "../models/ddt";
 import { safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
+import { getCompanySettings, CompanySettings } from "@/features/settings/companySettingsRepository";
 import {
   calculateDdtTotals,
   paginateDdtRows,
@@ -84,6 +85,39 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
   ({ ddt, items, isPrintOnly = false }, ref) => {
     const pages = paginateDdtRows(items);
     const totals = calculateDdtTotals(items);
+
+    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
+
+    useEffect(() => {
+      let active = true;
+      void getCompanySettings().then((s) => {
+        if (active) setCompanySettings(s);
+      });
+      return () => {
+        active = false;
+      };
+    }, []);
+
+    const footerText = useMemo(() => {
+      if (!companySettings) {
+        return "Via di Carraia, 218 - 55061 Carraia - Capannori (LU) Tel. 0583.980126 - Email: Bricoclass@live.it Cod. Univoco: M5UXCR1 - P.Iva e C.F: 01601690462";
+      }
+      const parts: string[] = [];
+      const addr = [
+        companySettings.address,
+        [companySettings.postal_code, companySettings.city].filter(Boolean).join(" "),
+        companySettings.province ? `(${companySettings.province})` : "",
+      ]
+        .filter(Boolean)
+        .join(" - ");
+      if (addr) parts.push(addr);
+      if (companySettings.phone) parts.push(`Tel. ${companySettings.phone}`);
+      if (companySettings.email) parts.push(`Email: ${companySettings.email}`);
+      const sdi = companySettings.sdi_code || "M5UXCR1";
+      parts.push(`Cod. Univoco: ${sdi}`);
+      if (companySettings.vat_number) parts.push(`P.Iva e C.F: ${companySettings.vat_number}`);
+      return parts.join(" · ") || "Via di Carraia, 218 - 55061 Carraia - Capannori (LU) Tel. 0583.980126 - Email: Bricoclass@live.it Cod. Univoco: M5UXCR1 - P.Iva e C.F: 01601690462";
+    }, [companySettings]);
 
     return (
       <div
@@ -1057,7 +1091,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                     letterSpacing: "-0.2px",
                   }}
                 >
-                  Via di Carraia, 218 - 55061 Carraia - Capannori (LU) Tel. 0583.980126 - Email: Bricoclass@live.it Cod. Univoco: M5UXCR1 - P.Iva e C.F: 01601690462
+                  {footerText}
                 </div>
               </div>
             ) : (
@@ -1074,7 +1108,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                   flexShrink: 0,
                 }}
               >
-                Via di Carraia, 218 - 55061 Carraia - Capannori (LU) Tel. 0583.980126 - Email: Bricoclass@live.it Cod. Univoco: M5UXCR1 - P.Iva e C.F: 01601690462
+                {footerText}
               </div>
             )}
           </div>

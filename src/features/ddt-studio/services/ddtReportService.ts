@@ -655,11 +655,19 @@ export async function getMonthlyFullDdtDocuments(
 
   if (docRows.length === 0) return [];
 
-  const docIds = docRows.map((d) => `'${d.id}'`).join(", ");
+  // Query parametrizzata in JOIN per evitare interpolazione stringhe IN (${docIds})
   const itemRows = await db.select<any[]>(
-    `SELECT * FROM ddt_items
-     WHERE deleted_at IS NULL AND ddt_id IN (${docIds})
-     ORDER BY row_index ASC`
+    `SELECT i.* FROM ddt_items i
+     JOIN ddt_documents d ON d.id = i.ddt_id
+     WHERE i.deleted_at IS NULL
+       AND d.deleted_at IS NULL
+       AND d.doc_number IS NOT NULL
+       AND d.status <> 'bozza'
+       AND d.year = ?
+       AND d.doc_date >= ?
+       AND d.doc_date <= ?
+     ORDER BY i.row_index ASC`,
+    [year, `${year}-${monthStr}-01`, `${year}-${monthStr}-31`]
   );
 
   const itemsByDocId = new Map<string, DdtItem[]>();

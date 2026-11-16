@@ -293,7 +293,18 @@ pub async fn restore_database_file(app: AppHandle, source_file_path: String) -> 
             .map_err(|e| format!("Impossibile creare copia preventiva di sicurezza: {}. Operazione annullata.", e))?;
     }
 
-    // 3. Rimuovi eventuali file WAL e SHM temporanei per evitare conflitti con la cache del vecchio DB
+    // 3. Chiudi ed elimina dal registro attivo il pool di connessioni SQLite in memoria per rilasciare i file lock su Windows
+    if let Some(db_instances) = app.try_state::<tauri_plugin_sql::DbInstances>() {
+        let pool_to_close = {
+            let mut instances = db_instances.0.write().await;
+            instances.remove("sqlite:LastData.db")
+        };
+        if let Some(tauri_plugin_sql::DbPool::Sqlite(pool)) = pool_to_close {
+            pool.close().await;
+        }
+    }
+
+    // 4. Rimuovi eventuali file WAL e SHM temporanei per evitare conflitti con la cache del vecchio DB
     let wal_path = db_path.with_file_name("LastData.db-wal");
     if wal_path.exists() {
         let _ = fs::remove_file(&wal_path);

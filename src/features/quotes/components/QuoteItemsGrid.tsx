@@ -474,7 +474,7 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
       enterNavigatesVertically enterNavigatesVerticallyAfterEdit tabToNextCell={tabToNextCell}
       navigateToNextCell={navigateToNextCell} onCellValueChanged={handleCellChanged} onCellKeyDown={handleKeyDown}
       onCellEditingStarted={() => { window.__isDDTCellEditing = true; selectionRangeRef.current = null; }}
-      onCellEditingStopped={() => { window.setTimeout(() => { window.__isDDTCellEditing = false; }, 200); }}
+      onCellEditingStopped={() => { window.__isDDTCellEditing = false; }}
       suppressMovableColumns />
   </div>;
 }

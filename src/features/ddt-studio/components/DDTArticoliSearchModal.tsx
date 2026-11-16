@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from "r
 import { Search, X, Check, ShoppingCart, CheckCircle2 } from "lucide-react";
 import { ListinoGeneraleRow, ListinoClienteRow } from "@/features/price-lists/models/priceList";
 import { priceListRepository } from "@/features/price-lists/services/priceListRepository";
+import { getCachedGeneralList } from "@/features/price-lists/services/priceListGeneralCache";
 import { getClientArticleHistory, ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtViewDate } from "../services/ddtViewFormatting";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
@@ -35,9 +36,7 @@ interface PendingArticleInsert {
   vat_rate?: number;
 }
 
-// Cache in memoria globale del listino generale per evitare query pesanti ripetute a ogni ri-render
-let cachedGeneralList: ListinoGeneraleRow[] | null = null;
-
+// Componente modale di ricerca articoli
 export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = React.memo(({
   isOpen,
   onClose,
@@ -62,7 +61,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Dati Listino Generale & Cliente
-  const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>(() => cachedGeneralList || []);
+  const [generalItems, setGeneralItems] = useState<ListinoGeneraleRow[]>([]);
   const [clientItems, setClientItems] = useState<ListinoClienteRow[]>([]);
   const [historyItems, setHistoryItems] = useState<ClientArticleHistoryRow[]>([]);
 
@@ -175,22 +174,17 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
 
     let active = true;
     const init = async () => {
-      // 1. Carica listino generale se non già in cache
-      if (!cachedGeneralList) {
-        setIsLoading(true);
-        try {
-          const genRows = await priceListRepository.searchGeneral("", 50000);
-          if (active) {
-            cachedGeneralList = genRows;
-            setGeneralItems(genRows);
-          }
-        } catch (e) {
-          console.error("Errore caricamento listino generale:", e);
-        } finally {
-          if (active) setIsLoading(false);
+      // 1. Carica listino generale tramite cache condivisa
+      setIsLoading(true);
+      try {
+        const genRows = await getCachedGeneralList();
+        if (active) {
+          setGeneralItems(genRows);
         }
-      } else {
-        setGeneralItems(cachedGeneralList);
+      } catch (e) {
+        console.error("Errore caricamento listino generale:", e);
+      } finally {
+        if (active) setIsLoading(false);
       }
 
       // 2. Carica listino specifico cliente se presente

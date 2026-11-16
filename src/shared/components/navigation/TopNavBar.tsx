@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
@@ -23,6 +23,8 @@ import {
   Grid2X2,
   Layers,
   Minimize2,
+  ChevronLeft,
+  ChevronRight,
   User,
   Cloud,
   Loader2,
@@ -50,16 +52,16 @@ export interface NavModule {
 
 export const ALL_TOPBAR_NAV_MODULES: NavModule[] = [
   { id: "dashboard", title: "Dashboard", componentId: "dashboard", icon: <LayoutGrid className="w-3.5 h-3.5" /> },
+  { id: "ddt-studio", title: "DDT Studio", componentId: "ddt-studio", icon: <FileSpreadsheet className="w-3.5 h-3.5" /> },
   { id: "orders", title: "Order Manager", componentId: "orders", icon: <ShoppingCart className="w-3.5 h-3.5" /> },
   { id: "price-lists", title: "Listino Generale", componentId: "price-lists", icon: <Tag className="w-3.5 h-3.5" /> },
+  { id: "client-lists", title: "Listini Clienti", componentId: "client-lists", icon: <UserCheck className="w-3.5 h-3.5" /> },
+  { id: "quotes", title: "Preventivi", componentId: "quotes", icon: <Calculator className="w-3.5 h-3.5" /> },
+  { id: "offers", title: "Offerte", componentId: "offers", icon: <ClipboardList className="w-3.5 h-3.5" /> },
   { id: "or-numbers", title: "OR Numbers", componentId: "or-numbers", icon: <Hash className="w-3.5 h-3.5" /> },
   { id: "ddt-list", title: "DDT List", componentId: "ddt-list", icon: <FileText className="w-3.5 h-3.5" /> },
   { id: "ddt-articles", title: "DDT Articoli", componentId: "ddt-articles", icon: <ListChecks className="w-3.5 h-3.5" /> },
-  { id: "client-lists", title: "Listini Clienti", componentId: "client-lists", icon: <UserCheck className="w-3.5 h-3.5" /> },
   { id: "invoices", title: "Fatture Elettroniche", componentId: "invoices", icon: <Receipt className="w-3.5 h-3.5" /> },
-  { id: "ddt-studio", title: "DDT Studio (Pro)", componentId: "ddt-studio", icon: <FileSpreadsheet className="w-3.5 h-3.5" /> },
-  { id: "quotes", title: "Preventivi", componentId: "quotes", icon: <Calculator className="w-3.5 h-3.5" /> },
-  { id: "offers", title: "Offerte", componentId: "offers", icon: <ClipboardList className="w-3.5 h-3.5" /> },
   { id: "clients", title: "Clienti", componentId: "clients", icon: <Users className="w-3.5 h-3.5" /> },
   { id: "supplier-price-lists", title: "Listini Fornitori", componentId: "supplier-price-lists", icon: <Truck className="w-3.5 h-3.5" /> },
   { id: "notes", title: "Note", componentId: "notes", icon: <StickyNote className="w-3.5 h-3.5" /> },
@@ -248,16 +250,42 @@ export const TopNavBar: React.FC = () => {
 
   const modules = ALL_TOPBAR_NAV_MODULES;
 
+  const topbarScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollTopbar = (direction: "left" | "right") => {
+    if (topbarScrollRef.current) {
+      topbarScrollRef.current.scrollBy({
+        left: direction === "left" ? -220 : 220,
+        behavior: "smooth",
+      });
+    }
+  };
+
   const userOrder =
     currentUser?.topbar_order && currentUser.topbar_order.length > 0
       ? currentUser.topbar_order
       : DEFAULT_TOPBAR_ORDER;
 
+  // Garantisce che per qualsiasi utente abilitato a ddt-studio, il pulsante appaia sempre ben visibile subito dopo dashboard
+  const effectiveOrder = useMemo(() => {
+    const list = [...userOrder];
+    const ddtIdx = list.indexOf("ddt-studio");
+    if (ddtIdx > 2) {
+      list.splice(ddtIdx, 1);
+      const dashIdx = list.indexOf("dashboard");
+      list.splice(dashIdx !== -1 ? dashIdx + 1 : 1, 0, "ddt-studio");
+    } else if (ddtIdx === -1) {
+      const dashIdx = list.indexOf("dashboard");
+      list.splice(dashIdx !== -1 ? dashIdx + 1 : 1, 0, "ddt-studio");
+    }
+    return list;
+  }, [userOrder]);
+
   const visibleModules = [...modules]
     .filter((mod) => isPageAllowedForUser(currentUser, mod.id))
     .sort((a, b) => {
-      const idxA = userOrder.indexOf(a.id);
-      const idxB = userOrder.indexOf(b.id);
+      const idxA = effectiveOrder.indexOf(a.id);
+      const idxB = effectiveOrder.indexOf(b.id);
       const posA = idxA === -1 ? 999 : idxA;
       const posB = idxB === -1 ? 999 : idxB;
       return posA - posB;
@@ -311,16 +339,27 @@ export const TopNavBar: React.FC = () => {
   };
 
   return (
-    <header className="h-11 bg-[var(--card)] border-b border-[var(--border)] px-2 flex items-center justify-between select-none text-[var(--foreground)] transition-colors gap-2">
-        {/* Lista Moduli Navigazione Primaria (con scrollbar e supporto rotellina del mouse) */}
-        <div
-          onWheel={(e) => {
-            if (e.deltaY !== 0) {
-              e.currentTarget.scrollLeft += e.deltaY;
-            }
-          }}
-          className="flex-1 min-w-0 flex items-center space-x-1 overflow-x-auto py-1"
-        >
+    <header className="h-11 bg-[var(--card)] border-b border-[var(--border)] px-1.5 flex items-center justify-between select-none text-[var(--foreground)] transition-colors gap-1.5">
+      {/* Freccia Scorrimento Sinistra */}
+      <button
+        type="button"
+        onClick={() => scrollTopbar("left")}
+        className="h-7 w-5 flex items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] transition-colors shrink-0 cursor-pointer"
+        title="Scorri barra verso sinistra"
+      >
+        <ChevronLeft className="w-3.5 h-3.5" />
+      </button>
+
+      {/* Lista Moduli Navigazione Primaria (con scrollbar e supporto rotellina del mouse) */}
+      <div
+        ref={topbarScrollRef}
+        onWheel={(e) => {
+          if (e.deltaY !== 0) {
+            e.currentTarget.scrollLeft += e.deltaY;
+          }
+        }}
+        className="flex-1 min-w-0 flex items-center space-x-1 overflow-x-auto no-scrollbar py-1"
+      >
           {visibleModules.map((mod) => {
             const isActive = activeWindowId === mod.id;
             const isDragging = draggedModuleId === mod.id;
@@ -391,6 +430,16 @@ export const TopNavBar: React.FC = () => {
             </button>
           )}
         </div>
+
+      {/* Freccia Scorrimento Destra */}
+      <button
+        type="button"
+        onClick={() => scrollTopbar("right")}
+        className="h-7 w-5 flex items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)] transition-colors shrink-0 cursor-pointer"
+        title="Scorri barra verso destra"
+      >
+        <ChevronRight className="w-3.5 h-3.5" />
+      </button>
 
       {/* Sezione Destra: Strumenti Desktop Finestre + Impostazioni */}
       <div className="flex items-center space-x-2 pl-2 shrink-0">

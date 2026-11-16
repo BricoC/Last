@@ -9,8 +9,8 @@ export interface AppPageModule {
 
 export const ALL_APP_PAGE_MODULES: AppPageModule[] = [
   { id: "dashboard", title: "Dashboard", category: "operativo" },
+  { id: "ddt-studio", title: "DDT Studio", category: "operativo" },
   { id: "orders", title: "Order Manager", category: "operativo" },
-  { id: "ddt-studio", title: "DDT Studio (Pro)", category: "operativo" },
   { id: "price-lists", title: "Listino Generale", category: "commerciale" },
   { id: "client-lists", title: "Listini Clienti", category: "commerciale" },
   { id: "quotes", title: "Preventivi", category: "commerciale" },
@@ -29,16 +29,16 @@ export const DEFAULT_ALLOWED_PAGES = ALL_APP_PAGE_MODULES.map((m) => m.id);
 
 export const DEFAULT_TOPBAR_ORDER: string[] = [
   "dashboard",
+  "ddt-studio",
   "orders",
   "price-lists",
+  "client-lists",
+  "quotes",
+  "offers",
   "or-numbers",
   "ddt-list",
   "ddt-articles",
-  "client-lists",
   "invoices",
-  "ddt-studio",
-  "quotes",
-  "offers",
   "clients",
   "supplier-price-lists",
   "notes",
