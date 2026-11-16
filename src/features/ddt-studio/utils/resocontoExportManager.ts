@@ -1,6 +1,5 @@
-import { toPng } from "html-to-image";
-import jsPDF from "jspdf";
 import { invoke } from "@tauri-apps/api/core";
+import { buildA4PdfFromElements } from "@/shared/utils/a4PdfCapture";
 
 export interface ResocontoExportOptions {
   pageElements: HTMLElement[];
@@ -21,52 +20,11 @@ export async function exportResocontoPdfToDesktop(
     throw new Error("Nessuna pagina A4 trovata per il resoconto.");
   }
 
-  // Attende il caricamento dei font se disponibili
-  if ((document as any).fonts?.ready) {
-    try {
-      await Promise.race([
-        (document as any).fonts.ready,
-        new Promise((resolve) => setTimeout(resolve, 1500)),
-      ]);
-    } catch {
-      // Ignora errori font
-    }
-  }
-
-  // Creazione PDF A4 Portrait (verticale: 210mm x 297mm)
-  const pdf = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
+  const pdf = await buildA4PdfFromElements(pageElements, {
+    pixelRatio: 2.0,
+    quality: 0.94,
+    cacheKey: "resoconto-a4",
   });
-
-  const pdfWidth = pdf.internal.pageSize.getWidth();
-  const pdfHeight = pdf.internal.pageSize.getHeight();
-
-  for (let i = 0; i < pageElements.length; i++) {
-    if (i > 0) pdf.addPage();
-
-    const pageEl = pageElements[i];
-
-    // Cattura ad alta risoluzione 2.2x pixel ratio
-    const dataUrl = await toPng(pageEl, {
-      pixelRatio: 2.2,
-      backgroundColor: "#ffffff",
-      style: {
-        boxShadow: "none",
-        border: "none",
-        margin: "0",
-        opacity: "1",
-        visibility: "visible",
-      },
-    });
-
-    if (!dataUrl || !dataUrl.startsWith("data:image")) {
-      throw new Error(`Errore nella generazione grafica della pagina ${i + 1}.`);
-    }
-
-    pdf.addImage(dataUrl, "PNG", 0, 0, pdfWidth, pdfHeight, undefined, "FAST");
-  }
 
   // Nome file formattato: Resoconto_Storico_[Cliente]_[Anno]_[Data].pdf
   const now = new Date();

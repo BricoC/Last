@@ -1,7 +1,11 @@
 import { forwardRef, useState, useEffect, useMemo } from "react";
 import { DdtDocument, DdtItem } from "../models/ddt";
 import { safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
-import { getCompanySettings, CompanySettings } from "@/features/settings/companySettingsRepository";
+import {
+  getCompanySettings,
+  getCachedCompanySettings,
+  CompanySettings,
+} from "@/features/settings/companySettingsRepository";
 import {
   calculateDdtTotals,
   paginateDdtRows,
@@ -86,9 +90,12 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
     const pages = paginateDdtRows(items);
     const totals = calculateDdtTotals(items);
 
-    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
+    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(() =>
+      getCachedCompanySettings()
+    );
 
     useEffect(() => {
+      if (companySettings) return;
       let active = true;
       void getCompanySettings().then((s) => {
         if (active) setCompanySettings(s);
@@ -96,27 +103,40 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
       return () => {
         active = false;
       };
-    }, []);
+    }, [companySettings]);
 
     const footerText = useMemo(() => {
       if (!companySettings) {
-        return "Via di Carraia, 218 - 55061 Carraia - Capannori (LU) Tel. 0583.980126 - Email: Bricoclass@live.it Cod. Univoco: M5UXCR1 - P.Iva e C.F: 01601690462";
+        return "";
       }
       const parts: string[] = [];
-      const addr = [
-        companySettings.address,
-        [companySettings.postal_code, companySettings.city].filter(Boolean).join(" "),
-        companySettings.province ? `(${companySettings.province})` : "",
+      if (companySettings.business_name?.trim()) {
+        parts.push(companySettings.business_name.trim());
+      }
+      const locationPart = [
+        companySettings.postal_code?.trim(),
+        companySettings.city?.trim(),
+        companySettings.province?.trim() ? `(${companySettings.province.trim()})` : "",
       ]
         .filter(Boolean)
-        .join(" - ");
+        .join(" ");
+      const addr = [companySettings.address?.trim(), locationPart].filter(Boolean).join(" - ");
       if (addr) parts.push(addr);
-      if (companySettings.phone) parts.push(`Tel. ${companySettings.phone}`);
-      if (companySettings.email) parts.push(`Email: ${companySettings.email}`);
-      const sdi = companySettings.sdi_code || "M5UXCR1";
-      parts.push(`Cod. Univoco: ${sdi}`);
-      if (companySettings.vat_number) parts.push(`P.Iva e C.F: ${companySettings.vat_number}`);
-      return parts.join(" · ") || "Via di Carraia, 218 - 55061 Carraia - Capannori (LU) Tel. 0583.980126 - Email: Bricoclass@live.it Cod. Univoco: M5UXCR1 - P.Iva e C.F: 01601690462";
+      if (companySettings.phone?.trim()) parts.push(`Tel. ${companySettings.phone.trim()}`);
+      if (companySettings.email?.trim()) parts.push(`Email: ${companySettings.email.trim()}`);
+      const sdi = companySettings.sdi_code?.trim();
+      if (sdi) parts.push(`Cod. Univoco: ${sdi}`);
+      const vat = companySettings.vat_number?.trim();
+      const cf = companySettings.fiscal_code?.trim();
+      if (vat && cf && vat !== cf) {
+        parts.push(`P.Iva: ${vat}`);
+        parts.push(`C.F: ${cf}`);
+      } else if (vat) {
+        parts.push(`P.Iva e C.F: ${vat}`);
+      } else if (cf) {
+        parts.push(`C.F: ${cf}`);
+      }
+      return parts.join(" · ");
     }, [companySettings]);
 
     return (
@@ -160,6 +180,8 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                     <img
                       src={bricoLogo}
                       alt="Ferramenta Brico Class S.A.S."
+                      loading="eager"
+                      decoding="sync"
                       style={{
                         maxHeight: "110px",
                         maxWidth: "430px",
@@ -1082,7 +1104,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                 <div
                   style={{
                     textAlign: "center",
-                    fontSize: "10px",
+                    fontSize: "9.5px",
                     fontStyle: "italic",
                     marginTop: "6px",
                     paddingTop: "2px",
@@ -1098,7 +1120,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
               <div
                 style={{
                   textAlign: "center",
-                  fontSize: "10px",
+                  fontSize: "9.5px",
                   fontStyle: "italic",
                   marginTop: "6px",
                   paddingTop: "2px",

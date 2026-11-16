@@ -3,6 +3,7 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { Client, ClientDestination, ClientPhone } from "../models/client";
 import { clientRepository } from "./clientRepository";
 import { normalizeDestinationKey, deduplicateDestinations } from "../utils/destinationUtils";
+import { normalizeClientCanonicalKey } from "../utils/clientSearchUtils";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -432,11 +433,20 @@ export class ClientSyncService {
        ORDER BY doc_date DESC`
     );
 
-    // Recupera l'elenco dei clienti già salvati
-    const existingRows = await db.select<{ business_name: string }[]>(
-      "SELECT business_name FROM clients WHERE deleted_at IS NULL"
+    // Recupera l'elenco dei clienti già salvati (esatti e canonici) per evitare ricreazione di duplicati (es. CAMM vs C.A.M.M.)
+    const existingRows = await db.select<{ id: string; business_name: string; address: string | null }[]>(
+      "SELECT id, business_name, address FROM clients WHERE deleted_at IS NULL ORDER BY CASE WHEN address IS NOT NULL AND TRIM(address) <> '' THEN 0 ELSE 1 END, LENGTH(business_name) DESC"
     );
-    const existingSet = new Set(existingRows.map((r) => r.business_name.toUpperCase().trim()));
+    const existingSet = new Set<string>();
+    const existingCanonicalMap = new Map<string, { id: string; business_name: string }>();
+    for (const r of existingRows) {
+      const exactKey = r.business_name.toUpperCase().trim();
+      if (exactKey) existingSet.add(exactKey);
+      const canonicalKey = normalizeClientCanonicalKey(r.business_name);
+      if (canonicalKey && !existingCanonicalMap.has(canonicalKey)) {
+        existingCanonicalMap.set(canonicalKey, { id: r.id, business_name: r.business_name });
+      }
+    }
 
     // Mappa per aggregare i dati dei clienti mancanti
     interface ExtractedClientData {
@@ -452,10 +462,20 @@ export class ClientSyncService {
     }
 
     const missingClients = new Map<string, ExtractedClientData>();
+    const canonicalReassignments = new Map<string, { id: string; business_name: string }>();
 
     for (const row of ddtRows) {
-      const normName = row.client_name.trim().toUpperCase();
+      const rawName = row.client_name.trim();
+      const normName = rawName.toUpperCase();
       if (!normName || existingSet.has(normName)) continue;
+
+      const canonicalMatch = existingCanonicalMap.get(normalizeClientCanonicalKey(normName));
+      if (canonicalMatch) {
+        if (canonicalMatch.business_name.trim().toUpperCase() !== normName) {
+          canonicalReassignments.set(rawName, canonicalMatch);
+        }
+        continue;
+      }
 
       if (!missingClients.has(normName)) {
         // Parsing citta e provincia se presente " - "
@@ -527,6 +547,15 @@ export class ClientSyncService {
     // Ottimizzazione P1: Esecuzione in una singola transazione atomica SQLite
     await db.execute("BEGIN IMMEDIATE");
     try {
+      for (const [aliasName, canonicalTarget] of canonicalReassignments.entries()) {
+        await db.execute(
+          `UPDATE ddt_documents
+           SET client_name = $1, client_id = $2, updated_at = $3
+           WHERE LOWER(TRIM(client_name)) = LOWER(TRIM($4)) AND deleted_at IS NULL`,
+          [canonicalTarget.business_name, canonicalTarget.id, now, aliasName]
+        );
+      }
+
       for (const [name, data] of missingClients.entries()) {
         const autoPriceLists = this.autoMatchPriceLists(name, availablePriceLists);
         const destinationsList = deduplicateDestinations(Array.from(data.destinationsMap.values()));

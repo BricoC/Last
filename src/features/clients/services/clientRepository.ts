@@ -1,6 +1,6 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import { Client, ClientPhone, CreateClientInput } from "../models/client";
-import { rankClientsBySearch } from "../utils/clientSearchUtils";
+import { rankClientsBySearch, normalizeClientCanonicalKey } from "../utils/clientSearchUtils";
 import { deduplicateDestinations } from "../utils/destinationUtils";
 
 export class ClientRepository {
@@ -295,6 +295,14 @@ export class ClientRepository {
         [target.business_name, target.id, now, dup.business_name, dup.id]
       );
 
+      // Riassegna eventuali preventivi del duplicato al cliente principale
+      await db.execute(
+        `UPDATE quotes
+         SET client_name = $1, client_id = $2, sync_status = 'pending', updated_at = $3
+         WHERE LOWER(TRIM(client_name)) = LOWER(TRIM($4)) OR client_id = $5`,
+        [target.business_name, target.id, now, dup.business_name, dup.id]
+      );
+
       // Soft delete del record duplicato
       await db.execute(
         `UPDATE clients 
@@ -336,28 +344,9 @@ export class ClientRepository {
     const all = await this.getClients("");
     if (all.length < 2) return [];
 
-    const normalize = (s: string) => {
-      // Regole speciali per casi noti
-      let clean = s.toUpperCase().trim();
-      if (clean === "CAMM" || clean === "C.A.M.M.") return "CAMM";
-      if (clean.includes("LAVORO AMICO")) return "COOP LAVORO AMICO";
-      if (clean.includes("FRUGOLI")) return "FAL TRIVELLAZIONI FRUGOLI";
-      if (clean.startsWith("FRANZINI ANNIBALE")) return "FRANZINI ANNIBALE";
-      if (clean.startsWith("DEVERIO")) return "DEVERIO";
-      if (clean.startsWith("SPARES SERVICE")) return "SPARES SERVICE MACHINERY";
-      if (clean === "ELETIEMME" || clean === "ELLETIEMME") return "ELLETIEMME";
-      if (clean.startsWith("GIGA PIU") || clean.startsWith("GIGA PIÙ")) return "GIGA PIU";
-
-      return clean
-        .replace(/[.\-_,;:\/\\()]/g, " ")
-        .replace(/\b(S\.?R\.?L\.?S?|S\.?P\.?A\.?|S\.?N\.?C\.?|S\.?A\.?S\.?|DI)\b/gi, "")
-        .replace(/\s+/g, " ")
-        .trim();
-    };
-
     const groups = new Map<string, Client[]>();
     for (const client of all) {
-      const key = normalize(client.business_name);
+      const key = normalizeClientCanonicalKey(client.business_name);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(client);
     }

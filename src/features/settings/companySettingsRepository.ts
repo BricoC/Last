@@ -18,6 +18,19 @@ export interface CompanySettings extends BaseEntity {
 export type CompanySettingsInput = Omit<CompanySettings, keyof BaseEntity>;
 const SETTINGS_ID = "company_profile";
 
+let cachedCompanySettings: CompanySettings | null = null;
+let inFlightSettingsPromise: Promise<CompanySettings> | null = null;
+
+/** Restituisce le impostazioni aziendali se già caricate in memoria (evita query ripetute su batch render). */
+export function getCachedCompanySettings(): CompanySettings | null {
+  return cachedCompanySettings;
+}
+
+/** Invalida esplicitamente la cache in memoria (utile per test o refresh forzati). */
+export function clearCompanySettingsCache(): void {
+  cachedCompanySettings = null;
+}
+
 export const DEFAULT_COMPANY_SETTINGS: CompanySettingsInput = {
   business_name: "Ferramenta Brico Class S.A.S.",
   address: "Via di Carraia, 218",
@@ -33,26 +46,46 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettingsInput = {
 };
 
 export async function getCompanySettings(): Promise<CompanySettings> {
-  const db = await getDatabase();
-  const rows = await db.select<CompanySettings[]>(
-    "SELECT * FROM company_settings WHERE id = $1 AND deleted_at IS NULL", [SETTINGS_ID]
-  );
-  if (rows[0]) return rows[0];
+  if (cachedCompanySettings) {
+    return cachedCompanySettings;
+  }
+  if (inFlightSettingsPromise) {
+    return inFlightSettingsPromise;
+  }
 
-  // Auto-seed iniziale dei dati aziendali Brico Class se non ancora inizializzati
-  await saveCompanySettings(DEFAULT_COMPANY_SETTINGS);
-  const seeded = await db.select<CompanySettings[]>(
-    "SELECT * FROM company_settings WHERE id = $1 AND deleted_at IS NULL", [SETTINGS_ID]
-  );
-  return seeded[0] ?? {
-    ...DEFAULT_COMPANY_SETTINGS,
-    id: SETTINGS_ID,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    updated_by: "system",
-    deleted_at: null,
-    sync_status: "pending",
-  };
+  inFlightSettingsPromise = (async () => {
+    const db = await getDatabase();
+    const rows = await db.select<CompanySettings[]>(
+      "SELECT * FROM company_settings WHERE id = $1 AND deleted_at IS NULL", [SETTINGS_ID]
+    );
+    if (rows[0]) {
+      cachedCompanySettings = rows[0];
+      return rows[0];
+    }
+
+    // Auto-seed iniziale dei dati aziendali Brico Class se non ancora inizializzati
+    await saveCompanySettings(DEFAULT_COMPANY_SETTINGS);
+    const seeded = await db.select<CompanySettings[]>(
+      "SELECT * FROM company_settings WHERE id = $1 AND deleted_at IS NULL", [SETTINGS_ID]
+    );
+    const result = seeded[0] ?? {
+      ...DEFAULT_COMPANY_SETTINGS,
+      id: SETTINGS_ID,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: "system",
+      deleted_at: null,
+      sync_status: "pending",
+    };
+    cachedCompanySettings = result;
+    return result;
+  })();
+
+  try {
+    return await inFlightSettingsPromise;
+  } finally {
+    inFlightSettingsPromise = null;
+  }
 }
 
 export async function saveCompanySettings(input: CompanySettingsInput): Promise<void> {
@@ -73,4 +106,15 @@ export async function saveCompanySettings(input: CompanySettingsInput): Promise<
   `, [SETTINGS_ID, input.business_name, input.address, input.postal_code, input.city,
     input.province, input.vat_number, input.fiscal_code, input.sdi_code || "M5UXCR1",
     input.phone, input.email, input.logo_data_url, now]);
+
+  cachedCompanySettings = {
+    ...input,
+    sdi_code: input.sdi_code || "M5UXCR1",
+    id: SETTINGS_ID,
+    created_at: cachedCompanySettings?.created_at || now,
+    updated_at: now,
+    updated_by: "system",
+    deleted_at: null,
+    sync_status: "pending",
+  };
 }

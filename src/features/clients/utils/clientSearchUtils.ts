@@ -187,3 +187,26 @@ export function rankClientsBySearch(clients: Client[], query: string): Client[] 
 
   return scored.map((s) => s.client);
 }
+
+/**
+ * Calcola la chiave canonica della ragione sociale per riconoscere varianti/duplicati
+ * (es. "CAMM" e "C.A.M.M.", sigle puntate, punteggiatura o suffissi societari diversi).
+ */
+export function normalizeClientCanonicalKey(name: string): string {
+  const clean = name.toUpperCase().trim();
+  if (!clean) return "";
+  if (clean === "CAMM" || clean === "C.A.M.M.") return "CAMM";
+  if (clean.includes("LAVORO AMICO")) return "COOP LAVORO AMICO";
+  if (clean.includes("FRUGOLI")) return "FAL TRIVELLAZIONI FRUGOLI";
+  if (clean.startsWith("FRANZINI ANNIBALE")) return "FRANZINI ANNIBALE";
+  if (clean.startsWith("DEVERIO")) return "DEVERIO";
+  if (clean.startsWith("SPARES SERVICE")) return "SPARES SERVICE MACHINERY";
+  if (clean === "ELETIEMME" || clean === "ELLETIEMME") return "ELLETIEMME";
+  if (clean.startsWith("GIGA PIU") || clean.startsWith("GIGA PIÙ")) return "GIGA PIU";
+
+  return clean
+    .replace(/[.\-_,;:\/\\()]/g, " ")
+    .replace(/\b(S\.?R\.?L\.?S?|S\.?P\.?A\.?|S\.?N\.?C\.?|S\.?A\.?S\.?|DI)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}

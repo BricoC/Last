@@ -9,6 +9,7 @@ import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
 import { getCompanySettings } from "@/features/settings/companySettingsRepository";
 import { DDTA4Document } from "../document/DDTA4Document";
 import { generatePdfBytesFromElements, formatDdtPdfFilename } from "../utils/ddtExportManager";
+import { waitForDomPaint } from "@/shared/utils/a4PdfCapture";
 
 export interface DDTEmailSendModalProps {
   isOpen: boolean;
@@ -150,8 +151,8 @@ export const DDTEmailSendModal: React.FC<DDTEmailSendModalProps> = ({
         // 1. Monta il documento nel portale invisibile
         setBatchRenderDoc(doc);
 
-        // 2. Attendi 60ms per il rendering DOM A4
-        await new Promise((r) => setTimeout(r, 65));
+        // 2. Attendi il rendering DOM A4
+        await waitForDomPaint(25);
 
         // 3. Rileva le pagine A4 renderizzate
         const portalPages = document.querySelectorAll("#ddt-email-batch-portal .ddt-a4-page");

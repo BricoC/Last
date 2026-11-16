@@ -7,6 +7,8 @@ import {
 } from "../services/ddtReportService";
 import { formatDdtPdfFilename, generatePdfBase64FromElements } from "../utils/ddtExportManager";
 import { DdtDocument, DdtItem } from "../models/ddt";
+import { getCompanySettings } from "@/features/settings/companySettingsRepository";
+import { waitForDomPaint } from "@/shared/utils/a4PdfCapture";
 
 export interface BatchProgressInfo {
   year: number;
@@ -164,7 +166,8 @@ export const useDdtBatchExportStore = create<DdtBatchExportState>((set, get) => 
 
       await saveReportToDesktop(`${folderName}/${excelRes.filename}`, excelRes.buffer);
 
-      // 2. Recupera tutti i DDT del mese
+      // 2. Pre-carica i dati aziendali una sola volta in cache e recupera tutti i DDT del mese
+      await getCompanySettings();
       const ddtDocs = await getMonthlyFullDdtDocuments(year, month);
       const total = ddtDocs.length;
 
@@ -221,20 +224,23 @@ export const useDdtBatchExportStore = create<DdtBatchExportState>((set, get) => 
         });
 
         // Attendi che il DOM renderizzi il documento nel portale invisibile
-        await new Promise((r) => setTimeout(r, 45));
+        await waitForDomPaint(25);
 
         const portalPages = document.querySelectorAll("#ddt-batch-export-portal .ddt-a4-page");
         const pagesArray = Array.from(portalPages) as HTMLElement[];
 
         if (pagesArray.length > 0) {
-          // pixelRatio: 1.6 per altissima nitidezza senza occupare 6M di pixel di canvas
-          const pdfBase64 = await generatePdfBase64FromElements(pagesArray, { pixelRatio: 1.6 });
+          // pixelRatio 1.85 + JPEG 0.92: nitidezza elevata, peso 3-4x minore e cattura rapida
+          const pdfBase64 = await generatePdfBase64FromElements(pagesArray, {
+            pixelRatio: 1.85,
+            quality: 0.92,
+          });
           const pdfFilename = formatDdtPdfFilename(doc);
           await saveReportToDesktop(`${folderName}/PDF/${pdfFilename}`, pdfBase64);
         }
 
-        // Micro-pausa essenziale per liberare il Main Thread JS (garantisce click, scroll e digitazione a 60fps)
-        await new Promise((r) => setTimeout(r, 35));
+        // Cede il controllo al Main Thread JS tra un documento e l'altro
+        await new Promise((r) => setTimeout(r, 0));
       }
 
       set({

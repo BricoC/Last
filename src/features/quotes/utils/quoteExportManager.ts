@@ -1,7 +1,6 @@
-import { toPng } from "html-to-image";
-import jsPDF from "jspdf";
 import { invoke } from "@tauri-apps/api/core";
 import type { QuoteDraft } from "../models/quoteDraft";
+import { buildA4PdfFromElements } from "@/shared/utils/a4PdfCapture";
 
 export function makeQuotePdfFilename(draft: QuoteDraft): string {
   const year = draft.year || new Date().getFullYear();
@@ -13,24 +12,16 @@ export function makeQuotePdfFilename(draft: QuoteDraft): string {
 }
 
 export async function generateQuotePdfBytes(draft: QuoteDraft): Promise<{ filename: string; bytes: Uint8Array }> {
-  if (document.fonts?.ready) await document.fonts.ready;
   await waitForPreview();
   const pages = Array.from(document.querySelectorAll<HTMLElement>("#quote-print-root .quote-a4-page"));
   if (!pages.length) throw new Error("Anteprima del preventivo non disponibile.");
 
-  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const width = pdf.internal.pageSize.getWidth();
-  const height = pdf.internal.pageSize.getHeight();
-  for (const [index, page] of pages.entries()) {
-    if (index) pdf.addPage();
-    const image = await toPng(page, {
-      pixelRatio: 2.5,
-      backgroundColor: "#ffffff",
-      style: { boxShadow: "none", border: "none", margin: "0", opacity: "1", visibility: "visible" },
-      filter: (node) => !(node instanceof HTMLElement && node.classList.contains("quote-no-print")),
-    });
-    pdf.addImage(image, "PNG", 0, 0, width, height, undefined, "FAST");
-  }
+  const pdf = await buildA4PdfFromElements(pages, {
+    pixelRatio: 2.0,
+    quality: 0.94,
+    excludeClass: "quote-no-print",
+    cacheKey: "quote-a4",
+  });
 
   const filename = makeQuotePdfFilename(draft);
   const bytes = new Uint8Array(pdf.output("arraybuffer"));

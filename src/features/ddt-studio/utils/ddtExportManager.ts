@@ -1,7 +1,11 @@
 import { toPng } from "html-to-image";
-import jsPDF from "jspdf";
 import { invoke } from "@tauri-apps/api/core";
 import { DdtDocument } from "../models/ddt";
+import {
+  buildA4PdfFromElements,
+  ensureDocumentFontsReady,
+  getCachedFontEmbedCss,
+} from "@/shared/utils/a4PdfCapture";
 
 /**
  * Formatta il nome file secondo lo standard richiesto:
@@ -99,9 +103,13 @@ export async function capturePageToPng(
   pageEl: HTMLElement,
   options?: { pixelRatio?: number }
 ): Promise<string> {
+  const fontEmbedCSS = await getCachedFontEmbedCss(pageEl, "ddt-a4", "ddt-no-print");
   return await toPng(pageEl, {
     pixelRatio: options?.pixelRatio ?? 2.5,
     backgroundColor: "#ffffff",
+    cacheBust: false,
+    skipAutoScale: true,
+    ...(fontEmbedCSS !== undefined ? { fontEmbedCSS } : {}),
     style: {
       boxShadow: "none",
       border: "none",
@@ -168,22 +176,16 @@ export async function exportDdtImageToDesktop(
 /**
  * Genera il buffer di byte del PDF a partire da un elenco di elementi pagina A4.
  */
-export async function generatePdfBytesFromElements(pages: HTMLElement[]): Promise<Uint8Array> {
-  const pdf = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
+export async function generatePdfBytesFromElements(
+  pages: HTMLElement[],
+  options?: { pixelRatio?: number; quality?: number }
+): Promise<Uint8Array> {
+  const pdf = await buildA4PdfFromElements(pages, {
+    pixelRatio: options?.pixelRatio ?? 2.0,
+    quality: options?.quality ?? 0.94,
+    excludeClass: "ddt-no-print",
+    cacheKey: "ddt-a4",
   });
-
-  const pdfW = pdf.internal.pageSize.getWidth();
-  const pdfH = pdf.internal.pageSize.getHeight();
-
-  for (let i = 0; i < pages.length; i++) {
-    if (i > 0) pdf.addPage();
-    const dataUrl = await capturePageToPng(pages[i]);
-    pdf.addImage(dataUrl, "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
-  }
-
   const pdfArrayBuffer = pdf.output("arraybuffer");
   return new Uint8Array(pdfArrayBuffer);
 }
@@ -194,38 +196,27 @@ export async function generatePdfBytesFromElements(pages: HTMLElement[]): Promis
  */
 export async function generatePdfBase64FromElements(
   pages: HTMLElement[],
-  options?: { pixelRatio?: number }
+  options?: { pixelRatio?: number; quality?: number }
 ): Promise<string> {
-  const pdf = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
+  const pdf = await buildA4PdfFromElements(pages, {
+    pixelRatio: options?.pixelRatio ?? 1.85,
+    quality: options?.quality ?? 0.92,
+    excludeClass: "ddt-no-print",
+    cacheKey: "ddt-a4",
   });
-
-  const pdfW = pdf.internal.pageSize.getWidth();
-  const pdfH = pdf.internal.pageSize.getHeight();
-
-  for (let i = 0; i < pages.length; i++) {
-    if (i > 0) pdf.addPage();
-    const dataUrl = await capturePageToPng(pages[i], options);
-    pdf.addImage(dataUrl, "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
-  }
-
   return pdf.output("datauristring");
 }
 
 /**
- * Genera il PDF A4 multipagina ad altissima fedeltà:
- * incorpora le pagine PNG catturate nativamente (senza html2canvas),
- * garantendo un PDF multipagina perfetto al 100% rispetto all'anteprima video.
+ * Genera il PDF A4 multipagina ad alta fedeltà:
+ * incorpora le pagine JPEG ad alta qualità catturate nativamente,
+ * garantendo un PDF leggero, veloce e fedele all'anteprima video.
  */
 export async function exportDdtPdfToDesktop(
   ddt: Partial<DdtDocument>,
   container?: HTMLElement | null
 ): Promise<{ filename: string; path: string }> {
-  if ((document as any).fonts?.ready) {
-    await (document as any).fonts.ready;
-  }
+  await ensureDocumentFontsReady();
 
   const pages = getCapturePageElements(container);
   if (pages.length === 0) {

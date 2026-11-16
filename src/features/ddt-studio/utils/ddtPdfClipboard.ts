@@ -5,11 +5,14 @@ import { DdtDocument } from "../models/ddt";
 import { DdtRepository } from "../services/ddtRepository";
 import { DDTA4Document } from "../document/DDTA4Document";
 import { generatePdfBytesFromElements, formatDdtPdfFilename } from "./ddtExportManager";
+import { getCompanySettings } from "@/features/settings/companySettingsRepository";
+import { ensureDocumentFontsReady, waitForDomPaint } from "@/shared/utils/a4PdfCapture";
 
 /**
  * Renderizza un DdtDocument fuori schermo in formato A4 ed estrae i byte PDF generati.
  */
 export async function generatePdfBytesForDoc(doc: DdtDocument): Promise<Uint8Array> {
+  await getCompanySettings();
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.left = "-99999px";
@@ -30,11 +33,9 @@ export async function generatePdfBytesForDoc(doc: DdtDocument): Promise<Uint8Arr
   );
 
   try {
-    if ((document as any).fonts?.ready) {
-      await (document as any).fonts.ready;
-    }
-    // Breve pausa per garantire il calcolo del layout flex/grid multipagina
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await ensureDocumentFontsReady();
+    // Attende il calcolo del layout flex/grid multipagina
+    await waitForDomPaint(30);
 
     const pages = container.querySelectorAll(".ddt-a4-page");
     const pagesArray = Array.from(pages) as HTMLElement[];
