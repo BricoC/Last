@@ -4,6 +4,8 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { clientSyncService } from "@/features/clients/services/clientSyncService";
 import { ddtRepository } from "./ddtRepository";
 import { ddtCloudPushService } from "./ddtCloudPushService";
+import { buildSnapshotFromCloud } from "./ddtMergeUtils";
+import { saveDdtBaseSnapshot } from "./ddtSnapshotService";
 import { OrNumbersRepository } from "@/features/or-numbers/services/orNumbersRepository";
 import {
   HEADER_FIELDS,
@@ -305,23 +307,37 @@ class DdtIncrementalSyncService {
           console.warn(`[Sync Incrementale] Errore fetch testate anno ${year}: ${headersRes.status}`);
         }
 
-        // 2c-bis. Controllo Conflitto su localMax: se esiste su Supabase un DDT con lo stesso numero ma contenuto diverso
-        if (localMax > 0) {
+        // 2c-bis. Controllo Conflitto su localMax e su eventuali DDT pending: se esiste su Supabase un DDT con lo stesso numero ma contenuto diverso
+        const pendingConflictCheckRows = await db.select<{ doc_number: number }[]>(
+          `SELECT DISTINCT doc_number FROM ddt_documents
+           WHERE year = $1 AND deleted_at IS NULL AND doc_number IS NOT NULL
+             AND status <> 'bozza' AND sync_status = 'pending'`,
+          [year]
+        );
+        const numbersToCheck = Array.from(
+          new Set(
+            [localMax, ...pendingConflictCheckRows.map((r) => Number(r.doc_number))].filter(
+              (n) => Number.isFinite(n) && n > 0
+            )
+          )
+        );
+
+        if (numbersToCheck.length > 0) {
           try {
-            const checkMaxUrl = new URL(`/rest/v1/ddt`, projectUrl);
-            checkMaxUrl.searchParams.set("anno", `eq.${year}`);
-            checkMaxUrl.searchParams.set("numero", `eq.${localMax}`);
-            checkMaxUrl.searchParams.set("select", HEADER_FIELDS);
-            const checkMaxRes = await fetch(checkMaxUrl.toString(), {
+            const checkUrl = new URL(`/rest/v1/ddt`, projectUrl);
+            checkUrl.searchParams.set("anno", `eq.${year}`);
+            checkUrl.searchParams.set("numero", `in.(${numbersToCheck.join(",")})`);
+            checkUrl.searchParams.set("select", HEADER_FIELDS);
+            const checkRes = await fetch(checkUrl.toString(), {
               headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
             });
-            if (checkMaxRes.ok) {
-              const maxHeaders = (await checkMaxRes.json()) as CloudHeader[];
-              if (maxHeaders && maxHeaders.length > 0) {
-                const remote = maxHeaders[0];
+            if (checkRes.ok) {
+              const remoteHeaders = (await checkRes.json()) as CloudHeader[];
+              for (const remote of remoteHeaders || []) {
+                const remoteNum = Number(remote.numero);
                 const localRows = await db.select<any[]>(
                   "SELECT * FROM ddt_documents WHERE year = $1 AND doc_number = $2 AND deleted_at IS NULL LIMIT 1",
-                  [year, localMax]
+                  [year, remoteNum]
                 );
                 if (localRows.length > 0) {
                   const loc = localRows[0];
@@ -334,7 +350,7 @@ class DdtIncrementalSyncService {
                   if (isDifferent) {
                     const confLinesUrl = new URL(`/rest/v1/ddt_righe`, projectUrl);
                     confLinesUrl.searchParams.set("anno", `eq.${year}`);
-                    confLinesUrl.searchParams.set("numero_ddt", `eq.${localMax}`);
+                    confLinesUrl.searchParams.set("numero_ddt", `eq.${remoteNum}`);
                     confLinesUrl.searchParams.set("select", LINE_FIELDS);
                     confLinesUrl.searchParams.set("order", "riga_nr.asc");
                     const confLinesRes = await fetch(confLinesUrl.toString(), {
@@ -347,7 +363,7 @@ class DdtIncrementalSyncService {
                         new CustomEvent("ddt-conflict-detected", {
                           detail: {
                             year,
-                            docNumber: localMax,
+                            docNumber: remoteNum,
                             localDoc: {
                               id: loc.id,
                               client_name: loc.client_name,
@@ -369,12 +385,13 @@ class DdtIncrementalSyncService {
                         })
                       );
                     }
+                    break;
                   }
                 }
               }
             }
           } catch (conflictCheckErr) {
-            console.warn("[Sync Incrementale] Errore controllo conflitto su localMax:", conflictCheckErr);
+            console.warn("[Sync Incrementale] Errore controllo conflitto numeri DDT:", conflictCheckErr);
           }
         }
 
@@ -531,6 +548,11 @@ class DdtIncrementalSyncService {
                       );
                     }
                   }
+                  await saveDdtBaseSnapshot(
+                    loc.id,
+                    remoteModified || null,
+                    buildSnapshotFromCloud(remoteH, updatedLines)
+                  );
                 }
 
                 totalUpdatedHistorical++;
@@ -705,6 +727,26 @@ class DdtIncrementalSyncService {
       const importResult = await invoke<DdtImportResult>("import_supabase_ddt_into_local", {
         payload: { headers: importedHeaders, lines: mappedLines },
       });
+
+      // Salva gli snapshot base per i nuovi DDT scaricati (usati dal 3-way merge)
+      const linesByDocKey = new Map<string, CloudLine[]>();
+      for (const line of newLines) {
+        const k = line.ddt_id || `${line.anno}:${line.numero_ddt}`;
+        const list = linesByDocKey.get(k);
+        if (list) list.push(line);
+        else linesByDocKey.set(k, [line]);
+      }
+      for (const h of newHeaders) {
+        const docLines =
+          linesByDocKey.get(h.id) ??
+          linesByDocKey.get(`${h.anno}:${h.numero}`) ??
+          [];
+        await saveDdtBaseSnapshot(
+          h.id,
+          h.ultima_modifica || h.created_at || null,
+          buildSnapshotFromCloud(h, docLines)
+        );
+      }
 
       // 6. Arricchimento anagrafiche e sedi per i DDT appena scaricati
       await clientSyncService.importMissingClientsFromDdts();

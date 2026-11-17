@@ -165,6 +165,40 @@ export class ClientSyncService {
   }
 
   /**
+   * Invia a Supabase Cloud tutti i clienti creati, modificati o eliminati offline.
+   * Esegue 0 chiamate HTTP verso Supabase se non ci sono record pending in locale.
+   */
+  public async syncPendingClientsToSupabase(): Promise<{ pushed: number; deleted: number }> {
+    const deleted = await this.syncPendingDeletionsToSupabase().catch(() => 0);
+
+    const db = await getDatabase();
+    const pendingRows = await db.select<{ id: string }[]>(
+      "SELECT id FROM clients WHERE deleted_at IS NULL AND sync_status = 'pending'"
+    );
+
+    if (pendingRows.length === 0) {
+      if (deleted > 0 && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("clients-data-updated"));
+      }
+      return { pushed: 0, deleted };
+    }
+
+    let pushed = 0;
+    for (const row of pendingRows) {
+      const client = await clientRepository.getClientById(row.id);
+      if (!client) continue;
+      const ok = await this.pushClientToSupabase(client);
+      if (ok) pushed++;
+    }
+
+    if ((pushed > 0 || deleted > 0) && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("clients-data-updated"));
+    }
+
+    return { pushed, deleted };
+  }
+
+  /**
    * Dopo l'unione di duplicati, rimuove dal Cloud i nomi duplicati archiviati e aggiorna il cliente principale.
    */
   public async syncMergedClientToSupabase(mergedClient: Client): Promise<void> {

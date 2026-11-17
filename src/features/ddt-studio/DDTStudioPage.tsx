@@ -4,6 +4,9 @@ import { LoaderCircle } from "lucide-react";
 import { DdtArchiveEntry, DdtDocument, DdtItem } from "./models/ddt";
 import { ddtRepository } from "./services/ddtRepository";
 import { subscribeToOpenDdt } from "./services/ddtNavigation";
+import { ddtCloudPushService } from "./services/ddtCloudPushService";
+import { DdtFieldConflict } from "./services/ddtMergeUtils";
+import { ensureDdtBaseSnapshotFromLocal } from "./services/ddtSnapshotService";
 import { clientRepository } from "@/features/clients/services/clientRepository";
 import { money, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
@@ -90,6 +93,69 @@ export function makeEmptyItems(): DdtItem[] {
     vat_amount: money(0),
     purchase_price: money(0),
   }));
+}
+
+export function buildPaddedDdtItems(docId: string, docItems: DdtItem[]): DdtItem[] {
+  const blankRowTimestamp = new Date().toISOString();
+  const padded: DdtItem[] = Array.from({ length: TOTAL_PRESET_ROWS }, (_, i) => ({
+    id: `${docId}-blank-${i + 1}`,
+    created_at: blankRowTimestamp,
+    updated_at: blankRowTimestamp,
+    updated_by: "system",
+    deleted_at: null,
+    sync_status: "pending",
+    ddt_id: docId,
+    row_index: i + 1,
+    code: "",
+    description: "",
+    unit: "",
+    quantity: "",
+    unit_price: money(0),
+    base_price: money(0),
+    discount_pct: "",
+    net_amount: money(0),
+    vat_rate: "",
+    vat_amount: money(0),
+    purchase_price: money(0),
+  }));
+
+  for (const it of docItems || []) {
+    const itemWithDefaults: DdtItem = {
+      ...it,
+      base_price: it.base_price && isPositivePrice(it.base_price) ? it.base_price : it.unit_price,
+      base_discount_pct: it.base_discount_pct !== undefined ? it.base_discount_pct : it.discount_pct,
+    };
+    const targetIdx =
+      it.row_index && it.row_index >= 1 && it.row_index <= TOTAL_PRESET_ROWS
+        ? it.row_index - 1
+        : -1;
+
+    if (
+      targetIdx >= 0 &&
+      !padded[targetIdx].description?.trim() &&
+      !isPositivePrice(padded[targetIdx].unit_price)
+    ) {
+      padded[targetIdx] = { ...itemWithDefaults, row_index: targetIdx + 1 };
+    } else {
+      const startSearch = targetIdx >= 0 ? targetIdx : 0;
+      let freeIdx = -1;
+      for (let i = startSearch; i < TOTAL_PRESET_ROWS; i++) {
+        if (!padded[i].description?.trim() && !isPositivePrice(padded[i].unit_price)) {
+          freeIdx = i;
+          break;
+        }
+      }
+      if (freeIdx === -1) {
+        freeIdx = padded.findIndex(
+          (slot) => !slot.description?.trim() && !isPositivePrice(slot.unit_price)
+        );
+      }
+      if (freeIdx >= 0) {
+        padded[freeIdx] = { ...itemWithDefaults, row_index: freeIdx + 1 };
+      }
+    }
+  }
+  return padded;
 }
 
 export function makeTest48Items(): DdtItem[] {
@@ -194,6 +260,14 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [trashCount, setTrashCount] = useState(0);
   const [activeConflict, setActiveConflict] = useState<DdtConflictDetail | null>(null);
+  const [remoteUpdateNotice, setRemoteUpdateNotice] = useState<string | null>(null);
+  const [mergeConflict, setMergeConflict] = useState<{
+    docId: string;
+    year: number;
+    docNumber: number | null;
+    conflicts: DdtFieldConflict[];
+  } | null>(null);
+  const [resolvingMerge, setResolvingMerge] = useState(false);
 
   const refreshTrashCount = useCallback(async () => {
     try {
@@ -215,8 +289,23 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         setActiveConflict(e.detail as DdtConflictDetail);
       }
     };
+    const handleMergeConflict = (e: Event) => {
+      const detail = (e as CustomEvent<{
+        docId: string;
+        year: number;
+        docNumber: number | null;
+        conflicts: DdtFieldConflict[];
+      }>).detail;
+      if (detail?.docId && detail.conflicts?.length > 0) {
+        setMergeConflict(detail);
+      }
+    };
     window.addEventListener("ddt-conflict-detected", handleConflict);
-    return () => window.removeEventListener("ddt-conflict-detected", handleConflict);
+    window.addEventListener("ddt-merge-conflict", handleMergeConflict);
+    return () => {
+      window.removeEventListener("ddt-conflict-detected", handleConflict);
+      window.removeEventListener("ddt-merge-conflict", handleMergeConflict);
+    };
   }, []);
 
   // Stato DDT Corrente
@@ -228,9 +317,15 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [globalMarkup, setGlobalMarkup] = useState("");
 
   const currentDdtIdRef = React.useRef<string | undefined>(ddt.id);
+  const ddtUpdatedAtRef = React.useRef<string | undefined>(ddt.updated_at);
+  const isSavingRef = React.useRef<boolean>(isSaving);
   useEffect(() => {
     currentDdtIdRef.current = ddt.id;
-  }, [ddt.id]);
+    ddtUpdatedAtRef.current = ddt.updated_at;
+  }, [ddt.id, ddt.updated_at]);
+  useEffect(() => {
+    isSavingRef.current = isSaving;
+  }, [isSaving]);
 
   const signature = useCallback(
     (doc: Partial<DdtDocument>, rows: DdtItem[], discount: string, markup: string) => {
@@ -470,15 +565,61 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     loadAvailableYears();
   }, [loadAvailableYears]);
 
-  // Aggiornamento reattivo quando la sincronizzazione in background scarica nuovi DDT
+  // Aggiornamento reattivo live quando Supabase Realtime / 3-way merge aggiorna i dati
   useEffect(() => {
+    const syncOpenEditorIfNeeded = async (mergedDocId?: string) => {
+      const openId = currentDdtIdRef.current;
+      if (!openId || isSavingRef.current) return;
+      if (mergedDocId && mergedDocId !== openId) return;
+      try {
+        const latest = await ddtRepository.getDdtById(openId);
+        if (!latest || currentDdtIdRef.current !== openId) return;
+
+        const isMerged = Boolean(mergedDocId === openId);
+        const changedOnDisk =
+          isMerged ||
+          (latest.updated_at && latest.updated_at !== ddtUpdatedAtRef.current);
+
+        if (!changedOnDisk) return;
+
+        if (!isDirtyRef.current || isMerged) {
+          const padded = buildPaddedDdtItems(latest.id, latest.items || []);
+          setDdt(latest);
+          setItems(padded);
+          setRemoteUpdateNotice(null);
+          savedSignature.current = signature(latest, padded, globalDiscount, globalMarkup);
+          showToast(
+            isMerged
+              ? "Modifiche unite automaticamente con l'altra postazione"
+              : "DDT aggiornato in tempo reale da un'altra postazione"
+          );
+        } else {
+          setRemoteUpdateNotice(
+            "Un'altra postazione ha aggiornato questo DDT sul Cloud: al tuo salvataggio le modifiche verranno unite automaticamente."
+          );
+        }
+      } catch (err) {
+        console.warn("[DDTStudio] Errore reload live editor:", err);
+      }
+    };
+
     const handleSyncUpdate = () => {
       void loadRecentDdts();
       void loadAvailableYears();
+      void syncOpenEditorIfNeeded();
+    };
+    const handleMergedUpdate = (e: Event) => {
+      const docId = (e as CustomEvent<{ docId?: string }>).detail?.docId;
+      void loadRecentDdts();
+      void syncOpenEditorIfNeeded(docId);
     };
     window.addEventListener("ddt-data-updated", handleSyncUpdate);
-    return () => window.removeEventListener("ddt-data-updated", handleSyncUpdate);
-  }, [loadRecentDdts, loadAvailableYears]);
+    window.addEventListener("ddt-data-merged", handleMergedUpdate);
+    return () => {
+      window.removeEventListener("ddt-data-updated", handleSyncUpdate);
+      window.removeEventListener("ddt-data-merged", handleMergedUpdate);
+    };
+  }, [loadRecentDdts, loadAvailableYears, signature, globalDiscount, globalMarkup]);
 
   useEffect(() => {
     const handleQuoteConversion = (event: Event) => {
@@ -516,7 +657,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       if (!fullDoc) return;
 
       currentDdtIdRef.current = fullDoc.id;
+      setRemoteUpdateNotice(null);
       setDdt(fullDoc);
+      // Inizializza in modo asincrono lo snapshot base se questo DDT è già sincronizzato
+      void ensureDdtBaseSnapshotFromLocal(fullDoc.id);
       // Keep the archive sidebar on the same year as a DDT opened from List or Articles,
       // but preserve "Tutti gli anni" (null) if chosen by the user.
       setSelectedYear((prev) => {
@@ -524,63 +668,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         return prev === fullDoc.year ? prev : fullDoc.year;
       });
 
-      // Inizializza esattamente 500 righe per la griglia
-      const docId = fullDoc.id;
-      const blankRowTimestamp = new Date().toISOString();
-      const padded: DdtItem[] = Array.from({ length: TOTAL_PRESET_ROWS }, (_, i) => ({
-        id: `${docId}-blank-${i + 1}`,
-        created_at: blankRowTimestamp,
-        updated_at: blankRowTimestamp,
-        updated_by: "system",
-        deleted_at: null,
-        sync_status: "pending",
-        ddt_id: docId,
-        row_index: i + 1,
-        code: "",
-        description: "",
-        unit: "",
-        quantity: "",
-        unit_price: money(0),
-        base_price: money(0),
-        discount_pct: "",
-        net_amount: money(0),
-        vat_rate: "",
-        vat_amount: money(0),
-        purchase_price: money(0),
-      }));
-
-      // Inserisci ogni riga memorizzata esattamente al suo row_index originale (1-indexed)
-      // preservando fedelmente le righe vuote e la posizione voluta dall'utente (es. PAGATO alla riga 5)
-      for (const it of fullDoc.items || []) {
-        const itemWithDefaults: DdtItem = {
-          ...it,
-          base_price: it.base_price && isPositivePrice(it.base_price) ? it.base_price : it.unit_price,
-          base_discount_pct: it.base_discount_pct !== undefined ? it.base_discount_pct : it.discount_pct,
-        };
-        const targetIdx = it.row_index && it.row_index >= 1 && it.row_index <= TOTAL_PRESET_ROWS
-          ? it.row_index - 1
-          : -1;
-
-        if (targetIdx >= 0 && (!padded[targetIdx].description?.trim() && !isPositivePrice(padded[targetIdx].unit_price))) {
-          padded[targetIdx] = { ...itemWithDefaults, row_index: targetIdx + 1 };
-        } else {
-          // Se la riga indicata è occupata o non valida, trova il primo slot libero a partire da targetIdx
-          const startSearch = targetIdx >= 0 ? targetIdx : 0;
-          let freeIdx = -1;
-          for (let i = startSearch; i < TOTAL_PRESET_ROWS; i++) {
-            if (!padded[i].description?.trim() && !isPositivePrice(padded[i].unit_price)) {
-              freeIdx = i;
-              break;
-            }
-          }
-          if (freeIdx === -1) {
-            freeIdx = padded.findIndex((slot) => !slot.description?.trim() && !isPositivePrice(slot.unit_price));
-          }
-          if (freeIdx >= 0) {
-            padded[freeIdx] = { ...itemWithDefaults, row_index: freeIdx + 1 };
-          }
-        }
-      }
+      const padded = buildPaddedDdtItems(fullDoc.id, fullDoc.items || []);
       setGlobalDiscount("");
       setGlobalMarkup("");
       setItems(padded);
@@ -651,8 +739,11 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     setIsSaving(true);
     try {
       const saved = await ddtRepository.saveDraft(ddt, items);
+      const syncedItems = buildPaddedDdtItems(saved.id, saved.items || []);
       setDdt(saved);
-      savedSignature.current = signature(saved, items, globalDiscount, globalMarkup);
+      setItems(syncedItems);
+      setRemoteUpdateNotice(null);
+      savedSignature.current = signature(saved, syncedItems, globalDiscount, globalMarkup);
       await loadRecentDdts();
 
       // Salvataggio automatico silenzioso del cliente in anagrafica
@@ -694,8 +785,11 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     setIsSaving(true);
     try {
       const saved = await ddtRepository.emitDdt(ddt, items);
+      const syncedItems = buildPaddedDdtItems(saved.id, saved.items || []);
       setDdt(saved);
-      savedSignature.current = signature(saved, items, globalDiscount, globalMarkup);
+      setItems(syncedItems);
+      setRemoteUpdateNotice(null);
+      savedSignature.current = signature(saved, syncedItems, globalDiscount, globalMarkup);
       await loadRecentDdts();
 
       // Salvataggio automatico del cliente in anagrafica
@@ -744,8 +838,11 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     try {
       // 1. Salva con numero progressivo
       const saved = await ddtRepository.emitDdt(ddt, items);
+      const syncedItems = buildPaddedDdtItems(saved.id, saved.items || []);
       setDdt(saved);
-      savedSignature.current = signature(saved, items, globalDiscount, globalMarkup);
+      setItems(syncedItems);
+      setRemoteUpdateNotice(null);
+      savedSignature.current = signature(saved, syncedItems, globalDiscount, globalMarkup);
       await loadRecentDdts();
 
       // Auto-salvataggio cliente in anagrafica
@@ -1203,6 +1300,20 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         isSaving={isSaving}
       />
 
+      {/* Banner avviso aggiornamento remoto mentre si sta editando */}
+      {remoteUpdateNotice && (
+        <div className="bg-amber-500/15 border-b border-amber-500/40 text-amber-200 px-4 py-1.5 text-xs flex items-center justify-between gap-2">
+          <span>{remoteUpdateNotice}</span>
+          <button
+            type="button"
+            onClick={() => setRemoteUpdateNotice(null)}
+            className="text-[11px] underline hover:text-white shrink-0"
+          >
+            Chiudi
+          </button>
+        </div>
+      )}
+
       {/* Header Operativo DDT Studio */}
       <DDTStudioHeader
         ddt={ddt}
@@ -1392,6 +1503,79 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         onClose={() => setActiveConflict(null)}
         onResolve={handleResolveConflict}
       />
+
+      {/* Modale Conflitto Modifica Concorrente su Stesso Campo DDT */}
+      {mergeConflict && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-lg rounded-lg border border-amber-500/40 bg-[#1e2129] p-5 shadow-2xl space-y-4 text-xs text-slate-200">
+            <h3 className="text-sm font-bold text-amber-400">
+              Conflitto di modifica sul DDT #{mergeConflict.docNumber}/{mergeConflict.year}
+            </h3>
+            <p className="text-slate-300">
+              Due postazioni hanno modificato contemporaneamente lo stesso campo. Scegli quale versione mantenere:
+            </p>
+            <div className="max-h-52 overflow-y-auto space-y-2 rounded border border-slate-700 bg-[#14161c] p-2.5">
+              {mergeConflict.conflicts.map((c, idx) => (
+                <div key={`${c.scope}-${c.field}-${idx}`} className="border-b border-slate-800 pb-1.5 last:border-b-0 last:pb-0">
+                  <div className="font-semibold text-white">{c.label}</div>
+                  <div className="text-sky-300">Questo PC: {c.localValue}</div>
+                  <div className="text-emerald-300">Altra postazione (Cloud): {c.remoteValue}</div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={resolvingMerge}
+                onClick={async () => {
+                  setResolvingMerge(true);
+                  try {
+                    const res = await ddtCloudPushService.resolveMergeConflict(
+                      mergeConflict.docId,
+                      "use-remote"
+                    );
+                    if (res.success) {
+                      setMergeConflict(null);
+                      showToast("Versione del Cloud scaricata e applicata.");
+                    } else {
+                      showToast(res.error || "Impossibile applicare la versione Cloud");
+                    }
+                  } finally {
+                    setResolvingMerge(false);
+                  }
+                }}
+                className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold disabled:opacity-50"
+              >
+                Usa versione del Cloud
+              </button>
+              <button
+                type="button"
+                disabled={resolvingMerge}
+                onClick={async () => {
+                  setResolvingMerge(true);
+                  try {
+                    const res = await ddtCloudPushService.resolveMergeConflict(
+                      mergeConflict.docId,
+                      "keep-local"
+                    );
+                    if (res.success) {
+                      setMergeConflict(null);
+                      showToast("Modifiche di questo PC inviate al Cloud.");
+                    } else {
+                      showToast(res.error || "Impossibile inviare al Cloud");
+                    }
+                  } finally {
+                    setResolvingMerge(false);
+                  }
+                }}
+                className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold disabled:opacity-50"
+              >
+                Mantieni modifiche di questo PC
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Portale Dedicato alla Stampa & Esportazione Immagine (In coordinate stabili offscreen) */}
       {typeof document !== "undefined" &&

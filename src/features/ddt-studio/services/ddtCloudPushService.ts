@@ -1,5 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import {
+  CloudHeader,
+  CloudLine,
+  HEADER_FIELDS,
+  LINE_FIELDS,
+  mapHeaderForLocal,
+  mapLineForLocal,
+} from "@/features/settings/data-import/ddtReadOnlyPreviewService";
+import {
+  buildSnapshotFromCloud,
+  buildSnapshotFromLocal,
+  DdtFieldConflict,
+  mergeDdtSnapshots,
+} from "./ddtMergeUtils";
+import { getDdtBaseSnapshot, saveDdtBaseSnapshot } from "./ddtSnapshotService";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -65,6 +80,8 @@ interface LocalDdtItemRow {
 export interface DdtPushResult {
   success: boolean;
   docNumber?: number | null;
+  merged?: boolean;
+  conflicts?: DdtFieldConflict[];
   error?: string;
 }
 
@@ -270,23 +287,24 @@ class DdtCloudPushService {
     }
   }
 
-  private async getCloudOwnerForNumber(
+  private async getCloudOwnerMetaForNumber(
     creds: SupabaseConfig,
     year: number,
     docNumber: number
-  ): Promise<string | null> {
+  ): Promise<{ id: string; ultima_modifica: string | null } | null> {
     const url = new URL("/rest/v1/ddt", creds.projectUrl);
     url.searchParams.set("anno", `eq.${year}`);
     url.searchParams.set("numero", `eq.${docNumber}`);
-    url.searchParams.set("select", "id");
+    url.searchParams.set("select", "id,ultima_modifica");
     url.searchParams.set("limit", "1");
 
     const res = await fetchWithTimeout(url.toString(), {
       headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
     });
     if (!res.ok) return null;
-    const rows = (await res.json()) as Array<{ id: string }>;
-    return rows?.[0]?.id ?? null;
+    const rows = (await res.json()) as Array<{ id: string; ultima_modifica?: string | null }>;
+    if (!rows?.[0]?.id) return null;
+    return { id: rows[0].id, ultima_modifica: rows[0].ultima_modifica ?? null };
   }
 
   /**
@@ -300,11 +318,156 @@ class DdtCloudPushService {
     const creds = await this.getCredentials();
     if (!creds) return false;
     try {
-      const owner = await this.getCloudOwnerForNumber(creds, year, docNumber);
-      return Boolean(owner && owner !== excludeId);
+      const owner = await this.getCloudOwnerMetaForNumber(creds, year, docNumber);
+      return Boolean(owner && owner.id !== excludeId);
     } catch {
       return false;
     }
+  }
+
+  private async fetchRemoteDdtFull(
+    creds: SupabaseConfig,
+    ddtId: string
+  ): Promise<{ header: CloudHeader; lines: CloudLine[] } | null> {
+    const hUrl = new URL("/rest/v1/ddt", creds.projectUrl);
+    hUrl.searchParams.set("id", `eq.${ddtId}`);
+    hUrl.searchParams.set("select", HEADER_FIELDS);
+    hUrl.searchParams.set("limit", "1");
+
+    const lUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
+    lUrl.searchParams.set("ddt_id", `eq.${ddtId}`);
+    lUrl.searchParams.set("select", LINE_FIELDS);
+    lUrl.searchParams.set("order", "riga_nr.asc");
+
+    const [hRes, lRes] = await Promise.all([
+      fetchWithTimeout(hUrl.toString(), {
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      }),
+      fetchWithTimeout(lUrl.toString(), {
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      }),
+    ]);
+
+    if (!hRes.ok || !lRes.ok) return null;
+    const headers = (await hRes.json()) as CloudHeader[];
+    if (!headers?.[0]) return null;
+    const lines = (await lRes.json()) as CloudLine[];
+    return { header: headers[0], lines };
+  }
+
+  private async applyMergedSnapshotToLocal(
+    docId: string,
+    merged: ReturnType<typeof mergeDdtSnapshots>["merged"],
+    totalTaxableSubunits: number,
+    totalVatSubunits: number,
+    totalDocumentSubunits: number,
+    updatedAt: string,
+    syncStatus: "pending" | "synced"
+  ): Promise<{ updatedDoc: LocalDdtRow; updatedItems: LocalDdtItemRow[] }> {
+    const db = await getDatabase();
+    const h = merged.header;
+
+    await db.execute(
+      `UPDATE ddt_documents SET
+        doc_date = $1, client_name = $2, client_address = $3, client_city = $4,
+        client_vat = $5, client_fiscal_code = $6, client_sdi = $7,
+        destination_name = $8, destination_city = $9, transport_reason = $10,
+        payment_method = $11, order_reference = $12, operator = $13,
+        goods_appearance = $14, carriage_terms = $15, packages_count = $16,
+        weight_kg = $17, carrier = $18, internal_notes = $19,
+        total_taxable_subunits = $20, total_vat_subunits = $21, total_document_subunits = $22,
+        updated_at = $23, sync_status = $24
+       WHERE id = $25`,
+      [
+        h.doc_date,
+        h.client_name,
+        h.client_address,
+        h.client_city,
+        h.client_vat,
+        h.client_fiscal_code,
+        h.client_sdi,
+        h.destination_name,
+        h.destination_city,
+        h.transport_reason,
+        h.payment_method,
+        h.order_reference,
+        h.operator,
+        h.goods_appearance,
+        h.carriage_terms,
+        h.packages_count,
+        h.weight_kg,
+        h.carrier,
+        h.internal_notes,
+        totalTaxableSubunits,
+        totalVatSubunits,
+        totalDocumentSubunits,
+        updatedAt,
+        syncStatus,
+        docId,
+      ]
+    );
+
+    const keepIds = new Set(merged.items.map((it) => it.id));
+    const existingRows = await db.select<{ id: string }[]>(
+      `SELECT id FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NULL`,
+      [docId]
+    );
+    for (const row of existingRows) {
+      if (!keepIds.has(row.id)) {
+        await db.execute(
+          `UPDATE ddt_items SET deleted_at = $1, updated_at = $1, sync_status = $2 WHERE id = $3`,
+          [updatedAt, syncStatus, row.id]
+        );
+      }
+    }
+
+    for (const it of merged.items) {
+      await db.execute(
+        `INSERT INTO ddt_items (
+          id, ddt_id, row_index, code, description, row_kind, unit, quantity,
+          unit_price_subunits, discount_pct, net_amount_subunits, vat_rate,
+          vat_amount_subunits, purchase_price_subunits, created_at, updated_at,
+          updated_by, deleted_at, sync_status
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,'sync_merge',NULL,$16)
+        ON CONFLICT(id) DO UPDATE SET
+          row_index = excluded.row_index, code = excluded.code, description = excluded.description,
+          row_kind = excluded.row_kind, unit = excluded.unit, quantity = excluded.quantity,
+          unit_price_subunits = excluded.unit_price_subunits, discount_pct = excluded.discount_pct,
+          net_amount_subunits = excluded.net_amount_subunits, vat_rate = excluded.vat_rate,
+          vat_amount_subunits = excluded.vat_amount_subunits,
+          purchase_price_subunits = excluded.purchase_price_subunits,
+          updated_at = excluded.updated_at, deleted_at = NULL, sync_status = excluded.sync_status`,
+        [
+          it.id,
+          docId,
+          it.row_index,
+          it.code,
+          it.description,
+          it.row_kind,
+          it.unit,
+          it.quantity,
+          it.unit_price_subunits,
+          it.discount_pct,
+          it.net_amount_subunits,
+          it.vat_rate,
+          it.vat_amount_subunits,
+          it.purchase_price_subunits,
+          updatedAt,
+          syncStatus,
+        ]
+      );
+    }
+
+    const updatedDocs = await db.select<LocalDdtRow[]>(
+      `SELECT * FROM ddt_documents WHERE id = $1 LIMIT 1`,
+      [docId]
+    );
+    const updatedItems = await db.select<LocalDdtItemRow[]>(
+      `SELECT * FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NULL ORDER BY row_index ASC`,
+      [docId]
+    );
+
+    return { updatedDoc: updatedDocs[0], updatedItems };
   }
 
   private async computeNextAvailableNumber(year: number): Promise<number> {
@@ -323,30 +486,68 @@ class DdtCloudPushService {
   private async upsertSingleDdt(
     creds: SupabaseConfig,
     doc: LocalDdtRow,
-    reassignNumberOnConflict: boolean
+    reassignNumberOnConflict: boolean,
+    forceOverwrite = false
   ): Promise<DdtPushResult> {
     if (doc.deleted_at || doc.status === "bozza" || doc.doc_number === null) {
       return { success: true, docNumber: doc.doc_number };
     }
 
     const db = await getDatabase();
-    const items = await db.select<LocalDdtItemRow[]>(
+    let items = await db.select<LocalDdtItemRow[]>(
       `SELECT * FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NULL ORDER BY row_index ASC`,
       [doc.id]
     );
 
     let currentDoc = { ...doc };
+    let wasAutoMerged = false;
     let pushedHeader = false;
+    let savedRemoteModified: string | null = null;
 
     for (let attempt = 0; attempt < 3; attempt++) {
-      const existingOwner = await this.getCloudOwnerForNumber(
+      const remoteMeta = await this.getCloudOwnerMetaForNumber(
         creds,
         currentDoc.year,
         currentDoc.doc_number!
       );
 
-      if (existingOwner && existingOwner !== currentDoc.id) {
+      if (remoteMeta && remoteMeta.id !== currentDoc.id) {
         if (!reassignNumberOnConflict) {
+          if (typeof window !== "undefined") {
+            const remoteFull = await this.fetchRemoteDdtFull(creds, remoteMeta.id).catch(() => null);
+            if (remoteFull) {
+              const remoteTotalSubunits = Math.round(
+                (Number(remoteFull.header.totale_documento) || 0) * 100000
+              );
+              window.dispatchEvent(
+                new CustomEvent("ddt-conflict-detected", {
+                  detail: {
+                    year: currentDoc.year,
+                    docNumber: currentDoc.doc_number!,
+                    localDoc: {
+                      id: currentDoc.id,
+                      client_name: currentDoc.client_name,
+                      doc_date: currentDoc.doc_date,
+                      total_document_subunits: currentDoc.total_document_subunits,
+                      status: currentDoc.status,
+                    },
+                    incomingDoc: {
+                      id: remoteFull.header.id,
+                      client_name: remoteFull.header.cliente || "",
+                      doc_date: remoteFull.header.data || "",
+                      total_document_subunits: remoteTotalSubunits,
+                      items_count: remoteFull.lines.length,
+                      source: "Gestionale / Cloud Supabase",
+                      rawHeader: mapHeaderForLocal(remoteFull.header),
+                      rawLines: remoteFull.lines.map((l, idx) =>
+                        mapLineForLocal(l, remoteFull.header.id, idx + 1)
+                      ),
+                    },
+                  },
+                })
+              );
+            }
+          }
           return {
             success: false,
             docNumber: currentDoc.doc_number,
@@ -359,6 +560,70 @@ class DdtCloudPushService {
           currentDoc.id,
         ]);
         currentDoc = { ...currentDoc, doc_number: nextNumber };
+      }
+
+      // 3-Way Merge intelligente se un altro PC ha aggiornato questo stesso DDT su Supabase
+      if (!forceOverwrite && remoteMeta && remoteMeta.id === currentDoc.id) {
+        const baseSnap = await getDdtBaseSnapshot(currentDoc.id);
+        if (
+          baseSnap?.remoteUltimaModifica &&
+          remoteMeta.ultima_modifica &&
+          baseSnap.remoteUltimaModifica !== remoteMeta.ultima_modifica
+        ) {
+          const remoteFull = await this.fetchRemoteDdtFull(creds, currentDoc.id);
+          if (remoteFull) {
+            const localSnap = buildSnapshotFromLocal(currentDoc, items);
+            const remoteSnap = buildSnapshotFromCloud(remoteFull.header, remoteFull.lines);
+            const delRows = await db.select<{ id: string }[]>(
+              `SELECT id FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NOT NULL AND sync_status = 'pending'`,
+              [currentDoc.id]
+            );
+            const localDeletedIds = new Set(delRows.map((r) => r.id));
+            const mergeResult = mergeDdtSnapshots(
+              baseSnap.snapshot,
+              localSnap,
+              localDeletedIds,
+              remoteSnap
+            );
+
+            if (mergeResult.conflicts.length > 0) {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent("ddt-merge-conflict", {
+                    detail: {
+                      docId: currentDoc.id,
+                      year: currentDoc.year,
+                      docNumber: currentDoc.doc_number,
+                      conflicts: mergeResult.conflicts,
+                    },
+                  })
+                );
+              }
+              return {
+                success: false,
+                docNumber: currentDoc.doc_number,
+                conflicts: mergeResult.conflicts,
+                error: `Conflitto di modifica sul DDT ${currentDoc.doc_number}/${currentDoc.year}: scegli quale modifica mantenere`,
+              };
+            }
+
+            if (mergeResult.autoMergedChanges > 0) {
+              const mergeTs = new Date().toISOString();
+              const applied = await this.applyMergedSnapshotToLocal(
+                currentDoc.id,
+                mergeResult.merged,
+                mergeResult.totalTaxableSubunits,
+                mergeResult.totalVatSubunits,
+                mergeResult.totalDocumentSubunits,
+                mergeTs,
+                "pending"
+              );
+              currentDoc = applied.updatedDoc;
+              items = applied.updatedItems;
+              wasAutoMerged = true;
+            }
+          }
+        }
       }
 
       const { headerPayload } = buildSupabaseDdtPayloads(currentDoc, items);
@@ -375,6 +640,10 @@ class DdtCloudPushService {
       });
 
       if (headerRes.ok) {
+        const repRows = (await headerRes.json().catch(() => [])) as Array<{
+          ultima_modifica?: string | null;
+        }>;
+        savedRemoteModified = repRows?.[0]?.ultima_modifica ?? currentDoc.updated_at;
         pushedHeader = true;
         break;
       }
@@ -405,31 +674,7 @@ class DdtCloudPushService {
       };
     }
 
-    // Sostituisce le righe su Supabase per evitare righe residue dopo modifiche
-    const delByDdtUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
-    delByDdtUrl.searchParams.set("ddt_id", `eq.${currentDoc.id}`);
-    const delRes = await fetchWithTimeout(delByDdtUrl.toString(), {
-      method: "DELETE",
-      headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
-    });
-    if (!delRes.ok) {
-      return {
-        success: false,
-        docNumber: currentDoc.doc_number,
-        error: `Errore pulizia righe remote DDT (HTTP ${delRes.status})`,
-      };
-    }
-
-    // Pulisce eventuali righe orfane con stesso anno/numero e ddt_id NULL
-    const delOrphanUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
-    delOrphanUrl.searchParams.set("anno", `eq.${currentDoc.year}`);
-    delOrphanUrl.searchParams.set("numero_ddt", `eq.${currentDoc.doc_number}`);
-    delOrphanUrl.searchParams.set("ddt_id", "is.null");
-    await fetchWithTimeout(delOrphanUrl.toString(), {
-      method: "DELETE",
-      headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
-    }).catch(() => {});
-
+    // Upsert righe PRIMA di eliminare le righe rimosse: evita DDT a 0 righe su Supabase se cade la rete a metà
     const { linePayloads } = buildSupabaseDdtPayloads(currentDoc, items);
     if (linePayloads.length > 0) {
       const linesUrl = new URL("/rest/v1/ddt_righe?on_conflict=id", creds.projectUrl);
@@ -452,7 +697,32 @@ class DdtCloudPushService {
           error: `Errore push righe DDT: ${errBody?.message || linesRes.statusText || linesRes.status}`,
         };
       }
+
+      const delRemovedUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
+      delRemovedUrl.searchParams.set("ddt_id", `eq.${currentDoc.id}`);
+      delRemovedUrl.searchParams.set("id", `not.in.(${linePayloads.map((l) => l.id).join(",")})`);
+      await fetchWithTimeout(delRemovedUrl.toString(), {
+        method: "DELETE",
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      }).catch(() => {});
+    } else {
+      const delAllUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
+      delAllUrl.searchParams.set("ddt_id", `eq.${currentDoc.id}`);
+      await fetchWithTimeout(delAllUrl.toString(), {
+        method: "DELETE",
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      }).catch(() => {});
     }
+
+    // Pulisce eventuali righe orfane con stesso anno/numero e ddt_id NULL
+    const delOrphanUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
+    delOrphanUrl.searchParams.set("anno", `eq.${currentDoc.year}`);
+    delOrphanUrl.searchParams.set("numero_ddt", `eq.${currentDoc.doc_number}`);
+    delOrphanUrl.searchParams.set("ddt_id", "is.null");
+    await fetchWithTimeout(delOrphanUrl.toString(), {
+      method: "DELETE",
+      headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+    }).catch(() => {});
 
     await db.execute(`UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`, [
       currentDoc.id,
@@ -461,7 +731,59 @@ class DdtCloudPushService {
       currentDoc.id,
     ]);
 
-    return { success: true, docNumber: currentDoc.doc_number };
+    const finalSnap = buildSnapshotFromLocal(currentDoc, items);
+    await saveDdtBaseSnapshot(currentDoc.id, savedRemoteModified, finalSnap);
+
+    if (wasAutoMerged && typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("ddt-data-merged", { detail: { docId: currentDoc.id } })
+      );
+    }
+
+    return {
+      success: true,
+      docNumber: currentDoc.doc_number,
+      ...(wasAutoMerged ? { merged: true } : {}),
+    };
+  }
+
+  public async resolveMergeConflict(
+    docId: string,
+    resolution: "keep-local" | "use-remote"
+  ): Promise<DdtPushResult> {
+    const creds = await this.getCredentials();
+    if (!creds) return { success: false, error: "Configurazione Supabase non disponibile" };
+
+    const db = await getDatabase();
+    if (resolution === "keep-local") {
+      const docs = await db.select<LocalDdtRow[]>(
+        `SELECT * FROM ddt_documents WHERE id = $1 LIMIT 1`,
+        [docId]
+      );
+      if (!docs[0]) return { success: false, error: "DDT non trovato" };
+      const res = await this.upsertSingleDdt(creds, docs[0], false, true);
+      if (res.success && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+      }
+      return res;
+    }
+
+    const remoteFull = await this.fetchRemoteDdtFull(creds, docId);
+    if (!remoteFull) return { success: false, error: "Impossibile scaricare la versione dal Cloud" };
+    const remoteSnap = buildSnapshotFromCloud(remoteFull.header, remoteFull.lines);
+    let taxSub = 0;
+    let vatSub = 0;
+    for (const it of remoteSnap.items) {
+      taxSub += it.net_amount_subunits;
+      vatSub += it.vat_amount_subunits;
+    }
+    const ts = remoteFull.header.ultima_modifica || new Date().toISOString();
+    await this.applyMergedSnapshotToLocal(docId, remoteSnap, taxSub, vatSub, taxSub + vatSub, ts, "synced");
+    await saveDdtBaseSnapshot(docId, ts, remoteSnap);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+    }
+    return { success: true, docNumber: remoteSnap.header.doc_number };
   }
 
   public async deleteRemoteDdt(id: string): Promise<boolean> {

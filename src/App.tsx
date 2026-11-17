@@ -41,6 +41,7 @@ import { MgsAlertOverlay } from "@/shared/easter-eggs/MgsAlertOverlay";
 import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
+import { clientSyncService } from "@/features/clients/services/clientSyncService";
 import { checkAndExecuteDailyBackup } from "@/features/settings/services/backupService";
 
 export function App() {
@@ -95,8 +96,17 @@ export function App() {
         });
     };
 
-    const runQuickSync = () => triggerDdtSync(false, false, false);
-    const runStartupSync = () => triggerDdtSync(true, true, true);
+    const runQuickSync = () => {
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      triggerDdtSync(false, false, false);
+      void clientSyncService.syncPendingClientsToSupabase().catch(() => {});
+    };
+    const runStartupSync = () => {
+      triggerDdtSync(true, true, true);
+      if (typeof navigator === "undefined" || navigator.onLine) {
+        void clientSyncService.syncPendingClientsToSupabase().catch(() => {});
+      }
+    };
 
     runStartupSync();
     void ddtIncrementalSyncService.startRealtime();
