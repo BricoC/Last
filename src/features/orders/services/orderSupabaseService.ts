@@ -73,6 +73,9 @@ export class OrderSupabaseService {
         "postgres_changes",
         { event: "*", schema: "public", table: "ordini" },
         (payload) => {
+          if (payload.eventType === "DELETE" && payload.old && (payload.old as any).id) {
+            void this.deleteFromSqlite([String((payload.old as any).id)]);
+          }
           window.dispatchEvent(
             new CustomEvent("supabase_update_ordini", { detail: payload })
           );
@@ -88,6 +91,9 @@ export class OrderSupabaseService {
         }
       )
       .subscribe();
+
+    // Allinea silenziosamente la cache SQLite degli ordini con Supabase
+    void this.reconcileFullOrdersCache();
 
     // Ascolta il ritorno della connessione internet per svuotare la coda offline
     window.addEventListener("online", () => {
@@ -165,7 +171,7 @@ export class OrderSupabaseService {
           }));
 
           // Salva in background nella cache locale SQLite (senza bloccare)
-          void this.cacheOrdersToSqlite(mapped);
+          void this.cacheOrdersToSqlite(mapped, viewMode);
 
           return mapped;
         }
@@ -280,7 +286,7 @@ export class OrderSupabaseService {
               isNew: false,
               sync_status: "synced",
             };
-            void this.cacheSingleOrderToSqlite(insertedItem);
+            void this.cacheSingleOrderToSqlite(insertedItem, order.id);
             return { success: true, data: insertedItem };
           }
         }
@@ -769,6 +775,29 @@ export class OrderSupabaseService {
           const { data, error } = await supabase.from("ordini").insert([item.payload]).select();
           if (error) throw error;
           if (data && data[0]) {
+            const r = data[0];
+            await this.cacheSingleOrderToSqlite(
+              {
+                id: String(r.id),
+                supabase_id: String(r.id),
+                order_date: r.data || "",
+                supplier_name: r.fornitore || "",
+                article_code: r.articolo || "",
+                description: (r.descrizione || "").toUpperCase(),
+                quantity: String(r.quantita || ""),
+                price: String(r.prezzo || ""),
+                ordered_date: r.ordinato || null,
+                notes: r.note || "",
+                user_name: r.utente || "",
+                is_archived: Boolean(r.archiviato),
+                is_deleted: Boolean(r.eliminato),
+                highlights: parseHighlights(r.evidenze),
+                created_at: r.created_at || nowIso,
+                updated_at: r.ultima_modifica || nowIso,
+                sync_status: "synced",
+              },
+              item.targetId
+            );
             processedCount++;
             continue;
           }
@@ -843,12 +872,20 @@ export class OrderSupabaseService {
   // CACHE SQLITE LOCALE (PER MODALITÀ OFFLINE)
   // ==========================================
 
-  private async cacheOrdersToSqlite(orders: OrderItem[]): Promise<void> {
+  private async cacheOrdersToSqlite(orders: OrderItem[], viewMode?: OrderViewMode): Promise<void> {
     try {
       const db = await getDatabase();
       const now = new Date().toISOString();
+      const fetchedSupabaseIds = new Set<string>();
+
       for (const item of orders) {
         const localId = "ord_" + item.id;
+        fetchedSupabaseIds.add(String(item.id));
+        // Rimuove eventuali vecchie righe draft/duplicate collegate allo stesso supabase_id
+        await db.execute(
+          `DELETE FROM orders WHERE supabase_id = $1 AND id <> $2`,
+          [String(item.id), localId]
+        );
         await db.execute(
           `INSERT INTO orders (
             id, supabase_id, order_date, supplier_name, article_code, description,
@@ -891,14 +928,110 @@ export class OrderSupabaseService {
           ]
         );
       }
+
+      // Rimuove dalla cache di questa vista eventuali ordini synced eliminati o spostati da altri PC
+      if (viewMode) {
+        const queuedIds = new Set(this.getOfflineQueue().map((q) => this.cleanId(q.targetId) || q.targetId));
+        const viewWhere =
+          viewMode === "archiviati"
+            ? "is_archived = 1 AND is_deleted = 0"
+            : viewMode === "cestino"
+            ? "is_deleted = 1"
+            : "is_archived = 0 AND is_deleted = 0";
+        const localInView = await db.select<{ id: string; supabase_id: string | null }[]>(
+          `SELECT id, supabase_id FROM orders WHERE ${viewWhere} AND sync_status = 'synced'`
+        );
+        for (const row of localInView) {
+          const supId = row.supabase_id ? String(row.supabase_id) : "";
+          if (supId && !fetchedSupabaseIds.has(supId) && !queuedIds.has(supId) && !queuedIds.has(row.id)) {
+            await db.execute(`DELETE FROM orders WHERE id = $1`, [row.id]);
+          }
+        }
+      }
     } catch {}
   }
 
-  private async cacheSingleOrderToSqlite(item: OrderItem): Promise<void> {
+  /**
+   * Riallinea completamente la cache SQLite `orders` con `public.ordini` su Supabase:
+   * deduplica eventuali righe draft rimaste dopo l'insert, inserisce ordini mancanti (es. cestino/archivio)
+   * e rimuove dalla cache ordini eliminati definitivamente su Supabase.
+   */
+  public async reconcileFullOrdersCache(): Promise<void> {
+    const supabase = await this.getClient();
+    if (!supabase || !navigator.onLine) return;
+
+    try {
+      const allRemote: any[] = [];
+      const PAGE = 1000;
+      let from = 0;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("ordini")
+          .select("*")
+          .order("created_at", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error || !Array.isArray(data)) return;
+        allRemote.push(...data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+
+      const mapped: OrderItem[] = allRemote.map((r: any) => ({
+        id: r.id,
+        supabase_id: r.id,
+        order_date: r.data || "",
+        supplier_name: r.fornitore || "",
+        article_code: r.articolo || "",
+        description: (r.descrizione || "").toUpperCase(),
+        quantity: String(r.quantita || ""),
+        price: String(r.prezzo || ""),
+        ordered_date: r.ordinato || null,
+        notes: r.note || "",
+        user_name: r.utente || "",
+        is_archived: Boolean(r.archiviato),
+        is_deleted: Boolean(r.eliminato),
+        highlights: parseHighlights(r.evidenze),
+        created_at: r.created_at || new Date().toISOString(),
+        updated_at: r.ultima_modifica || new Date().toISOString(),
+        sync_status: "synced",
+      }));
+
+      await this.cacheOrdersToSqlite(mapped);
+
+      const db = await getDatabase();
+      const queuedIds = new Set(this.getOfflineQueue().map((q) => this.cleanId(q.targetId) || q.targetId));
+      const remoteIds = new Set(mapped.map((m) => String(m.id)));
+      const localAll = await db.select<{ id: string; supabase_id: string | null; sync_status: string }[]>(
+        `SELECT id, supabase_id, sync_status FROM orders`
+      );
+      for (const row of localAll) {
+        const supId = row.supabase_id ? String(row.supabase_id) : "";
+        if (row.sync_status === "synced" && (!supId || !remoteIds.has(supId)) && !queuedIds.has(row.id)) {
+          await db.execute(`DELETE FROM orders WHERE id = $1`, [row.id]);
+        }
+      }
+    } catch (err) {
+      console.warn("[OrderSupabaseService] Errore riconciliazione cache ordini:", err);
+    }
+  }
+
+  private async cacheSingleOrderToSqlite(item: OrderItem, previousLocalId?: string): Promise<void> {
     try {
       const db = await getDatabase();
-      const localId = item.id.startsWith("ord_") ? item.id : "ord_" + item.id;
+      const cleanSup = item.supabase_id ? String(item.supabase_id) : null;
+      const localId = cleanSup ? `ord_${cleanSup}` : (item.id.startsWith("ord_") ? item.id : "ord_" + item.id);
       const now = new Date().toISOString();
+
+      if (cleanSup) {
+        await db.execute(
+          `DELETE FROM orders WHERE (supabase_id = $1 OR id = $2) AND id <> $3`,
+          [cleanSup, previousLocalId || "", localId]
+        );
+      } else if (previousLocalId && previousLocalId !== localId) {
+        await db.execute(`DELETE FROM orders WHERE id = $1`, [previousLocalId]);
+      }
+
       await db.execute(
         `INSERT INTO orders (
           id, supabase_id, order_date, supplier_name, article_code, description,

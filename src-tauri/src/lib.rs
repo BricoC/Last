@@ -13,6 +13,7 @@ mod quote_types;
 mod supabase_config;
 mod supabase_ddt_import;
 mod supabase_ddt_preview;
+mod supabase_monitor;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -465,6 +466,9 @@ pub fn run() {
             ddt_delete_command::soft_delete_ddt_transaction,
             supabase_config::load_supabase_config,
             supabase_config::save_supabase_config,
+            supabase_monitor::load_supabase_management_config,
+            supabase_monitor::save_supabase_management_config,
+            supabase_monitor::fetch_supabase_cloud_metrics,
             supabase_ddt_preview::load_local_ddt_preview_keys,
             supabase_ddt_import::import_supabase_ddt_into_local,
             quote_commands::save_quote_transaction,

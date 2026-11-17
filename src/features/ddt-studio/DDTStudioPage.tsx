@@ -604,7 +604,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   useEffect(() => {
     let active = true;
     if (ddt.doc_number === null) {
-      ddtRepository.getNextDocNumber(ddt.year || new Date().getFullYear(), ddt.series || "").then((num) => {
+      ddtRepository.getNextDocNumberWithCloud(ddt.year || new Date().getFullYear(), ddt.series || "").then((num) => {
         if (active && num) {
           setDdt((prev) => {
             if (prev.doc_number === null) {
@@ -633,7 +633,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     const nextDdt = makeEmptyDdt();
     const nextItems = makeEmptyItems();
     try {
-      const nextNum = await ddtRepository.getNextDocNumber(nextDdt.year || new Date().getFullYear(), nextDdt.series || "");
+      const nextNum = await ddtRepository.getNextDocNumberWithCloud(nextDdt.year || new Date().getFullYear(), nextDdt.series || "");
       nextDdt.doc_number = nextNum;
     } catch (e) {
       console.warn("Impossibile calcolare prossimo numero DDT:", e);

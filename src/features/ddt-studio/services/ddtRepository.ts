@@ -4,6 +4,13 @@ import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domai
 import { DdtItem, DdtDocument, DdtArchiveEntry } from "../models/ddt";
 import { calculateDdtTotals } from "../utils/ddtCalculations";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { ddtCloudPushService } from "./ddtCloudPushService";
+
+function notifyDdtUpdated(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+  }
+}
 
 export class DdtRepository {
   /**
@@ -203,12 +210,30 @@ export class DdtRepository {
    * Soft delete di un DDT (sposta nel Cestino a 15 elementi FIFO)
    */
   public async deleteDdt(id: string): Promise<void> {
+    const db = await getDatabase();
+    const existing = await db.select<{ doc_number: number | null; status: string }[]>(
+      "SELECT doc_number, status FROM ddt_documents WHERE id = $1 AND deleted_at IS NULL LIMIT 1",
+      [id]
+    );
+    const shouldDeleteRemote = Boolean(
+      existing[0] && existing[0].doc_number !== null && existing[0].status !== "bozza"
+    );
+
+    if (shouldDeleteRemote) {
+      ddtCloudPushService.markRecentlyDeleted(id);
+    }
+
     await invoke("soft_delete_ddt_transaction", {
       id,
       deletedAt: new Date().toISOString(),
     });
     // Tronca il cestino mantenendo rigorosamente le ultime 15 voci (FIFO)
     await this.pruneTrash();
+
+    notifyDdtUpdated();
+    if (shouldDeleteRemote) {
+      void ddtCloudPushService.deleteRemoteDdt(id).catch(() => {});
+    }
   }
 
   /**
@@ -325,7 +350,7 @@ export class DdtRepository {
 
     // 2. Ripristino forzato con Assegnazione Nuovo Numero
     if (mode === "new_number") {
-      const nextNum = await this.getNextDocNumber(doc.year, doc.series || "");
+      const nextNum = await this.getNextDocNumberWithCloud(doc.year, doc.series || "");
       await db.execute(
         `UPDATE ddt_documents SET doc_number = $1, status = 'confermato', deleted_at = NULL, updated_at = $2, sync_status = 'pending' WHERE id = $3`,
         [nextNum, now, id]
@@ -334,15 +359,21 @@ export class DdtRepository {
         `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2`,
         [now, id]
       );
+      notifyDdtUpdated();
+      void ddtCloudPushService.pushDdtById(id, { reassignNumberOnConflict: true }).catch(() => {});
       return { success: true, restoredAs: "new_number", docNumber: nextNum, year: doc.year };
     }
 
-    // 3. Ripristino con numero originale: verifica assenza di conflitti con DDT attivi
+    // 3. Ripristino con numero originale: verifica assenza di conflitti con DDT attivi (locali e su Supabase)
     const conflictRows = await db.select<any[]>(
       "SELECT id FROM ddt_documents WHERE year = $1 AND doc_number = $2 AND deleted_at IS NULL AND id <> $3",
       [doc.year, doc.doc_number, id]
     );
-    if (conflictRows.length > 0) {
+    const cloudTaken =
+      conflictRows.length === 0 && !doc.series
+        ? await ddtCloudPushService.isNumberTakenOnCloud(doc.year, doc.doc_number, id)
+        : false;
+    if (conflictRows.length > 0 || cloudTaken) {
       return {
         success: false,
         conflict: true,
@@ -360,6 +391,8 @@ export class DdtRepository {
       `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2`,
       [now, id]
     );
+    notifyDdtUpdated();
+    void ddtCloudPushService.pushDdtById(id, { reassignNumberOnConflict: false }).catch(() => {});
     return { success: true, restoredAs: "original", docNumber: doc.doc_number, year: doc.year };
   }
 
@@ -397,7 +430,7 @@ export class DdtRepository {
   }
 
   /**
-   * Calcola il prossimo numero progressivo disponibile per l'anno e serie specificati
+   * Calcola il prossimo numero progressivo disponibile per l'anno e serie specificati (solo SQLite locale)
    */
   public async getNextDocNumber(year: number, series = ""): Promise<number> {
     const db = await getDatabase();
@@ -410,6 +443,16 @@ export class DdtRepository {
     return rows[0]?.next_num ?? 1;
   }
 
+  /**
+   * Calcola il prossimo numero progressivo considerando sia il DB locale sia Supabase (per evitare collisioni multi-PC)
+   */
+  public async getNextDocNumberWithCloud(year: number, series = ""): Promise<number> {
+    const localNext = await this.getNextDocNumber(year, series);
+    if (series) return localNext;
+    const remoteMax = await ddtCloudPushService.getRemoteMaxDocNumber(year);
+    return Math.max(localNext, remoteMax + 1);
+  }
+
   private async saveDocumentInternal(
     ddt: Partial<DdtDocument>,
     items: Partial<DdtItem>[],
@@ -420,11 +463,22 @@ export class DdtRepository {
     const year = ddt.year || new Date().getFullYear();
     const series = ddt.series?.trim() || "";
 
-    const docNumber = ddt.doc_number ?? null;
+    let docNumber = ddt.doc_number ?? null;
     let status = ddt.status || "bozza";
+    const isNewEmission = isEmission && status !== "confermato" && status !== "annullato";
 
     if (isEmission) {
       status = "confermato";
+      if (isNewEmission) {
+        if (docNumber === null) {
+          docNumber = await this.getNextDocNumberWithCloud(year, series);
+        } else if (!series) {
+          const cloudTaken = await ddtCloudPushService.isNumberTakenOnCloud(year, docNumber, docId);
+          if (cloudTaken) {
+            docNumber = await this.getNextDocNumberWithCloud(year, series);
+          }
+        }
+      }
     }
 
     const totals = calculateDdtTotals(items);
@@ -508,6 +562,19 @@ export class DdtRepository {
     };
 
     await invoke("save_ddt_transaction", { payload });
+
+    // Se è un DDT confermato/emesso, sincronizza subito su Supabase (con riallineamento numero su collisione in prima emissione)
+    if (status !== "bozza" && docNumber !== null) {
+      if (isEmission) {
+        await ddtCloudPushService.pushDdtById(docId, {
+          reassignNumberOnConflict: isNewEmission,
+        });
+      } else {
+        void ddtCloudPushService.pushDdtById(docId, { reassignNumberOnConflict: false }).catch(() => {});
+      }
+    }
+
+    notifyDdtUpdated();
 
     const saved = await this.getDdtById(docId);
     if (!saved) throw new Error("Errore durante il salvataggio del DDT");

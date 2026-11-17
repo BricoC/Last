@@ -153,15 +153,21 @@ export function ClientListPage() {
 
   const deleteClient = async () => {
     if (!editing) return;
-    if (!window.confirm(`Archiviare il cliente “${editing.business_name}”?`)) return;
+    if (!window.confirm(`Archiviare ed eliminare anche dal Cloud il cliente “${editing.business_name}”?`)) return;
     try {
       await clientRepository.softDeleteClient(editing.id);
+      const syncedDelete = await clientSyncService.deleteClientFromSupabase(
+        editing.business_name,
+        editing.id
+      );
       setFormOpen(false);
       setEditing(null);
       await reload(query);
       setFeedback({
         type: "success",
-        text: `Cliente “${editing.business_name}” archiviato con successo.`,
+        text: syncedDelete
+          ? `Cliente “${editing.business_name}” eliminato in locale e su Supabase Cloud.`
+          : `Cliente “${editing.business_name}” archiviato in locale (verrà rimosso dal Cloud al prossimo sync).`,
       });
     } catch (err: unknown) {
       setFeedback({

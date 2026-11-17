@@ -3,6 +3,10 @@ import { Client, ClientPhone, ClientDestination } from "../../models/client";
 import { matchesSearchToken, matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { deduplicateDestinations } from "../../utils/destinationUtils";
 import { rankClientsBySearch } from "../../utils/clientSearchUtils";
+import {
+  findMatchingRemoteClientIds,
+  shouldDeleteRemoteClient,
+} from "../clientSyncService";
 
 describe("Client Model & Repository Consistency Rules", () => {
   it("rispetta la struttura BaseEntity e il tracciamento audit", () => {
@@ -263,5 +267,25 @@ describe("Client Model & Repository Consistency Rules", () => {
 
     // VERIPLAST CARRAIA non può riutilizzare 'carraia' due volte per 'car' e 'carr'
     expect(names).not.toContain("VERIPLAST CARRAIA");
+  });
+
+  it("propaga la cancellazione su Supabase solo se nessun altro cliente attivo locale ha lo stesso nome", () => {
+    expect(shouldDeleteRemoteClient("CAMM", ["C.A.M.M.", "TREVITECH"])).toBe(true);
+    expect(shouldDeleteRemoteClient("ARTE DEL SERRAMENTO", ["ARTE DEL SERRAMENTO", "TREVITECH"])).toBe(false);
+    expect(shouldDeleteRemoteClient(" arte del serramento ", ["ARTE DEL SERRAMENTO"])).toBe(false);
+    expect(shouldDeleteRemoteClient("   ", ["TREVITECH"])).toBe(false);
+  });
+
+  it("trova gli ID Supabase esatti per la cancellazione senza usare wildcard ILIKE", () => {
+    const remoteRows = [
+      { id: 10, cliente: "CAMM" },
+      { id: 11, cliente: "C.A.M.M." },
+      { id: 12, cliente: "DEVERIO S.R.L" },
+      { id: 13, cliente: "DEVERIO S.R.L." },
+      { id: 14, cliente: "  camm  " },
+    ];
+    expect(findMatchingRemoteClientIds(remoteRows, "camm")).toEqual([10, 14]);
+    expect(findMatchingRemoteClientIds(remoteRows, "DEVERIO S.R.L")).toEqual([12]);
+    expect(findMatchingRemoteClientIds(remoteRows, "INESISTENTE")).toEqual([]);
   });
 });

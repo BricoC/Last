@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { getDatabase } from "@/shared/data-layer/database";
 import { clientSyncService } from "@/features/clients/services/clientSyncService";
 import { ddtRepository } from "./ddtRepository";
+import { ddtCloudPushService } from "./ddtCloudPushService";
 import { OrNumbersRepository } from "@/features/or-numbers/services/orNumbersRepository";
 import {
   HEADER_FIELDS,
@@ -38,7 +40,75 @@ export interface IncrementalSyncResult {
 }
 
 class DdtIncrementalSyncService {
-  private isSyncing = false;
+  private activeSyncPromise: Promise<IncrementalSyncResult> | null = null;
+  private pendingResync = false;
+  private realtimeClient: SupabaseClient | null = null;
+  private realtimeClientKey: string | null = null;
+  private realtimeChannel: RealtimeChannel | null = null;
+  private realtimeSubscribers = 0;
+
+  public async startRealtime(): Promise<void> {
+    this.realtimeSubscribers++;
+    if (this.realtimeChannel) return;
+
+    try {
+      const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
+      if (!status?.config?.projectUrl || !status?.config?.anonKey || this.realtimeSubscribers <= 0) {
+        return;
+      }
+
+      const projectUrl = status.config.projectUrl.trim().replace(/\/$/, "");
+      const anonKey = status.config.anonKey.trim();
+      const clientKey = `${projectUrl}::${anonKey}`;
+
+      if (!this.realtimeClient || this.realtimeClientKey !== clientKey) {
+        this.realtimeClient = createClient(projectUrl, anonKey);
+        this.realtimeClientKey = clientKey;
+      }
+
+      this.realtimeChannel = this.realtimeClient
+        .channel("realtime_ddt")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "ddt" },
+          (payload) => {
+            if (payload.eventType === "DELETE" && payload.old && typeof (payload.old as { id?: string }).id === "string") {
+              void this.handleRemoteDelete((payload.old as { id: string }).id);
+            } else {
+              void this.syncNewDdtsFromSupabase().catch(() => {});
+            }
+          }
+        )
+        .subscribe();
+    } catch (err) {
+      console.warn("[Sync Incrementale] Impossibile avviare Supabase Realtime DDT:", err);
+    }
+  }
+
+  public stopRealtime(): void {
+    this.realtimeSubscribers = Math.max(0, this.realtimeSubscribers - 1);
+    if (this.realtimeSubscribers > 0) return;
+    if (this.realtimeChannel && this.realtimeClient) {
+      void this.realtimeClient.removeChannel(this.realtimeChannel);
+      this.realtimeChannel = null;
+    }
+  }
+
+  private async handleRemoteDelete(remoteId: string): Promise<void> {
+    try {
+      const db = await getDatabase();
+      const res = await db.execute(
+        `DELETE FROM ddt_documents WHERE id = $1 AND sync_status = 'synced'`,
+        [remoteId]
+      );
+      if ((res.rowsAffected ?? 0) > 0 && typeof window !== "undefined") {
+        await db.execute(`DELETE FROM ddt_items WHERE ddt_id = $1`, [remoteId]);
+        window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+      }
+    } catch (err) {
+      console.warn("[Sync Incrementale] Errore rimozione DDT eliminato da remoto:", err);
+    }
+  }
 
   private async fetchLinesWithPagination(
     projectUrl: string,
@@ -76,12 +146,40 @@ class DdtIncrementalSyncService {
   }
 
   public async syncNewDdtsFromSupabase(): Promise<IncrementalSyncResult> {
-    if (this.isSyncing) {
-      return { newHeadersCount: 0, newLinesCount: 0, backupPath: null };
+    if (this.activeSyncPromise) {
+      this.pendingResync = true;
+      return this.activeSyncPromise;
     }
-    this.isSyncing = true;
 
+    this.activeSyncPromise = (async () => {
+      let lastResult: IncrementalSyncResult = { newHeadersCount: 0, newLinesCount: 0, backupPath: null };
+      let totalHeaders = 0;
+      let totalLines = 0;
+
+      do {
+        this.pendingResync = false;
+        lastResult = await this.executeSingleSync();
+        totalHeaders += lastResult.newHeadersCount;
+        totalLines += lastResult.newLinesCount;
+        if (lastResult.error) {
+          this.pendingResync = false;
+          return { ...lastResult, newHeadersCount: totalHeaders, newLinesCount: totalLines };
+        }
+      } while (this.pendingResync);
+
+      return { ...lastResult, newHeadersCount: totalHeaders, newLinesCount: totalLines };
+    })().finally(() => {
+      this.activeSyncPromise = null;
+    });
+
+    return this.activeSyncPromise;
+  }
+
+  private async executeSingleSync(): Promise<IncrementalSyncResult> {
     try {
+      // 0. PUSH PRIMA DEL PULL: invia eventuali DDT locali in attesa (emessi/modificati/cestinati offline)
+      await ddtCloudPushService.pushPendingDdts().catch(() => {});
+
       // 1. Carica configurazione Supabase
       const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
       if (!status?.config?.projectUrl || !status?.config?.anonKey) {
@@ -103,22 +201,23 @@ class DdtIncrementalSyncService {
       let totalUpdatedHistorical = 0;
 
       for (const year of activeYears) {
-        // 2a. Recupera tutti i doc_number esistenti in locale per l'anno per identificare sia il massimo che eventuali buchi
-        const localDocRows = await db.select<{ doc_number: number }[]>(
-          `SELECT doc_number 
+        // 2a. Recupera tutti i doc_number esistenti (inclusi quelli cestinati per non segnalare falsi buchi)
+        const allDocRows = await db.select<{ doc_number: number; deleted_at: string | null }[]>(
+          `SELECT doc_number, deleted_at
            FROM ddt_documents 
-           WHERE deleted_at IS NULL AND doc_number IS NOT NULL AND year = $1
+           WHERE doc_number IS NOT NULL AND year = $1
            ORDER BY doc_number ASC`,
           [year]
         );
 
-        const localNums = new Set(localDocRows.map((r) => r.doc_number));
-        const localMax = localDocRows.length > 0 ? Math.max(...localDocRows.map((r) => r.doc_number)) : 0;
+        const localNums = new Set(allDocRows.filter((r) => !r.deleted_at).map((r) => r.doc_number));
+        const knownOrTrashedNums = new Set(allDocRows.map((r) => r.doc_number));
+        const localMax = localNums.size > 0 ? Math.max(...localNums) : 0;
 
-        // Rileva tutti i buchi di numerazione sequenziale tra 1 e localMax
+        // Rileva tutti i buchi di numerazione sequenziale tra 1 e localMax (escludendo i numeri intenzionalmente cestinati)
         const missingGaps: number[] = [];
         for (let n = 1; n < localMax; n++) {
-          if (!localNums.has(n)) {
+          if (!knownOrTrashedNums.has(n)) {
             missingGaps.push(n);
           }
         }
@@ -251,14 +350,15 @@ class DdtIncrementalSyncService {
           unresolvedGaps.push({ year, missingNumbers: stillMissing });
         }
 
-        if (fetchedHeadersForYear.length === 0) {
+        const visibleFetched = fetchedHeadersForYear.filter((h) => !ddtCloudPushService.isRecentlyDeleted(h.id));
+        if (visibleFetched.length === 0) {
           continue;
         }
 
-        newHeaders.push(...fetchedHeadersForYear);
+        newHeaders.push(...visibleFetched);
 
         // 2d. Fetch mirato delle righe per TUTTI i numeri individuati (nuovi + buchi recuperati) in chunk con paginazione
-        const distinctNumbers = Array.from(new Set(fetchedHeadersForYear.map((h) => Number(h.numero))));
+        const distinctNumbers = Array.from(new Set(visibleFetched.map((h) => Number(h.numero))));
         const CHUNK = 50;
         for (let i = 0; i < distinctNumbers.length; i += CHUNK) {
           const chunk = distinctNumbers.slice(i, i + CHUNK);
@@ -313,8 +413,11 @@ class DdtIncrementalSyncService {
               const remoteVat = Math.round((Number(remoteH.totale_iva) || 0) * 100000);
               const remoteModified = remoteH.ultima_modifica || remoteH.created_at || "";
 
+              const remoteMs = remoteModified ? Date.parse(remoteModified) : NaN;
+              const localMs = loc.updated_at ? Date.parse(loc.updated_at) : NaN;
               const isTotalDiff = Math.abs((loc.total_document_subunits || 0) - remoteTotDoc) > 10;
-              const isTimestampNewer = Boolean(remoteModified && loc.updated_at && remoteModified > loc.updated_at);
+              const isTimestampNewer =
+                Number.isFinite(remoteMs) && Number.isFinite(localMs) && remoteMs > localMs + 1000;
 
               if (isTotalDiff || isTimestampNewer) {
                 console.log(`[Sync Incrementale] Rilevata modifica su DDT storico ${num}/${year} (totale: ${loc.total_document_subunits} -> ${remoteTotDoc})`);
@@ -326,13 +429,21 @@ class DdtIncrementalSyncService {
 
                 await db.execute(
                   `UPDATE ddt_documents 
-                   SET status = $1, payment_method = $2, transport_reason = $3, carriage_terms = $4,
-                       packages_count = $5, weight_kg = $6, carrier = $7, operator = $8,
-                       total_taxable_subunits = $9, total_vat_subunits = $10, total_document_subunits = $11,
-                       order_reference = $12, updated_at = $13
-                   WHERE id = $14`,
+                   SET status = $1, doc_date = COALESCE($2, doc_date), client_name = COALESCE($3, client_name),
+                       client_address = $4, client_city = $5, destination_name = $6, destination_city = $7,
+                       payment_method = $8, transport_reason = $9, carriage_terms = $10,
+                       packages_count = $11, weight_kg = $12, carrier = $13, operator = $14,
+                       internal_notes = $15, total_taxable_subunits = $16, total_vat_subunits = $17,
+                       total_document_subunits = $18, order_reference = $19, updated_at = $20
+                   WHERE id = $21`,
                   [
-                    remoteH.stato || "emessa",
+                    remoteH.stato || "confermato",
+                    remoteH.data || null,
+                    remoteH.cliente?.trim() || null,
+                    remoteH.indirizzo || null,
+                    remoteH.citta || null,
+                    remoteH.destinazione || null,
+                    remoteH.citta_dest || null,
                     remoteH.pagamento || null,
                     remoteH.causale || "Vendita",
                     remoteH.porto || "Franco stabilimento",
@@ -340,6 +451,7 @@ class DdtIncrementalSyncService {
                     remoteH.peso_kg === null ? null : String(remoteH.peso_kg),
                     remoteH.vettore || null,
                     remoteH.operatore || null,
+                    remoteH.note || null,
                     remoteTaxable,
                     remoteVat,
                     remoteTotDoc,
@@ -349,7 +461,7 @@ class DdtIncrementalSyncService {
                   ]
                 );
 
-                if (isTotalDiff) {
+                if (isTotalDiff || isTimestampNewer) {
                   const updatedLines = await this.fetchLinesWithPagination(projectUrl, anonKey, year, [num]);
                   if (updatedLines.length > 0) {
                     await db.execute("DELETE FROM ddt_items WHERE ddt_id = $1", [loc.id]);
@@ -583,8 +695,6 @@ class DdtIncrementalSyncService {
         backupPath: null,
         error: err instanceof Error ? err.message : String(err),
       };
-    } finally {
-      this.isSyncing = false;
     }
   }
 }

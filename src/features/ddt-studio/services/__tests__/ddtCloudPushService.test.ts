@@ -1,0 +1,284 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const { mockInvoke, mockExecute, mockSelect } = vi.hoisted(() => ({
+  mockInvoke: vi.fn(),
+  mockExecute: vi.fn(),
+  mockSelect: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mockInvoke,
+}));
+
+vi.mock("@/shared/data-layer/database", () => ({
+  getDatabase: vi.fn(async () => ({
+    execute: mockExecute,
+    select: mockSelect,
+  })),
+}));
+
+import { buildSupabaseDdtPayloads, ddtCloudPushService } from "../ddtCloudPushService";
+
+describe("ddtCloudPushService", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mockInvoke.mockReset();
+    mockExecute.mockReset();
+    mockSelect.mockReset();
+    mockInvoke.mockResolvedValue({
+      config: { projectUrl: "https://example.supabase.co", anonKey: "anon-key" },
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("maps SQLite DDT header and items (including discounts and notes) into Supabase payloads", () => {
+    const doc = {
+      id: "ddt-1",
+      doc_number: 3026,
+      year: 2026,
+      series: "",
+      doc_date: "2026-11-17",
+      status: "confermato",
+      client_name: "CARTIERE CARRARA",
+      client_address: "Via Roma 1",
+      client_city: "Capannori",
+      client_vat: "01234567890",
+      client_fiscal_code: null,
+      client_sdi: "M5UXCR1",
+      client_phones_json: JSON.stringify([{ id: "1", nome: "Ufficio", numero: "05831234" }]),
+      destination_name: "CV4",
+      destination_city: "Lucca",
+      transport_reason: "Vendita",
+      payment_method: "RI.BA. 60 GG",
+      order_reference: "ORD-99",
+      operator: "Sam",
+      goods_appearance: "Cartoni",
+      carriage_terms: "Franco stabilimento",
+      packages_count: "2",
+      weight_kg: "12,5",
+      carrier: "Mittente",
+      internal_notes: "Consegna urgente",
+      total_taxable_subunits: 37830000, // 378.30
+      total_vat_subunits: 8322600, // 83.226
+      total_document_subunits: 46152600, // 461.526
+      created_at: "2026-11-17T09:00:00.000Z",
+      updated_at: "2026-11-17T09:05:00.000Z",
+      deleted_at: null,
+      sync_status: "pending",
+    };
+
+    const items = [
+      {
+        id: "item-1",
+        ddt_id: "ddt-1",
+        row_index: 1,
+        code: "ART1",
+        description: "AVVITATORE",
+        row_kind: "item",
+        unit: "NR.",
+        quantity: "1",
+        unit_price_subunits: 39000000, // 390.00
+        discount_pct: "3",
+        net_amount_subunits: 37830000, // 378.30
+        vat_rate: 22,
+        purchase_price_subunits: 20000000, // 200.00
+        deleted_at: null,
+      },
+      {
+        id: "item-2",
+        ddt_id: "ddt-1",
+        row_index: 2,
+        code: null,
+        description: "SERIAL: J830370",
+        row_kind: "note",
+        unit: "",
+        quantity: "",
+        unit_price_subunits: 0,
+        discount_pct: "",
+        net_amount_subunits: 0,
+        vat_rate: 0,
+        purchase_price_subunits: 0,
+        deleted_at: null,
+      },
+    ];
+
+    const { headerPayload, linePayloads } = buildSupabaseDdtPayloads(doc, items);
+
+    expect(headerPayload.numero).toBe(3026);
+    expect(headerPayload.peso_kg).toBe(12.5);
+    expect(headerPayload.totale_imponibile).toBe(378.3);
+    expect(headerPayload.prezzo_acquisto_totale).toBe(200);
+    expect(headerPayload.ricavo).toBe(178.3);
+    expect(headerPayload.sconto_totale).toBe(11.7);
+    expect(headerPayload.telefoni).toEqual([{ id: "1", nome: "Ufficio", numero: "05831234" }]);
+
+    expect(linePayloads).toHaveLength(2);
+    expect(linePayloads[0]).toMatchObject({
+      id: "item-1",
+      riga_nr: 1,
+      prezzo: 390,
+      sconto_pct: 0.03,
+      importo: 378.3,
+      prezzo_scontato: 378.3,
+      prezzo_acquisto: 200,
+      ricavo: 178.3,
+    });
+    expect(linePayloads[1]).toMatchObject({
+      id: "item-2",
+      riga_nr: 2,
+      quantita: 0,
+      prezzo: 0,
+      importo: 0,
+      descrizione: "SERIAL: J830370",
+    });
+  });
+
+  it("reassigns doc_number on cloud collision during new emission and marks synced", async () => {
+    const localDoc = {
+      id: "ddt-local-uuid",
+      doc_number: 3026,
+      year: 2026,
+      series: "",
+      doc_date: "2026-11-17",
+      status: "confermato",
+      client_name: "CENTO",
+      client_address: null,
+      client_city: null,
+      client_vat: null,
+      client_fiscal_code: null,
+      client_sdi: null,
+      client_phones_json: "[]",
+      destination_name: null,
+      destination_city: null,
+      transport_reason: "Vendita",
+      payment_method: null,
+      order_reference: null,
+      operator: "Sam",
+      goods_appearance: null,
+      carriage_terms: "Franco stabilimento",
+      packages_count: null,
+      weight_kg: null,
+      carrier: null,
+      internal_notes: null,
+      total_taxable_subunits: 1000000,
+      total_vat_subunits: 220000,
+      total_document_subunits: 1220000,
+      created_at: "2026-11-17T10:00:00.000Z",
+      updated_at: "2026-11-17T10:00:00.000Z",
+      deleted_at: null,
+      sync_status: "pending",
+    };
+
+    mockSelect
+      .mockResolvedValueOnce([localDoc]) // pushDdtById -> load doc
+      .mockResolvedValueOnce([]) // upsertSingleDdt -> load items
+      .mockResolvedValueOnce([{ max_num: 3026 }]); // computeNextAvailableNumber -> local max
+
+    mockExecute.mockResolvedValue({ rowsAffected: 1 });
+
+    const fetchCalls: Array<{ url: string; method: string; body?: string }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      fetchCalls.push({ url, method, body: typeof init?.body === "string" ? init.body : undefined });
+
+      // 1st collision check: 3026 owned by another PC's UUID
+      if (method === "GET" && url.includes("numero=eq.3026")) {
+        return new Response(JSON.stringify([{ id: "other-pc-uuid" }]), { status: 200 });
+      }
+      // getRemoteMaxDocNumber
+      if (method === "GET" && url.includes("order=numero.desc")) {
+        return new Response(JSON.stringify([{ numero: 3026 }]), { status: 200 });
+      }
+      // 2nd collision check for 3027 -> free
+      if (method === "GET" && url.includes("numero=eq.3027")) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      // POST header or DELETE lines
+      return new Response(JSON.stringify([]), { status: 200 });
+    }) as typeof fetch;
+
+    const res = await ddtCloudPushService.pushDdtById("ddt-local-uuid", {
+      reassignNumberOnConflict: true,
+    });
+
+    expect(res).toEqual({ success: true, docNumber: 3027 });
+    expect(mockExecute).toHaveBeenCalledWith(
+      `UPDATE ddt_documents SET doc_number = $1 WHERE id = $2`,
+      [3027, "ddt-local-uuid"]
+    );
+    expect(mockExecute).toHaveBeenCalledWith(
+      `UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`,
+      ["ddt-local-uuid"]
+    );
+    const headerPost = fetchCalls.find((c) => c.method === "POST" && c.url.includes("/rest/v1/ddt?"));
+    expect(headerPost?.body).toContain('"numero":3027');
+  });
+
+  it("pushes active pending DDTs and deletes soft-deleted DDTs remotely in batch push", async () => {
+    const activeDoc = {
+      id: "doc-active",
+      doc_number: 3030,
+      year: 2026,
+      series: "",
+      doc_date: "2026-11-17",
+      status: "confermato",
+      client_name: "ALFITAL",
+      client_address: null,
+      client_city: null,
+      client_vat: null,
+      client_fiscal_code: null,
+      client_sdi: null,
+      client_phones_json: "[]",
+      destination_name: null,
+      destination_city: null,
+      transport_reason: "Vendita",
+      payment_method: null,
+      order_reference: null,
+      operator: null,
+      goods_appearance: null,
+      carriage_terms: "Franco stabilimento",
+      packages_count: null,
+      weight_kg: null,
+      carrier: null,
+      internal_notes: null,
+      total_taxable_subunits: 500000,
+      total_vat_subunits: 110000,
+      total_document_subunits: 610000,
+      created_at: "2026-11-17T10:00:00.000Z",
+      updated_at: "2026-11-17T10:00:00.000Z",
+      deleted_at: null,
+      sync_status: "pending",
+    };
+
+    const trashedDoc = {
+      ...activeDoc,
+      id: "doc-trashed",
+      doc_number: 3029,
+      deleted_at: "2026-11-17T10:05:00.000Z",
+    };
+
+    mockSelect
+      .mockResolvedValueOnce([trashedDoc, activeDoc]) // pendingDocs
+      .mockResolvedValueOnce([]); // items for activeDoc
+
+    mockExecute.mockResolvedValue({ rowsAffected: 1 });
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([]), { status: 200 })) as typeof fetch;
+
+    const batchRes = await ddtCloudPushService.pushPendingDdts();
+
+    expect(batchRes).toEqual({ pushed: 1, deleted: 1, errors: 0 });
+    expect(mockExecute).toHaveBeenCalledWith(
+      `UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`,
+      ["doc-trashed"]
+    );
+    expect(mockExecute).toHaveBeenCalledWith(
+      `UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`,
+      ["doc-active"]
+    );
+  });
+});

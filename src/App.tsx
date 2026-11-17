@@ -80,10 +80,28 @@ export function App() {
   }, [applyToDom]);
 
   useEffect(() => {
-    // Sincronizzazione incrementale automatica all'avvio da Supabase (scarica SOLO i nuovi DDT)
-    void ddtIncrementalSyncService.syncNewDdtsFromSupabase().catch((err) => {
-      console.warn("[App] Sync incrementale all'avvio non riuscita:", err);
-    });
+    // Sincronizzazione bidirezionale DDT all'avvio, Realtime Supabase, polling periodico (20s) e refresh su online/focus
+    const runDdtSync = () => {
+      if (typeof navigator === "undefined" || navigator.onLine) {
+        void ddtIncrementalSyncService.syncNewDdtsFromSupabase().catch((err) => {
+          console.warn("[App] Sync DDT non riuscita:", err);
+        });
+      }
+    };
+
+    runDdtSync();
+    void ddtIncrementalSyncService.startRealtime();
+
+    const interval = setInterval(runDdtSync, 20_000);
+    window.addEventListener("online", runDdtSync);
+    window.addEventListener("focus", runDdtSync);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("online", runDdtSync);
+      window.removeEventListener("focus", runDdtSync);
+      ddtIncrementalSyncService.stopRealtime();
+    };
   }, []);
 
   // Controllo ed esecuzione silenziosa del backup giornaliero automatico quando l'utente è autenticato

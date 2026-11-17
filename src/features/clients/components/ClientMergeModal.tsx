@@ -3,6 +3,7 @@ import { X, GitMerge, CheckCircle2, ArrowRight, Building2, RefreshCw } from "luc
 import { Button } from "@/shared/components/ui/button";
 import { Client } from "../models/client";
 import { clientRepository } from "../services/clientRepository";
+import { clientSyncService } from "../services/clientSyncService";
 
 interface DuplicateGroup {
   canonical: Client;
@@ -47,15 +48,16 @@ export const ClientMergeModal: React.FC<ClientMergeModalProps> = ({
     setMerging(true);
     setStatusMessage(`Unione in corso di ${group.canonical.business_name}...`);
     try {
-      await clientRepository.mergeClients(
+      const merged = await clientRepository.mergeClients(
         group.canonical.id,
         group.duplicates.map((d) => d.id)
       );
+      await clientSyncService.syncMergedClientToSupabase(merged);
       // Ricarica i gruppi rimanenti
       const remaining = groups.filter((g) => g.canonical.id !== group.canonical.id);
       setGroups(remaining);
       onMerged();
-      setStatusMessage(`Unito con successo: ${group.canonical.business_name}`);
+      setStatusMessage(`Unito e sincronizzato con successo: ${group.canonical.business_name}`);
     } catch (err: unknown) {
       setStatusMessage(err instanceof Error ? err.message : "Errore durante l'unione.");
     } finally {
@@ -69,14 +71,15 @@ export const ClientMergeModal: React.FC<ClientMergeModalProps> = ({
     setStatusMessage("Unione di tutti i duplicati in corso...");
     try {
       for (const group of groups) {
-        await clientRepository.mergeClients(
+        const merged = await clientRepository.mergeClients(
           group.canonical.id,
           group.duplicates.map((d) => d.id)
         );
+        await clientSyncService.syncMergedClientToSupabase(merged);
       }
       setGroups([]);
       onMerged();
-      setStatusMessage("Tutti i duplicati sono stati uniti con successo!");
+      setStatusMessage("Tutti i duplicati sono stati uniti e sincronizzati sul Cloud!");
       setTimeout(() => {
         onClose();
       }, 1000);

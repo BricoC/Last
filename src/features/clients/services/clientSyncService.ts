@@ -55,6 +55,23 @@ const KNOWN_PRICE_LIST_ALIASES: Record<string, string[]> = {
   "C.A.M.M.": ["LIST_C.A.M.M."],
 };
 
+export function findMatchingRemoteClientIds(
+  remoteRows: Array<{ id: number; cliente: string | null | undefined }>,
+  businessName: string
+): number[] {
+  const target = businessName.trim().toLowerCase();
+  if (!target) return [];
+  return remoteRows
+    .filter((r) => typeof r.id === "number" && (r.cliente || "").trim().toLowerCase() === target)
+    .map((r) => r.id);
+}
+
+export function shouldDeleteRemoteClient(businessName: string, activeLocalNames: string[]): boolean {
+  const target = businessName.trim().toLowerCase();
+  if (!target) return false;
+  return !activeLocalNames.some((n) => n.trim().toLowerCase() === target);
+}
+
 export class ClientSyncService {
   private async getCredentials(): Promise<SupabaseConfig> {
     const status = await invoke<ConfigStatus>("load_supabase_config");
@@ -65,9 +82,103 @@ export class ClientSyncService {
   }
 
   /**
+   * Propaga su Supabase Cloud l'eliminazione di un cliente archiviato in locale.
+   * Non elimina da Supabase se esiste ancora un altro cliente attivo in locale con lo stesso nome esatto.
+   */
+  public async deleteClientFromSupabase(businessName: string, localClientId?: string): Promise<boolean> {
+    const trimmed = businessName.trim();
+    if (!trimmed) return false;
+
+    try {
+      const db = await getDatabase();
+      const activeSameName = await db.select<{ business_name: string }[]>(
+        "SELECT business_name FROM clients WHERE deleted_at IS NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($1))",
+        [trimmed]
+      );
+
+      if (!shouldDeleteRemoteClient(trimmed, activeSameName.map((r) => r.business_name))) {
+        if (localClientId) {
+          await db.execute("UPDATE clients SET sync_status = 'synced' WHERE id = $1", [localClientId]);
+        }
+        return true;
+      }
+
+      const creds = await this.getCredentials();
+      const listUrl = new URL("/rest/v1/clienti", creds.projectUrl);
+      listUrl.searchParams.set("select", "id,cliente");
+      listUrl.searchParams.set("limit", "1000");
+
+      const listRes = await fetch(listUrl.toString(), {
+        method: "GET",
+        headers: {
+          apikey: creds.anonKey,
+          Authorization: `Bearer ${creds.anonKey}`,
+        },
+      });
+      if (!listRes.ok) return false;
+
+      const remoteRows = (await listRes.json()) as Array<{ id: number; cliente: string | null }>;
+      const matchingIds = findMatchingRemoteClientIds(remoteRows, trimmed);
+
+      if (matchingIds.length > 0) {
+        const delUrl = new URL("/rest/v1/clienti", creds.projectUrl);
+        delUrl.searchParams.set("id", `in.(${matchingIds.join(",")})`);
+        const delRes = await fetch(delUrl.toString(), {
+          method: "DELETE",
+          headers: {
+            apikey: creds.anonKey,
+            Authorization: `Bearer ${creds.anonKey}`,
+          },
+        });
+        if (!delRes.ok) return false;
+      }
+
+      if (localClientId) {
+        await db.execute("UPDATE clients SET sync_status = 'synced' WHERE id = $1", [localClientId]);
+      } else {
+        await db.execute(
+          "UPDATE clients SET sync_status = 'synced' WHERE deleted_at IS NOT NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($1))",
+          [trimmed]
+        );
+      }
+      return true;
+    } catch (err) {
+      console.warn("[ClientSyncService] Eliminazione cliente su Supabase non riuscita (verrà ritentata):", err);
+      return false;
+    }
+  }
+
+  /**
+   * Invia a Supabase Cloud tutte le eliminazioni clienti rimaste in coda offline.
+   */
+  public async syncPendingDeletionsToSupabase(): Promise<number> {
+    const db = await getDatabase();
+    const pendingDeleted = await db.select<{ id: string; business_name: string }[]>(
+      "SELECT id, business_name FROM clients WHERE deleted_at IS NOT NULL AND sync_status = 'pending'"
+    );
+    let syncedCount = 0;
+    for (const row of pendingDeleted) {
+      const ok = await this.deleteClientFromSupabase(row.business_name, row.id);
+      if (ok) syncedCount++;
+    }
+    return syncedCount;
+  }
+
+  /**
+   * Dopo l'unione di duplicati, rimuove dal Cloud i nomi duplicati archiviati e aggiorna il cliente principale.
+   */
+  public async syncMergedClientToSupabase(mergedClient: Client): Promise<void> {
+    await this.syncPendingDeletionsToSupabase().catch(() => 0);
+    await this.pushClientToSupabase(mergedClient);
+  }
+
+  /**
    * Sincronizza e scarica tutti i clienti da Supabase nel database locale
    */
   public async syncAllFromSupabase(): Promise<SyncClientsResult> {
+    // Prima di scaricare da Supabase, propaga eventuali cancellazioni locali pendenti
+    await this.syncPendingDeletionsToSupabase().catch(() => 0);
+
     const creds = await this.getCredentials();
     const availablePriceLists = await clientRepository.getAllAvailablePriceLists();
 
@@ -94,14 +205,28 @@ export class ClientSyncService {
 
     const db = await getDatabase();
 
+    // Evita di ricreare clienti la cui cancellazione locale non è ancora andata a buon fine sul cloud
+    const pendingDeletedRows = await db.select<{ business_name: string }[]>(
+      "SELECT business_name FROM clients WHERE deleted_at IS NOT NULL AND sync_status = 'pending'"
+    );
+    const pendingDeletedNames = new Set(
+      pendingDeletedRows.map((r) => r.business_name.trim().toLowerCase()).filter(Boolean)
+    );
+
     // Ottimizzazione P1: Pre-caricamento in memoria di tutti i clienti locali in una Map per eliminare query N+1
-    const existingRows = await db.select<{ id: string; business_name: string; price_lists_json: string | null }[]>(
-      "SELECT id, business_name, price_lists_json FROM clients WHERE deleted_at IS NULL"
+    const existingRows = await db.select<{
+      id: string;
+      business_name: string;
+      price_lists_json: string | null;
+      sync_status: string | null;
+    }[]>(
+      "SELECT id, business_name, price_lists_json, sync_status FROM clients WHERE deleted_at IS NULL"
     );
     const existingMap = new Map<string, { id: string; price_lists_json: string | null }>();
     for (const r of existingRows) {
       existingMap.set(r.business_name.trim().toLowerCase(), r);
     }
+    const remoteNamesLower = new Set<string>();
 
     interface PreparedClientWrite {
       id: string;
@@ -124,6 +249,9 @@ export class ClientSyncService {
     for (const row of rows) {
       const businessName = (row.cliente || "").trim();
       if (!businessName) continue;
+      const lowerName = businessName.toLowerCase();
+      remoteNamesLower.add(lowerName);
+      if (pendingDeletedNames.has(lowerName)) continue;
 
       // Parsing localita ("TASSIGNANO - LU") -> citta e provincia
       let city = "";
@@ -283,6 +411,24 @@ export class ClientSyncService {
         }
         imported++;
       }
+
+      // Allinea eventuali clienti già sincronizzati ma rimossi da Supabase da un altro PC
+      if (rows.length > 0 && rows.length < 1000) {
+        for (const existing of existingRows) {
+          if (
+            existing.sync_status === "synced" &&
+            !remoteNamesLower.has(existing.business_name.trim().toLowerCase())
+          ) {
+            await db.execute(
+              `UPDATE clients
+               SET deleted_at = $1, updated_at = $1, updated_by = 'supabase_sync_delete', sync_status = 'synced'
+               WHERE id = $2 AND deleted_at IS NULL AND sync_status = 'synced'`,
+              [now, existing.id]
+            );
+          }
+        }
+      }
+
       await db.execute("COMMIT");
     } catch (err) {
       await db.execute("ROLLBACK");
@@ -448,6 +594,13 @@ export class ClientSyncService {
       }
     }
 
+    const softDeletedRows = await db.select<{ business_name: string }[]>(
+      "SELECT business_name FROM clients WHERE deleted_at IS NOT NULL"
+    );
+    const softDeletedSet = new Set(
+      softDeletedRows.map((r) => r.business_name.toUpperCase().trim()).filter(Boolean)
+    );
+
     // Mappa per aggregare i dati dei clienti mancanti
     interface ExtractedClientData {
       business_name: string;
@@ -467,7 +620,7 @@ export class ClientSyncService {
     for (const row of ddtRows) {
       const rawName = row.client_name.trim();
       const normName = rawName.toUpperCase();
-      if (!normName || existingSet.has(normName)) continue;
+      if (!normName || existingSet.has(normName) || softDeletedSet.has(normName)) continue;
 
       const canonicalMatch = existingCanonicalMap.get(normalizeClientCanonicalKey(normName));
       if (canonicalMatch) {
