@@ -1,12 +1,13 @@
 import { SupabaseConnectionFields } from "./data-import/SupabaseConnectionFields";
 import React, { useEffect, useState } from "react";
 import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
-import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2, Users, HardDrive, DownloadCloud, Activity } from "lucide-react";
+import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2, Users, HardDrive, DownloadCloud, Activity, FileSpreadsheet } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { CompanySettingsPanel } from "./CompanySettingsPanel";
 import { EmailSettingsPanel } from "./EmailSettingsPanel";
 import { DatabaseQuerySettingsPanel } from "./DatabaseQuerySettingsPanel";
 import { BackupSettingsPanel } from "./BackupSettingsPanel";
+import { PriceListExcelExportPanel } from "./PriceListExcelExportPanel";
 import { SoftwareUpdateSettingsPanel } from "./SoftwareUpdateSettingsPanel";
 import { CloudMonitorPanel } from "./CloudMonitorPanel";
 
@@ -126,6 +127,7 @@ export const SettingsPage: React.FC = () => {
             { id: "general", label: "Parametri Generali", icon: <Sliders className="w-4 h-4" /> },
             { id: "email", label: "Configurazione Email", icon: <Mail className="w-4 h-4" /> },
             { id: "backup", label: "Backup & Ripristino", icon: <HardDrive className="w-4 h-4" /> },
+            { id: "excel-export", label: "Export Excel Listini", icon: <FileSpreadsheet className="w-4 h-4" /> },
             { id: "updater", label: "Aggiornamenti", icon: <DownloadCloud className="w-4 h-4" /> },
             { id: "database", label: "Cloud & Database", icon: <Database className="w-4 h-4" /> },
             { id: "cloud-monitor", label: "Monitoraggio Cloud", icon: <Activity className="w-4 h-4" /> },
@@ -166,6 +168,10 @@ export const SettingsPage: React.FC = () => {
         ) : activeNav === "backup" ? (
           <div className="flex-1 min-w-0">
             <BackupSettingsPanel />
+          </div>
+        ) : activeNav === "excel-export" ? (
+          <div className="flex-1 min-w-0">
+            <PriceListExcelExportPanel />
           </div>
         ) : activeNav === "updater" ? (
           <div className="flex-1 min-w-0">

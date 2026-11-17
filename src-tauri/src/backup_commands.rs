@@ -197,6 +197,20 @@ pub fn write_backup_file(file_path: String, content: String) -> Result<u64, Stri
     Ok(len)
 }
 
+/// Scrive un file binario (es. Excel .xlsx) nella cartella scelta dall'utente
+#[tauri::command]
+pub fn write_binary_file(file_path: String, bytes: Vec<u8>) -> Result<u64, String> {
+    let path = Path::new(&file_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Errore creazione cartella di destinazione: {}", e))?;
+    }
+    fs::write(path, &bytes)
+        .map_err(|e| format!("Errore scrittura file binario: {}", e))?;
+    let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    Ok(len)
+}
+
 /// Legge il contenuto testuale di un file di backup
 #[tauri::command]
 pub fn read_backup_file(file_path: String) -> Result<String, String> {

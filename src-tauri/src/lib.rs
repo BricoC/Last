@@ -481,6 +481,7 @@ pub fn run() {
             backup_commands::select_backup_file_dialog,
             backup_commands::open_folder_in_explorer,
             backup_commands::write_backup_file,
+            backup_commands::write_binary_file,
             backup_commands::read_backup_file,
             backup_commands::copy_database_file,
             backup_commands::restore_database_file,

@@ -225,6 +225,77 @@ export interface ClientListAnalysisResult {
   errors: string[];
 }
 
+const SALE_PRICE_HEADER_CANDIDATES = [
+  "FATTURA",
+  "PREZZO_FATTURA",
+  "VENDITA FATTURA",
+  "PREZZO VENDITA",
+  "VENDITA",
+  "VENDITA IVA COMPRESA",
+  "PREZZO CON IVA",
+] as const;
+
+/**
+ * Converte una riga Excel di un listino cliente gestendo intestazioni con spazi
+ * (es. " FATTURA") o etichette storiche equivalenti (es. "VENDITA", "PREZZO CON IVA").
+ */
+export function parseCustomerPriceListExcelRow(
+  rawRow: Record<string, unknown>,
+  clienteWithPrefix: string,
+  fileName: string
+): ParsedListinoClienteRow | null {
+  const normalized: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(rawRow)) {
+    const cleanKey = key.trim().toUpperCase();
+    if (cleanKey && !(cleanKey in normalized && normalized[cleanKey] !== "")) {
+      normalized[cleanKey] = val;
+    }
+  }
+
+  const descRaw = normalized.DESCRIZIONE;
+  if (descRaw == null) return null;
+  const desc = String(descRaw).trim();
+  if (!desc || desc === "0") return null;
+
+  let prezzoFattura = 0;
+  for (const candidate of SALE_PRICE_HEADER_CANDIDATES) {
+    const val = normalized[candidate];
+    if (val != null && val !== "") {
+      prezzoFattura = parseSafeNum(val);
+      break;
+    }
+  }
+
+  const acqRaw = normalized.ACQUISTO;
+  const acquistoOldText = acqRaw != null ? String(acqRaw).trim() : "";
+  const hasText = acquistoOldText !== "" && /[a-zA-Z]/.test(acquistoOldText);
+
+  let prezzoAcquisto = 0;
+  if (acquistoOldText && !hasText) {
+    prezzoAcquisto = parseSafeNum(acquistoOldText);
+  }
+
+  let ricarico = 0;
+  const ricRaw = normalized.RICARICO;
+  if (ricRaw != null && ricRaw !== "") {
+    ricarico = parseSafeNum(ricRaw);
+  }
+
+  return {
+    cliente: clienteWithPrefix,
+    fileName,
+    descrizione: desc,
+    prezzo_fattura: prezzoFattura,
+    prezzo_acquisto: prezzoAcquisto,
+    acquisto_old: acquistoOldText,
+    ricarico,
+    note: normalized.NOTE ? String(normalized.NOTE).trim() : null,
+    note1: normalized.NOTE1 ? String(normalized.NOTE1).trim() : null,
+    note2: normalized.NOTE2 ? String(normalized.NOTE2).trim() : null,
+    hasTextAcquisto: hasText,
+  };
+}
+
 export async function scanAndParseClientPriceLists(
   folderPath: string = "D:\\BricoClassFiles\\Offline\\ListiniClienti",
   ignoreOneDriveConflicts: boolean = true,
@@ -276,46 +347,10 @@ export async function scanAndParseClientPriceLists(
       clientsSet.add(clienteWithPrefix);
 
       for (const r of rawData) {
-        const descRaw = r.DESCRIZIONE ?? r.descrizione;
-        if (descRaw == null) continue;
-        const desc = String(descRaw).trim();
-        if (!desc || desc === "0") continue;
-
-        let prezzoFattura = 0;
-        const fatRaw = r.FATTURA ?? r.prezzo_fattura;
-        if (fatRaw != null && fatRaw !== "") {
-          prezzoFattura = parseSafeNum(fatRaw);
-        }
-
-        const acqRaw = r.ACQUISTO ?? r.acquisto;
-        const acquistoOldText = acqRaw != null ? String(acqRaw).trim() : "";
-        const hasText = acquistoOldText !== "" && /[a-zA-Z]/.test(acquistoOldText);
-        if (hasText) textAcquistoCount++;
-
-        let prezzoAcquisto = 0;
-        if (acquistoOldText && !hasText) {
-          prezzoAcquisto = parseSafeNum(acquistoOldText);
-        }
-
-        let ricarico = 0;
-        const ricRaw = r.RICARICO ?? r.ricarico;
-        if (ricRaw != null && ricRaw !== "") {
-          ricarico = parseSafeNum(ricRaw);
-        }
-
-        allRows.push({
-          cliente: clienteWithPrefix,
-          fileName: file.filename,
-          descrizione: desc,
-          prezzo_fattura: prezzoFattura,
-          prezzo_acquisto: prezzoAcquisto,
-          acquisto_old: acquistoOldText,
-          ricarico: ricarico,
-          note: r.NOTE ? String(r.NOTE).trim() : null,
-          note1: r.NOTE1 ? String(r.NOTE1).trim() : null,
-          note2: r.NOTE2 ? String(r.NOTE2).trim() : null,
-          hasTextAcquisto: hasText,
-        });
+        const parsedRow = parseCustomerPriceListExcelRow(r, clienteWithPrefix, file.filename);
+        if (!parsedRow) continue;
+        if (parsedRow.hasTextAcquisto) textAcquistoCount++;
+        allRows.push(parsedRow);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
