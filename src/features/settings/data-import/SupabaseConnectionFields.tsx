@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Button } from "@/shared/components/ui/button";
-import { CheckCircle2, LoaderCircle, Search, Server } from "lucide-react";
-import { DdtReadOnlyPreview } from "./DdtSupabasePreviewPanel";
+import { Check, CheckCircle2, Copy, Download, LoaderCircle, Search, Server } from "lucide-react";
+import { FULL_SUPABASE_SCHEMA_SQL } from "./supabaseSchemaSql";
+import { CloudFullSetupService, SetupProgress } from "@/shared/services/cloudFullSetupService";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -24,19 +25,25 @@ const PUBLIC_TABLES = [
   "ddt",
   "ddt_righe",
   "ddt_logs",
-  "app_settings",
   "clienti",
-  "preventivi",
   "listino_generale",
+  "listini_vari",
+  "listino_generale_cestino",
   "listini_clienti",
-  "listini_prezzi_log",
+  "listini_clienti_cestino",
+  "preventivi",
+  "preventivi_cestino",
+  "preventivi_sequenza",
   "fatture_elettroniche_testate",
   "fatture_elettroniche_righe",
-  "note_aziendali",
-  "listini_vari",
-  "ordini",
   "fornitori",
-  "storico_operazioni",
+  "ordini",
+  "note",
+  "offerte",
+  "app_users",
+  "email_settings",
+  "backup_settings",
+  "riba_pagamenti",
 ] as const;
 
 const EMPTY_CONFIG: SupabaseConfig = { projectUrl: "", anonKey: "" };
@@ -63,6 +70,9 @@ export function SupabaseConnectionFields() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [counts, setCounts] = useState<VisibleTableCount[] | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<SetupProgress | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -98,8 +108,54 @@ export function SupabaseConnectionFields() {
       setStatus(saved);
       setConfig(normalized);
       setMessage("URL e chiave anon salvati sul PC.");
+      window.dispatchEvent(new CustomEvent("supabase-config-updated"));
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
+  };
+
+  const copySchemaSql = async () => {
+    try {
+      await navigator.clipboard.writeText(FULL_SUPABASE_SCHEMA_SQL);
+      setCopiedSql(true);
+      setMessage("Script SQL completo copiato negli appunti. Incollalo in Supabase -> SQL Editor -> Run.");
+      setTimeout(() => setCopiedSql(false), 3000);
+    } catch (cause) {
+      setError(`Impossibile copiare lo script SQL: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  };
+
+  const downloadAllFromCloud = async () => {
+    if (downloadingAll) return;
+    const projectUrl = config.projectUrl.trim().replace(/\/$/, "");
+    const anonKey = config.anonKey.trim();
+    if (!projectUrl || !anonKey) {
+      setError("Inserisci prima URL Supabase e chiave anon/pubblica.");
+      return;
+    }
+    if (anonKey.startsWith("sb_secret_") || anonKey.toLowerCase().includes("service_role")) {
+      setError("Questa schermata accetta solo la chiave anon/pubblica, mai service_role o chiavi secret.");
+      return;
+    }
+
+    setDownloadingAll(true);
+    setError("");
+    setMessage("");
+    setDownloadProgress({
+      stage: "ddt",
+      message: "Avvio scaricamento completo da Cloud...",
+      percent: 5,
+    });
+
+    const res = await CloudFullSetupService.runFullCloudImport(projectUrl, anonKey, (prog) => {
+      setDownloadProgress(prog);
+    });
+
+    setDownloadingAll(false);
+    if (res.success) {
+      setMessage("Scaricamento completo da Cloud terminato! Tutti i dati sono aggiornati in locale.");
+    } else {
+      setError(res.error || "Scaricamento da Cloud non riuscito.");
+    }
   };
 
   const verify = async () => {
@@ -124,6 +180,7 @@ export function SupabaseConnectionFields() {
       } else {
         setError(`Accesso leggibile per ${readable} tabelle su ${PUBLIC_TABLES.length}. Controlla grants e RLS per quelle segnalate.`);
       }
+      window.dispatchEvent(new CustomEvent("supabase-config-updated"));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Verifica Supabase non riuscita."); }
     finally { setChecking(false); }
   };
@@ -155,13 +212,48 @@ export function SupabaseConnectionFields() {
       </fieldset>
 
       <div className="flex flex-wrap gap-3">
-        <Button type="button" size="sm" disabled={busy || !status} onClick={save}>Salva sul PC</Button>
-        <Button type="button" size="sm" variant="secondary" disabled={busy || checking || !canVerify} onClick={verify}>
+        <Button type="button" size="sm" disabled={busy || downloadingAll || !status} onClick={save}>Salva sul PC</Button>
+        <Button type="button" size="sm" variant="secondary" disabled={busy || checking || downloadingAll || !canVerify} onClick={verify}>
           {checking ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
           Verifica accesso
         </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={busy || downloadingAll || !canVerify}
+          onClick={() => void downloadAllFromCloud()}
+          title="Scarica tutto lo storico dal Cloud Supabase nel database locale (DDT, listini, clienti, offerte, note, preventivi, ordini, fatture e utenti)"
+        >
+          {downloadingAll ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+          {downloadingAll ? "Scaricamento in corso..." : "Scarica tutto da Cloud"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => void copySchemaSql()}
+          title="Copia lo script SQL completo per creare tutte le tabelle su un progetto Supabase nuovo/vuoto"
+        >
+          {copiedSql ? <Check className="mr-2 h-4 w-4 text-emerald-400" /> : <Copy className="mr-2 h-4 w-4" />}
+          {copiedSql ? "SQL Copiato!" : "Copia SQL"}
+        </Button>
       </div>
-      {status && <p className="text-[11px] text-[var(--muted-foreground)] break-all">Configurazione locale: {status.configPath}</p>}
+      {downloadProgress && downloadingAll && (
+        <div className="rounded-lg border border-sky-500/30 bg-sky-950/20 p-3 space-y-1.5 text-xs">
+          <div className="flex items-center justify-between text-sky-300 font-medium">
+            <span>{downloadProgress.message}</span>
+            <span className="font-mono">{downloadProgress.percent}%</span>
+          </div>
+          <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+            <div
+              className="h-full bg-sky-500 transition-all duration-300"
+              style={{ width: `${downloadProgress.percent}%` }}
+            />
+          </div>
+        </div>
+      )}
       {message && <p role="status" className="text-xs">{message}</p>}
       {error && <p role="alert" className="text-xs text-[var(--destructive)]">{error}</p>}
       {counts && <div className="rounded-lg border border-[var(--border)] p-3 text-xs space-y-2">
@@ -176,11 +268,7 @@ export function SupabaseConnectionFields() {
           </div>)}
         </div>
       </div>}
-      <p className="text-[11px] text-[var(--muted-foreground)]">
-        La chiave anon/pubblica è pensata per l’uso client e non concede accesso da sola: Supabase applica grants e policy RLS. Last usa questa coppia per le richieste di lettura; non inserire service_role o chiavi secret.
-      </p>
     </section>
-    <DdtReadOnlyPreview projectUrl={config.projectUrl} anonKey={config.anonKey} />
     </div>
   );
 }

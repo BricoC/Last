@@ -1,5 +1,5 @@
 import { SupabaseConnectionFields } from "./data-import/SupabaseConnectionFields";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
 import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2, Users, HardDrive, DownloadCloud, Activity } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
@@ -15,6 +15,17 @@ import { UserManagementPanel } from "./UserManagementPanel";
 export const SettingsPage: React.FC = () => {
   const { theme, setPreset, setBrightness, resetTheme } = useThemeStore();
   const [activeNav, setActiveNav] = useState("users");
+
+  useEffect(() => {
+    const onOpenSettingsTab = (e: Event) => {
+      const custom = e as CustomEvent<string>;
+      if (typeof custom.detail === "string" && custom.detail.trim()) {
+        setActiveNav(custom.detail);
+      }
+    };
+    window.addEventListener("open-settings-tab", onOpenSettingsTab);
+    return () => window.removeEventListener("open-settings-tab", onOpenSettingsTab);
+  }, []);
   const [editEnabled, setEditEnabled] = useState(true);
   const [autoSaveMinutes, setAutoSaveMinutes] = useState<number>(() => {
     const saved = localStorage.getItem("price_list_autosave_minutes");

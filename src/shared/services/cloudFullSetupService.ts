@@ -4,8 +4,17 @@ import { importAllReadableSupabaseDdts } from "@/features/settings/data-import/d
 import { clientSyncService } from "@/features/clients/services/clientSyncService";
 import { ddtRepository } from "@/features/ddt-studio/services/ddtRepository";
 import { priceListSyncService, SyncProgress } from "@/features/price-lists/services/priceListSyncService";
+import { offersSyncService } from "@/features/offers/services/offersSyncService";
+import { notesSyncService } from "@/features/notes/services/notesSyncService";
+import { QuoteSyncService } from "@/features/quotes/services/quoteSyncService";
+import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
+import { electronicInvoicesService } from "@/features/invoices/services/electronicInvoicesService";
 import { AppUserService } from "@/shared/services/appUserService";
-import { loadBackupConfig } from "@/features/settings/services/backupService";
+import {
+  loadBackupConfig,
+  pullBackupSettingsFromSupabase,
+} from "@/features/settings/services/backupService";
+import { pullEmailSettingsFromSupabase } from "@/features/settings/emailSettingsRepository";
 
 export interface SetupStatus {
   needsSupabase: boolean;
@@ -20,7 +29,7 @@ export interface SetupStatus {
 }
 
 export interface SetupProgress {
-  stage: "ddt" | "price-lists" | "users" | "completed" | "error";
+  stage: "ddt" | "price-lists" | "modules" | "users" | "completed" | "error";
   message: string;
   percent: number;
 }
@@ -116,8 +125,8 @@ export class CloudFullSetupService {
       // 2. FASE 1: Download completo DDT di tutti gli anni (2023, 2024, 2025, 2026...) e righe
       onProgress({
         stage: "ddt",
-        message: "Scaricamento e indicizzazione storico DDT (tutti gli anni)...",
-        percent: 15,
+        message: "Scaricamento storico DDT e righe da Supabase...",
+        percent: 12,
       });
 
       const ddtRes = await importAllReadableSupabaseDdts(url, key);
@@ -125,56 +134,81 @@ export class CloudFullSetupService {
 
       onProgress({
         stage: "ddt",
-        message: "Estrazione e arricchimento anagrafica clienti dai DDT...",
-        percent: 40,
+        message: "Scaricamento anagrafica completa Clienti...",
+        percent: 30,
       });
 
+      try {
+        await clientSyncService.syncAllFromSupabase();
+      } catch (e) {
+        console.warn("[CloudSetup] Sync anagrafica clienti da Supabase non riuscita:", e);
+      }
       await clientSyncService.importMissingClientsFromDdts();
       await ddtRepository.enrichMissingDdtClientData();
 
-      // 3. FASE 2: Download completo Listino Generale (8.849) e Listini Clienti (18.558)
+      // 3. FASE 2: Download completo Listino Generale, Listini Vari e Listini Clienti
       onProgress({
         stage: "price-lists",
-        message: "Scaricamento Listino Generale (8.849 articoli) e Listini Clienti...",
-        percent: 50,
+        message: "Scaricamento Listino Generale e Listini Clienti...",
+        percent: 40,
       });
 
       await priceListSyncService.syncAllFromSupabase((p: SyncProgress) => {
-        let pct = 50;
+        let pct = 40;
         if (p.stage === "general") {
-          pct = 50 + Math.round((p.current / (p.total || 8849)) * 20);
+          pct = 40 + Math.round((p.current / (p.total || 8849)) * 18);
         } else if (p.stage === "clienti") {
-          pct = 70 + Math.round((p.current / (p.total || 18558)) * 20);
+          pct = 58 + Math.round((p.current / (p.total || 18558)) * 18);
         }
         onProgress({
           stage: "price-lists",
           message: p.message,
-          percent: Math.min(92, pct),
+          percent: Math.min(76, pct),
         });
       });
 
-      // 4. FASE 3: Sincronizzazione Utenti e Postazioni
+      // 4. FASE 3: Offerte, Note, Preventivi, Ordini, Fornitori e Fatture Elettroniche
       onProgress({
-        stage: "users",
-        message: "Sincronizzazione utenti e postazioni aziendali...",
-        percent: 95,
+        stage: "modules",
+        message: "Scaricamento Offerte, Note, Preventivi, Ordini e Fatture...",
+        percent: 80,
       });
 
-      try {
-        await AppUserService.syncWithCloud();
-      } catch (e) {
-        console.warn("[CloudSetup] Sync utenti non riuscita:", e);
-      }
+      await Promise.allSettled([
+        offersSyncService.sync().catch((e) => console.warn("[CloudSetup] Offerte:", e)),
+        notesSyncService.sync().catch((e) => console.warn("[CloudSetup] Note:", e)),
+        QuoteSyncService.pullQuotes().catch((e) => console.warn("[CloudSetup] Preventivi:", e)),
+        orderSupabaseService.fetchSuppliers().catch((e) => console.warn("[CloudSetup] Fornitori:", e)),
+        orderSupabaseService.fetchOrders("attivi").catch((e) => console.warn("[CloudSetup] Ordini attivi:", e)),
+        orderSupabaseService.fetchOrders("archiviati").catch((e) => console.warn("[CloudSetup] Ordini archiviati:", e)),
+        electronicInvoicesService.syncFromSupabase().catch((e) => console.warn("[CloudSetup] Fatture:", e)),
+      ]);
+
+      // 5. FASE 4: Utenti, Postazioni e Impostazioni Cloud
+      onProgress({
+        stage: "users",
+        message: "Sincronizzazione utenti, email e configurazione backup...",
+        percent: 94,
+      });
+
+      await Promise.allSettled([
+        AppUserService.syncWithCloud().catch((e) => console.warn("[CloudSetup] Utenti:", e)),
+        pullEmailSettingsFromSupabase().catch((e) => console.warn("[CloudSetup] Email settings:", e)),
+        pullBackupSettingsFromSupabase().catch((e) => console.warn("[CloudSetup] Backup settings:", e)),
+      ]);
 
       onProgress({
         stage: "completed",
-        message: "Inizializzazione completata con successo! Tutti i dati sono disponibili.",
+        message: "Scaricamento completo da Cloud terminato con successo! Tutti i dati sono in locale.",
         percent: 100,
       });
 
-      // Notifica tutti i componenti della Dashboard e DDT di ricaricare i dati aggiornati
+      // Notifica tutti i moduli e la TopNavBar di aggiornare i dati e gli stati
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+        window.dispatchEvent(new CustomEvent("clients-data-updated"));
+        window.dispatchEvent(new CustomEvent("cloud-sync-status-updated"));
+        window.dispatchEvent(new CustomEvent("supabase-config-updated"));
       }
 
       return { success: true };
