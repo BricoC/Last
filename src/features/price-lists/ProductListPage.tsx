@@ -20,7 +20,6 @@ import {
   Plus,
   Trash2,
   Receipt,
-  CloudDownload,
 } from "lucide-react";
 import { ListinoGeneraleRow, PriceListLogEntry, TrashListinoRow } from "./models/priceList";
 import { priceListRepository } from "./services/priceListRepository";
@@ -334,10 +333,6 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
   // Fornitori unificati per Autocomplete colonna fornitore
   const [generalSuppliers, setGeneralSuppliers] = useState<string[]>([]);
 
-  // Stato sincronizzazione Cloud
-  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
-  const [cloudSyncMessage, setCloudSyncMessage] = useState<string | null>(null);
-
   // Modale Cestino Articoli Eliminati (Max 30 FIFO)
   const [trashCount, setTrashCount] = useState<number>(0);
   const [isTrashModalOpen, setIsTrashModalOpen] = useState(false);
@@ -434,52 +429,29 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     }
   }, []);
 
-  // Sincronizzazione manuale Cloud al click dell'utente
-  const handleManualCloudSync = useCallback(async () => {
-    setIsSyncingCloud(true);
-    setCloudSyncMessage(null);
-    try {
-      const syncRes = await priceListSyncService.syncIncrementalGeneralFromSupabase();
-      if (syncRes.error) {
-        setCloudSyncMessage(`Errore Cloud: ${syncRes.error}`);
-      } else if (syncRes.updatedCount > 0) {
-        const refreshedRows = await priceListRepository.searchGeneral("", 15000);
-        setItems(refreshedRows);
-        setTotalDbCount(refreshedRows.length);
-        setOriginalRowsSnapshot((prev) => {
-          const next = new Map(prev);
-          for (const r of syncRes.updatedRows) {
-            next.set(r.id, { ...r });
-          }
-          return next;
-        });
-        const lastMod = await priceListRepository.getLastModificationTime();
-        if (lastMod) {
-          setLastDbModTime(new Date(lastMod));
-        }
-        setCloudSyncMessage(`Sincronizzati ${syncRes.updatedCount} articoli dal Cloud`);
-      } else {
-        setCloudSyncMessage("Tutto aggiornato con il Cloud");
-      }
-    } catch (err: any) {
-      console.warn("[ProductListPage] Errore sync manuale Cloud:", err);
-      setCloudSyncMessage("Errore connessione Cloud");
-    } finally {
-      setIsSyncingCloud(false);
-      setTimeout(() => setCloudSyncMessage(null), 4000);
-    }
-  }, []);
-
   // Apertura modale Fatture Elettroniche filtrata sull'articolo
   const handleOpenInvoices = useCallback((item: ListinoGeneraleRow) => {
     const searchKey = item.codice_articolo?.trim() || item.descrizione?.trim() || "";
     setInvoicesModalSearch(searchKey);
   }, []);
 
-  // Controllo automatico aggiornamenti Cloud quando la finestra riprende il focus
+  // Controllo automatico aggiornamenti Cloud al ritorno su finestra/rete o dopo Cloud Sync globale
   useEffect(() => {
     let lastFocusCheck = Date.now();
-    const handleWindowFocus = () => {
+    const refreshGeneralFromSqlite = async () => {
+      const refreshedRows = await priceListRepository.searchGeneral("", 15000);
+      setItems(refreshedRows);
+      setTotalDbCount(refreshedRows.length);
+      setOriginalRowsSnapshot(new Map(refreshedRows.map((r) => [r.id, { ...r }])));
+      const lastMod = await priceListRepository.getLastModificationTime().catch(() => null);
+      if (lastMod) {
+        const modDate = new Date(lastMod);
+        if (!isNaN(modDate.getTime())) setLastDbModTime(modDate);
+      }
+    };
+
+    const handleAutoSync = () => {
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
       const now = Date.now();
       if (now - lastFocusCheck > 30000 && dirtyRows.size === 0) {
         lastFocusCheck = now;
@@ -487,18 +459,27 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
           .syncIncrementalGeneralFromSupabase()
           .then((res) => {
             if (res.updatedCount > 0) {
-              priceListRepository.searchGeneral("", 15000).then((refreshedRows) => {
-                setItems(refreshedRows);
-                setTotalDbCount(refreshedRows.length);
-                setOriginalRowsSnapshot(new Map(refreshedRows.map((r) => [r.id, { ...r }])));
-              });
+              void refreshGeneralFromSqlite();
             }
           })
           .catch(() => {});
       }
     };
-    window.addEventListener("focus", handleWindowFocus);
-    return () => window.removeEventListener("focus", handleWindowFocus);
+
+    const handleGlobalCloudSync = () => {
+      if (dirtyRows.size === 0) {
+        void refreshGeneralFromSqlite().catch(() => {});
+      }
+    };
+
+    window.addEventListener("focus", handleAutoSync);
+    window.addEventListener("online", handleAutoSync);
+    window.addEventListener("cloud-sync-status-updated", handleGlobalCloudSync);
+    return () => {
+      window.removeEventListener("focus", handleAutoSync);
+      window.removeEventListener("online", handleAutoSync);
+      window.removeEventListener("cloud-sync-status-updated", handleGlobalCloudSync);
+    };
   }, [dirtyRows.size]);
 
   useEffect(() => {
@@ -1498,34 +1479,6 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
             onToggleColumn={toggleColumn}
             onResetDefault={resetDefaultColumns}
           />
-
-          {/* Sincronizzazione Cloud manuale per scaricare istantaneamente modifiche da altri PC */}
-          <button
-            type="button"
-            onClick={handleManualCloudSync}
-            disabled={loading || isSaving || isSyncingCloud}
-            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 hover:text-sky-300 transition-colors shadow-xs cursor-pointer font-medium"
-            title="Sincronizza subito modifiche da altri PC (Supabase Cloud)"
-          >
-            <CloudDownload className={`w-3.5 h-3.5 ${isSyncingCloud ? "animate-bounce" : ""}`} />
-            <span className="hidden sm:inline">{isSyncingCloud ? "Sync Cloud..." : "Sync Cloud"}</span>
-          </button>
-
-          {cloudSyncMessage && (
-            <span className="text-[11px] text-sky-400 font-medium px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 animate-in fade-in">
-              {cloudSyncMessage}
-            </span>
-          )}
-
-          <button
-            type="button"
-            onClick={loadData}
-            disabled={loading || isSaving}
-            className="p-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
-            title="Ricarica lista da SQLite locale"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
 
           {canEdit && (
             <div className="flex items-center space-x-1">

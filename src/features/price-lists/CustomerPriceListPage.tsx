@@ -226,7 +226,6 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
     return distinctClients.filter((c) => c.toLowerCase().includes(term));
   }, [distinctClients, clientDropdownSearch]);
 
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // 1 Riga vuota sempre in cima per creazione nuovi articoli
@@ -285,7 +284,6 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   };
 
   const loadData = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const [count, clients, rows, tCount, supps] = await Promise.all([
@@ -337,14 +335,58 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
     } catch (err) {
       console.error("Errore caricamento listini clienti da SQLite:", err);
       setError(err instanceof Error ? err.message : "Errore lettura database locale.");
-    } finally {
-      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  // Controllo automatico aggiornamenti Cloud al ritorno su finestra/rete o dopo Cloud Sync globale
+  useEffect(() => {
+    let lastFocusCheck = Date.now();
+    const refreshClientiFromSqlite = async () => {
+      const [clients, refreshedRows] = await Promise.all([
+        priceListRepository.getDistinctClients(),
+        priceListRepository.searchClientPrices("", undefined, 20000),
+      ]);
+      setDistinctClients(clients);
+      setItems(refreshedRows);
+      setTotalDbCount(refreshedRows.length);
+      setOriginalRowsSnapshot(new Map(refreshedRows.map((r) => [r.id, { ...r }])));
+    };
+
+    const handleAutoSync = () => {
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      const now = Date.now();
+      if (now - lastFocusCheck > 30000 && dirtyRows.size === 0) {
+        lastFocusCheck = now;
+        priceListSyncService
+          .syncIncrementalClientiFromSupabase()
+          .then((res) => {
+            if (res.updatedCount > 0) {
+              void refreshClientiFromSqlite();
+            }
+          })
+          .catch(() => {});
+      }
+    };
+
+    const handleGlobalCloudSync = () => {
+      if (dirtyRows.size === 0) {
+        void refreshClientiFromSqlite().catch(() => {});
+      }
+    };
+
+    window.addEventListener("focus", handleAutoSync);
+    window.addEventListener("online", handleAutoSync);
+    window.addEventListener("cloud-sync-status-updated", handleGlobalCloudSync);
+    return () => {
+      window.removeEventListener("focus", handleAutoSync);
+      window.removeEventListener("online", handleAutoSync);
+      window.removeEventListener("cloud-sync-status-updated", handleGlobalCloudSync);
+    };
+  }, [dirtyRows.size]);
 
   // Scorciatoia F4 per ricerca
   useEffect(() => {
@@ -1098,17 +1140,6 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
             onToggleColumn={toggleColumn}
             onResetDefault={resetDefaultColumns}
           />
-
-          {/* Ricarica */}
-          <button
-            type="button"
-            onClick={() => void loadData()}
-            disabled={loading || isSaving}
-            className="p-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-            title="Ricarica da database"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
 
           {/* Annulla Modifiche (Ctrl+Z) & Scarta Tutto */}
           {canEdit && (

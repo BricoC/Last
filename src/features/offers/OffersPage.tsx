@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   ClipboardList,
   Search,
@@ -19,6 +20,7 @@ import {
   Copy,
   Check,
   Zap,
+  Printer,
 } from "lucide-react";
 import type { OfferRecord, OfferStatus } from "./types/offer";
 import { OFFER_STATUSES, OFFER_STATUS_STYLES } from "./types/offer";
@@ -139,6 +141,8 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   // Feedback copia testo
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Offerta attualmente pronta per stampa A4
+  const [printingOffer, setPrintingOffer] = useState<OfferRecord | null>(null);
 
   // Menu rapido cambio stato card
   const [openStatusMenuId, setOpenStatusMenuId] = useState<string | null>(null);
@@ -365,6 +369,31 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
+
+  const handlePrintOffer = (offer: OfferRecord) => {
+    setPrintingOffer(offer);
+  };
+
+  useEffect(() => {
+    if (!printingOffer) return;
+    let cancelled = false;
+    const handleAfterPrint = () => {
+      if (!cancelled) setPrintingOffer(null);
+    };
+    window.addEventListener("afterprint", handleAfterPrint);
+    const rafId = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) {
+          window.print();
+        }
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("afterprint", handleAfterPrint);
+    };
+  }, [printingOffer]);
 
   const toggleRowExpansion = (id: string) => {
     setExpandedRows((prev) => {
@@ -895,6 +924,16 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.offerte;`;
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
+                      onClick={() => handlePrintOffer(item)}
+                      className="flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)]/70 bg-[var(--background)] hover:bg-[var(--card)] text-[11px] text-[var(--muted-foreground)] hover:text-white transition-colors cursor-pointer"
+                      title="Stampa offerta (o salva in PDF)"
+                    >
+                      <Printer className="w-3 h-3" />
+                      <span>Stampa</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => handleCopyItems(item.id, item.items_text)}
                       className="flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)]/70 bg-[var(--background)] hover:bg-[var(--card)] text-[11px] text-[var(--muted-foreground)] hover:text-white transition-colors cursor-pointer"
                       title="Copia articoli negli appunti"
@@ -1034,6 +1073,74 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.offerte;`;
 
       {/* Easter Egg MGS Alert Overlay */}
       <MgsAlertOverlay isActive={isMgsAlertActive} onStop={stopMgsAlert} />
+
+      {/* Portale dedicato alla Stampa A4 della singola offerta */}
+      {typeof document !== "undefined" &&
+        printingOffer &&
+        createPortal(
+          <div
+            id="offer-print-portal"
+            style={{
+              position: "fixed",
+              left: "-99999px",
+              top: 0,
+              width: "210mm",
+              opacity: 1,
+              pointerEvents: "none",
+              zIndex: -99999,
+            }}
+          >
+            <div style={{ borderBottom: "2px solid #0f172a", paddingBottom: "10px", marginBottom: "14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px" }}>
+                <span style={{ fontSize: "9.5pt", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#475569" }}>
+                  Offerta / Richiesta Cliente
+                </span>
+                <span style={{ fontSize: "9.5pt", fontWeight: 700, color: "#0f172a" }}>
+                  Stato: {printingOffer.status}
+                  {printingOffer.is_urgent ? " • URGENTE" : ""}
+                </span>
+              </div>
+              <h1 style={{ fontSize: "19pt", fontWeight: 800, margin: "6px 0 4px 0", color: "#0f172a" }}>
+                {printingOffer.requester}
+              </h1>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", fontSize: "10pt", color: "#334155" }}>
+                <span>
+                  <strong>Data:</strong> {formatDateTimeDisplay(printingOffer.created_at || printingOffer.offer_date)}
+                </span>
+                {printingOffer.contact && (
+                  <span>
+                    <strong>Contatto:</strong> {printingOffer.contact}
+                  </span>
+                )}
+                <span>
+                  <strong>Operatore:</strong> {printingOffer.created_by || "Operatore"}
+                </span>
+                {printingOffer.updated_at && printingOffer.updated_at !== printingOffer.created_at && (
+                  <span>
+                    <strong>Ultima modifica:</strong> {formatDateTimeDisplay(printingOffer.updated_at)} ({printingOffer.updated_by || "Operatore"})
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div
+              style={{
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+                fontSize: "10.5pt",
+                lineHeight: 1.65,
+                whiteSpace: "pre-wrap",
+                color: "#0f172a",
+                border: "1px solid #cbd5e1",
+                borderRadius: "6px",
+                padding: "12px 14px",
+                backgroundColor: "#ffffff",
+              }}
+            >
+              {printingOffer.items_text || "(Nessun articolo specificato)"}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
