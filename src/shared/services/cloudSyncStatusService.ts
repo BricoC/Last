@@ -415,7 +415,10 @@ class CloudSyncStatusService {
     cliCount: number;
     summary: string;
   }> {
-    const ddtResult = await ddtIncrementalSyncService.syncNewDdtsFromSupabase();
+    const ddtResult = await ddtIncrementalSyncService.syncNewDdtsFromSupabase({
+      includePreviousYear: true,
+      checkModifiedRecent: true,
+    });
 
     let genCount = 0;
     try {

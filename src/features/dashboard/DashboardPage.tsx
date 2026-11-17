@@ -236,15 +236,24 @@ export const DashboardPage: React.FC = () => {
   // Chiusura con tasto ESC per la matrice clienti a tutto schermo (gli altri modali gestiscono autonomamente il loro stack)
   useEscClose(isClientMatrixModalOpen, () => setIsClientMatrixModalOpen(false));
 
-  const loadPerformanceReport = useCallback(async (yr: number) => {
-    setLoadingPerformance(true);
+  const selectedMonthForDdtsRef = useRef<number>(currentMonthNum);
+  useEffect(() => {
+    selectedMonthForDdtsRef.current = selectedMonthForDdts;
+  }, [selectedMonthForDdts]);
+
+  const loadPerformanceReport = useCallback(async (yr: number, silent = false) => {
+    if (!silent) {
+      setLoadingPerformance(true);
+    }
     try {
       const rep = await dashboardService.getMonthlyPerformanceReport(yr);
       setPerformanceReport(rep);
     } catch (err) {
       console.error("Errore caricamento report rendimento mensile:", err);
     } finally {
-      setLoadingPerformance(false);
+      if (!silent) {
+        setLoadingPerformance(false);
+      }
     }
   }, []);
 
@@ -264,17 +273,19 @@ export const DashboardPage: React.FC = () => {
     return { totTurnover, totCost, totMargin, avgMargin, totDelta, totDdts };
   }, [performanceReport]);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const res = await dashboardService.getDashboardData();
       setData(res);
 
-      // Se non ci sono DDT nel mese corrente (es. a inizio mese), controlla se il mese precedente ha DDT
-      const ddtForCurMonth = await dashboardService.getDdtsForMonth(currentYearNum, currentMonthNum);
-      if (ddtForCurMonth.length > 0) {
-        setMonthDdts(ddtForCurMonth);
-        setSelectedMonthForDdts(currentMonthNum);
+      const activeMonth = silent ? selectedMonthForDdtsRef.current : currentMonthNum;
+      const ddtForMonth = await dashboardService.getDdtsForMonth(currentYearNum, activeMonth);
+      if (ddtForMonth.length > 0 || silent) {
+        setMonthDdts(ddtForMonth);
+        if (!silent) setSelectedMonthForDdts(activeMonth);
       } else {
         const prevM = currentMonthNum > 1 ? currentMonthNum - 1 : 12;
         const prevYr = currentMonthNum > 1 ? currentYearNum : currentYearNum - 1;
@@ -289,7 +300,9 @@ export const DashboardPage: React.FC = () => {
     } catch (err) {
       console.error("Errore caricamento dati Dashboard:", err);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [currentMonthNum, currentYearNum]);
 
@@ -297,11 +310,11 @@ export const DashboardPage: React.FC = () => {
     void loadData();
   }, [loadData]);
 
-  // Aggiornamento reattivo su sincronizzazioni
+  // Aggiornamento reattivo silenzioso su sincronizzazioni reali
   useEffect(() => {
     const handleSync = () => {
-      void loadData();
-      void loadPerformanceReport(performanceYear);
+      void loadData(true);
+      void loadPerformanceReport(performanceYear, true);
     };
     window.addEventListener("ddt-data-updated", handleSync);
     return () => window.removeEventListener("ddt-data-updated", handleSync);

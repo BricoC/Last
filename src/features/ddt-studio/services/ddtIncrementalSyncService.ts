@@ -39,9 +39,18 @@ export interface IncrementalSyncResult {
   error?: string;
 }
 
+export interface SyncDdtOptions {
+  includePreviousYear?: boolean;
+  checkModifiedRecent?: boolean;
+}
+
 class DdtIncrementalSyncService {
   private activeSyncPromise: Promise<IncrementalSyncResult> | null = null;
   private pendingResync = false;
+  private pendingIncludePrevYear = false;
+  private pendingCheckModified = false;
+  private verifiedEmptyDdtIds = new Set<string>();
+  private checkedGapKeys = new Set<string>();
   private realtimeClient: SupabaseClient | null = null;
   private realtimeClientKey: string | null = null;
   private realtimeChannel: RealtimeChannel | null = null;
@@ -75,7 +84,12 @@ class DdtIncrementalSyncService {
             if (payload.eventType === "DELETE" && payload.old && typeof (payload.old as { id?: string }).id === "string") {
               void this.handleRemoteDelete((payload.old as { id: string }).id);
             } else {
-              void this.syncNewDdtsFromSupabase().catch(() => {});
+              const changedAnno = Number((payload.new as { anno?: number } | null)?.anno || 0);
+              const isPrevYear = changedAnno > 0 && changedAnno < new Date().getFullYear();
+              void this.syncNewDdtsFromSupabase({
+                includePreviousYear: isPrevYear,
+                checkModifiedRecent: true,
+              }).catch(() => {});
             }
           }
         )
@@ -145,9 +159,13 @@ class DdtIncrementalSyncService {
     return allLines;
   }
 
-  public async syncNewDdtsFromSupabase(): Promise<IncrementalSyncResult> {
+  public async syncNewDdtsFromSupabase(
+    options: SyncDdtOptions = {}
+  ): Promise<IncrementalSyncResult> {
     if (this.activeSyncPromise) {
       this.pendingResync = true;
+      if (options.includePreviousYear) this.pendingIncludePrevYear = true;
+      if (options.checkModifiedRecent) this.pendingCheckModified = true;
       return this.activeSyncPromise;
     }
 
@@ -155,16 +173,23 @@ class DdtIncrementalSyncService {
       let lastResult: IncrementalSyncResult = { newHeadersCount: 0, newLinesCount: 0, backupPath: null };
       let totalHeaders = 0;
       let totalLines = 0;
+      let nextOpts: SyncDdtOptions = { ...options };
 
       do {
         this.pendingResync = false;
-        lastResult = await this.executeSingleSync();
+        this.pendingIncludePrevYear = false;
+        this.pendingCheckModified = false;
+        lastResult = await this.executeSingleSync(nextOpts);
         totalHeaders += lastResult.newHeadersCount;
         totalLines += lastResult.newLinesCount;
         if (lastResult.error) {
           this.pendingResync = false;
           return { ...lastResult, newHeadersCount: totalHeaders, newLinesCount: totalLines };
         }
+        nextOpts = {
+          includePreviousYear: this.pendingIncludePrevYear,
+          checkModifiedRecent: this.pendingCheckModified,
+        };
       } while (this.pendingResync);
 
       return { ...lastResult, newHeadersCount: totalHeaders, newLinesCount: totalLines };
@@ -175,7 +200,7 @@ class DdtIncrementalSyncService {
     return this.activeSyncPromise;
   }
 
-  private async executeSingleSync(): Promise<IncrementalSyncResult> {
+  private async executeSingleSync(options: SyncDdtOptions = {}): Promise<IncrementalSyncResult> {
     try {
       // 0. PUSH PRIMA DEL PULL: invia eventuali DDT locali in attesa (emessi/modificati/cestinati offline)
       await ddtCloudPushService.pushPendingDdts().catch(() => {});
@@ -189,10 +214,10 @@ class DdtIncrementalSyncService {
       const projectUrl = status.config.projectUrl.trim().replace(/\/$/, "");
       const anonKey = status.config.anonKey.trim();
 
-      // 2. Determina gli anni attivi da SQLite locale
+      // 2. Determina gli anni attivi da SQLite locale (di default solo anno corrente; precedente su avvio/richiesta esplicita)
       const db = await getDatabase();
       const currentYear = new Date().getFullYear();
-      const activeYears = [currentYear, currentYear - 1];
+      const activeYears = options.includePreviousYear ? [currentYear, currentYear - 1] : [currentYear];
 
       const newHeaders: CloudHeader[] = [];
       const newLines: CloudLine[] = [];
@@ -225,11 +250,15 @@ class DdtIncrementalSyncService {
         const fetchedHeadersForYear: CloudHeader[] = [];
 
         // 2b. PRIORITÀ BUCHI: Se ci sono numeri mancanti nella sequenza locale, cerca di recuperarli da Supabase
-        if (missingGaps.length > 0) {
-          console.warn(`[Sync Incrementale] Rilevati ${missingGaps.length} buchi di numerazione per l'anno ${year}:`, missingGaps);
+        const gapsToCheck = options.includePreviousYear
+          ? missingGaps
+          : missingGaps.filter((n) => !this.checkedGapKeys.has(`${year}:${n}`));
+
+        if (gapsToCheck.length > 0) {
+          console.warn(`[Sync Incrementale] Rilevati ${gapsToCheck.length} buchi di numerazione per l'anno ${year}:`, gapsToCheck);
           const CHUNK = 50;
-          for (let i = 0; i < missingGaps.length; i += CHUNK) {
-            const chunk = missingGaps.slice(i, i + CHUNK);
+          for (let i = 0; i < gapsToCheck.length; i += CHUNK) {
+            const chunk = gapsToCheck.slice(i, i + CHUNK);
             const gapUrl = new URL(`/rest/v1/ddt`, projectUrl);
             gapUrl.searchParams.set("anno", `eq.${year}`);
             gapUrl.searchParams.set("numero", `in.(${chunk.join(",")})`);
@@ -241,6 +270,12 @@ class DdtIncrementalSyncService {
             });
             if (gapRes.ok) {
               const gapHeaders = (await gapRes.json()) as CloudHeader[];
+              const foundSet = new Set((gapHeaders || []).map((h) => Number(h.numero)));
+              for (const gNum of chunk) {
+                if (!foundSet.has(gNum)) {
+                  this.checkedGapKeys.add(`${year}:${gNum}`);
+                }
+              }
               if (gapHeaders && gapHeaders.length > 0) {
                 console.log(`[Sync Incrementale] Recuperati da Supabase ${gapHeaders.length} DDT che colmano buchi:`, gapHeaders.map((h) => h.numero));
                 fetchedHeadersForYear.push(...gapHeaders);
@@ -346,35 +381,36 @@ class DdtIncrementalSyncService {
         // Controlla se rimangono buchi di numerazione non trovati neanche su Supabase
         const recoveredNums = new Set(fetchedHeadersForYear.map((h) => Number(h.numero)));
         const stillMissing = missingGaps.filter((n) => !recoveredNums.has(n));
-        if (stillMissing.length > 0) {
+        if (stillMissing.length > 0 && options.includePreviousYear) {
           unresolvedGaps.push({ year, missingNumbers: stillMissing });
         }
 
         const visibleFetched = fetchedHeadersForYear.filter((h) => !ddtCloudPushService.isRecentlyDeleted(h.id));
-        if (visibleFetched.length === 0) {
-          continue;
-        }
+        if (visibleFetched.length > 0) {
+          newHeaders.push(...visibleFetched);
 
-        newHeaders.push(...visibleFetched);
-
-        // 2d. Fetch mirato delle righe per TUTTI i numeri individuati (nuovi + buchi recuperati) in chunk con paginazione
-        const distinctNumbers = Array.from(new Set(visibleFetched.map((h) => Number(h.numero))));
-        const CHUNK = 50;
-        for (let i = 0; i < distinctNumbers.length; i += CHUNK) {
-          const chunk = distinctNumbers.slice(i, i + CHUNK);
-          const lines = await this.fetchLinesWithPagination(projectUrl, anonKey, year, chunk);
-          if (lines.length > 0) {
-            newLines.push(...lines);
+          // 2d. Fetch mirato delle righe per TUTTI i numeri individuati (nuovi + buchi recuperati) in chunk con paginazione
+          const distinctNumbers = Array.from(new Set(visibleFetched.map((h) => Number(h.numero))));
+          const CHUNK = 50;
+          for (let i = 0; i < distinctNumbers.length; i += CHUNK) {
+            const chunk = distinctNumbers.slice(i, i + CHUNK);
+            const lines = await this.fetchLinesWithPagination(projectUrl, anonKey, year, chunk);
+            if (lines.length > 0) {
+              newLines.push(...lines);
+            }
           }
         }
 
-        // 2e. Verifica e riconciliazione modifiche storiche per DDT già esistenti (es. correzione prezzi/quantità su Supabase)
+        // 2e. Verifica modifiche su DDT esistenti solo su avvio/Realtime/nuovi arrivi (evita polling pesante ogni tick)
+        if (!options.checkModifiedRecent && visibleFetched.length === 0) {
+          continue;
+        }
         try {
           const modUrl = new URL(`/rest/v1/ddt`, projectUrl);
           modUrl.searchParams.set("anno", `eq.${year}`);
           modUrl.searchParams.set("select", HEADER_FIELDS);
           modUrl.searchParams.set("order", "ultima_modifica.desc.nullslast");
-          modUrl.searchParams.set("limit", "50");
+          modUrl.searchParams.set("limit", "25");
 
           const modRes = await fetch(modUrl.toString(), {
             headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
@@ -415,7 +451,8 @@ class DdtIncrementalSyncService {
 
               const remoteMs = remoteModified ? Date.parse(remoteModified) : NaN;
               const localMs = loc.updated_at ? Date.parse(loc.updated_at) : NaN;
-              const isTotalDiff = Math.abs((loc.total_document_subunits || 0) - remoteTotDoc) > 10;
+              // Tolleranza 0.01 EUR (1000 subunits) per evitare falsi aggiornamenti dovuti ad arrotondamenti decimali
+              const isTotalDiff = Math.abs((loc.total_document_subunits || 0) - remoteTotDoc) > 1000;
               const isTimestampNewer =
                 Number.isFinite(remoteMs) && Number.isFinite(localMs) && remoteMs > localMs + 1000;
 
@@ -517,19 +554,21 @@ class DdtIncrementalSyncService {
         }
       }
 
-      // 2b. Controllo e recupero di sicurezza: se esistono DDT recenti senza righe in SQLite, scarica le righe mancanti
-      const missingLinesDocs = await db.select<{ id: string; year: number; doc_number: number }[]>(
+      // 2b. Controllo e recupero di sicurezza: se esistono DDT recenti senza righe in SQLite, scarica SOLO i numeri mancanti
+      const minRecoveryYear = options.includePreviousYear ? currentYear - 1 : currentYear;
+      const missingLinesRaw = await db.select<{ id: string; year: number; doc_number: number }[]>(
         `SELECT id, year, doc_number 
          FROM ddt_documents 
          WHERE deleted_at IS NULL 
            AND doc_number IS NOT NULL 
            AND year >= $1
            AND id NOT IN (SELECT DISTINCT ddt_id FROM ddt_items WHERE ddt_id IS NOT NULL)`,
-        [currentYear - 1]
+        [minRecoveryYear]
       );
+      const missingLinesDocs = missingLinesRaw.filter((d) => !this.verifiedEmptyDdtIds.has(d.id));
 
       if (missingLinesDocs.length > 0) {
-        console.log(`[Sync Incrementale] Rilevati ${missingLinesDocs.length} DDT senza righe: avvio recupero da Supabase...`);
+        console.log(`[Sync Incrementale] Rilevati ${missingLinesDocs.length} DDT senza righe: avvio recupero mirato da Supabase...`);
         const docById = new Map<string, { id: string; year: number; doc_number: number }>();
         const docByYearNum = new Map<string, string>();
         missingLinesDocs.forEach((d) => {
@@ -542,74 +581,78 @@ class DdtIncrementalSyncService {
           missingByYear.set(d.year, [...(missingByYear.get(d.year) ?? []), d.doc_number]);
         });
 
+        let recoveredLinesCount = 0;
+        const recoveredDocIds = new Set<string>();
+
         for (const [year, numbers] of missingByYear.entries()) {
-          const minN = Math.min(...numbers);
-          const maxN = Math.max(...numbers);
-
-          const recoveryUrl = new URL(`/rest/v1/ddt_righe`, projectUrl);
-          recoveryUrl.searchParams.set("anno", `eq.${year}`);
-          recoveryUrl.searchParams.set("and", `(numero_ddt.gte.${minN},numero_ddt.lte.${maxN})`);
-          recoveryUrl.searchParams.set("select", LINE_FIELDS);
-          recoveryUrl.searchParams.set("order", "numero_ddt.asc,riga_nr.asc");
-
-          const recoveryRes = await fetch(recoveryUrl.toString(), {
-            headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
-          });
-
-          if (recoveryRes.ok) {
-            const recoveryLines = (await recoveryRes.json()) as CloudLine[];
-            for (const line of recoveryLines) {
-              const targetDocId = line.ddt_id && docById.has(line.ddt_id)
-                ? line.ddt_id
-                : docByYearNum.get(`${line.anno}:${line.numero_ddt}`);
-
-              if (!targetDocId) continue;
-
-              const mapped = mapLineForLocal(line, targetDocId, Number(line.riga_nr || 1));
-              await db.execute(
-                `INSERT OR REPLACE INTO ddt_items (
-                  id, ddt_id, row_index, description, row_kind, unit, quantity,
-                  unit_price_subunits, discount_pct, net_amount_subunits, vat_rate,
-                  vat_amount_subunits, purchase_price_subunits, created_at, updated_at,
-                  updated_by, sync_status
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'supabase-read-only-import','synced')`,
-                [
-                  mapped.id,
-                  targetDocId,
-                  mapped.rowIndex,
-                  mapped.description,
-                  mapped.rowKind,
-                  mapped.unit,
-                  mapped.quantity,
-                  mapped.unitPriceSubunits,
-                  mapped.discountPct,
-                  mapped.netAmountSubunits,
-                  mapped.vatRate,
-                  mapped.vatAmountSubunits,
-                  mapped.purchasePriceSubunits,
-                  mapped.createdAt,
-                  mapped.updatedAt,
-                ]
-              );
+          const CHUNK = 50;
+          const recoveryLines: CloudLine[] = [];
+          for (let i = 0; i < numbers.length; i += CHUNK) {
+            const chunk = numbers.slice(i, i + CHUNK);
+            const lines = await this.fetchLinesWithPagination(projectUrl, anonKey, year, chunk);
+            if (lines.length > 0) {
+              recoveryLines.push(...lines);
             }
+          }
 
-            // Ricalcola i totali per i documenti recuperati
-            for (const doc of missingLinesDocs.filter((d) => d.year === year)) {
-              const totals = await db.select<{ net: number; vat: number }[]>(
-                `SELECT SUM(net_amount_subunits) as net, SUM(vat_amount_subunits) as vat FROM ddt_items WHERE ddt_id = $1`,
-                [doc.id]
-              );
-              const net = totals[0]?.net ?? 0;
-              const vat = totals[0]?.vat ?? 0;
-              await db.execute(
-                `UPDATE ddt_documents SET total_taxable_subunits = $1, total_vat_subunits = $2, total_document_subunits = $3 WHERE id = $4`,
-                [net, vat, net + vat, doc.id]
-              );
+          for (const line of recoveryLines) {
+            const targetDocId = line.ddt_id && docById.has(line.ddt_id)
+              ? line.ddt_id
+              : docByYearNum.get(`${line.anno}:${line.numero_ddt}`);
+
+            if (!targetDocId) continue;
+
+            const mapped = mapLineForLocal(line, targetDocId, Number(line.riga_nr || 1));
+            await db.execute(
+              `INSERT OR REPLACE INTO ddt_items (
+                id, ddt_id, row_index, description, row_kind, unit, quantity,
+                unit_price_subunits, discount_pct, net_amount_subunits, vat_rate,
+                vat_amount_subunits, purchase_price_subunits, created_at, updated_at,
+                updated_by, sync_status
+              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'supabase-read-only-import','synced')`,
+              [
+                mapped.id,
+                targetDocId,
+                mapped.rowIndex,
+                mapped.description,
+                mapped.rowKind,
+                mapped.unit,
+                mapped.quantity,
+                mapped.unitPriceSubunits,
+                mapped.discountPct,
+                mapped.netAmountSubunits,
+                mapped.vatRate,
+                mapped.vatAmountSubunits,
+                mapped.purchasePriceSubunits,
+                mapped.createdAt,
+                mapped.updatedAt,
+              ]
+            );
+            recoveredLinesCount++;
+            recoveredDocIds.add(targetDocId);
+          }
+
+          // Ricalcola i totali solo per i documenti che hanno effettivamente recuperato righe;
+          // marca in sessione quelli confermati a 0 righe su Supabase per evitare loop ogni sync
+          for (const doc of missingLinesDocs.filter((d) => d.year === year)) {
+            if (!recoveredDocIds.has(doc.id)) {
+              this.verifiedEmptyDdtIds.add(doc.id);
+              continue;
             }
+            const totals = await db.select<{ net: number; vat: number }[]>(
+              `SELECT SUM(net_amount_subunits) as net, SUM(vat_amount_subunits) as vat FROM ddt_items WHERE ddt_id = $1`,
+              [doc.id]
+            );
+            const net = totals[0]?.net ?? 0;
+            const vat = totals[0]?.vat ?? 0;
+            await db.execute(
+              `UPDATE ddt_documents SET total_taxable_subunits = $1, total_vat_subunits = $2, total_document_subunits = $3 WHERE id = $4`,
+              [net, vat, net + vat, doc.id]
+            );
           }
         }
 
-        if (typeof window !== "undefined") {
+        if (recoveredLinesCount > 0 && typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("ddt-data-updated"));
         }
       }

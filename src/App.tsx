@@ -80,26 +80,35 @@ export function App() {
   }, [applyToDom]);
 
   useEffect(() => {
-    // Sincronizzazione bidirezionale DDT all'avvio, Realtime Supabase, polling periodico (20s) e refresh su online/focus
-    const runDdtSync = () => {
-      if (typeof navigator === "undefined" || navigator.onLine) {
-        void ddtIncrementalSyncService.syncNewDdtsFromSupabase().catch((err) => {
+    // Sincronizzazione bidirezionale DDT all'avvio, Realtime Supabase (<1s), polling leggero di sicurezza (2 min) e sync su online/focus con throttle
+    let lastQuickSyncMs = 0;
+
+    const triggerDdtSync = (includePreviousYear: boolean, checkModifiedRecent: boolean, force = false) => {
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      const now = Date.now();
+      if (!force && now - lastQuickSyncMs < 30_000) return;
+      lastQuickSyncMs = now;
+      void ddtIncrementalSyncService
+        .syncNewDdtsFromSupabase({ includePreviousYear, checkModifiedRecent })
+        .catch((err) => {
           console.warn("[App] Sync DDT non riuscita:", err);
         });
-      }
     };
 
-    runDdtSync();
+    const runQuickSync = () => triggerDdtSync(false, false, false);
+    const runStartupSync = () => triggerDdtSync(true, true, true);
+
+    runStartupSync();
     void ddtIncrementalSyncService.startRealtime();
 
-    const interval = setInterval(runDdtSync, 20_000);
-    window.addEventListener("online", runDdtSync);
-    window.addEventListener("focus", runDdtSync);
+    const interval = setInterval(runQuickSync, 120_000);
+    window.addEventListener("online", runQuickSync);
+    window.addEventListener("focus", runQuickSync);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener("online", runDdtSync);
-      window.removeEventListener("focus", runDdtSync);
+      window.removeEventListener("online", runQuickSync);
+      window.removeEventListener("focus", runQuickSync);
       ddtIncrementalSyncService.stopRealtime();
     };
   }, []);
