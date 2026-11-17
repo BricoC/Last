@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { OFFER_STATUSES, OFFER_STATUS_STYLES, type OfferRecord, type TrashOfferRow } from "../types/offer";
+import { sortOffers } from "../utils/offerSorting";
 
 describe("Offers Types and Search Logic", () => {
   it("defines exactly the 4 required statuses with respective styles", () => {
@@ -73,14 +74,53 @@ describe("Offers Types and Search Logic", () => {
     expect(res3[0].id).toBe("2");
   });
 
-  it("sorts offers by date descending with the latest on top", () => {
-    const sorted = [...sampleOffers].sort((a, b) => {
-      const cmpDate = b.offer_date.localeCompare(a.offer_date);
-      if (cmpDate !== 0) return cmpDate;
-      return b.created_at.localeCompare(a.created_at);
-    });
+  it("sorts offers by date descending with 'Inviata' placed at the bottom", () => {
+    const offersToSort: OfferRecord[] = [
+      {
+        ...sampleOffers[1],
+        id: "sent-newest",
+        offer_date: "2026-11-15",
+        created_at: "2026-11-15T12:00:00.000Z",
+        status: "Inviata",
+      },
+      {
+        ...sampleOffers[0],
+        id: "prep-older",
+        offer_date: "2026-11-01",
+        created_at: "2026-11-01T08:00:00.000Z",
+        status: "Da preparare",
+      },
+      {
+        ...sampleOffers[1],
+        id: "sent-older",
+        offer_date: "2026-11-05",
+        created_at: "2026-11-05T10:00:00.000Z",
+        status: "Inviata",
+      },
+      {
+        ...sampleOffers[0],
+        id: "pending-mid",
+        offer_date: "2026-11-04",
+        created_at: "2026-11-04T09:00:00.000Z",
+        status: "In sospeso",
+      },
+      {
+        ...sampleOffers[0],
+        id: "prep-newer",
+        offer_date: "2026-11-10",
+        created_at: "2026-11-10T10:00:00.000Z",
+        status: "Da preparare",
+      },
+    ];
 
-    expect(sorted[0].id).toBe("1"); // 2026-11-03 before 2026-11-02
+    const sorted = sortOffers(offersToSort);
+    expect(sorted.map((o) => o.id)).toEqual([
+      "prep-newer",
+      "pending-mid",
+      "prep-older",
+      "sent-newest",
+      "sent-older",
+    ]);
   });
 
   it("handles TrashOfferRow with deleted_at timestamp correctly", () => {

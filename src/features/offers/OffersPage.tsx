@@ -26,9 +26,10 @@ import { offersRepository } from "./services/offersRepository";
 import { offersSyncService } from "./services/offersSyncService";
 import { OfferEditModal } from "./components/OfferEditModal";
 import { OffersTrashModal } from "./components/OffersTrashModal";
+import { sortOffers } from "./utils/offerSorting";
 import { matchesFragmentSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
-import { registerDirtyCheck, registerWindowCloseGuard } from "@/shared/stores/useWindowStore";
+import { registerDirtyCheck, registerWindowCloseGuard, useWindowStore } from "@/shared/stores/useWindowStore";
 import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import { cn } from "@/shared/utils/cn";
 import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
@@ -37,6 +38,7 @@ import { MgsAlertOverlay } from "@/shared/easter-eggs/MgsAlertOverlay";
 export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   const { currentUser } = useUserStore();
   const currentUserName = currentUser?.name || "Operatore";
+  const activeWindowId = useWindowStore((s) => s.activeWindowId);
 
   // Tab attiva: "active" | "archived"
   const [currentTab, setCurrentTab] = useState<"active" | "archived">("active");
@@ -74,6 +76,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [isSupabaseTableMissing, setIsSupabaseTableMissing] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [archivingSent, setArchivingSent] = useState(false);
 
   // Stato Cestino Offerte (max 10 elementi)
   const [showTrashModal, setShowTrashModal] = useState(false);
@@ -140,8 +143,8 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   // Menu rapido cambio stato card
   const [openStatusMenuId, setOpenStatusMenuId] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [list, c] = await Promise.all([
         offersRepository.getAllOffers(),
@@ -152,34 +155,38 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
     } catch (err) {
       console.error("[OffersPage] Errore caricamento offerte:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadData();
+    void loadData(false);
     void loadTrashCount();
   }, [loadData, loadTrashCount]);
 
-  // Ascolta aggiornamenti remoti o sync in background
+  // Ascolta aggiornamenti locali, remoti o sync in background
   useEffect(() => {
     const handleUpdate = () => {
-      void loadData();
+      void loadData(true);
     };
     window.addEventListener("offers-data-updated", handleUpdate);
     return () => window.removeEventListener("offers-data-updated", handleUpdate);
   }, [loadData]);
 
-  const handleSync = async () => {
-    setSyncing(true);
-    setSyncMessage(null);
+  const handleSync = useCallback(async (silent = false) => {
+    if (!silent) {
+      setSyncing(true);
+      setSyncMessage(null);
+    }
     try {
       const res = await offersSyncService.sync();
       if (res.success) {
         setIsSupabaseTableMissing(false);
-        setSyncMessage(`Sincronizzato: +${res.pushed} inviati, +${res.pulled} scaricati`);
-        void loadData();
-        setTimeout(() => setSyncMessage(null), 4000);
+        if (!silent) {
+          setSyncMessage(`Sincronizzato: +${res.pushed} inviati, +${res.pulled} scaricati`);
+          setTimeout(() => setSyncMessage(null), 4000);
+        }
+        await loadData(true);
       } else if (res.error) {
         if (
           res.error.includes("public.offerte") ||
@@ -188,8 +195,8 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
           res.error.includes("404")
         ) {
           setIsSupabaseTableMissing(true);
-          setSyncMessage("Tabella 'offerte' non presente su Supabase.");
-        } else {
+          if (!silent) setSyncMessage("Tabella 'offerte' non presente su Supabase.");
+        } else if (!silent) {
           setSyncMessage(`Errore sync: ${res.error}`);
           setTimeout(() => setSyncMessage(null), 6000);
         }
@@ -198,20 +205,53 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("public.offerte") || msg.includes("404")) {
         setIsSupabaseTableMissing(true);
-        setSyncMessage("Tabella 'offerte' non presente su Supabase.");
-      } else {
+        if (!silent) setSyncMessage("Tabella 'offerte' non presente su Supabase.");
+      } else if (!silent) {
         setSyncMessage("Offline / Errore connessione Supabase");
         setTimeout(() => setSyncMessage(null), 5000);
       }
     } finally {
-      setSyncing(false);
+      if (!silent) setSyncing(false);
     }
-  };
+  }, [loadData]);
 
-  // Esegui sincronizzazione iniziale all'apertura della pagina
+  // Sincronizzazione iniziale, Realtime Supabase, polling periodico (10s) e refresh su focus/online
   useEffect(() => {
-    void handleSync();
-  }, []);
+    void handleSync(true);
+    void offersSyncService.startRealtime();
+
+    const triggerSilentSync = () => {
+      if (typeof navigator === "undefined" || navigator.onLine) {
+        void handleSync(true);
+      }
+    };
+
+    const interval = setInterval(triggerSilentSync, 10_000);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        triggerSilentSync();
+      }
+    };
+
+    window.addEventListener("focus", triggerSilentSync);
+    window.addEventListener("online", triggerSilentSync);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", triggerSilentSync);
+      window.removeEventListener("online", triggerSilentSync);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      offersSyncService.stopRealtime();
+    };
+  }, [handleSync]);
+
+  // Quando si ritorna sulla scheda Offerte (senza chiudere/riaprire il tab), aggiorna subito
+  useEffect(() => {
+    if (windowId && activeWindowId === windowId) {
+      void handleSync(true);
+    }
+  }, [windowId, activeWindowId, handleSync]);
 
   const handleOpenCreate = () => {
     setModalOffer(null);
@@ -247,9 +287,12 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
           is_urgent: Boolean(data.is_urgent),
           created_by: currentUserName,
         });
+        setCurrentTab("active");
+        if (selectedStatusFilter !== "ALL" && selectedStatusFilter !== data.status) {
+          setSelectedStatusFilter("ALL");
+        }
       }
-      await loadData();
-      void handleSync();
+      await loadData(true);
     } catch (err) {
       console.error("[OffersPage] Errore salvataggio offerta:", err);
     }
@@ -259,8 +302,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
     setOpenStatusMenuId(null);
     try {
       await offersRepository.updateStatus(id, newStatus, currentUserName);
-      await loadData();
-      void handleSync();
+      await loadData(true);
     } catch (err) {
       console.error("[OffersPage] Errore aggiornamento stato:", err);
     }
@@ -269,8 +311,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   const handleToggleUrgent = async (id: string, currentUrgent: boolean) => {
     try {
       await offersRepository.toggleUrgent(id, !currentUrgent, currentUserName);
-      await loadData();
-      void handleSync();
+      await loadData(true);
     } catch (err) {
       console.error("[OffersPage] Errore cambio urgenza:", err);
     }
@@ -279,18 +320,40 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   const handleToggleArchive = async (id: string, isArchived: boolean) => {
     try {
       await offersRepository.toggleArchive(id, isArchived, currentUserName);
-      await loadData();
-      void handleSync();
+      await loadData(true);
     } catch (err) {
       console.error("[OffersPage] Errore archiviazione offerta:", err);
+    }
+  };
+
+  const sentActiveCount = useMemo(
+    () => allOffers.filter((o) => !o.is_archived && o.status === "Inviata").length,
+    [allOffers]
+  );
+
+  const handleArchiveSentOffers = async () => {
+    if (sentActiveCount === 0 || archivingSent) return;
+    setArchivingSent(true);
+    try {
+      const archivedCount = await offersRepository.archiveSentOffers(currentUserName);
+      await loadData(true);
+      if (archivedCount > 0) {
+        setSyncMessage(
+          `${archivedCount} ${archivedCount === 1 ? "offerta inviata archiviata" : "offerte inviate archiviate"}`
+        );
+        setTimeout(() => setSyncMessage(null), 4000);
+      }
+    } catch (err) {
+      console.error("[OffersPage] Errore archiviazione offerte inviate:", err);
+    } finally {
+      setArchivingSent(false);
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
       await offersRepository.moveToTrash(id, currentUserName);
-      await loadData();
-      void handleSync();
+      await loadData(true);
       void loadTrashCount();
     } catch (err) {
       console.error("[OffersPage] Errore spostamento offerta nel cestino:", err);
@@ -334,7 +397,10 @@ CREATE TABLE IF NOT EXISTS public.offerte (
 -- RLS per consentire la sincronizzazione dal gestionale
 ALTER TABLE public.offerte ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Accesso offerte per tutti" ON public.offerte;
-CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USING (true) WITH CHECK (true);`;
+CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USING (true) WITH CHECK (true);
+
+-- Abilita aggiornamenti in tempo reale tra più postazioni
+ALTER PUBLICATION supabase_realtime ADD TABLE public.offerte;`;
 
     navigator.clipboard.writeText(sql);
     setCopiedSql(true);
@@ -386,7 +452,7 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
       );
     }
 
-    return result;
+    return sortOffers(result);
   }, [allOffers, currentTab, selectedStatusFilter, searchQuery]);
 
   const formatDateTimeDisplay = (isoStr: string) => {
@@ -519,7 +585,7 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
           {/* Bottone Sincronizza */}
           <button
             type="button"
-            onClick={handleSync}
+            onClick={() => void handleSync(false)}
             disabled={syncing}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] text-xs text-[var(--muted-foreground)] hover:text-white transition-colors cursor-pointer"
             title="Sincronizza ora con Supabase"
@@ -618,9 +684,38 @@ CREATE POLICY "Accesso offerte per tutti" ON public.offerte FOR ALL TO anon USIN
           </div>
         </div>
 
-        <div className="text-xs text-[var(--muted-foreground)] font-mono">
-          {filteredOffers.length} {filteredOffers.length === 1 ? "offerta" : "offerte"}
-          {searchQuery && ` (filtrate su ${allOffers.length})`}
+        <div className="flex items-center gap-3">
+          {currentTab === "active" && (
+            <button
+              type="button"
+              onClick={handleArchiveSentOffers}
+              disabled={sentActiveCount === 0 || archivingSent}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all",
+                sentActiveCount > 0 && !archivingSent
+                  ? "border-amber-500/40 bg-amber-950/30 hover:bg-amber-900/50 text-amber-300 hover:text-amber-200 cursor-pointer active:scale-95"
+                  : "border-[var(--border)]/60 bg-[var(--background)]/40 text-[var(--muted-foreground)]/50 cursor-not-allowed"
+              )}
+              title={
+                sentActiveCount > 0
+                  ? `Archivia tutte le ${sentActiveCount} offerte con stato "Inviata"`
+                  : 'Nessuna offerta attiva con stato "Inviata" da archiviare'
+              }
+            >
+              <Archive className="w-3.5 h-3.5" />
+              <span>{archivingSent ? "Archiviazione..." : "Archivia inviate"}</span>
+              {sentActiveCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold">
+                  {sentActiveCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          <div className="text-xs text-[var(--muted-foreground)] font-mono">
+            {filteredOffers.length} {filteredOffers.length === 1 ? "offerta" : "offerte"}
+            {searchQuery && ` (filtrate su ${allOffers.length})`}
+          </div>
         </div>
       </div>
 

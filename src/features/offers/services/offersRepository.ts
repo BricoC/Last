@@ -2,28 +2,34 @@ import { getDatabase } from "@/shared/data-layer/database";
 import type { OfferRecord, OfferStatus, TrashOfferRow } from "../types/offer";
 import { offersSyncService } from "./offersSyncService";
 
+function notifyOffersChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("offers-data-updated"));
+  }
+}
+
 export class OffersRepository {
   /**
-   * Recupera la lista delle offerte ordinate con la più recente in cima
+   * Recupera la lista delle offerte ordinate con quelle "Inviata" in fondo e le più recenti in cima
    */
   public async getOffers(isArchived: boolean): Promise<OfferRecord[]> {
     const db = await getDatabase();
     const rows = await db.select<OfferRecord[]>(
       `SELECT * FROM offers 
        WHERE is_archived = $1
-       ORDER BY offer_date DESC, created_at DESC`,
+       ORDER BY CASE WHEN status = 'Inviata' THEN 1 ELSE 0 END ASC, offer_date DESC, created_at DESC`,
       [isArchived ? 1 : 0]
     );
     return rows;
   }
 
   /**
-   * Recupera tutte le offerte (attive e archiviate) ordinate con la più recente in cima
+   * Recupera tutte le offerte (attive e archiviate) ordinate con quelle "Inviata" in fondo e le più recenti in cima
    */
   public async getAllOffers(): Promise<OfferRecord[]> {
     const db = await getDatabase();
     const rows = await db.select<OfferRecord[]>(
-      `SELECT * FROM offers ORDER BY offer_date DESC, created_at DESC`
+      `SELECT * FROM offers ORDER BY CASE WHEN status = 'Inviata' THEN 1 ELSE 0 END ASC, offer_date DESC, created_at DESC`
     );
     return rows;
   }
@@ -105,7 +111,8 @@ export class OffersRepository {
       sync_status: "pending",
     };
 
-    // Sincronizza immediatamente
+    // Notifica la UI e sincronizza immediatamente
+    notifyOffersChanged();
     void offersSyncService.sync().catch(() => {});
 
     return created;
@@ -148,7 +155,8 @@ export class OffersRepository {
       [offer_date, requester, contact, items_text, status, is_urgent, updated_by, nowIso, id]
     );
 
-    // Sincronizza immediatamente
+    // Notifica la UI e sincronizza immediatamente
+    notifyOffersChanged();
     void offersSyncService.sync().catch(() => {});
   }
 
@@ -170,6 +178,7 @@ export class OffersRepository {
       [status, user, nowIso, id]
     );
 
+    notifyOffersChanged();
     void offersSyncService.sync().catch(() => {});
   }
 
@@ -191,6 +200,7 @@ export class OffersRepository {
       [is_urgent ? 1 : 0, user, nowIso, id]
     );
 
+    notifyOffersChanged();
     void offersSyncService.sync().catch(() => {});
   }
 
@@ -212,7 +222,31 @@ export class OffersRepository {
       [isArchived ? 1 : 0, user, nowIso, id]
     );
 
+    notifyOffersChanged();
     void offersSyncService.sync().catch(() => {});
+  }
+
+  /**
+   * Archivia tutte le offerte attive con stato "Inviata"
+   */
+  public async archiveSentOffers(updated_by?: string): Promise<number> {
+    const db = await getDatabase();
+    const nowIso = new Date().toISOString();
+    const user = updated_by || "Operatore";
+
+    const res = await db.execute(
+      `UPDATE offers SET 
+        is_archived = 1,
+        updated_by = $1,
+        updated_at = $2,
+        sync_status = 'pending'
+       WHERE is_archived = 0 AND status = 'Inviata'`,
+      [user, nowIso]
+    );
+
+    notifyOffersChanged();
+    void offersSyncService.sync().catch(() => {});
+    return res.rowsAffected ?? 0;
   }
 
   /**
@@ -267,9 +301,11 @@ export class OffersRepository {
       );
     `);
 
+    notifyOffersChanged();
+
     // 4. Rimuovi da Supabase se presente
     if (offer.supabase_id) {
-      void offersSyncService.deleteRemoteOffer(offer.supabase_id).catch(() => {});
+      await offersSyncService.deleteRemoteOffer(offer.supabase_id).catch(() => {});
     }
   }
 
@@ -342,7 +378,8 @@ export class OffersRepository {
     // 2. Rimuovi dal cestino
     await db.execute(`DELETE FROM offers_trash WHERE id = $1`, [id]);
 
-    // 3. Sincronizza su Supabase
+    // 3. Notifica la UI e sincronizza su Supabase
+    notifyOffersChanged();
     void offersSyncService.sync().catch(() => {});
 
     return {
@@ -374,8 +411,10 @@ export class OffersRepository {
     await db.execute(`DELETE FROM offers WHERE id = $1`, [id]);
     await db.execute(`DELETE FROM offers_trash WHERE id = $1`, [id]);
 
+    notifyOffersChanged();
+
     if (supabaseId) {
-      void offersSyncService.deleteRemoteOffer(supabaseId).catch(() => {});
+      await offersSyncService.deleteRemoteOffer(supabaseId).catch(() => {});
     }
   }
 }
