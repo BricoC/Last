@@ -189,7 +189,7 @@ export const OrderManagerPage: React.FC<OrderManagerPageProps> = () => {
         </div>
       ) : (
         /* 3. Sistema di Navigazione Tab Orizzontale a Bottoni */
-        <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
           <div className="flex items-center gap-1 px-5 pt-2 pb-0 bg-[var(--card)] border-b border-[var(--border)] flex-shrink-0 select-none">
             {tabs.map((tab) => {
               const isActive = activeTab === tab.id;
@@ -214,7 +214,7 @@ export const OrderManagerPage: React.FC<OrderManagerPageProps> = () => {
           </div>
 
           {/* 4. Area Contenuto del Tab Attivo */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             {activeTab === 0 && (
               <OrdersActiveTab
                 suppliers={suppliers}

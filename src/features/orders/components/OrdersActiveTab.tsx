@@ -50,6 +50,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
   const gridRef = useRef<AgGridReact<OrderItem>>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const focusedSupplierRef = useRef<string | null>(null);
+  const activeDraftRowKeyRef = useRef<string | null>(null);
 
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -306,7 +307,10 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
 
     for (const node of nodes) {
       const d = node.data;
+      const rowKey = d?._rowKey || (d?.id ? String(d.id) : null);
+      const isActiveDraft = Boolean(activeDraftRowKeyRef.current && rowKey === activeDraftRowKeyRef.current);
       const isFilled =
+        !isActiveDraft &&
         !d?.isNew &&
         (Boolean(d?.description?.trim()) ||
           Boolean(d?.article_code?.trim()) ||
@@ -387,6 +391,63 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
     }
     const node = e.api.getDisplayedRowAtIndex(e.rowIndex);
     focusedSupplierRef.current = node?.data?.supplier_name || null;
+
+    const focusedKey = node?.data?._rowKey || (node?.data?.id ? String(node.data.id) : null);
+    if (activeDraftRowKeyRef.current && focusedKey !== activeDraftRowKeyRef.current) {
+      const targetCol = e.column;
+      activeDraftRowKeyRef.current = null;
+      e.api.onSortChanged();
+      if (node && targetCol && node.rowIndex !== null && node.rowIndex !== undefined) {
+        e.api.setFocusedCell(node.rowIndex, targetCol);
+      }
+    }
+  }, []);
+
+  const tabToNextCell = useCallback((params: any) => {
+    const api = gridRef.current?.api;
+    const { previousCellPosition, backwards } = params;
+    if (!api || !previousCellPosition) return params.nextCellPosition ?? previousCellPosition;
+
+    const rowNode = api.getDisplayedRowAtIndex(previousCellPosition.rowIndex);
+    const editableCols = api
+      .getAllDisplayedColumns()
+      .filter((col) => (rowNode ? col.isCellEditable(rowNode) : Boolean(col.getColDef().editable)));
+    if (editableCols.length === 0) return previousCellPosition;
+
+    const currentColId = previousCellPosition.column.getColId();
+    let colIdx = editableCols.findIndex((c) => c.getColId() === currentColId);
+    let rowIndex = previousCellPosition.rowIndex;
+    const rowCount = api.getDisplayedRowCount();
+
+    if (colIdx === -1) {
+      colIdx = backwards ? editableCols.length - 1 : 0;
+    } else if (backwards) {
+      colIdx--;
+      if (colIdx < 0) {
+        if (rowIndex > 0) {
+          rowIndex--;
+          colIdx = editableCols.length - 1;
+        } else {
+          return previousCellPosition;
+        }
+      }
+    } else {
+      colIdx++;
+      if (colIdx >= editableCols.length) {
+        if (rowIndex < rowCount - 1) {
+          rowIndex++;
+          colIdx = 0;
+        } else {
+          return previousCellPosition;
+        }
+      }
+    }
+
+    return {
+      rowIndex,
+      column: editableCols[colIdx],
+      rowPinned: previousCellPosition.rowPinned,
+    };
   }, []);
 
   // Salvataggio cella: Diretto su Supabase Cloud (con accodamento offline automatico)
@@ -408,6 +469,10 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         Boolean(data.ordered_date?.trim());
 
       if (isDraftRow && !hasContent) return;
+
+      if (isDraftRow) {
+        activeDraftRowKeyRef.current = data._rowKey || String(data.id);
+      }
 
       const autoDate = data.order_date?.trim() ? data.order_date : TODAY();
       data.order_date = autoDate;
@@ -958,6 +1023,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
           if (!hasContent && p.data?.isNew) return null;
           return (
             <button
+              tabIndex={-1}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -983,6 +1049,8 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       filter: true,
       floatingFilter: false,
       suppressMovable: false,
+      suppressKeyboardEvent: (params) =>
+        Boolean(params.editing && params.event.key === "Tab" && params.column?.getColId() !== "supplier_name"),
       comparator: (valueA, valueB, nodeA, nodeB, isDescending) => {
         const aBottom = nodeA.data?.isNew || String(nodeA.data?.id).startsWith("new_") || String(nodeA.data?.id).startsWith("ord_draft_");
         const bBottom = nodeB.data?.isNew || String(nodeB.data?.id).startsWith("new_") || String(nodeB.data?.id).startsWith("ord_draft_");
@@ -1142,7 +1210,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       </div>
 
       {/* 3. Griglia Principale AG Grid (identica a noManV1) */}
-      <div className="flex-1 w-full h-full overflow-hidden p-2">
+      <div className="flex-1 min-h-0 min-w-0 w-full overflow-hidden p-2">
         <div className="ag-theme-alpine orders-modern-grid w-full h-full">
           <AgGridReact<OrderItem>
             ref={gridRef}
@@ -1158,6 +1226,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
             onCellKeyDown={onCellKeyDown}
             onCellClicked={handleCellClicked}
             onCellFocused={handleCellFocused}
+            tabToNextCell={tabToNextCell}
             rowSelection="multiple"
             suppressRowClickSelection={true}
             stopEditingWhenCellsLoseFocus={true}

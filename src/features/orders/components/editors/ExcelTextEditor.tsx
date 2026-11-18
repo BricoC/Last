@@ -24,6 +24,8 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const [value, setValue] = useState<string>(String(startValue));
   const valueRef = useRef<string>(String(startValue));
   const inputRef = useRef<HTMLInputElement>(null);
+  const propsRef = useRef<ICellEditorParams>(props);
+  propsRef.current = props;
   const selectionRef = useRef<{ start: number | null; end: number | null }>({ start: null, end: null });
 
   // Quick edit vs Deep edit:
@@ -66,7 +68,7 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
         if (isTypedChar || props.eventKey === "F2") {
           const len = inputRef.current.value.length;
           inputRef.current.setSelectionRange(len, len);
-        } else if (props.eventKey === "Enter") {
+        } else if (props.eventKey === "Enter" || !props.eventKey) {
           inputRef.current.select();
         }
       }
@@ -80,62 +82,132 @@ export const ExcelTextEditor = forwardRef((props: ICellEditorParams, ref) => {
 
   useEffect(() => {
     window.__isOrderCellEditing = true;
-    if (inputRef.current) {
+    const focusInput = () => {
+      if (!inputRef.current) return;
       inputRef.current.focus();
       if (isTypedChar || props.eventKey === "F2") {
         const len = inputRef.current.value.length;
         inputRef.current.setSelectionRange(len, len);
-      } else if (props.eventKey === "Enter") {
+      } else if (props.eventKey === "Enter" || !props.eventKey) {
         inputRef.current.select();
       }
-    }
+    };
+
+    focusInput();
+    const rafId = requestAnimationFrame(focusInput);
+
+    const el = inputRef.current;
+    const handleNativeKeyDown = (e: KeyboardEvent) => {
+      const currentProps = propsRef.current;
+
+      if (e.key === "Tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        const api = currentProps.api;
+        const targetNode = currentProps.node;
+        const currentColId = currentProps.column?.getColId();
+        if (!api || !targetNode || !currentColId) return;
+
+        const backwards = e.shiftKey;
+        api.stopEditing(false);
+
+        setTimeout(() => {
+          const rowCount = api.getDisplayedRowCount?.() || 0;
+          const currentRowIndex = targetNode.rowIndex;
+          if (currentRowIndex === null || currentRowIndex === undefined || currentRowIndex < 0 || rowCount === 0) {
+            return;
+          }
+
+          const editableCols = api
+            .getAllDisplayedColumns()
+            .filter((c) => c.isCellEditable(targetNode))
+            .map((c) => c.getColId());
+          if (editableCols.length === 0) return;
+
+          const colIdx = editableCols.indexOf(currentColId);
+          let nextRow = currentRowIndex;
+          let nextColIdx = colIdx === -1 ? (backwards ? editableCols.length - 1 : 0) : colIdx + (backwards ? -1 : 1);
+
+          if (nextColIdx < 0) {
+            if (nextRow > 0) {
+              nextRow--;
+              nextColIdx = editableCols.length - 1;
+            } else {
+              nextColIdx = 0;
+            }
+          } else if (nextColIdx >= editableCols.length) {
+            if (nextRow < rowCount - 1) {
+              nextRow++;
+              nextColIdx = 0;
+            } else {
+              nextColIdx = editableCols.length - 1;
+            }
+          }
+
+          const targetCol = editableCols[nextColIdx];
+          const targetNextNode = api.getDisplayedRowAtIndex(nextRow);
+          if (!targetCol || !targetNextNode) return;
+
+          api.setFocusedCell(nextRow, targetCol);
+          const resolvedRow = targetNextNode.rowIndex ?? nextRow;
+          api.ensureIndexVisible(resolvedRow, null);
+          api.ensureColumnVisible(targetCol);
+          api.startEditingCell({ rowIndex: resolvedRow, colKey: targetCol });
+        }, 15);
+        return;
+      }
+
+      if (isQuickEdit.current && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        const rowIndex = currentProps.node?.rowIndex;
+        if (rowIndex === null || rowIndex === undefined || !currentProps.api) return;
+
+        const columns = currentProps.api.getAllDisplayedColumns();
+        const currentIdx = columns.findIndex((c) => c.getColId() === currentProps.column?.getColId());
+        if (currentIdx === -1) return;
+
+        let nextRow = rowIndex;
+        let nextCol = currentIdx;
+
+        if (e.key === "ArrowRight") nextCol++;
+        if (e.key === "ArrowLeft") nextCol--;
+        if (e.key === "ArrowDown") nextRow++;
+        if (e.key === "ArrowUp") nextRow--;
+
+        currentProps.api.stopEditing();
+
+        setTimeout(() => {
+          if (
+            nextCol >= 0 &&
+            nextCol < columns.length &&
+            nextRow >= 0 &&
+            nextRow < (currentProps.api?.getDisplayedRowCount?.() || 0)
+          ) {
+            const nextColId = columns[nextCol].getColId();
+            currentProps.api?.setFocusedCell(nextRow, nextColId);
+          }
+        }, 10);
+      }
+    };
+
+    el?.addEventListener("keydown", handleNativeKeyDown);
     return () => {
+      cancelAnimationFrame(rafId);
+      el?.removeEventListener("keydown", handleNativeKeyDown);
       window.__isOrderCellEditing = false;
     };
   }, []);
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (isQuickEdit.current && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const rowIndex = props.node?.rowIndex;
-      if (rowIndex === null || rowIndex === undefined || !props.api) return;
-
-      const columns = props.api.getAllDisplayedColumns();
-      const currentIdx = columns.findIndex((c) => c.getColId() === props.column?.getColId());
-      if (currentIdx === -1) return;
-
-      let nextRow = rowIndex;
-      let nextCol = currentIdx;
-
-      if (e.key === "ArrowRight") nextCol++;
-      if (e.key === "ArrowLeft") nextCol--;
-      if (e.key === "ArrowDown") nextRow++;
-      if (e.key === "ArrowUp") nextRow--;
-
-      props.api.stopEditing();
-
-      setTimeout(() => {
-        if (
-          nextCol >= 0 &&
-          nextCol < columns.length &&
-          nextRow >= 0 &&
-          nextRow < (props.api?.getDisplayedRowCount?.() || 0)
-        ) {
-          const nextColId = columns[nextCol].getColId();
-          props.api?.setFocusedCell(nextRow, nextColId);
-        }
-      }, 10);
-    }
-  };
 
   return (
     <input
       ref={inputRef}
       value={value}
       onChange={handleInputChange}
-      onKeyDown={onKeyDown}
       style={{
         width: "100%",
         height: "100%",
