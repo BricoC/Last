@@ -1,6 +1,6 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migrateQuoteSchemaV6(db: Database): Promise<void> {
+export async function migrateQuoteSchemaV6(db: MigrationDatabase): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS quotes (
       id TEXT PRIMARY KEY,

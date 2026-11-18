@@ -692,7 +692,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   useEffect(() => {
     let active = true;
     if (ddt.doc_number === null) {
-      ddtRepository.getNextDocNumberWithCloud(ddt.year || new Date().getFullYear(), ddt.series || "").then((num) => {
+      ddtRepository.getNextDocNumberWithCloud(ddt.year || new Date().getFullYear()).then((num) => {
         if (active && num) {
           setDdt((prev) => {
             if (prev.doc_number === null) {
@@ -708,7 +708,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       });
     }
     return () => { active = false; };
-  }, [ddt.id, ddt.doc_number, ddt.year, ddt.series, signature]);
+  }, [ddt.id, ddt.doc_number, ddt.year, signature]);
 
   // Nuovo DDT vuoto con numero progressivo già visibile
   const handleNewDdt = async () => {
@@ -721,7 +721,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     const nextDdt = makeEmptyDdt();
     const nextItems = makeEmptyItems();
     try {
-      const nextNum = await ddtRepository.getNextDocNumberWithCloud(nextDdt.year || new Date().getFullYear(), nextDdt.series || "");
+      const nextNum = await ddtRepository.getNextDocNumberWithCloud(nextDdt.year || new Date().getFullYear());
       nextDdt.doc_number = nextNum;
     } catch (e) {
       console.warn("Impossibile calcolare prossimo numero DDT:", e);

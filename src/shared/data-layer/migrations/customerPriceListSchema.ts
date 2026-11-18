@@ -1,34 +1,19 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migrateCustomerPriceListUpgradeV22(db: Database): Promise<void> {
-  // 1. Verifica ed estensione tabella listini_clienti
-  const tableInfo = await db.select<{ name: string }[]>("PRAGMA table_info(listini_clienti);");
-  const existingCols = new Set(tableInfo.map((c) => c.name));
-
-  if (!existingCols.has("data_ref")) {
-    await db.execute("ALTER TABLE listini_clienti ADD COLUMN data_ref TEXT;");
+export async function migrateCustomerPriceListUpgradeV22(db: MigrationDatabase): Promise<void> {
+  for (const [column, definition] of [
+    ["data_ref", "TEXT"],
+    ["acquisto_eur", "REAL"],
+    ["perc_acquisto", "REAL"],
+    ["data_acquisto", "TEXT"],
+    ["fornitore", "TEXT"],
+  ]) {
+    await db.addColumnIfMissing("listini_clienti", column, definition);
   }
-  if (!existingCols.has("acquisto_eur")) {
-    await db.execute("ALTER TABLE listini_clienti ADD COLUMN acquisto_eur REAL;");
-  }
-  if (!existingCols.has("perc_acquisto")) {
-    await db.execute("ALTER TABLE listini_clienti ADD COLUMN perc_acquisto REAL;");
-  }
-  if (!existingCols.has("data_acquisto")) {
-    await db.execute("ALTER TABLE listini_clienti ADD COLUMN data_acquisto TEXT;");
-  }
-  if (!existingCols.has("fornitore")) {
-    await db.execute("ALTER TABLE listini_clienti ADD COLUMN fornitore TEXT;");
-  }
-  if (!existingCols.has("acquisto_old")) {
-    await db.execute("ALTER TABLE listini_clienti ADD COLUMN acquisto_old TEXT;");
-    // Popola acquisto_old col vecchio prezzo_acquisto convertito a testo
-    await db.execute(`
-      UPDATE listini_clienti 
-      SET acquisto_old = CAST(prezzo_acquisto AS TEXT) 
-      WHERE prezzo_acquisto IS NOT NULL AND acquisto_old IS NULL;
-    `);
-  }
+  await db.addColumnIfMissing("listini_clienti", "acquisto_old", "TEXT", `
+    UPDATE listini_clienti SET acquisto_old = CAST(prezzo_acquisto AS TEXT)
+    WHERE prezzo_acquisto IS NOT NULL AND acquisto_old IS NULL
+  `);
 
   // 2. Tabella Cestino Listini Clienti (max 50 voci FIFO)
   await db.execute(`

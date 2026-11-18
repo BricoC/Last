@@ -22,6 +22,7 @@ export interface ListinoGeneraleRow {
   note: string | null;
   created_at?: string;
   updated_at?: string;
+  sync_revision?: string | null;
 }
 
 export interface ListinoClienteRow {
@@ -43,6 +44,7 @@ export interface ListinoClienteRow {
   note2: string | null;
   created_at?: string;
   updated_at?: string;
+  sync_revision?: string | null;
 }
 
 export interface TrashListinoClienteRow extends ListinoClienteRow {

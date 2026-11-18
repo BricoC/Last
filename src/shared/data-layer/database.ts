@@ -1,4 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
+import { buildMigrationPlan, type MigrationDatabase } from "./migrationPlan";
 import {
   migrateDdtNumberReuseAfterSoftDeleteV9,
   migrateDdtInformationalRowsV10,
@@ -20,6 +22,8 @@ import { migrateNotesSchemaV23, migrateNotesSchemaV24 } from "./migrations/notes
 import { migrateTrashSchemaV25 } from "./migrations/trashSchema";
 import { migrateQuoteFavoritesSchemaV26 } from "./migrations/quoteFavoritesSchema";
 import { migrateSupplierPriceListsSchemaV27 } from "./migrations/supplierPriceListsSchema";
+import { migratePendingCloudWritesV31 } from "./migrations/pendingCloudWritesSchema";
+import { migrateNoteDeletionsV32 } from "./migrations/noteDeletionsSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -29,7 +33,7 @@ let initPromise: Promise<Database> | null = null;
 interface Migration {
   version: number;
   name: string;
-  up: (db: Database) => Promise<void>;
+  up: (db: MigrationDatabase) => Promise<void>;
 }
 
 /**
@@ -40,7 +44,7 @@ const MIGRATIONS: Migration[] = [
   {
     version: 1,
     name: "create_products_table_and_indexes",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       // Tabella Prodotti
       await db.execute(`
         CREATE TABLE IF NOT EXISTS products (
@@ -85,26 +89,20 @@ const MIGRATIONS: Migration[] = [
   {
     version: 2,
     name: "upgrade_products_5decimal_support",
-    up: async (db: Database) => {
-      // Aggiungi colonne per memorizzazione monetaria a 5 cifre decimali (subunits scalate 100.000)
+    up: async (db: MigrationDatabase) => {
+      await db.addColumnIfMissing("products", "purchase_price_subunits", "INTEGER NOT NULL DEFAULT 0");
+      await db.addColumnIfMissing("products", "sale_price_subunits", "INTEGER NOT NULL DEFAULT 0");
       await db.execute(`
-        ALTER TABLE products ADD COLUMN purchase_price_subunits INTEGER NOT NULL DEFAULT 0;
-      `);
-      await db.execute(`
-        ALTER TABLE products ADD COLUMN sale_price_subunits INTEGER NOT NULL DEFAULT 0;
-      `);
-      // Migrazione deterministica dai vecchi centesimi: cents * 1000 = subunits (zero perdita di precisione)
-      await db.execute(`
-        UPDATE products 
-        SET purchase_price_subunits = purchase_price_cents * 1000,
-            sale_price_subunits = sale_price_cents * 1000;
+        UPDATE products SET
+          purchase_price_subunits = CASE WHEN purchase_price_subunits = 0 THEN purchase_price_cents * 1000 ELSE purchase_price_subunits END,
+          sale_price_subunits = CASE WHEN sale_price_subunits = 0 THEN sale_price_cents * 1000 ELSE sale_price_subunits END
       `);
     },
   },
   {
     version: 3,
     name: "create_clients_table",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await db.execute(`
         CREATE TABLE IF NOT EXISTS clients (
           id TEXT PRIMARY KEY,
@@ -148,7 +146,7 @@ const MIGRATIONS: Migration[] = [
   {
     version: 4,
     name: "create_ddt_documents_and_items_tables",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       // Testate DDT
       await db.execute(`
         CREATE TABLE IF NOT EXISTS ddt_documents (
@@ -279,24 +277,16 @@ const MIGRATIONS: Migration[] = [
   {
     version: 13,
     name: "add_client_destinations_price_lists_and_email",
-    up: async (db: Database) => {
-      const tableInfo = await db.select<{ name: string }[]>("PRAGMA table_info(clients)");
-      const colNames = new Set(tableInfo.map((c) => c.name));
-      if (!colNames.has("destinations_json")) {
-        await db.execute("ALTER TABLE clients ADD COLUMN destinations_json TEXT DEFAULT '[]'");
-      }
-      if (!colNames.has("price_lists_json")) {
-        await db.execute("ALTER TABLE clients ADD COLUMN price_lists_json TEXT DEFAULT '[]'");
-      }
-      if (!colNames.has("email")) {
-        await db.execute("ALTER TABLE clients ADD COLUMN email TEXT");
-      }
+    up: async (db: MigrationDatabase) => {
+      await db.addColumnIfMissing("clients", "destinations_json", "TEXT DEFAULT '[]'");
+      await db.addColumnIfMissing("clients", "price_lists_json", "TEXT DEFAULT '[]'");
+      await db.addColumnIfMissing("clients", "email", "TEXT");
     },
   },
   {
     version: 14,
     name: "enrich_ddt_client_details",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await db.execute(`
         UPDATE ddt_documents
         SET 
@@ -315,109 +305,105 @@ const MIGRATIONS: Migration[] = [
   {
     version: 15,
     name: "create_supplier_invoices_and_items",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateElectronicInvoicesSchemaV15(db);
     },
   },
   {
     version: 16,
     name: "create_orders_suppliers_and_audit_tables",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateOrdersSchemaV16(db);
     },
   },
   {
     version: 17,
     name: "create_offers_table",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateOffersSchemaV17(db);
     },
   },
   {
     version: 18,
     name: "add_urgent_and_audit_fields_to_offers",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateOffersSchemaV18(db);
     },
   },
   {
     version: 19,
     name: "create_price_list_trash_table",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migratePriceListTrashSchemaV19(db);
     },
   },
   {
     version: 20,
     name: "create_email_settings_table",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateEmailSettingsSchemaV20(db);
     },
   },
   {
     version: 21,
     name: "create_quote_trash_and_sequences_table",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateQuoteTrashSchemaV21(db);
     },
   },
   {
     version: 22,
     name: "customer_price_list_upgrade_v22",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateCustomerPriceListUpgradeV22(db);
     },
   },
   {
     version: 23,
     name: "create_notes_table",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateNotesSchemaV23(db);
     },
   },
   {
     version: 24,
     name: "add_supabase_id_to_notes",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateNotesSchemaV24(db);
     },
   },
   {
     version: 25,
     name: "create_notes_and_offers_trash_tables",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateTrashSchemaV25(db);
     },
   },
   {
     version: 26,
     name: "create_quote_favorite_items_table",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateQuoteFavoritesSchemaV26(db);
     },
   },
   {
     version: 27,
     name: "create_supplier_price_lists_tables",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await migrateSupplierPriceListsSchemaV27(db);
     },
   },
   {
     version: 28,
     name: "add_sdi_code_to_company_settings",
-    up: async (db: Database) => {
-      try {
-        await db.execute("ALTER TABLE company_settings ADD COLUMN sdi_code TEXT NOT NULL DEFAULT 'M5UXCR1';");
-      } catch {
-        // Colonna già presente se migrata
-      }
+    up: async (db: MigrationDatabase) => {
+      await db.addColumnIfMissing("company_settings", "sdi_code", "TEXT NOT NULL DEFAULT 'M5UXCR1'");
     },
   },
   {
     version: 29,
     name: "seed_client_price_lists_from_known_aliases",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       const aliases: Record<string, string[]> = {
         "CARTIERE CARRARA": ["LIST_CARMA"],
         "TREVITECH": ["LIST_TREVI"],
@@ -459,7 +445,7 @@ const MIGRATIONS: Migration[] = [
   {
     version: 30,
     name: "clear_placeholder_email_settings",
-    up: async (db: Database) => {
+    up: async (db: MigrationDatabase) => {
       await db.execute(`
         UPDATE email_settings SET
           carrara_to = CASE WHEN carrara_to LIKE '%@cartierecarrara.com' THEN '' ELSE carrara_to END,
@@ -473,6 +459,28 @@ const MIGRATIONS: Migration[] = [
           accountant_to = CASE WHEN accountant_to LIKE '%@studiotaddeucci.it' THEN '' ELSE accountant_to END
         WHERE id = 'email_config';
       `);
+    },
+  },
+  {
+    version: 31,
+    name: "track_pending_price_list_and_invoice_writes",
+    up: migratePendingCloudWritesV31,
+  },
+  {
+    version: 32,
+    name: "persist_pending_note_deletions",
+    up: migrateNoteDeletionsV32,
+  },
+  {
+    version: 33,
+    name: "repair_previously_unverified_columns",
+    up: async (db: MigrationDatabase) => {
+      await migratePriceListLogSchemaV12(db);
+      await migrateOffersSchemaV18(db);
+      await migrateQuoteTrashSchemaV21(db);
+      await migrateNotesSchemaV24(db);
+      await migrateSupplierPriceListsSchemaV27(db);
+      await db.addColumnIfMissing("company_settings", "sdi_code", "TEXT NOT NULL DEFAULT 'M5UXCR1'");
     },
   },
 ];
@@ -538,17 +546,9 @@ export async function getDatabase(): Promise<Database> {
 
   initPromise = (async () => {
     try {
-      const rawDb = await Database.load(DB_FILENAME);
-      const db = wrapDatabaseWithBusyRetry(rawDb);
-
-      // Ottimizzazioni PRAGMA SQLite per concorrenza multi-connessione e integrità referenziale
-      await db.execute("PRAGMA journal_mode = WAL;");
-      await db.execute("PRAGMA synchronous = NORMAL;");
-      await db.execute("PRAGMA busy_timeout = 30000;");
-      await db.execute("PRAGMA foreign_keys = ON;");
-
-      // Esecuzione migrazioni versionate
-      await runMigrations(db);
+      await withSqliteBusyRetry(() => invoke("initialize_local_database"));
+      await runMigrations();
+      const db = wrapDatabaseWithBusyRetry(Database.get(DB_FILENAME));
 
       dbInstance = db;
       return db;
@@ -565,33 +565,11 @@ export async function getDatabase(): Promise<Database> {
 /**
  * Motore di migrazione versionata: verifica lo storico e applica solo i nuovi delta.
  */
-async function runMigrations(db: Database): Promise<void> {
-  // 1. Assicura esistenza tabella tracciamento migrazioni
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      applied_at TEXT NOT NULL
-    );
-  `);
-
-  // 2. Recupera le versioni già applicate
-  const appliedRows = await db.select<{ version: number }[]>(
-    "SELECT version FROM schema_migrations"
-  );
-  const appliedSet = new Set(appliedRows.map((r) => r.version));
-
-  // 3. Esegue i delta in ordine progressivo
-  for (const migration of MIGRATIONS) {
-    if (!appliedSet.has(migration.version)) {
-      console.log(`[Database] Applicazione migrazione v${migration.version}: ${migration.name}`);
-      await migration.up(db);
-
-      await db.execute(
-        "INSERT INTO schema_migrations (version, name, applied_at) VALUES ($1, $2, $3)",
-        [migration.version, migration.name, new Date().toISOString()]
-      );
-      console.log(`[Database] Migrazione v${migration.version} applicata con successo.`);
-    }
-  }
+async function runMigrations(): Promise<void> {
+  const migrations = await Promise.all(MIGRATIONS.map(async ({ version, name, up }) => ({
+    version,
+    name,
+    steps: await buildMigrationPlan(up),
+  })));
+  await withSqliteBusyRetry(() => invoke("run_local_migrations", { migrations }));
 }

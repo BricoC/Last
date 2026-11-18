@@ -1,4 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { invoke } from "@tauri-apps/api/core";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
 import { parseInvoiceXmlAll, ParsedInvoiceResult } from "./invoiceXmlParser";
@@ -83,6 +84,7 @@ export class ElectronicInvoicesService {
   async syncFromSupabase(
     onProgress?: (msg: string, percent: number) => void
   ): Promise<{ testateCount: number; righeCount: number }> {
+    const startedAt = new Date().toISOString();
     const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
     if (!status?.config?.projectUrl || !status?.config?.anonKey) {
       throw new Error("Configurazione Supabase mancante o non valida.");
@@ -99,7 +101,7 @@ export class ElectronicInvoicesService {
 
     // 1. Scarica tutte le testate con paginazione
     onProgress?.("Download testate fatture...", 10);
-    const db = await getDatabase();
+    const writes: SqliteWrite[] = [];
     let testateOffset = 0;
     const testatePageSize = 1000;
     let totalTestate = 0;
@@ -113,14 +115,15 @@ export class ElectronicInvoicesService {
         throw new Error(`Errore fetch testate: HTTP ${testateRes.status}`);
       }
       const rawTestate: any[] = await testateRes.json();
-      if (!rawTestate || rawTestate.length === 0) break;
+      if (!Array.isArray(rawTestate)) throw new Error("Risposta non valida per le testate fatture.");
+      if (rawTestate.length === 0) break;
 
       totalTestate += rawTestate.length;
-      onProgress?.(`Salvataggio ${totalTestate} testate in SQLite locale...`, 20);
+      onProgress?.(`Scaricate ${totalTestate} testate...`, 20);
 
       for (const t of rawTestate) {
-        await db.execute(
-          `INSERT INTO supplier_invoices (
+        writes.push({
+          sql: `INSERT INTO supplier_invoices (
             supplier_name, vat_number, fiscal_code, doc_number, doc_date, year,
             total_amount, taxable_amount, vat_amount, payment_method, due_date,
             iban, bank_name, file_name, notes
@@ -137,8 +140,11 @@ export class ElectronicInvoicesService {
             iban = excluded.iban,
             bank_name = excluded.bank_name,
             file_name = excluded.file_name,
-            notes = excluded.notes;`,
-          [
+            notes = excluded.notes
+          WHERE supplier_invoices.cloud_upload_pending = 0
+            AND (supplier_invoices.cloud_uploaded_at IS NULL
+              OR julianday(supplier_invoices.cloud_uploaded_at) < julianday($16));`,
+          params: [
             t.fornitore || "",
             t.partita_iva || null,
             t.codice_fiscale || null,
@@ -154,12 +160,12 @@ export class ElectronicInvoicesService {
             t.istituto_finanziario || null,
             t.nome_file || null,
             t.note || null,
+            startedAt,
           ]
-        );
+        });
       }
 
-      testateOffset += testatePageSize;
-      if (rawTestate.length < testatePageSize) break;
+      testateOffset += rawTestate.length;
     }
 
     // 3. Scarica tutte le righe a blocchi paginati da 1000
@@ -168,8 +174,16 @@ export class ElectronicInvoicesService {
     const pageSize = 1000;
     let totalRighe = 0;
 
-    // Svuota tabella locale righe prima del ricarico completo pulito
-    await db.execute("DELETE FROM supplier_invoice_items");
+    writes.push({
+      sql: `DELETE FROM supplier_invoice_items AS item
+        WHERE NOT EXISTS (
+          SELECT 1 FROM supplier_invoices AS invoice
+          WHERE invoice.supplier_name = item.supplier_name AND invoice.doc_number = item.doc_number
+            AND invoice.doc_date = item.doc_date
+            AND (invoice.cloud_upload_pending = 1 OR julianday(invoice.cloud_uploaded_at) >= julianday($1))
+        )`,
+      params: [startedAt],
+    });
 
     while (true) {
       const righeRes = await fetch(
@@ -180,20 +194,26 @@ export class ElectronicInvoicesService {
         throw new Error(`Errore fetch righe: HTTP ${righeRes.status}`);
       }
       const rawRighe: any[] = await righeRes.json();
-      if (!rawRighe || rawRighe.length === 0) break;
+      if (!Array.isArray(rawRighe)) throw new Error("Risposta non valida per le righe fatture.");
+      if (rawRighe.length === 0) break;
 
       totalRighe += rawRighe.length;
       const pct = Math.min(95, Math.round(35 + (offset / 25000) * 60));
-      onProgress?.(`Importate ${totalRighe} righe articolo...`, pct);
+      onProgress?.(`Scaricate ${totalRighe} righe articolo...`, pct);
 
       for (const r of rawRighe) {
-        await db.execute(
-          `INSERT INTO supplier_invoice_items (
+        writes.push({
+          sql: `INSERT INTO supplier_invoice_items (
             supplier_name, doc_number, doc_date, year, line_number, article_code,
             description, quantity, unit, unit_price, discount_1, discount_2, discount_3,
             discounted_price, total_price, vat_rate
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16);`,
-          [
+          ) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+          WHERE NOT EXISTS (
+            SELECT 1 FROM supplier_invoices
+            WHERE supplier_name = $1 AND doc_number = $2 AND doc_date = $3
+              AND (cloud_upload_pending = 1 OR julianday(cloud_uploaded_at) >= julianday($17))
+          );`,
+          params: [
             r.fornitore || "",
             String(r.numero_documento || "").trim(),
             r.data_documento || "",
@@ -212,14 +232,17 @@ export class ElectronicInvoicesService {
             r.aliquota_iva !== null && r.aliquota_iva !== undefined && r.aliquota_iva !== "" && Number.isFinite(Number(r.aliquota_iva))
               ? Number(r.aliquota_iva)
               : 22,
+            startedAt,
           ]
-        );
+        });
       }
 
-      offset += pageSize;
-      if (rawRighe.length < pageSize) break;
+      offset += rawRighe.length;
     }
 
+    onProgress?.("Aggiornamento archivio fatture locale...", 95);
+    await getDatabase();
+    await applyLocalDatabaseBatch(writes);
     onProgress?.("Sincronizzazione completata con successo!", 100);
     return { testateCount: totalTestate, righeCount: totalRighe };
   }
@@ -305,33 +328,21 @@ export class ElectronicInvoicesService {
       };
     }
 
-    // 3. Inserimento in SQLite locale
+    // 3. Salva l'import locale prima di tentare l'invio cloud.
+    const localWrites: SqliteWrite[] = [];
     let totalLinesInserted = 0;
     for (let i = 0; i < toInsert.length; i++) {
       const { invoice, items } = toInsert[i];
       const pct = Math.min(70, Math.round(30 + ((i + 1) / toInsert.length) * 40));
       onProgress?.(`Salvataggio ${invoice.supplier_name} doc. ${invoice.doc_number}...`, pct);
 
-      await db.execute(
-        `INSERT INTO supplier_invoices (
+      localWrites.push({
+        sql: `INSERT INTO supplier_invoices (
           supplier_name, vat_number, fiscal_code, doc_number, doc_date, year,
           total_amount, taxable_amount, vat_amount, payment_method, due_date,
-          iban, bank_name, file_name, notes
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-        ON CONFLICT(supplier_name, doc_number, doc_date) DO UPDATE SET
-          vat_number = excluded.vat_number,
-          fiscal_code = excluded.fiscal_code,
-          year = excluded.year,
-          total_amount = excluded.total_amount,
-          taxable_amount = excluded.taxable_amount,
-          vat_amount = excluded.vat_amount,
-          payment_method = excluded.payment_method,
-          due_date = excluded.due_date,
-          iban = excluded.iban,
-          bank_name = excluded.bank_name,
-          file_name = excluded.file_name,
-          notes = excluded.notes;`,
-        [
+          iban, bank_name, file_name, notes, cloud_upload_pending
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,1);`,
+        params: [
           invoice.supplier_name,
           invoice.vat_number || null,
           invoice.fiscal_code || null,
@@ -347,17 +358,17 @@ export class ElectronicInvoicesService {
           invoice.bank_name || null,
           invoice.file_name || null,
           invoice.notes || null,
-        ]
-      );
+        ],
+      });
 
       for (const it of items) {
-        await db.execute(
-          `INSERT INTO supplier_invoice_items (
+        localWrites.push({
+          sql: `INSERT INTO supplier_invoice_items (
             supplier_name, doc_number, doc_date, year, line_number, article_code,
             description, quantity, unit, unit_price, discount_1, discount_2, discount_3,
             discounted_price, total_price, vat_rate
           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16);`,
-          [
+          params: [
             it.supplier_name,
             it.doc_number,
             it.doc_date,
@@ -374,11 +385,12 @@ export class ElectronicInvoicesService {
             it.discounted_price,
             it.total_price,
             it.vat_rate,
-          ]
-        );
+          ],
+        });
         totalLinesInserted++;
       }
     }
+    await applyLocalDatabaseBatch(localWrites);
 
     // 4. Invio a Supabase Cloud
     let cloudSynced = false;
@@ -464,10 +476,16 @@ export class ElectronicInvoicesService {
             body: JSON.stringify(chunk),
           });
           if (!rRes.ok) {
-            console.warn(`Errore invio blocco righe Supabase: HTTP ${rRes.status}`);
+            throw new Error(`Fatture salvate in locale. Invio cloud incompleto: blocco righe ${Math.floor(c / chunkSize) + 1}, HTTP ${rRes.status}.`);
           }
         }
 
+        const uploadedAt = new Date().toISOString();
+        await applyLocalDatabaseBatch(toInsert.map(({ invoice }) => ({
+          sql: `UPDATE supplier_invoices SET cloud_upload_pending = 0, cloud_uploaded_at = $1
+                WHERE supplier_name = $2 AND doc_number = $3 AND doc_date = $4`,
+          params: [uploadedAt, invoice.supplier_name, invoice.doc_number, invoice.doc_date],
+        })));
         cloudSynced = true;
       }
     } catch (cErr) {
@@ -475,7 +493,7 @@ export class ElectronicInvoicesService {
       cloudError = cErr instanceof Error ? cErr.message : "Errore connessione Cloud";
     }
 
-    onProgress?.("Importazione completata con successo!", 100);
+    onProgress?.(cloudError ? "Importazione locale completata. Invio cloud incompleto." : "Importazione completata con successo!", 100);
 
     return {
       totalFiles: files.length,

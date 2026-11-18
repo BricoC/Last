@@ -1,12 +1,17 @@
+use crate::sqlite_backup::{open_database, snapshot_suffix, StagedSnapshot};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use sqlx::{Connection, SqliteConnection};
+use std::{fs, path::Path, time::SystemTime};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_sql::DbInstances;
+
+#[path = "supabase_ddt_import_plan.rs"]
+mod plan;
+use plan::{classify_import, ImportPlan};
+
+#[cfg(test)]
+#[path = "supabase_ddt_import_tests.rs"]
+mod tests;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,30 +90,6 @@ pub struct DdtImportResult {
     backup_path: Option<String>,
 }
 
-#[derive(sqlx::FromRow)]
-struct LocalHeader {
-    id: String,
-    year: i64,
-    doc_number: Option<i64>,
-    sync_status: String,
-    deleted_at: Option<String>,
-}
-
-fn document_key(year: i64, number: i64) -> (i64, i64) {
-    (year, number)
-}
-
-async fn local_headers(
-    connection: &mut sqlx::SqliteConnection,
-) -> Result<Vec<LocalHeader>, String> {
-    sqlx::query_as::<_, LocalHeader>(
-        "SELECT id, year, doc_number, sync_status, deleted_at FROM ddt_documents",
-    )
-    .fetch_all(&mut *connection)
-    .await
-    .map_err(|error| format!("Impossibile controllare i DDT locali: {error}"))
-}
-
 #[tauri::command]
 pub async fn import_supabase_ddt_into_local(
     app: AppHandle,
@@ -120,154 +101,63 @@ pub async fn import_supabase_ddt_into_local(
         .app_data_dir()
         .map_err(|_| "Cartella dati Last non disponibile".to_string())?;
 
-    let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
-    let local = local_headers(&mut connection).await?;
-    let local_by_id: HashMap<String, &LocalHeader> = local
-        .iter()
-        .map(|header| (header.id.clone(), header))
-        .collect();
-    let mut active_numbers = HashSet::new();
-    for header in &local {
-        if header.deleted_at.is_none() {
-            if let Some(number) = header.doc_number {
-                active_numbers.insert(document_key(header.year, number));
-            }
-        }
-    }
+    let pool = crate::sqlite_utils::get_sqlite_pool(&db_instances).await?;
+    let database_path = pool.connect_options().get_filename().to_path_buf();
+    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    import_with_snapshot(&mut connection, &database_path, &data_dir, &payload).await
+}
 
-    let mut cloud_key_counts: HashMap<(i64, i64), usize> = HashMap::new();
-    for header in &payload.headers {
-        *cloud_key_counts
-            .entry(document_key(header.year, header.doc_number))
-            .or_default() += 1;
-    }
-    let duplicate_cloud_headers = cloud_key_counts
-        .values()
-        .filter(|count| **count > 1)
-        .map(|count| *count)
-        .sum();
-    let mut candidate_ids = HashSet::new();
-    let mut conflicts = 0usize;
-    let mut already_present = 0usize;
-
-    for header in &payload.headers {
-        let key = document_key(header.year, header.doc_number);
-        let _disposition = if cloud_key_counts.get(&key).copied().unwrap_or(0) > 1 {
-            conflicts += 1;
-            "duplicate"
-        } else if let Some(existing) = local_by_id.get(&header.id) {
-            if existing.deleted_at.is_none()
-                && existing.year == header.year
-                && existing.doc_number == Some(header.doc_number)
-                && existing.sync_status == "synced"
-            {
-                already_present += 1;
-                "present"
-            } else {
-                conflicts += 1;
-                "conflict"
-            }
-        } else if active_numbers.contains(&key) {
-            conflicts += 1;
-            "conflict"
-        } else {
-            candidate_ids.insert(header.id.clone());
-            "candidate"
-        };
-    }
-
-    let mut orphan_lines = 0usize;
-    let mut candidate_lines: Vec<&DdtImportLine> = Vec::new();
-    let line_ids = sqlx::query_scalar::<_, String>("SELECT id FROM ddt_items")
-        .fetch_all(&mut *connection)
-        .await
-        .map_err(|error| format!("Impossibile controllare gli UUID delle righe locali: {error}"))?;
-    let existing_line_ids: HashSet<String> = line_ids.into_iter().collect();
-    let mut line_id_conflicts = 0usize;
-    let mut headers_with_line_id_conflict = HashSet::new();
-    for line in &payload.lines {
-        let Some(header_id) = line.cloud_header_id.as_deref() else {
-            orphan_lines += 1;
-            continue;
-        };
-        if !candidate_ids.contains(header_id) {
-            continue;
-        }
-        if existing_line_ids.contains(&line.id) {
-            line_id_conflicts += 1;
-            headers_with_line_id_conflict.insert(header_id.to_string());
-        } else {
-            candidate_lines.push(line);
-        }
-    }
-    for header_id in headers_with_line_id_conflict {
-        candidate_ids.remove(&header_id);
-        conflicts += 1;
-    }
-    candidate_lines.retain(|line| {
-        line.cloud_header_id
-            .as_ref()
-            .is_some_and(|id| candidate_ids.contains(id))
-    });
-
-    let candidate_headers: Vec<&DdtImportHeader> = payload
-        .headers
-        .iter()
-        .filter(|header| candidate_ids.contains(&header.id))
-        .collect();
-    if candidate_headers.is_empty() {
-        return Ok(DdtImportResult {
-            imported_headers: 0,
-            imported_lines: 0,
-            already_present,
-            conflicts,
-            duplicate_cloud_headers,
-            orphan_lines,
-            line_id_conflicts,
-            backup_path: None,
-        });
-    }
-
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| error.to_string())?
-        .as_secs();
-    let backup = data_dir.join(format!("LastData.pre-supabase-ddt-import-{timestamp}.db"));
-    let backup_name = backup.to_string_lossy().to_string();
-    sqlx::query("VACUUM INTO $1")
-        .bind(&backup_name)
-        .execute(&mut *connection)
-        .await
-        .map_err(|error| {
-            format!("Backup SQLite non riuscito; nessun DDT è stato importato: {error}")
-        })?;
-
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+async fn import_with_snapshot(
+    connection: &mut SqliteConnection,
+    database_path: &Path,
+    data_dir: &Path,
+    payload: &DdtImportPayload,
+) -> Result<DdtImportResult, String> {
+    let mut transaction = connection
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| format!("Impossibile avviare la transazione d’importazione: {error}"))?;
-    let result = import_transaction(&mut connection, &candidate_headers, &candidate_lines).await;
-    match result {
+    let ImportPlan {
+        mut result,
+        headers,
+        lines,
+    } = classify_import(&mut transaction, payload).await?;
+    if headers.is_empty() {
+        transaction
+            .commit()
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(result);
+    }
+
+    let backup = data_dir.join(format!(
+        "LastData.pre-supabase-ddt-import-{}.db",
+        snapshot_suffix()
+    ));
+    let stage = StagedSnapshot::new(&backup)?;
+    // VACUUM INTO needs its own connection. The write lock keeps that read snapshot
+    // consistent with the transaction's classification and the state before the import.
+    let mut reader = open_database(database_path, true).await?;
+    stage.capture(&mut reader).await?;
+    reader.close().await.map_err(|error| error.to_string())?;
+    stage.validate(false).await?;
+    stage.install(&backup)?;
+    let backup_name = backup.to_string_lossy().into_owned();
+
+    match import_transaction(&mut transaction, &headers, &lines).await {
         Ok((imported_headers, imported_lines)) => {
-            sqlx::query("COMMIT").execute(&mut *connection).await
+            transaction.commit().await
                 .map_err(|error| format!("Commit importazione non riuscito (backup disponibile in {backup_name}): {error}"))?;
-            rotate_pre_import_backups(&data_dir, 5);
-            Ok(DdtImportResult {
-                imported_headers,
-                imported_lines,
-                already_present,
-                conflicts,
-                duplicate_cloud_headers,
-                orphan_lines,
-                line_id_conflicts,
-                backup_path: Some(backup_name),
-            })
+            rotate_pre_import_backups(data_dir, 5);
+            result.imported_headers = imported_headers;
+            result.imported_lines = imported_lines;
+            result.backup_path = Some(backup_name);
+            Ok(result)
         }
         Err(error) => {
-            let rollback = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-            if let Err(rollback_error) = rollback {
-                return Err(format!("{error}; rollback non riuscito: {rollback_error}. Backup disponibile in {backup_name}"));
-            }
+            transaction.rollback().await.map_err(|rollback| {
+                format!("{error}; rollback non riuscito: {rollback}. Backup disponibile in {backup_name}")
+            })?;
             let _ = fs::remove_file(&backup);
             Err(error)
         }

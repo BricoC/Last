@@ -44,8 +44,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
       const vStr = String(props.value).trim();
       startValue = vStr === "" || vStr === "null" || vStr === "undefined" ? "" : vStr;
     } else if (colId === "quantity" || colId === "quantita") {
-      const qStr = String(props.value).trim();
-      startValue = qStr === "0" || qStr === "" ? "" : qStr;
+      startValue = String(props.value).trim();
     } else if (colId === "ric_pct") {
       if (props.value !== null && props.value !== undefined && props.value !== "") {
         const num = typeof props.value === "number" ? props.value : parseFloat(String(props.value));

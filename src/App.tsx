@@ -16,6 +16,7 @@ import { OrderManagerPage } from "@/features/orders/OrderManagerPage";
 import { OrNumbersPage } from "@/features/or-numbers/OrNumbersPage";
 import { OffersPage } from "@/features/offers/OffersPage";
 import { NotesPage } from "@/features/notes/NotesPage";
+import { notesSyncService } from "@/features/notes/services/notesSyncService";
 import { SupplierPriceListPage } from "@/features/supplier-price-lists/SupplierPriceListPage";
 import { ManualCloudImportPage } from "@/features/manual-cloud-import/ManualCloudImportPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
@@ -101,11 +102,13 @@ export function App() {
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
       triggerDdtSync(false, false, false);
       void clientSyncService.syncPendingClientsToSupabase().catch(() => {});
+      void notesSyncService.retryPendingDeletions().catch((error) => console.warn("[App] Eliminazioni note:", error));
     };
     const runStartupSync = () => {
       triggerDdtSync(true, true, true);
       if (typeof navigator === "undefined" || navigator.onLine) {
         void clientSyncService.syncPendingClientsToSupabase().catch(() => {});
+        void notesSyncService.retryPendingDeletions().catch((error) => console.warn("[App] Eliminazioni note:", error));
       }
     };
 

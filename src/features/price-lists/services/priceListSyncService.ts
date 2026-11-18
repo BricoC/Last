@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import {
   ListinoGeneraleRow,
   ListinoClienteRow,
@@ -68,6 +69,69 @@ function mapSupabaseClientRow(r: any): ListinoClienteRow {
   };
 }
 
+function clientPriceListPayload(row: ListinoClienteRow, updatedAt: string) {
+  return {
+    cliente: row.cliente,
+    fornitore: row.fornitore ?? null,
+    codice_articolo: row.codice_articolo ?? null,
+    descrizione: row.descrizione,
+    prezzo_fattura: row.prezzo_fattura ?? null,
+    prezzo_acquisto: row.prezzo_acquisto ?? null,
+    acquisto_eur: row.acquisto_eur ?? null,
+    perc_acquisto: row.perc_acquisto ?? null,
+    data_acquisto: row.data_acquisto ?? null,
+    acquisto_old: row.acquisto_old ?? null,
+    ricarico: row.ricarico ?? null,
+    data_ref: row.data_ref ?? null,
+    note: row.note ?? null,
+    note1: row.note1 ?? null,
+    note2: row.note2 ?? null,
+    updated_at: updatedAt,
+    modificato_da: "Operatore",
+  };
+}
+
+function deleteMissingPriceListRows(
+  table: "listino_generale" | "listini_clienti",
+  rows: { id: string }[],
+  startedAt: string
+): SqliteWrite {
+  return {
+    sql: `DELETE FROM ${table}
+          WHERE sync_revision IS NULL AND id NOT GLOB 'new_*'
+            AND (julianday(updated_at) IS NULL OR julianday(updated_at) < julianday($2))
+            AND (sync_confirmed_at IS NULL OR julianday(sync_confirmed_at) < julianday($2))
+            AND id NOT IN (SELECT value FROM json_each($1))`,
+    params: [JSON.stringify(rows.map((row) => row.id)), startedAt],
+  };
+}
+
+async function acknowledgePriceListWrite(
+  response: Response,
+  table: "listino_generale" | "listini_clienti",
+  localId: string,
+  prefix: string,
+  revision: string | null | undefined,
+  updatedAt: string
+): Promise<string> {
+  if (!response.ok) throw new Error(`Errore scrittura Supabase su ${table}: HTTP ${response.status}`);
+  const rows = await response.json();
+  if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.id == null) {
+    throw new Error(`Supabase non ha confermato la riga ${localId}`);
+  }
+  const newId = localId.startsWith("new_") ? prefix + rows[0].id : localId;
+  const db = await getDatabase();
+  await db.execute(
+    `UPDATE ${table} SET id = $1,
+       updated_at = CASE WHEN sync_revision IS $2 THEN $3 ELSE updated_at END,
+       sync_revision = CASE WHEN sync_revision IS $2 THEN NULL ELSE sync_revision END,
+       sync_confirmed_at = $5
+     WHERE id = $4`,
+    [newId, revision ?? null, updatedAt, localId, new Date().toISOString()]
+  );
+  return newId;
+}
+
 async function fetchAllPages<T>(
   baseUrl: string,
   anonKey: string,
@@ -104,7 +168,11 @@ async function fetchAllPages<T>(
     }
 
     const rows: T[] = await response.json();
-    if (!rows || rows.length === 0) {
+    if (!Array.isArray(rows)) throw new Error(`Risposta Supabase non valida per ${table}`);
+    if (rows.length === 0) {
+      if (totalRows !== Infinity && offset < totalRows) {
+        throw new Error(`Download incompleto di ${table}: ricevute ${offset} di ${totalRows} righe`);
+      }
       break;
     }
 
@@ -149,14 +217,13 @@ async function fetchPagesWithFilter<T>(
     });
 
     if (!response.ok) {
-      if (response.status === 404) return [];
       throw new Error(`Errore fetch Supabase su ${table}: ${response.status}`);
     }
 
     const rows: T[] = await response.json();
-    if (!rows || rows.length === 0) break;
+    if (!Array.isArray(rows)) throw new Error(`Risposta Supabase non valida per ${table}`);
+    if (rows.length === 0) break;
     allRows.push(...rows);
-    if (rows.length < PAGE_SIZE) break;
     offset += rows.length;
   }
 
@@ -172,8 +239,9 @@ export class PriceListSyncService {
   async syncAllFromSupabase(
     onProgress?: (prog: SyncProgress) => void
   ): Promise<{ generalCount: number; clientCount: number }> {
+    const startedAt = new Date().toISOString();
     const creds = await getSupabaseCredentials();
-    const db = await getDatabase();
+    await getDatabase();
 
     // 1. Scarica Listino Generale
     onProgress?.({
@@ -314,11 +382,12 @@ export class PriceListSyncService {
 
     // Inserimento batch in SQLite preservando eventuali nuove righe locali non ancora inviate
     const { priceListRepository } = await import("./priceListRepository");
-    await db.execute("DELETE FROM listino_generale WHERE id NOT LIKE 'new_%';");
-    await priceListRepository.saveGeneralRows(generalRows);
-
-    await db.execute("DELETE FROM listini_clienti WHERE id NOT LIKE 'new_%';");
-    await priceListRepository.saveClientRows(clientRows);
+    await applyLocalDatabaseBatch([
+      deleteMissingPriceListRows("listino_generale", generalRows, startedAt),
+      ...priceListRepository.buildGeneralWrites(generalRows, "cloud"),
+      deleteMissingPriceListRows("listini_clienti", clientRows, startedAt),
+      ...priceListRepository.buildClientWrites(clientRows, "cloud"),
+    ]);
 
     onProgress?.({
       stage: "completed",
@@ -342,8 +411,6 @@ export class PriceListSyncService {
     if (rows.length === 0) return { success: true, updatedCount: 0 };
     try {
       const creds = await getSupabaseCredentials();
-      const db = await getDatabase();
-
       const genRows = rows.filter((r) => r.source_table !== "listini_vari");
       const varRows = rows.filter((r) => r.source_table === "listini_vari");
 
@@ -352,7 +419,10 @@ export class PriceListSyncService {
         table: "listino_generale" | "listini_vari"
       ) => {
         for (const r of items) {
-          const isNew = r.id.startsWith("new_");
+          const localId = r.id;
+          const revision = r.sync_revision;
+          const isNew = localId.startsWith("new_");
+          const updatedAt = new Date().toISOString();
           const payload: any = {
             cat: r.cat ?? null,
             fornitore: r.fornitore ?? null,
@@ -373,7 +443,7 @@ export class PriceListSyncService {
             r2: r.r2 ?? null,
             perc_iva: r.perc_iva ?? 0.22,
             note: r.note ?? null,
-            updated_at: new Date().toISOString(),
+            updated_at: updatedAt,
           };
 
           if (isNew) {
@@ -386,19 +456,8 @@ export class PriceListSyncService {
               }),
               body: JSON.stringify(payload),
             });
-            if (!res.ok) {
-              throw new Error(`Errore POST Supabase su ${table}: HTTP ${res.status}`);
-            }
-            const inserted = await res.json();
-            if (inserted && inserted[0]?.id) {
-              const prefix = table === "listino_generale" ? "gen_" : "var_";
-              const newDbId = `${prefix}${inserted[0].id}`;
-              await db.execute(
-                "UPDATE listino_generale SET id = $1 WHERE id = $2;",
-                [newDbId, r.id]
-              );
-              r.id = newDbId;
-            }
+            const prefix = table === "listino_generale" ? "gen_" : "var_";
+            r.id = await acknowledgePriceListWrite(res, "listino_generale", localId, prefix, revision, updatedAt);
           } else {
             const rawIdStr = r.id.replace(/^(gen_|var_)/, "");
             const numId = parseInt(rawIdStr, 10);
@@ -408,12 +467,11 @@ export class PriceListSyncService {
               method: "PATCH",
               headers: buildAuthHeaders(creds.anonKey, {
                 "Content-Type": "application/json",
+                Prefer: "return=representation",
               }),
               body: JSON.stringify(payload),
             });
-            if (!res.ok) {
-              throw new Error(`Errore PATCH Supabase su ${table}: HTTP ${res.status}`);
-            }
+            await acknowledgePriceListWrite(res, "listino_generale", localId, "", revision, updatedAt);
           }
         }
       };
@@ -525,29 +583,13 @@ export class PriceListSyncService {
     if (rows.length === 0) return { success: true, updatedCount: 0 };
     try {
       const creds = await getSupabaseCredentials();
-      const db = await getDatabase();
 
       for (const r of rows) {
-        const isNew = r.id.startsWith("new_");
-        const payload: any = {
-          cliente: r.cliente,
-          fornitore: r.fornitore ?? null,
-          codice_articolo: r.codice_articolo ?? null,
-          descrizione: r.descrizione,
-          prezzo_fattura: r.prezzo_fattura ?? null,
-          prezzo_acquisto: r.prezzo_acquisto ?? null,
-          acquisto_eur: r.acquisto_eur ?? null,
-          perc_acquisto: r.perc_acquisto ?? null,
-          data_acquisto: r.data_acquisto ?? null,
-          acquisto_old: r.acquisto_old ?? null,
-          ricarico: r.ricarico ?? null,
-          data_ref: r.data_ref ?? null,
-          note: r.note ?? null,
-          note1: r.note1 ?? null,
-          note2: r.note2 ?? null,
-          updated_at: new Date().toISOString(),
-          modificato_da: "Operatore",
-        };
+        const localId = r.id;
+        const revision = r.sync_revision;
+        const isNew = localId.startsWith("new_");
+        const updatedAt = new Date().toISOString();
+        const payload = clientPriceListPayload(r, updatedAt);
 
         if (isNew) {
           const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti`, {
@@ -558,17 +600,7 @@ export class PriceListSyncService {
             }),
             body: JSON.stringify(payload),
           });
-          if (!res.ok) {
-            throw new Error(`Errore POST Supabase su listini_clienti: HTTP ${res.status}`);
-          }
-          const inserted = await res.json();
-          if (Array.isArray(inserted) && inserted[0]?.id) {
-            const newCloudId = `cli_${inserted[0].id}`;
-            await db.execute("UPDATE listini_clienti SET id = $1 WHERE id = $2;", [
-              newCloudId,
-              r.id,
-            ]);
-          }
+          r.id = await acknowledgePriceListWrite(res, "listini_clienti", localId, "cli_", revision, updatedAt);
         } else {
           const rawIdStr = r.id.replace(/^cli_/, "");
           const numId = parseInt(rawIdStr, 10);
@@ -578,12 +610,11 @@ export class PriceListSyncService {
             method: "PATCH",
             headers: buildAuthHeaders(creds.anonKey, {
               "Content-Type": "application/json",
+              Prefer: "return=representation",
             }),
             body: JSON.stringify(payload),
           });
-          if (!res.ok) {
-            throw new Error(`Errore PATCH Supabase su listini_clienti: HTTP ${res.status}`);
-          }
+          await acknowledgePriceListWrite(res, "listini_clienti", localId, "", revision, updatedAt);
         }
       }
 
@@ -669,19 +700,40 @@ export class PriceListSyncService {
   /**
    * Rimuove un elemento dal Cestino Clienti su Supabase al momento del ripristino.
    */
-  async deleteClientTrashFromSupabase(id: string): Promise<void> {
-    try {
-      const creds = await getSupabaseCredentials();
-      const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti_cestino?id=eq.${id}`, {
-        method: "DELETE",
-        headers: buildAuthHeaders(creds.anonKey),
+  async restoreClientFromTrash(id: string): Promise<ListinoClienteRow | null> {
+    const { priceListRepository } = await import("./priceListRepository");
+    return priceListRepository.restoreFromClientTrash(id, async (row) => {
+      const remoteId = /^(?:cli_)?(\d+)$/.exec(row.id)?.[1];
+      if (!remoteId) throw new Error("Identificativo cloud del listino cliente non valido.");
+
+      const { projectUrl, anonKey } = await getSupabaseCredentials();
+      const updatedAt = new Date().toISOString();
+      const url = new URL("/rest/v1/listini_clienti", projectUrl);
+      url.searchParams.set("on_conflict", "id");
+      const restored = await fetch(url, {
+        method: "POST",
+        headers: buildAuthHeaders(anonKey, {
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=representation",
+        }),
+        body: JSON.stringify({
+          ...clientPriceListPayload(row, updatedAt),
+          id: remoteId,
+          created_at: row.created_at || updatedAt,
+        }),
       });
-      if (!res.ok) {
-        console.warn(`[PriceListSyncService] Delete Cestino Clienti Supabase HTTP ${res.status}`);
+      if (!restored.ok) throw new Error(`Ripristino listino cliente su Supabase: HTTP ${restored.status}`);
+      const confirmed = await restored.json();
+      if (!Array.isArray(confirmed) || confirmed.length !== 1 || String(confirmed[0]?.id) !== remoteId) {
+        throw new Error("Supabase non ha confermato la riga ripristinata.");
       }
-    } catch (err) {
-      console.warn("[PriceListSyncService] Delete Cestino Clienti Supabase:", err);
-    }
+
+      const trashUrl = new URL("/rest/v1/listini_clienti_cestino", projectUrl);
+      trashUrl.searchParams.set("id", `eq.${id}`);
+      const deleted = await fetch(trashUrl, { method: "DELETE", headers: buildAuthHeaders(anonKey) });
+      if (!deleted.ok) throw new Error(`Rimozione dal cestino cloud: HTTP ${deleted.status}`);
+      return mapSupabaseClientRow(confirmed[0]);
+    });
   }
 
   /**
@@ -701,7 +753,7 @@ export class PriceListSyncService {
       let localMaxIso: string | null = null;
       try {
         const rows = await db.select<{ max_up: string | null }[]>(
-          "SELECT MAX(updated_at) as max_up FROM listino_generale WHERE updated_at IS NOT NULL;"
+          "SELECT MAX(updated_at) as max_up FROM listino_generale WHERE sync_revision IS NULL AND id NOT GLOB 'new_*';"
         );
         localMaxIso = rows[0]?.max_up || null;
       } catch {}
@@ -796,9 +848,13 @@ export class PriceListSyncService {
       ];
 
       const { priceListRepository } = await import("./priceListRepository");
-      await priceListRepository.saveGeneralRows(rowsToUpsert);
+      await priceListRepository.saveGeneralRows(rowsToUpsert, "cloud");
 
-      return { updatedCount: rowsToUpsert.length, updatedRows: rowsToUpsert };
+      const updatedRows = await db.select<ListinoGeneraleRow[]>(
+        "SELECT * FROM listino_generale WHERE id IN (SELECT value FROM json_each($1))",
+        [JSON.stringify(rowsToUpsert.map((row) => row.id))]
+      );
+      return { updatedCount: updatedRows.length, updatedRows };
     } catch (err: any) {
       console.warn("[PriceListSyncService] Sincronizzazione incrementale non riuscita (modalità offline):", err);
       return { updatedCount: 0, updatedRows: [], error: err?.message || String(err) };
@@ -820,7 +876,7 @@ export class PriceListSyncService {
       let localMaxIso: string | null = null;
       try {
         const rows = await db.select<{ max_up: string | null }[]>(
-          "SELECT MAX(updated_at) as max_up FROM listini_clienti WHERE updated_at IS NOT NULL;"
+          "SELECT MAX(updated_at) as max_up FROM listini_clienti WHERE sync_revision IS NULL AND id NOT GLOB 'new_*';"
         );
         localMaxIso = rows[0]?.max_up || null;
       } catch {}
@@ -850,9 +906,13 @@ export class PriceListSyncService {
       const rowsToUpsert: ListinoClienteRow[] = rawClienti.map(mapSupabaseClientRow);
 
       const { priceListRepository } = await import("./priceListRepository");
-      await priceListRepository.saveClientRows(rowsToUpsert);
+      await priceListRepository.saveClientRows(rowsToUpsert, "cloud");
 
-      return { updatedCount: rowsToUpsert.length, updatedRows: rowsToUpsert };
+      const updatedRows = await db.select<ListinoClienteRow[]>(
+        "SELECT * FROM listini_clienti WHERE id IN (SELECT value FROM json_each($1))",
+        [JSON.stringify(rowsToUpsert.map((row) => row.id))]
+      );
+      return { updatedCount: updatedRows.length, updatedRows };
     } catch (err: any) {
       console.warn("[PriceListSyncService] Sincronizzazione incrementale clienti fallita:", err);
       return { updatedCount: 0, updatedRows: [], error: err?.message || String(err) };

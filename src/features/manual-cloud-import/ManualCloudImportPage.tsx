@@ -464,10 +464,11 @@ export const ManualCloudImportPage: React.FC = () => {
         setProgressPct(Math.round((c / t) * 100));
       });
       setDdtAnalysis(ddtRes);
-      await uploadDdtToSupabase(ddtRes.headers, ddtRes.rows, cfg.projectUrl, cfg.anonKey, (st, c, t) => {
+      const ddtUpload = await uploadDdtToSupabase(ddtRes.headers, ddtRes.rows, cfg.projectUrl, cfg.anonKey, (st, c, t) => {
         setProgressText(`[1/3 DDT Invio] ${st}: ${c}/${t}`);
         setProgressPct(Math.round((c / t) * 100));
       });
+      if (ddtUpload.failed) throw new Error(`DDT: ${ddtUpload.failed} record non caricati`);
       addStructuredLog("success", "FASE 1/3: DDT Completata con successo!");
 
       // 2. Listino Generale & Vari
@@ -477,10 +478,11 @@ export const ManualCloudImportPage: React.FC = () => {
         setProgressPct(Math.round((c / t) * 100));
       });
       setGeneralAnalysis(genRes);
-      await uploadGeneralListsToSupabase(genRes.rowsGenerale, genRes.rowsVari, cfg.projectUrl, cfg.anonKey, (st, c, t) => {
+      const generalUpload = await uploadGeneralListsToSupabase(genRes.rowsGenerale, genRes.rowsVari, cfg.projectUrl, cfg.anonKey, (st, c, t) => {
         setProgressText(`[2/3 Listini Gen Invio] ${st}: ${c}/${t}`);
         setProgressPct(Math.round((c / t) * 100));
       });
+      if (generalUpload.failed) throw new Error(`Listini generali: ${generalUpload.failed} record non caricati`);
       addStructuredLog("success", "FASE 2/3: Listino Generale & Vari Completata!");
 
       // 3. Listini Clienti
@@ -490,10 +492,11 @@ export const ManualCloudImportPage: React.FC = () => {
         setProgressPct(Math.round((c / t) * 100));
       });
       setClientAnalysis(cliRes);
-      await uploadClientPriceListsToSupabase(cliRes.rows, cfg.projectUrl, cfg.anonKey, (c, t) => {
+      const clientUpload = await uploadClientPriceListsToSupabase(cliRes.rows, cfg.projectUrl, cfg.anonKey, (c, t) => {
         setProgressText(`[3/3 Clienti Invio] ${c}/${t}`);
         setProgressPct(Math.round((c / t) * 100));
       });
+      if (clientUpload.failed) throw new Error(`Listini clienti: ${clientUpload.failed} record non caricati`);
 
       if (syncToLocalDb) {
         addStructuredLog("info", "Sincronizzazione finale database SQLite locale...");

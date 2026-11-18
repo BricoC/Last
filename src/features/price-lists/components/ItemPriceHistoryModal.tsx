@@ -1,3 +1,4 @@
+import { generalPriceHistoryFields, generalPriceVariation } from "../utils/generalPriceHistory";
 import React, { useEffect, useState } from "react";
 import { X, History, ArrowRight, LoaderCircle } from "lucide-react";
 import { ListinoGeneraleRow, PriceListLogEntry } from "../models/priceList";
@@ -60,31 +61,11 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
     const sourceItem = pendingItem || item;
 
     const diffs: PriceListLogEntry[] = [];
-    const numFields: { key: keyof ListinoGeneraleRow; label: string }[] = [
-      { key: "prezzo_acquisto", label: "Prezzo Acquisto" },
-      { key: "prezzo_fattura", label: "Prezzo Fattura" },
-      { key: "prezzo_pubblico", label: "Prezzo Pubblico" },
-      { key: "prezzo_profess", label: "Prezzo Profess" },
-      { key: "perc_pub", label: "% Pubblico" },
-      { key: "perc_prof", label: "% Profess" },
-      { key: "perc_fatt", label: "% Fattura" },
-      { key: "aumento", label: "Aumento %" },
-      { key: "maga", label: "Magazzino %" },
-      { key: "perc_iva", label: "IVA" },
-    ];
-
-    for (const f of numFields) {
+    for (const f of generalPriceHistoryFields) {
       const oldV = (originalItem[f.key] as number | null) ?? null;
       const newV = (sourceItem[f.key] as number | null) ?? null;
       if (oldV !== newV) {
-        const oldNum = oldV ?? 0;
-        const newNum = newV ?? 0;
-        let pct: number | null = null;
-        if (oldNum > 0) {
-          pct = ((newNum - oldNum) / oldNum) * 100;
-        } else if (newNum > 0) {
-          pct = newNum > 2 ? newNum : newNum * 100;
-        }
+        const pct = generalPriceVariation(oldV, newV, f.fraction);
         diffs.push({
           id: -Math.floor(Math.random() * 10000) - 1,
           row_id: item.id,
@@ -272,8 +253,12 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
               </thead>
               <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
                 {allLogs.map((log) => {
-                  const isPositive = (log.variazione_pct ?? 0) > 0;
-                  const isNegative = (log.variazione_pct ?? 0) < 0;
+                  const field = generalPriceHistoryFields.find((entry) => entry.label === log.campo_modificato);
+                  const variance = field && !log.vecchio_valore
+                    ? generalPriceVariation(log.vecchio_valore, log.nuovo_valore, field.fraction)
+                    : log.variazione_pct;
+                  const isPositive = (variance ?? 0) > 0;
+                  const isNegative = (variance ?? 0) < 0;
                   const isPending = (log.id ?? 0) < 0;
                   const textDiff = getTextDiff(log);
                   const displayOld = textDiff.oldText ?? formatVal(log.vecchio_valore, log.campo_modificato);
@@ -310,9 +295,9 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                       <td className="px-3 py-2 text-right">
                         {log.vecchio_valore == null && log.nuovo_valore != null ? (
                           <span className="px-1.5 py-0.5 rounded text-[10.5px] font-bold bg-emerald-500/15 text-emerald-400">
-                            Nuovo {log.variazione_pct ? `(+${log.variazione_pct}%)` : ""}
+                            Nuovo {variance ? `(${variance > 0 ? "+" : ""}${round5(variance)}%)` : ""}
                           </span>
-                        ) : log.variazione_pct != null ? (
+                        ) : variance != null ? (
                           <span
                             className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold ${
                               isPositive
@@ -322,7 +307,7 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                                 : "text-[var(--muted-foreground)]"
                             }`}
                           >
-                            {isPositive ? `+${log.variazione_pct}%` : `${log.variazione_pct}%`}
+                            {`${isPositive ? "+" : ""}${round5(variance)}%`}
                           </span>
                         ) : (
                           "—"

@@ -1,6 +1,16 @@
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import type { NoteRecord, TrashNoteRow } from "../types/note";
 import { notesSyncService } from "./notesSyncService";
+
+function queueNoteDeletion(id: string, deletedAt: string): SqliteWrite {
+  return {
+    sql: `INSERT INTO note_deletions (id, supabase_id, deleted_at)
+          SELECT id, supabase_id, $2 FROM notes WHERE id = $1
+          ON CONFLICT(id) DO UPDATE SET supabase_id = excluded.supabase_id, deleted_at = excluded.deleted_at`,
+    params: [id, deletedAt],
+  };
+}
 
 export class NotesRepository {
   /**
@@ -119,57 +129,27 @@ export class NotesRepository {
    * Sposta una nota nel Cestino (massimo 10 elementi FIFO)
    */
   public async moveToTrash(id: string, deletedBy?: string): Promise<void> {
-    const db = await getDatabase();
-    const rows = await db.select<NoteRecord[]>(`SELECT * FROM notes WHERE id = $1 LIMIT 1`, [id]);
-    if (!rows || rows.length === 0) return;
-
-    const note = rows[0];
-    const nowIso = new Date().toISOString();
-    const user = deletedBy || "Operatore";
-
-    // 1. Inserisci o aggiorna nel cestino
-    await db.execute(
-      `INSERT INTO notes_trash (
-        id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color, created_by, updated_by, created_at, updated_at, deleted_at, deleted_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-      ON CONFLICT(id) DO UPDATE SET
-        deleted_at = excluded.deleted_at,
-        deleted_by = excluded.deleted_by`,
-      [
-        note.id,
-        note.supabase_id ?? null,
-        note.title,
-        note.content_html,
-        note.content_text,
-        note.is_pinned,
-        note.is_archived,
-        note.color || "default",
-        note.created_by || user,
-        note.updated_by || user,
-        note.created_at,
-        note.updated_at,
-        nowIso,
-        user,
-      ]
-    );
-
-    // 2. Rimuovi dalla tabella principale
-    await db.execute(`DELETE FROM notes WHERE id = $1`, [id]);
-
-    // 3. Tronca il cestino mantenendo rigorosamente le ultime 10 note (FIFO)
-    await db.execute(`
-      DELETE FROM notes_trash 
-      WHERE id NOT IN (
-        SELECT id FROM notes_trash 
-        ORDER BY deleted_at DESC 
-        LIMIT 10
-      );
-    `);
-
-    // 4. Rimuovi da Supabase se presente
-    if (note.supabase_id) {
-      void notesSyncService.deleteRemoteNote(note.supabase_id);
-    }
+    await getDatabase();
+    const now = new Date().toISOString();
+    await applyLocalDatabaseBatch([
+      {
+        sql: `INSERT INTO notes_trash (
+          id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
+          created_by, updated_by, created_at, updated_at, deleted_at, deleted_by
+        ) SELECT id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
+          created_by, updated_by, created_at, updated_at, $2, $3 FROM notes WHERE id = $1`,
+        params: [id, now, deletedBy || "Operatore"],
+      },
+      queueNoteDeletion(id, now),
+      { sql: "DELETE FROM notes WHERE id = $1", params: [id] },
+      {
+        sql: `DELETE FROM notes_trash WHERE id NOT IN (
+          SELECT id FROM notes_trash ORDER BY deleted_at DESC, rowid DESC LIMIT 10
+        )`,
+        params: [],
+      },
+    ]);
+    void notesSyncService.sync();
   }
 
   /**
@@ -207,39 +187,18 @@ export class NotesRepository {
     const item = rows[0];
     const nowIso = new Date().toISOString();
 
-    // 1. Reinserisci nella tabella attiva con sync_status = 'pending' per risincronizzare su Supabase
-    await db.execute(
-      `INSERT INTO notes (
-        id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color, created_by, updated_by, created_at, updated_at, sync_status
-      ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
-      ON CONFLICT(id) DO UPDATE SET
-        title = excluded.title,
-        content_html = excluded.content_html,
-        content_text = excluded.content_text,
-        is_pinned = excluded.is_pinned,
-        is_archived = excluded.is_archived,
-        color = excluded.color,
-        updated_at = excluded.updated_at,
-        sync_status = 'pending'`,
-      [
-        item.id,
-        item.title,
-        item.content_html,
-        item.content_text,
-        item.is_pinned,
-        item.is_archived,
-        item.color || "default",
-        item.created_by,
-        item.updated_by,
-        item.created_at,
-        nowIso,
-      ]
-    );
-
-    // 2. Rimuovi dal cestino
-    await db.execute(`DELETE FROM notes_trash WHERE id = $1`, [id]);
-
-    // 3. Sincronizza su Supabase
+    await applyLocalDatabaseBatch([
+      {
+        sql: `INSERT INTO notes (
+          id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
+          created_by, updated_by, created_at, updated_at, sync_status
+        ) SELECT id, NULL, title, content_html, content_text, is_pinned, is_archived, color,
+          created_by, updated_by, created_at, $2, 'pending' FROM notes_trash WHERE id = $1`,
+        params: [id, nowIso],
+        expectedRows: 1,
+      },
+      { sql: "DELETE FROM notes_trash WHERE id = $1", params: [id] },
+    ]);
     void notesSyncService.sync();
 
     return {
@@ -263,16 +222,13 @@ export class NotesRepository {
    * Elimina definitivamente una nota
    */
   public async deleteNote(id: string): Promise<void> {
-    const db = await getDatabase();
-    const rows = await db.select<{ supabase_id?: number | null }[]>(
-      `SELECT supabase_id FROM notes WHERE id = $1 LIMIT 1`,
-      [id]
-    );
-    await db.execute(`DELETE FROM notes WHERE id = $1`, [id]);
-    await db.execute(`DELETE FROM notes_trash WHERE id = $1`, [id]);
-    if (rows[0]?.supabase_id) {
-      void notesSyncService.deleteRemoteNote(rows[0].supabase_id);
-    }
+    await getDatabase();
+    await applyLocalDatabaseBatch([
+      queueNoteDeletion(id, new Date().toISOString()),
+      { sql: "DELETE FROM notes WHERE id = $1", params: [id] },
+      { sql: "DELETE FROM notes_trash WHERE id = $1", params: [id] },
+    ]);
+    void notesSyncService.sync();
   }
 }
 

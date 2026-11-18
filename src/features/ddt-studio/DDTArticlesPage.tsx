@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "./utils/ddtQuantity";
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { LoaderCircle, RefreshCw, Search, X, FileText, ArrowUpDown, ArrowUp, ArrowDown, Calendar } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -186,8 +187,8 @@ export function DDTArticlesPage() {
           cmp = (a.unit || "").localeCompare(b.unit || "", "it", { sensitivity: "base" });
           break;
         case "quantity": {
-          const valA = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
-          const valB = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          const valA = parseDdtQuantity(a.quantity) ?? 0;
+          const valB = parseDdtQuantity(b.quantity) ?? 0;
           cmp = valA - valB;
           break;
         }

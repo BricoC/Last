@@ -1,3 +1,4 @@
+import { generalPriceHistoryFields, generalPriceVariation } from "./utils/generalPriceHistory";
 import React, {
   useState,
   useEffect,
@@ -726,31 +727,11 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
 
         if (original) {
           // Campi numerici (prezzi, percentuali, IVA)
-          const numFields: { key: keyof ListinoGeneraleRow; label: string }[] = [
-            { key: "prezzo_acquisto", label: "Prezzo Acquisto" },
-            { key: "prezzo_fattura", label: "Prezzo Fattura" },
-            { key: "prezzo_pubblico", label: "Prezzo Pubblico" },
-            { key: "prezzo_profess", label: "Prezzo Profess" },
-            { key: "perc_pub", label: "% Pubblico" },
-            { key: "perc_prof", label: "% Profess" },
-            { key: "perc_fatt", label: "% Fattura" },
-            { key: "aumento", label: "Aumento %" },
-            { key: "maga", label: "Magazzino %" },
-            { key: "perc_iva", label: "IVA" },
-          ];
-
-          for (const f of numFields) {
+          for (const f of generalPriceHistoryFields) {
             const oldV = (original[f.key] as number | null) ?? null;
             const newV = (row[f.key] as number | null) ?? null;
             if (oldV !== newV) {
-              const oldNum = oldV ?? 0;
-              const newNum = newV ?? 0;
-              let pct: number | null = null;
-              if (oldNum > 0) {
-                pct = ((newNum - oldNum) / oldNum) * 100;
-              } else if (newNum > 0) {
-                pct = newNum > 2 ? newNum : newNum * 100;
-              }
+              const pct = generalPriceVariation(oldV, newV, f.fraction);
               logEntries.push({
                 row_id: row.id,
                 created_at: nowIso,

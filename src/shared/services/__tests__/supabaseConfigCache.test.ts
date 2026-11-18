@@ -54,4 +54,23 @@ describe("supabaseConfigCache", () => {
     expect(refreshed).toEqual({ projectUrl: "https://two.supabase.co", anonKey: "key-2" });
     expect(mockInvoke).toHaveBeenCalledTimes(2);
   });
+
+  it("scarta una risposta partita prima dell'invalidazione e condivide la richiesta nuova", async () => {
+    const { createCachedSupabaseConfigLoader } = await import("../supabaseConfigCache");
+    const loader = createCachedSupabaseConfigLoader("TestService");
+    let finishOld!: (value: unknown) => void;
+    const old = new Promise((resolve) => { finishOld = resolve; });
+    const updated = { projectUrl: "https://new.example.test", anonKey: "new" };
+    mockInvoke.mockReturnValueOnce(old).mockResolvedValueOnce({ config: updated });
+    const firstCaller = loader();
+    const sameGeneration = loader();
+    window.dispatchEvent({ type: "supabase-config-updated" } as Event);
+    const afterUpdate = loader();
+    await expect(afterUpdate).resolves.toEqual(updated);
+    finishOld({ config: { projectUrl: "https://old.example.test", anonKey: "old" } });
+    await expect(firstCaller).resolves.toEqual(updated);
+    await expect(sameGeneration).resolves.toEqual(updated);
+    await expect(loader()).resolves.toEqual(updated);
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+  });
 });

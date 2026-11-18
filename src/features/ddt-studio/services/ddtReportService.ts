@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import ExcelJS from "exceljs";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
@@ -306,7 +307,7 @@ export async function getDdtMonthlyReportData(
   const articleRows: DdtReportArticleRow[] = articleDbRows.map((row) => {
     const unitPrice = subunitsToEuro(row.unit_price_subunits);
     const netAmount = subunitsToEuro(row.net_amount_subunits);
-    const qNum = parseFloat(row.quantity || "0") || 0;
+    const qNum = parseDdtQuantity(row.quantity) ?? 0;
     const netPrice = qNum > 0 ? netAmount / qNum : unitPrice;
 
     const destParts = [row.destination_name, row.destination_city].filter(Boolean);

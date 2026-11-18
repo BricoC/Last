@@ -10,7 +10,8 @@ import {
 } from "lucide-react";
 import {
   type RibaDeadlineInfo,
-  prepareAndSendRibaEmail,
+  openRibaEmailDraft,
+  saveRemoteRibaPaid,
 } from "../services/ribaService";
 import { getEmailSettings, type EmailSettings } from "@/features/settings/emailSettingsRepository";
 
@@ -70,22 +71,11 @@ export const RibaModal: React.FC<RibaModalProps> = ({
     setSuccessMsg(null);
 
     try {
-      const res = await prepareAndSendRibaEmail({
-        deadlineStr: ribaInfo.deadlineStr,
-        deadlineKey: ribaInfo.deadlineKey,
-      });
-
-      if (res.success && res.sentAt) {
-        setSuccessMsg("Email preparata e aperta in Outlook con successo! Stato salvato su Supabase.");
-        onStatusUpdated({
-          isPaid: true,
-          sentAt: res.sentAt,
-        });
-        setTimeout(() => {
-          onClose();
-        }, 1800);
+      const res = await openRibaEmailDraft({ deadlineStr: ribaInfo.deadlineStr });
+      if (res.success) {
+        setSuccessMsg("Bozza aperta in Outlook.");
       } else {
-        setError(res.error || "Impossibile aprire Outlook o salvare lo stato su Supabase.");
+        setError(res.error || "Impossibile aprire Outlook.");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -94,6 +84,28 @@ export const RibaModal: React.FC<RibaModalProps> = ({
       setSending(false);
     }
   };
+
+  const confirmPayment = async () => {
+    setSending(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const sentAt = new Date().toISOString();
+      const saved = await saveRemoteRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
+      if (!saved) {
+        setError("Impossibile registrare il pagamento su Supabase. Riprova.");
+        return;
+      }
+      onStatusUpdated({ isPaid: true, sentAt });
+      setSuccessMsg("Pagamento registrato.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const recordedAt = ribaInfo.sentAt && Number.isFinite(Date.parse(ribaInfo.sentAt))
+    ? new Date(ribaInfo.sentAt).toLocaleString("it-IT")
+    : ribaInfo.sentAt;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -182,12 +194,12 @@ export const RibaModal: React.FC<RibaModalProps> = ({
               <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 space-y-1.5">
                 <div className="flex items-center justify-center gap-1.5 text-emerald-400 font-bold">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>Email alla banca già preparata per questa scadenza</span>
+                  <span>Pagamento registrato per questa scadenza</span>
                 </div>
                 {ribaInfo.sentAt && (
                   <div className="text-[11px] text-emerald-300/80 font-medium flex items-center justify-center gap-1">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Inviata / Registrata il: <strong className="text-emerald-200">{ribaInfo.sentAt}</strong></span>
+                    <span>Registrato il <strong className="text-emerald-200">{recordedAt}</strong></span>
                   </div>
                 )}
                 <div className="text-[10px] text-emerald-400/60 font-semibold uppercase tracking-wider">
@@ -250,7 +262,7 @@ export const RibaModal: React.FC<RibaModalProps> = ({
         </div>
 
         {/* Modal Actions */}
-        <div className="p-4 border-t border-[var(--border)]/70 bg-[var(--background)]/30 flex items-center justify-end gap-2.5">
+        <div className="p-4 border-t border-[var(--border)]/70 bg-[var(--background)]/30 flex flex-wrap items-center justify-end gap-2.5">
           <button
             type="button"
             onClick={onClose}
@@ -259,6 +271,16 @@ export const RibaModal: React.FC<RibaModalProps> = ({
           >
             Chiudi
           </button>
+          {!isPaid && (
+            <button
+              type="button"
+              onClick={confirmPayment}
+              disabled={sending}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold border border-[var(--border)] disabled:opacity-50"
+            >
+              Registra pagamento effettuato
+            </button>
+          )}
           <button
             type="button"
             onClick={handleSendEmail}
@@ -274,7 +296,7 @@ export const RibaModal: React.FC<RibaModalProps> = ({
             {sending ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Apertura Outlook...</span>
+                <span>Operazione in corso...</span>
               </>
             ) : (
               <>

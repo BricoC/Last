@@ -1,6 +1,6 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migratePriceListLogSchemaV12(db: Database): Promise<void> {
+export async function migratePriceListLogSchemaV12(db: MigrationDatabase): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS listini_prezzi_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,15 +21,9 @@ export async function migratePriceListLogSchemaV12(db: Database): Promise<void> 
     );
   `);
 
-  try {
-    await db.execute("ALTER TABLE listini_prezzi_log ADD COLUMN row_id TEXT;");
-  } catch {}
-  try {
-    await db.execute("ALTER TABLE listini_prezzi_log ADD COLUMN vecchio_testo TEXT;");
-  } catch {}
-  try {
-    await db.execute("ALTER TABLE listini_prezzi_log ADD COLUMN nuovo_testo TEXT;");
-  } catch {}
+  await db.addColumnIfMissing("listini_prezzi_log", "row_id", "TEXT");
+  await db.addColumnIfMissing("listini_prezzi_log", "vecchio_testo", "TEXT");
+  await db.addColumnIfMissing("listini_prezzi_log", "nuovo_testo", "TEXT");
 
   await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_listini_log_art 

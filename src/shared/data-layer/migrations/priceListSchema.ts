@@ -1,6 +1,6 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migratePriceListsSchemaV11(db: Database): Promise<void> {
+export async function migratePriceListsSchemaV11(db: MigrationDatabase): Promise<void> {
   // 1. Tabella Listino Generale (contiene sia listino_generale che listini_vari, per un totale di ~9763 articoli)
   await db.execute(`
     CREATE TABLE IF NOT EXISTS listino_generale (

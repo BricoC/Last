@@ -782,7 +782,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
 
   // Ripristino articolo dal cestino
   const handleItemRestored = useCallback((restored: ListinoClienteRow) => {
-    setItems((prev) => [restored, ...prev]);
+    setItems((prev) => [restored, ...prev.filter((row) => row.id !== restored.id)]);
     setTrashCount((c) => Math.max(0, c - 1));
   }, []);
 

@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import React, { useEffect, useMemo, useState, useDeferredValue, useRef } from "react";
 import { 
   X, 
@@ -242,8 +243,8 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           comparison = (a.destination || "").localeCompare(b.destination || "");
           break;
         case "quantity": {
-          const qa = parseFloat(a.quantity.replace(",", ".")) || 0;
-          const qb = parseFloat(b.quantity.replace(",", ".")) || 0;
+          const qa = parseDdtQuantity(a.quantity) ?? 0;
+          const qb = parseDdtQuantity(b.quantity) ?? 0;
           comparison = qa - qb;
           break;
         }
@@ -260,8 +261,8 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
           break;
         }
         case "netPrice": {
-          const qa = parseFloat(a.quantity.replace(",", ".")) || 0;
-          const qb = parseFloat(b.quantity.replace(",", ".")) || 0;
+          const qa = parseDdtQuantity(a.quantity) ?? 0;
+          const qb = parseDdtQuantity(b.quantity) ?? 0;
           const pa = qa > 0 ? a.netAmountSubunits / qa : a.unitPriceSubunits;
           const pb = qb > 0 ? b.netAmountSubunits / qb : b.unitPriceSubunits;
           comparison = pa - pb;
@@ -343,7 +344,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     const unitPrices: number[] = [];
 
     for (const r of filteredRows) {
-      const q = parseFloat(r.quantity.replace(",", ".")) || 0;
+      const q = parseDdtQuantity(r.quantity) ?? 0;
       totalQty += q;
       totalNetAmount += r.netAmountSubunits;
       totalPurchase += Math.round(r.purchasePriceSubunits * q);
@@ -357,7 +358,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
     const minPrice = unitPrices.length ? Math.min(...unitPrices) : 0;
     const maxPrice = unitPrices.length ? Math.max(...unitPrices) : 0;
     const lastRow = filteredRows[0];
-    const lastQty = parseFloat(lastRow.quantity.replace(",", ".")) || 0;
+    const lastQty = parseDdtQuantity(lastRow.quantity) ?? 0;
     const lastUnitNet = lastQty > 0 ? lastRow.netAmountSubunits / lastQty : lastRow.unitPriceSubunits;
 
     return {
@@ -856,7 +857,7 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
               </thead>
               <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
                 {visibleRows.map((row, idx) => {
-                  const qty = parseFloat(row.quantity.replace(",", ".")) || 0;
+                  const qty = parseDdtQuantity(row.quantity) ?? 0;
                   const unitNet = qty > 0 ? row.netAmountSubunits / qty : row.unitPriceSubunits;
                   const isPositiveRev = row.revenueSubunits > 0;
                   const isNegativeRev = row.revenueSubunits < 0;

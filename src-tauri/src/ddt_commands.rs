@@ -1,7 +1,12 @@
 use crate::ddt_types::DdtSavePayload;
+use sqlx::{Connection, SqliteConnection};
 use std::collections::HashSet;
 use tauri::State;
 use tauri_plugin_sql::DbInstances;
+
+#[cfg(test)]
+#[path = "ddt_commands_tests.rs"]
+mod tests;
 
 #[tauri::command]
 pub async fn save_ddt_transaction(
@@ -9,35 +14,96 @@ pub async fn save_ddt_transaction(
     payload: DdtSavePayload,
 ) -> Result<(), String> {
     let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+    write_ddt(&mut connection, payload, None).await
+}
+
+#[tauri::command]
+pub async fn replace_ddt_transaction(
+    db_instances: State<'_, DbInstances>,
+    local_id: String,
+    deleted_at: String,
+    payload: DdtSavePayload,
+) -> Result<(), String> {
+    let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
+    write_ddt(&mut connection, payload, Some((&local_id, &deleted_at))).await
+}
+
+async fn write_ddt(
+    connection: &mut SqliteConnection,
+    payload: DdtSavePayload,
+    replacement: Option<(&str, &str)>,
+) -> Result<(), String> {
+    let mut transaction = connection
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| format!("Impossibile avviare la transazione DDT: {error}"))?;
-
-    let result = persist_ddt(&mut connection, payload).await;
-    match result {
-        Ok(()) => match sqlx::query("COMMIT").execute(&mut *connection).await {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                let rollback = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-                match rollback {
-                    Ok(_) => Err(format!("Impossibile confermare la transazione DDT: {error}")),
-                    Err(rollback_error) => Err(format!(
-                        "Impossibile confermare la transazione DDT: {error}; rollback fallito: {rollback_error}"
-                    )),
-                }
-            }
-        },
-        Err(error) => {
-            let rollback = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-            match rollback {
-                Ok(_) => Err(error),
-                Err(rollback_error) => Err(format!(
-                    "{error}; anche il rollback della transazione DDT è fallito: {rollback_error}"
-                )),
-            }
+    let result = async {
+        if let Some((local_id, deleted_at)) = replacement {
+            move_replaced_ddt_to_trash(&mut transaction, local_id, deleted_at, &payload).await?;
         }
+        persist_ddt(&mut transaction, payload).await
     }
+    .await;
+
+    match result {
+        Ok(()) => transaction
+            .commit()
+            .await
+            .map_err(|error| format!("Impossibile confermare la transazione DDT: {error}")),
+        Err(error) => match transaction.rollback().await {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!(
+                "{error}. Errore durante il rollback DDT: {rollback}"
+            )),
+        },
+    }
+}
+
+async fn move_replaced_ddt_to_trash(
+    connection: &mut SqliteConnection,
+    local_id: &str,
+    deleted_at: &str,
+    incoming: &DdtSavePayload,
+) -> Result<(), String> {
+    let imported_exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM ddt_documents WHERE id = $1)")
+            .bind(&incoming.id)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(|error| error.to_string())?;
+    if imported_exists {
+        return Err(
+            "Esiste già un DDT locale con l'identificativo della versione importata".into(),
+        );
+    }
+
+    let updated = sqlx::query(
+        "UPDATE ddt_documents
+         SET deleted_at = $1, updated_at = $1, updated_by = 'conflict-resolver', sync_status = 'pending'
+         WHERE id = $2 AND deleted_at IS NULL AND year = $3 AND doc_number = $4",
+    )
+    .bind(deleted_at)
+    .bind(local_id)
+    .bind(incoming.year)
+    .bind(incoming.doc_number)
+    .execute(&mut *connection)
+    .await
+    .map_err(|error| error.to_string())?;
+    if updated.rows_affected() != 1 {
+        return Err("Il DDT locale da sostituire non corrisponde più al conflitto".into());
+    }
+
+    sqlx::query(
+        "UPDATE ddt_items
+         SET deleted_at = $1, updated_at = $1, updated_by = 'conflict-resolver', sync_status = 'pending'
+         WHERE ddt_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(deleted_at)
+    .bind(local_id)
+    .execute(&mut *connection)
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub(crate) async fn persist_ddt(

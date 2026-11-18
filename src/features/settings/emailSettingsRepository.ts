@@ -86,10 +86,13 @@ export async function pushEmailSettingsToSupabase(input: EmailSettingsInput): Pr
 /**
  * Scarica le impostazioni email dal Cloud Supabase e aggiorna SQLite locale
  */
-export async function pullEmailSettingsFromSupabase(): Promise<EmailSettings | null> {
+export async function pullEmailSettingsFromSupabase(requireCloud = false): Promise<EmailSettings | null> {
   try {
     const creds = await getSupabaseCredentials();
-    if (!creds) return null;
+    if (!creds) {
+      if (requireCloud) throw new Error("Configurazione Supabase assente");
+      return null;
+    }
 
     const url = `${creds.projectUrl}/rest/v1/email_settings?id=eq.${encodeURIComponent(SETTINGS_ID)}&select=*`;
     const res = await fetch(url, {
@@ -100,9 +103,13 @@ export async function pullEmailSettingsFromSupabase(): Promise<EmailSettings | n
       },
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (requireCloud) throw new Error(`HTTP ${res.status}`);
+      return null;
+    }
 
     const data = await res.json();
+    if (requireCloud && !Array.isArray(data)) throw new Error("Risposta Supabase non valida");
     if (Array.isArray(data) && data.length > 0 && data[0]) {
       const r = data[0];
       const parsed: EmailSettings = {
@@ -162,6 +169,7 @@ export async function pullEmailSettingsFromSupabase(): Promise<EmailSettings | n
       return parsed;
     }
   } catch (err) {
+    if (requireCloud) throw err;
     console.warn("[emailSettingsRepository] Errore pull email_settings da Supabase:", err);
   }
   return null;

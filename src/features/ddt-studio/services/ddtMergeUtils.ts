@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
 import { calculateRowAmounts } from "../utils/ddtCalculations";
 import {
@@ -136,7 +137,7 @@ function recomputeItemAmounts(item: DdtItemSnapshot): DdtItemSnapshot {
       item.unit_price_subunits === 0 &&
       item.purchase_price_subunits === 0 &&
       (!item.code || !item.code.trim()) &&
-      (!item.quantity || !(parseFloat(item.quantity.replace(",", ".")) > 0)));
+      ((parseDdtQuantity(item.quantity) ?? 0) <= 0));
 
   if (isNote) {
     return {

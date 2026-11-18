@@ -58,7 +58,7 @@ export class CloudFullSetupService {
       const ddtRows = await db.select<{ count: number }[]>("SELECT COUNT(*) as count FROM ddt_documents WHERE deleted_at IS NULL");
       const ddtCount = ddtRows?.[0]?.count || 0;
 
-      const listinoRows = await db.select<{ count: number }[]>("SELECT COUNT(*) as count FROM listino_generale WHERE deleted_at IS NULL");
+      const listinoRows = await db.select<{ count: number }[]>("SELECT COUNT(*) as count FROM listino_generale");
       const listinoCount = listinoRows?.[0]?.count || 0;
 
       if (ddtCount === 0 || listinoCount === 0) {
@@ -75,23 +75,12 @@ export class CloudFullSetupService {
     const activeUserId = AppUserService.getActiveUserId();
     const needsUser = !activeUserId;
 
-    // Se l'utente ha già completato il setup o chiuso il banner in localStorage
-    const dismissed =
-      typeof localStorage !== "undefined" &&
-      (localStorage.getItem("dashboard_setup_dismissed") === "true" ||
-        localStorage.getItem("dashboard_setup_completed") === "true");
-
-    // Se Supabase e la cartella di backup sono già impostati, la postazione è già configurata
-    const isAlreadySetup = !needsSupabase && !needsBackupFolder;
-
-    const isAllConfigured = isAlreadySetup || dismissed || (!needsSupabase && !needsData && !needsBackupFolder);
-
-    // Se è tutto configurato, memorizza persistentemente che il primo avvio è completato
-    if (isAlreadySetup && typeof localStorage !== "undefined") {
-      try {
-        localStorage.setItem("dashboard_setup_completed", "true");
-      } catch {}
-    }
+    const setupPartial = typeof localStorage !== "undefined" &&
+      localStorage.getItem("dashboard_setup_partial") === "true";
+    const dismissed = typeof localStorage !== "undefined" &&
+      localStorage.getItem("dashboard_setup_dismissed") === "true";
+    const isAllConfigured = dismissed || (!setupPartial && !needsSupabase && !needsData && !needsBackupFolder);
+    needsData ||= setupPartial;
 
     return {
       needsSupabase,
@@ -118,9 +107,22 @@ export class CloudFullSetupService {
       return { success: false, error: "Credenziali Supabase mancanti." };
     }
 
+    const failures: string[] = [];
+    const step = async (name: string, operation: () => Promise<unknown>) => {
+      try {
+        const result = await operation();
+        if (result && typeof result === "object" && "success" in result && result.success === false) {
+          throw new Error("error" in result ? String(result.error || "Operazione incompleta") : "Operazione incompleta");
+        }
+      } catch (error) {
+        failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+
     try {
       // 1. Salva la configurazione nel backend di Rust
       await invoke("save_supabase_config", { config: { projectUrl: url, anonKey: key } });
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("supabase-config-updated"));
 
       // 2. FASE 1: Download completo DDT di tutti gli anni (2023, 2024, 2025, 2026...) e righe
       onProgress({
@@ -129,8 +131,12 @@ export class CloudFullSetupService {
         percent: 12,
       });
 
-      const ddtRes = await importAllReadableSupabaseDdts(url, key);
-      console.log("[CloudSetup] DDT importati da Supabase:", ddtRes);
+      await step("DDT", async () => {
+        const result = await importAllReadableSupabaseDdts(url, key);
+        if (result.conflicts || result.orphanLines || result.lineIdConflicts) {
+          throw new Error(`Import parziale (${result.conflicts} conflitti testata, ${result.orphanLines} righe orfane, ${result.lineIdConflicts} conflitti riga)`);
+        }
+      });
 
       onProgress({
         stage: "ddt",
@@ -138,13 +144,11 @@ export class CloudFullSetupService {
         percent: 30,
       });
 
-      try {
-        await clientSyncService.syncAllFromSupabase();
-      } catch (e) {
-        console.warn("[CloudSetup] Sync anagrafica clienti da Supabase non riuscita:", e);
-      }
-      await clientSyncService.importMissingClientsFromDdts();
-      await ddtRepository.enrichMissingDdtClientData();
+      await step("Clienti", () => clientSyncService.syncAllFromSupabase());
+      await step("Anagrafica da DDT", async () => {
+        await clientSyncService.importMissingClientsFromDdts();
+        await ddtRepository.enrichMissingDdtClientData();
+      });
 
       // 3. FASE 2: Download completo Listino Generale, Listini Vari e Listini Clienti
       onProgress({
@@ -153,7 +157,7 @@ export class CloudFullSetupService {
         percent: 40,
       });
 
-      await priceListSyncService.syncAllFromSupabase((p: SyncProgress) => {
+      await step("Listini", () => priceListSyncService.syncAllFromSupabase((p: SyncProgress) => {
         let pct = 40;
         if (p.stage === "general") {
           pct = 40 + Math.round((p.current / (p.total || 8849)) * 18);
@@ -165,7 +169,7 @@ export class CloudFullSetupService {
           message: p.message,
           percent: Math.min(76, pct),
         });
-      });
+      }));
 
       // 4. FASE 3: Offerte, Note, Preventivi, Ordini, Fornitori e Fatture Elettroniche
       onProgress({
@@ -174,14 +178,16 @@ export class CloudFullSetupService {
         percent: 80,
       });
 
-      await Promise.allSettled([
-        offersSyncService.sync().catch((e) => console.warn("[CloudSetup] Offerte:", e)),
-        notesSyncService.sync().catch((e) => console.warn("[CloudSetup] Note:", e)),
-        QuoteSyncService.pullQuotes().catch((e) => console.warn("[CloudSetup] Preventivi:", e)),
-        orderSupabaseService.fetchSuppliers().catch((e) => console.warn("[CloudSetup] Fornitori:", e)),
-        orderSupabaseService.fetchOrders("attivi").catch((e) => console.warn("[CloudSetup] Ordini attivi:", e)),
-        orderSupabaseService.fetchOrders("archiviati").catch((e) => console.warn("[CloudSetup] Ordini archiviati:", e)),
-        electronicInvoicesService.syncFromSupabase().catch((e) => console.warn("[CloudSetup] Fatture:", e)),
+      await Promise.all([
+        step("Offerte", () => offersSyncService.sync()),
+        step("Note", () => notesSyncService.sync()),
+        step("Preventivi", () => QuoteSyncService.pullQuotes()),
+        step("Fornitori", () => orderSupabaseService.fetchSuppliers(true)),
+        step("Ordini", async () => {
+          await orderSupabaseService.fetchOrders("attivi", true);
+          await orderSupabaseService.fetchOrders("archiviati", true);
+        }),
+        step("Fatture", () => electronicInvoicesService.syncFromSupabase()),
       ]);
 
       // 5. FASE 4: Utenti, Postazioni e Impostazioni Cloud
@@ -191,15 +197,20 @@ export class CloudFullSetupService {
         percent: 94,
       });
 
-      await Promise.allSettled([
-        AppUserService.syncWithCloud().catch((e) => console.warn("[CloudSetup] Utenti:", e)),
-        pullEmailSettingsFromSupabase().catch((e) => console.warn("[CloudSetup] Email settings:", e)),
-        pullBackupSettingsFromSupabase().catch((e) => console.warn("[CloudSetup] Backup settings:", e)),
+      await Promise.all([
+        step("Utenti", () => AppUserService.syncWithCloud()),
+        step("Impostazioni email", () => pullEmailSettingsFromSupabase(true)),
+        step("Impostazioni backup", () => pullBackupSettingsFromSupabase(true)),
       ]);
 
+      const error = failures.length ? `Scaricamento parziale. ${failures.join(" · ")}` : undefined;
+      if (typeof localStorage !== "undefined") {
+        if (error) localStorage.setItem("dashboard_setup_partial", "true");
+        else localStorage.removeItem("dashboard_setup_partial");
+      }
       onProgress({
-        stage: "completed",
-        message: "Scaricamento completo da Cloud terminato con successo! Tutti i dati sono in locale.",
+        stage: error ? "error" : "completed",
+        message: error ?? "Scaricamento completo da Cloud terminato.",
         percent: 100,
       });
 
@@ -211,7 +222,7 @@ export class CloudFullSetupService {
         window.dispatchEvent(new CustomEvent("supabase-config-updated"));
       }
 
-      return { success: true };
+      return error ? { success: false, error } : { success: true };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[CloudSetup] Errore inizializzazione da Supabase:", msg);

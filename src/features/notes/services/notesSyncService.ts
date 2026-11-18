@@ -12,14 +12,18 @@ interface ConfigStatus {
   isValid: boolean;
 }
 
+type NotesSyncResult = { success: boolean; pushed: number; pulled: number; error?: string };
+type PendingDeletion = { id: string; supabase_id: number | null; deleted_at: string };
+
 export class NotesSyncService {
-  private isSyncing = false;
+  private activeSync: Promise<NotesSyncResult> | null = null;
+  private rerunRequested = false;
   private syncError: string | null = null;
   private lastSyncTime: Date | null = null;
 
   public getStatus() {
     return {
-      isSyncing: this.isSyncing,
+      isSyncing: this.activeSync !== null,
       syncError: this.syncError,
       lastSyncTime: this.lastSyncTime,
     };
@@ -43,18 +47,41 @@ export class NotesSyncService {
   /**
    * Sincronizzazione bidirezionale: invia le note modificate e scarica gli aggiornamenti dal cloud
    */
-  public async sync(): Promise<{ success: boolean; pushed: number; pulled: number; error?: string }> {
-    if (this.isSyncing) {
-      return { success: false, pushed: 0, pulled: 0, error: "Sincronizzazione già in corso" };
+  public sync(): Promise<NotesSyncResult> {
+    if (this.activeSync) {
+      this.rerunRequested = true;
+      return this.activeSync;
     }
+    this.activeSync = this.runSync().finally(() => { this.activeSync = null; });
+    return this.activeSync;
+  }
 
+  public async retryPendingDeletions(): Promise<void> {
+    const db = await getDatabase();
+    const [pending] = await db.select<{ id: string }[]>("SELECT id FROM note_deletions LIMIT 1");
+    if (pending) await this.sync();
+  }
+
+  private async runSync(): Promise<NotesSyncResult> {
+    let pushed = 0;
+    let pulled = 0;
+    let result: NotesSyncResult;
+    do {
+      this.rerunRequested = false;
+      result = await this.syncOnce();
+      pushed += result.pushed;
+      pulled += result.pulled;
+    } while (this.rerunRequested);
+    return { ...result, pushed, pulled };
+  }
+
+  private async syncOnce(): Promise<NotesSyncResult> {
     const creds = await this.getSupabaseCredentials();
     if (!creds) {
       this.syncError = "Configurazione Supabase non disponibile";
       return { success: false, pushed: 0, pulled: 0, error: this.syncError };
     }
 
-    this.isSyncing = true;
     this.syncError = null;
 
     let pushed = 0;
@@ -63,22 +90,35 @@ export class NotesSyncService {
     try {
       const db = await getDatabase();
 
-      // 0. PROPAGA ELIMINAZIONI OFFLINE: elimina da Supabase eventuali note rimaste nel cestino con supabase_id
-      const trashedWithRemote = await db.select<{ id: string; supabase_id: number | null; deleted_at: string }[]>(
-        `SELECT id, supabase_id, deleted_at FROM notes_trash`
+      const pendingDeletions = await db.select<PendingDeletion[]>(
+        "SELECT id, supabase_id, deleted_at FROM note_deletions ORDER BY deleted_at, id"
       );
-      for (const trashRow of trashedWithRemote) {
-        if (trashRow.supabase_id) {
-          const deletedOk = await this.deleteRemoteNote(trashRow.supabase_id);
-          if (deletedOk) {
-            await db.execute(`UPDATE notes_trash SET supabase_id = NULL WHERE id = $1`, [trashRow.id]);
+      let deletionError: string | undefined;
+      for (const deletion of pendingDeletions) {
+        try {
+          const url = new URL("/rest/v1/note", creds.projectUrl);
+          if (deletion.supabase_id != null) {
+            url.searchParams.set("or", `(id.eq.${deletion.supabase_id},local_id.eq.${JSON.stringify(deletion.id)})`);
+          } else {
+            url.searchParams.set("local_id", `eq.${deletion.id}`);
           }
+          const response = await fetch(url.toString(), {
+            method: "DELETE",
+            headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          await db.execute(
+            "DELETE FROM note_deletions WHERE id = $1 AND deleted_at = $2", [deletion.id, deletion.deleted_at]
+          );
+        } catch (error) {
+          deletionError = `Eliminazioni note in sospeso: ${error instanceof Error ? error.message : String(error)}`;
         }
       }
 
       // 1. PUSH: Invia le note con sync_status = 'pending' verso Supabase
       const pendings = await db.select<NoteRecord[]>(
-        `SELECT * FROM notes WHERE sync_status = 'pending'`
+        `SELECT * FROM notes WHERE sync_status = 'pending'
+           AND NOT EXISTS (SELECT 1 FROM note_deletions WHERE note_deletions.id = notes.id)`
       );
 
       for (const item of pendings) {
@@ -110,7 +150,7 @@ export class NotesSyncService {
           });
 
           if (res.ok) {
-            await db.execute(`UPDATE notes SET sync_status = 'synced' WHERE id = $1`, [item.id]);
+            await db.execute(`UPDATE notes SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2`, [item.id, item.updated_at]);
             pushed++;
           } else {
             const errBody = (await res.json().catch(() => ({}))) as { message?: string; hint?: string };
@@ -134,8 +174,8 @@ export class NotesSyncService {
             const data = await res.json().catch(() => []);
             const remoteId = Array.isArray(data) && data[0]?.id ? Number(data[0].id) : null;
             await db.execute(
-              `UPDATE notes SET supabase_id = $1, sync_status = 'synced' WHERE id = $2`,
-              [remoteId, item.id]
+              `UPDATE notes SET supabase_id = $1, sync_status = 'synced' WHERE id = $2 AND updated_at = $3`,
+              [remoteId, item.id, item.updated_at]
             );
             pushed++;
           } else {
@@ -172,15 +212,13 @@ export class NotesSyncService {
 
         if (Array.isArray(remoteList)) {
           for (const rem of remoteList) {
-            // Non resuscitare una nota eliminata localmente nel cestino dopo l'ultimo aggiornamento remoto
-            const trashedMatch = trashedWithRemote.find(
-              (t) =>
-                (rem.local_id && t.id === rem.local_id) ||
-                (t.supabase_id !== null && t.supabase_id === rem.id)
+            if (pendingDeletions.some((entry) => entry.id === rem.local_id || entry.supabase_id === rem.id)) continue;
+            const trashed = await db.select<{ id: string }[]>(
+              "SELECT id FROM note_deletions WHERE id = $1 OR supabase_id = $2 " +
+              "UNION ALL SELECT id FROM notes_trash WHERE id = $1 OR supabase_id = $2 LIMIT 1",
+              [rem.local_id ?? null, rem.id]
             );
-            if (trashedMatch && (!rem.updated_at || trashedMatch.deleted_at >= rem.updated_at)) {
-              continue;
-            }
+            if (trashed.length) continue;
 
             const existing = await db.select<{ id: string; sync_status: string; updated_at: string }[]>(
               `SELECT id, sync_status, updated_at FROM notes WHERE supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL) LIMIT 1`,
@@ -196,7 +234,10 @@ export class NotesSyncService {
               await db.execute(
                 `INSERT INTO notes (
                   id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color, created_by, updated_by, created_at, updated_at, sync_status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'synced')`,
+                ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'synced'
+                  WHERE NOT EXISTS (SELECT 1 FROM note_deletions WHERE id = $1 OR supabase_id = $2)
+                    AND NOT EXISTS (SELECT 1 FROM notes_trash WHERE id = $1 OR supabase_id = $2)
+                  ON CONFLICT(id) DO NOTHING`,
                 [
                   newId,
                   rem.id,
@@ -226,7 +267,7 @@ export class NotesSyncService {
                   created_by = $8,
                   updated_by = $9,
                   updated_at = $10
-                WHERE id = $11`,
+                WHERE id = $11 AND sync_status = 'synced'`,
                 [
                   rem.id,
                   rem.title || "Nuova Nota",
@@ -246,49 +287,16 @@ export class NotesSyncService {
         }
       }
 
+      if (!pullRes.ok) throw new Error(`Download note: HTTP ${pullRes.status}`);
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("notes-data-updated"));
+      if (deletionError) throw new Error(deletionError);
       this.lastSyncTime = new Date();
-      window.dispatchEvent(new CustomEvent("notes-data-updated"));
       return { success: true, pushed, pulled };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.syncError = msg;
       console.warn("[NotesSync] Sync interrotta:", err);
       return { success: false, pushed, pulled, error: msg };
-    } finally {
-      this.isSyncing = false;
-    }
-  }
-
-  /**
-   * Elimina una nota da Supabase se possiede un ID remoto
-   */
-  public async deleteRemoteNote(supabaseId: number | null | undefined): Promise<boolean> {
-    if (!supabaseId) return false;
-    const creds = await this.getSupabaseCredentials();
-    if (!creds) return false;
-
-    try {
-      const url = new URL(`/rest/v1/note?id=eq.${supabaseId}`, creds.projectUrl);
-      const res = await fetch(url.toString(), {
-        method: "DELETE",
-        headers: {
-          apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
-        },
-      });
-      if (res.ok || res.status === 404) {
-        try {
-          const db = await getDatabase();
-          await db.execute(`UPDATE notes_trash SET supabase_id = NULL WHERE supabase_id = $1`, [supabaseId]);
-        } catch {
-          // ignore cleanup failure
-        }
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.warn("[NotesSync] Impossibile eliminare nota da Supabase:", err);
-      return false;
     }
   }
 }

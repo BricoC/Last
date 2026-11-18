@@ -98,7 +98,7 @@ export class ClientSyncService {
 
       if (!shouldDeleteRemoteClient(trimmed, activeSameName.map((r) => r.business_name))) {
         if (localClientId) {
-          await db.execute("UPDATE clients SET sync_status = 'synced' WHERE id = $1", [localClientId]);
+          await db.execute("UPDATE clients SET sync_status = 'synced' WHERE id = $1 AND deleted_at IS NOT NULL", [localClientId]);
         }
         return true;
       }
@@ -134,7 +134,7 @@ export class ClientSyncService {
       }
 
       if (localClientId) {
-        await db.execute("UPDATE clients SET sync_status = 'synced' WHERE id = $1", [localClientId]);
+        await db.execute("UPDATE clients SET sync_status = 'synced' WHERE id = $1 AND deleted_at IS NOT NULL", [localClientId]);
       } else {
         await db.execute(
           "UPDATE clients SET sync_status = 'synced' WHERE deleted_at IS NOT NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($1))",
@@ -161,6 +161,9 @@ export class ClientSyncService {
       const ok = await this.deleteClientFromSupabase(row.business_name, row.id);
       if (ok) syncedCount++;
     }
+    if (syncedCount !== pendingDeleted.length) {
+      throw new Error(`Eliminazioni clienti in sospeso: ${pendingDeleted.length - syncedCount}`);
+    }
     return syncedCount;
   }
 
@@ -169,24 +172,25 @@ export class ClientSyncService {
    * Esegue 0 chiamate HTTP verso Supabase se non ci sono record pending in locale.
    */
   public async syncPendingClientsToSupabase(): Promise<{ pushed: number; deleted: number }> {
-    const deleted = await this.syncPendingDeletionsToSupabase().catch(() => 0);
+    let deleted = 0;
+    const failures: string[] = [];
+    try {
+      deleted = await this.syncPendingDeletionsToSupabase();
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
 
     const db = await getDatabase();
     const pendingRows = await db.select<{ id: string }[]>(
       "SELECT id FROM clients WHERE deleted_at IS NULL AND sync_status = 'pending'"
     );
 
-    if (pendingRows.length === 0) {
-      if (deleted > 0 && typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("clients-data-updated"));
-      }
-      return { pushed: 0, deleted };
-    }
-
     let pushed = 0;
+    let queued = 0;
     for (const row of pendingRows) {
       const client = await clientRepository.getClientById(row.id);
       if (!client) continue;
+      queued++;
       const ok = await this.pushClientToSupabase(client);
       if (ok) pushed++;
     }
@@ -195,6 +199,8 @@ export class ClientSyncService {
       window.dispatchEvent(new CustomEvent("clients-data-updated"));
     }
 
+    if (pushed !== queued) failures.push(`Modifiche clienti in sospeso: ${queued - pushed}`);
+    if (failures.length) throw new Error(failures.join(" · "));
     return { pushed, deleted };
   }
 
@@ -211,29 +217,27 @@ export class ClientSyncService {
    */
   public async syncAllFromSupabase(): Promise<SyncClientsResult> {
     // Prima di scaricare da Supabase, propaga eventuali modifiche ed eliminazioni locali pendenti
-    await this.syncPendingClientsToSupabase().catch(() => ({ pushed: 0, deleted: 0 }));
+    await this.syncPendingClientsToSupabase();
 
     const creds = await this.getCredentials();
     const availablePriceLists = await clientRepository.getAllAvailablePriceLists();
 
     const url = new URL("/rest/v1/clienti", creds.projectUrl);
     url.searchParams.set("select", "*");
-    url.searchParams.set("order", "cliente.asc");
+    url.searchParams.set("order", "cliente.asc,id.asc");
     url.searchParams.set("limit", "1000");
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: {
-        apikey: creds.anonKey,
-        Authorization: `Bearer ${creds.anonKey}`,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Errore connessione Supabase clienti: HTTP ${response.status}`);
+    const rows: SupabaseClientRow[] = [];
+    while (true) {
+      url.searchParams.set("offset", String(rows.length));
+      const response = await fetch(url.toString(), {
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      });
+      if (!response.ok) throw new Error(`Errore connessione Supabase clienti: HTTP ${response.status}`);
+      const page = await response.json();
+      if (!Array.isArray(page)) throw new Error("Inventario clienti cloud non valido");
+      if (!page.length) break;
+      rows.push(...page);
     }
-
-    const rows: SupabaseClientRow[] = await response.json();
     let imported = 0;
     let matchedPriceLists = 0;
 
@@ -256,7 +260,7 @@ export class ClientSyncService {
     }[]>(
       "SELECT id, business_name, price_lists_json, sync_status FROM clients WHERE deleted_at IS NULL"
     );
-    const existingMap = new Map<string, { id: string; price_lists_json: string | null }>();
+    const existingMap = new Map<string, { id: string; price_lists_json: string | null; sync_status?: string | null }>();
     for (const r of existingRows) {
       existingMap.set(r.business_name.trim().toLowerCase(), r);
     }
@@ -340,7 +344,8 @@ export class ClientSyncService {
       }
 
       // Ricerca rapida in memoria O(1)
-      const existing = existingMap.get(businessName.toLowerCase());
+      const existing = existingMap.get(lowerName);
+      if (existing?.sync_status === "pending") continue;
 
       let priceLists: string[] = [];
       if (existing && existing.price_lists_json) {
@@ -398,7 +403,7 @@ export class ClientSyncService {
               destinations_json = $9, phones_json = $10, price_lists_json = $11,
               is_active = 1, updated_at = $12, updated_by = 'supabase_sync',
               sync_status = 'synced'
-            WHERE id = $13 AND deleted_at IS NULL`,
+            WHERE id = $13 AND deleted_at IS NULL AND COALESCE(sync_status, '') <> 'pending'`,
             [
               w.businessName,
               w.address,
@@ -446,7 +451,7 @@ export class ClientSyncService {
       }
 
       // Allinea eventuali clienti già sincronizzati ma rimossi da Supabase da un altro PC
-      if (rows.length > 0 && rows.length < 1000) {
+      if (rows.length > 0) {
         for (const existing of existingRows) {
           if (
             existing.sync_status === "synced" &&
@@ -507,45 +512,32 @@ export class ClientSyncService {
             Authorization: `Bearer ${creds.anonKey}`,
           },
         });
-        if (checkRes.ok) {
-          const found = await checkRes.json();
-          if (Array.isArray(found) && found.length > 0 && typeof found[0]?.id === "number") {
-            supId = found[0].id;
-            break;
-          }
+        if (!checkRes.ok) throw new Error(`Ricerca cliente: HTTP ${checkRes.status}`);
+        const found = await checkRes.json();
+        if (Array.isArray(found) && found.length === 1 && typeof found[0]?.id === "number") {
+          supId = found[0].id;
+          break;
         }
+        if (!Array.isArray(found) || found.length > 0) throw new Error("Risultato ambiguo per la ragione sociale");
       }
 
-      // Fallback: se non trovato per nome ma presente P.IVA, cerca per P.IVA solo se univoca e compatibile
       if (supId === null && client.vat_number && client.vat_number.trim().length >= 8) {
         const vatUrl = new URL("/rest/v1/clienti", creds.projectUrl);
         vatUrl.searchParams.set("piva", `eq.${client.vat_number.trim()}`);
         vatUrl.searchParams.set("select", "id,cliente");
-        const vatRes = await fetch(vatUrl.toString(), {
-          headers: {
-            apikey: creds.anonKey,
-            Authorization: `Bearer ${creds.anonKey}`,
-          },
+        const vatRes = await fetch(vatUrl, {
+          headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
         });
-        if (vatRes.ok) {
-          const foundVat = await vatRes.json();
-          if (Array.isArray(foundVat) && foundVat.length === 1 && typeof foundVat[0]?.id === "number") {
-            const remoteName = String(foundVat[0]?.cliente || "").trim().toLowerCase();
-            const localName = client.business_name.trim().toLowerCase();
-            if (!remoteName || remoteName === localName) {
-              supId = foundVat[0].id;
-            } else {
-              // Se il record remoto con questa P.IVA appartiene a un cliente diverso presente in locale, non sovrascriverlo
-              const localDb = await getDatabase();
-              const otherLocal = await localDb.select<{ id: string }[]>(
-                "SELECT id FROM clients WHERE LOWER(TRIM(business_name)) = $1 AND deleted_at IS NULL AND id <> $2 LIMIT 1",
-                [remoteName, client.id]
-              );
-              if (otherLocal.length === 0) {
-                supId = foundVat[0].id;
-              }
-            }
+        if (!vatRes.ok) throw new Error(`Ricerca P.IVA: HTTP ${vatRes.status}`);
+        const matches = await vatRes.json();
+        if (!Array.isArray(matches) || matches.length > 1) throw new Error("P.IVA non univoca");
+        if (matches.length === 1) {
+          const match = matches[0];
+          if (typeof match.id !== "number" ||
+            String(match.cliente ?? "").trim().toLowerCase() !== client.business_name.trim().toLowerCase()) {
+            throw new Error("La P.IVA appartiene a una ragione sociale diversa");
           }
+          supId = match.id;
         }
       }
 
@@ -577,8 +569,8 @@ export class ClientSyncService {
       if (res.ok) {
         const db = await getDatabase();
         await db.execute(
-          "UPDATE clients SET sync_status = 'synced' WHERE id = $1",
-          [client.id]
+          "UPDATE clients SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2 AND deleted_at IS NULL",
+          [client.id, client.updated_at]
         );
         return true;
       }

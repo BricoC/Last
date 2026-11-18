@@ -9,13 +9,11 @@ interface ConfigStatus {
   config: CachedSupabaseConfig | null;
 }
 
-const cacheResetters = new Set<() => void>();
+let generation = 0;
 
 if (typeof window !== "undefined") {
   window.addEventListener("supabase-config-updated", () => {
-    for (const reset of cacheResetters) {
-      reset();
-    }
+    generation++;
   });
 }
 
@@ -24,25 +22,36 @@ if (typeof window !== "undefined") {
  * automaticamente la cache locale all'evento globale `supabase-config-updated`.
  */
 export function createCachedSupabaseConfigLoader(logScope: string) {
-  let cached: CachedSupabaseConfig | null = null;
-  cacheResetters.add(() => {
-    cached = null;
-  });
+  let cached: { generation: number; config: CachedSupabaseConfig } | undefined;
+  let request: { generation: number; result: Promise<ConfigStatus | null> } | undefined;
 
   return async (): Promise<CachedSupabaseConfig | null> => {
-    if (cached) return cached;
-    try {
-      const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
+    for (;;) {
+      const currentGeneration = generation;
+      if (cached?.generation === currentGeneration) return cached.config;
+      if (request?.generation !== currentGeneration) {
+        request = {
+          generation: currentGeneration,
+          result: invoke<ConfigStatus>("load_supabase_config").catch((error) => {
+            console.warn(`[${logScope}] Impossibile recuperare credenziali Supabase:`, error);
+            return null;
+          }),
+        };
+      }
+      const pending = request;
+      const status = await pending.result;
+      if (request === pending) request = undefined;
+      if (currentGeneration !== generation) continue;
+
       if (status?.config?.projectUrl && status?.config?.anonKey) {
-        cached = {
+        const config = {
           projectUrl: status.config.projectUrl.replace(/\/$/, ""),
           anonKey: status.config.anonKey.trim(),
         };
-        return cached;
+        cached = { generation: currentGeneration, config };
+        return config;
       }
-    } catch (err) {
-      console.warn(`[${logScope}] Impossibile recuperare credenziali Supabase:`, err);
+      return null;
     }
-    return null;
   };
 }

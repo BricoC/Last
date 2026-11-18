@@ -12,6 +12,10 @@ vi.mock("@/shared/data-layer/database", () => ({
 }));
 
 import { OrderSupabaseService } from "../orderSupabaseService";
+import type { OrderItem } from "../../types/order";
+
+const queueKey = "last_order_offline_queue";
+const draft = { id: "ord_draft_test", description: "Primo ordine" } as OrderItem;
 
 describe("OrderSupabaseService - cleanId & Offline Queue", () => {
   const originalNavigator = globalThis.navigator;
@@ -67,7 +71,7 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
 
     const mockSupabase = {
       from: () => ({
-        insert: () => ({
+        upsert: () => ({
           select: async () => ({
             data: [{ id: "real-uuid-999", created_at: "2026-11-18T10:00:00Z" }],
             error: null,
@@ -106,5 +110,57 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
     const processed = await service.processOfflineQueue();
     expect(processed).toBe(2);
     expect(updatedEqIds).toEqual(["real-uuid-999"]);
+  });
+
+  it("riusa lo stesso UUID se il cloud salva ma la risposta va persa", async () => {
+    const service = new OrderSupabaseService();
+    const remote = new Map<string, { id: string; descrizione: string }>();
+    const upsert = vi.fn(([row]: { id: string; descrizione: string }[]) => ({
+      select: async () => {
+        remote.set(row.id, row);
+        if (upsert.mock.calls.length === 1) throw new Error("Risposta persa");
+        return { data: [row], error: null };
+      },
+    }));
+    vi.spyOn(service, "getClient").mockResolvedValue({ from: () => ({ upsert }) } as any);
+
+    await service.saveOrder(draft, true);
+    await expect(service.processOfflineQueue()).resolves.toBe(1);
+    expect(upsert).toHaveBeenCalledTimes(2);
+    expect(remote.size).toBe(1);
+    expect(JSON.parse(localStorage.getItem(queueKey)!)).toEqual([]);
+  });
+
+  it("accorpa edit offline e conserva un nuovo edit accodato durante l'invio", async () => {
+    const service = new OrderSupabaseService();
+    const online = globalThis.navigator as { onLine: boolean };
+    online.onLine = false;
+    await service.saveOrder(draft, true);
+    await service.saveOrder({ ...draft, description: "Seconda versione" }, true);
+    const initial = JSON.parse(localStorage.getItem(queueKey)!);
+    expect(initial).toHaveLength(1);
+    expect(initial[0].payload.descrizione).toBe("SECONDA VERSIONE");
+
+    online.onLine = true;
+    let complete!: (value: unknown) => void;
+    let started!: () => void;
+    const sending = new Promise<void>((resolve) => { started = resolve; });
+    const upsert = vi.fn(() => ({
+      select: () => new Promise((resolve) => { complete = resolve; started(); }),
+    }));
+    const update = vi.fn(() => ({ eq: async () => ({ error: null }) }));
+    vi.spyOn(service, "getClient").mockResolvedValue({ from: () => ({ upsert, update }) } as any);
+    const run = service.processOfflineQueue();
+    await sending;
+    await service.saveOrder({ ...draft, description: "Terza versione" }, true);
+    await expect(service.processOfflineQueue()).resolves.toBe(0);
+    complete({ data: [{ id: initial[0].remoteId }], error: null });
+    await expect(run).resolves.toBe(1);
+    expect(JSON.parse(localStorage.getItem(queueKey)!)).toMatchObject([
+      { targetId: initial[0].remoteId, action: "update", payload: { descrizione: "TERZA VERSIONE" } },
+    ]);
+    await expect(service.processOfflineQueue()).resolves.toBe(1);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ descrizione: "TERZA VERSIONE" }));
+    expect(upsert).toHaveBeenCalledTimes(1);
   });
 });

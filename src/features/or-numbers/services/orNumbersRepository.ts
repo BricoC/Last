@@ -2,6 +2,11 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { OrRow, isActualOrderReference } from "../types/orNumbers";
 import { cleanDestinationName } from "@/features/ddt-studio/utils/destinationCleaner";
 import { invoke } from "@tauri-apps/api/core";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
+import { MonetaryValue } from "@/shared/domain/monetaryValue";
+import { parseDdtQuantity } from "@/features/ddt-studio/utils/ddtQuantity";
+import { calculateRowAmounts } from "@/features/ddt-studio/utils/ddtCalculations";
+import { ddtCloudPushService } from "@/features/ddt-studio/services/ddtCloudPushService";
 
 export class OrNumbersRepository {
   private static logsTableEnsured = false;
@@ -297,60 +302,63 @@ export class OrNumbersRepository {
     discountPercent?: number
   ): Promise<void> {
     const db = await getDatabase();
-    await db.execute(
-      `UPDATE ddt_documents 
-       SET order_reference = $1, 
-           updated_at = datetime('now'),
-           sync_status = 'pending'
-       WHERE id = $2`,
-      [orderRef.trim(), ddtId]
+    const [document] = await db.select<{ updated_at: string }[]>(
+      "SELECT updated_at FROM ddt_documents WHERE id = $1 AND deleted_at IS NULL", [ddtId]
     );
+    if (!document) throw new Error("DDT da aggiornare non trovato.");
+    const now = new Date().toISOString();
+    const writes: SqliteWrite[] = [];
+    let totals = "";
+    const parameters: unknown[] = [orderRef.trim(), now, ddtId, document.updated_at];
 
-    if (discountPercent !== undefined && !isNaN(discountPercent)) {
-      await db.execute(
-        `UPDATE ddt_items 
-         SET discount_pct = $1,
-             updated_at = datetime('now'),
-             sync_status = 'pending'
-         WHERE ddt_id = $2 AND deleted_at IS NULL`,
-        [String(discountPercent), ddtId]
+    if (discountPercent !== undefined) {
+      if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+        throw new Error("Sconto OR fuori intervallo.");
+      }
+      const rows = await db.select<{
+        id: string; updated_at: string; quantity: string; unit_price_subunits: number; vat_rate: number;
+      }[]>(
+        `SELECT id, updated_at, quantity, unit_price_subunits, vat_rate FROM ddt_items
+          WHERE ddt_id = $1 AND deleted_at IS NULL AND COALESCE(row_kind, 'item') <> 'note'`,
+        [ddtId]
       );
-    }
-
-    // Aggiornamento anche verso Supabase su tabella ddt
-    try {
-      const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
-      if (configRes?.config?.projectUrl && configRes?.config?.anonKey) {
-        // Recupera anche year e doc_number per un match impeccabile
-        const docRows = await db.select<{ year: number; doc_number: number }[]>(
-          "SELECT year, doc_number FROM ddt_documents WHERE id = $1",
-          [ddtId]
+      const discount = String(discountPercent);
+      let taxable = 0;
+      let tax = 0;
+      for (const row of rows) {
+        const { netAmount, vatAmount } = calculateRowAmounts(
+          parseDdtQuantity(row.quantity) ?? row.quantity,
+          MonetaryValue.fromSubunits(row.unit_price_subunits), discount, row.vat_rate
         );
-
-        const url = new URL("/rest/v1/ddt", configRes.config.projectUrl.replace(/\/$/, ""));
-        if (docRows.length > 0 && docRows[0].doc_number) {
-          url.searchParams.set("anno", `eq.${docRows[0].year}`);
-          url.searchParams.set("numero", `eq.${docRows[0].doc_number}`);
-        } else {
-          url.searchParams.set("id", `eq.${ddtId}`);
-        }
-
-        await fetch(url.toString(), {
-          method: "PATCH",
-          headers: {
-            apikey: configRes.config.anonKey,
-            Authorization: `Bearer ${configRes.config.anonKey}`,
-            "Content-Type": "application/json",
-            Prefer: "return=minimal"
-          },
-          body: JSON.stringify({ 
-            nr_vs_ordine: orderRef.trim(),
-            ultima_modifica: new Date().toISOString()
-          })
+        const net = netAmount.toSubunits();
+        const vat = vatAmount.toSubunits();
+        taxable += net;
+        tax += vat;
+        writes.push({
+          sql: `UPDATE ddt_items SET discount_pct = $1, net_amount_subunits = $2,
+                vat_amount_subunits = $3, updated_at = $4, sync_status = 'pending'
+                WHERE id = $5 AND updated_at = $6 AND deleted_at IS NULL`,
+          params: [discount, net, vat, now, row.id, row.updated_at],
+          expectedRows: 1,
         });
       }
-    } catch (err) {
-      console.warn("[OrNumbersRepository] Supabase assign OR sync warning:", err);
+      totals = ", total_taxable_subunits = $5, total_vat_subunits = $6, total_document_subunits = $7";
+      parameters.push(taxable, tax, taxable + tax);
+    }
+
+    writes.unshift({
+      sql: `UPDATE ddt_documents SET order_reference = $1, updated_at = $2, sync_status = 'pending'${totals}
+            WHERE id = $3 AND updated_at = $4 AND deleted_at IS NULL`,
+      params: parameters,
+      expectedRows: 1,
+    });
+    await applyLocalDatabaseBatch(writes);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+    try {
+      const result = await ddtCloudPushService.pushDdtById(ddtId, { reassignNumberOnConflict: false });
+      if (!result.success) console.warn("[OrNumbersRepository] DDT in attesa di sincronizzazione:", result.error);
+    } catch (error) {
+      console.warn("[OrNumbersRepository] DDT in attesa di sincronizzazione:", error);
     }
   }
 }

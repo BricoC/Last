@@ -388,7 +388,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
         unit: hist.unit || "NR.",
         unit_price: prezziIvaEnabled ? hist.unitPriceSubunits / 100000 : 0,
         purchase_price: hist.purchasePriceSubunits ? hist.purchasePriceSubunits / 100000 : 0,
-        vat_rate: prezziIvaEnabled && hist.vatRate ? hist.vatRate : undefined,
+        vat_rate: prezziIvaEnabled ? hist.vatRate ?? undefined : undefined,
       });
       setInsertQuantity(hist.quantity || "1");
     }

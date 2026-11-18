@@ -235,6 +235,14 @@ class CloudSyncStatusService {
         ),
       ]);
 
+      const incomplete = [
+        ["DDT", ddtFetch], ["Listino generale", genFetch], ["Listini clienti", cliFetch],
+      ] as const;
+      const unavailable = incomplete.filter(([, result]) =>
+        result.status === "rejected" || !result.value.ok
+      ).map(([label]) => label);
+      if (unavailable.length) remoteError = `Verifica cloud incompleta: ${unavailable.join(", ")}`;
+
       let ddtDate: Date | null = null;
       if (ddtFetch.status === "fulfilled" && ddtFetch.value.ok) {
         const ddtData = (await ddtFetch.value.json()) as any[];
@@ -323,9 +331,10 @@ class CloudSyncStatusService {
     // (es. se la migrazione o il salvataggio è partito da questo stesso PC, o se i dati locali sono già più recenti o identici)
     const isLocalDdtUpToDate =
       !remoteLatestDdt ||
-      !localLatestDdt ||
-      localLatestDdt.year > remoteLatestDdt.year ||
-      (localLatestDdt.year === remoteLatestDdt.year && localLatestDdt.number >= remoteLatestDdt.number);
+      Boolean(localLatestDdt && (
+        localLatestDdt.year > remoteLatestDdt.year ||
+        (localLatestDdt.year === remoteLatestDdt.year && localLatestDdt.number >= remoteLatestDdt.number)
+      ));
 
     let isLocalDataAlreadyUpToDate = false;
     if (isLocalDdtUpToDate && remoteLatestDate) {
@@ -342,26 +351,14 @@ class CloudSyncStatusService {
     }
 
     // Regola A: Se su Supabase esiste un DDT con numero superiore al massimo locale
-    if (
-      remoteLatestDdt &&
-      localLatestDdt &&
-      (remoteLatestDdt.year > localLatestDdt.year ||
-        (remoteLatestDdt.year === localLatestDdt.year && remoteLatestDdt.number > localLatestDdt.number))
-    ) {
+    if (remoteLatestDdt && !isLocalDdtUpToDate) {
       hasPendingRemoteChanges = true;
-      alignmentMessage = `Nuovo DDT n. ${remoteLatestDdt.number} presente sul Cloud (locale fermo al n. ${localLatestDdt.number})`;
+      alignmentMessage = `DDT n. ${remoteLatestDdt.number}/${remoteLatestDdt.year} presente sul Cloud e da scaricare`;
     }
     // Regola B: Se i dati locali (SQLite) sono già uguali o più recenti dell'attività del Cloud
     else if (isLocalDataAlreadyUpToDate) {
       hasPendingRemoteChanges = false;
       alignmentMessage = "Programma aggiornato: allineato con l'ultima attività del Cloud";
-      // Auto-aggiorna il timestamp nel browser per evitare falsi positivi futuri
-      try {
-        if (remoteLatestDate) {
-          localStorage.setItem("last_supabase_sync_timestamp", remoteLatestDate.toISOString());
-          localStorage.setItem("last_supabase_sync_summary", "Dati locali già allineati al Cloud");
-        }
-      } catch {}
     }
     // Regola C: Se l'attività remota è più recente dell'ultimo scaricamento locale (con 5s di tolleranza)
     else if (remoteLatestDate && localLastSyncDate) {
@@ -378,14 +375,17 @@ class CloudSyncStatusService {
       if (isLocalDdtUpToDate) {
         hasPendingRemoteChanges = false;
         alignmentMessage = "Programma allineato a Supabase";
-        try {
-          localStorage.setItem("last_supabase_sync_timestamp", new Date().toISOString());
-          localStorage.setItem("last_supabase_sync_summary", "DDT e listini allineati");
-        } catch {}
       } else {
         hasPendingRemoteChanges = true;
         alignmentMessage = "Nessuna sincronizzazione recente registrata in locale";
       }
+    }
+
+    const lastFailure = localStorage.getItem("last_supabase_sync_failure");
+    if (lastFailure || remoteError) {
+      remoteError = lastFailure ?? remoteError;
+      hasPendingRemoteChanges = true;
+      alignmentMessage = remoteError ?? alignmentMessage;
     }
 
     return {
@@ -414,56 +414,42 @@ class CloudSyncStatusService {
     genCount: number;
     cliCount: number;
     summary: string;
+    success: boolean;
   }> {
-    const ddtResult = await ddtIncrementalSyncService.syncNewDdtsFromSupabase({
-      includePreviousYear: true,
-      checkModifiedRecent: true,
-    });
-
-    let genCount = 0;
-    try {
-      const genRes = await priceListSyncService.syncIncrementalGeneralFromSupabase();
-      genCount = genRes.updatedCount || 0;
-    } catch (e) {
-      console.warn("[CloudSyncStatus] Errore sync incrementale listino generale:", e);
-    }
-
-    let cliCount = 0;
-    try {
-      const cliRes = await priceListSyncService.syncIncrementalClientiFromSupabase();
-      cliCount = cliRes.updatedCount || 0;
-    } catch (e) {
-      console.warn("[CloudSyncStatus] Errore sync incrementale listini clienti:", e);
-    }
-
-    // Genera sommario leggibile
-    const parts: string[] = [];
-    if (ddtResult.newHeadersCount > 0) {
-      parts.push(`${ddtResult.newHeadersCount} nuovi DDT`);
-    } else {
-      parts.push("DDT verificati (nessun nuovo doc)");
-    }
-    if (genCount > 0) parts.push(`${genCount} art. listino generale`);
-    if (cliCount > 0) parts.push(`${cliCount} listini clienti`);
-
-    const summary = parts.join(", ");
-    const nowIso = new Date().toISOString();
-
-    localStorage.setItem("last_supabase_sync_timestamp", nowIso);
-    localStorage.setItem("last_supabase_sync_summary", summary);
-
-    // Invalida cache interna e ricalcola
-    this.lastStatus = null;
-    void this.getStatus(true);
-
-    window.dispatchEvent(new CustomEvent("cloud-sync-status-updated"));
-
-    return {
-      ddtResult,
-      genCount,
-      cliCount,
-      summary,
+    const [ddt, general, clients] = await Promise.allSettled([
+      ddtIncrementalSyncService.syncNewDdtsFromSupabase({ includePreviousYear: true, checkModifiedRecent: true }),
+      priceListSyncService.syncIncrementalGeneralFromSupabase(),
+      priceListSyncService.syncIncrementalClientiFromSupabase(),
+    ]);
+    const ddtResult = ddt.status === "fulfilled" ? ddt.value : {
+      newHeadersCount: 0, newLinesCount: 0, backupPath: null, error: String(ddt.reason),
     };
+    const genCount = general.status === "fulfilled" ? general.value.updatedCount : 0;
+    const cliCount = clients.status === "fulfilled" ? clients.value.updatedCount : 0;
+
+    const failures = [
+      ["DDT", ddtResult.error],
+      ["Listino generale", general.status === "fulfilled" ? general.value.error : String(general.reason)],
+      ["Listini clienti", clients.status === "fulfilled" ? clients.value.error : String(clients.reason)],
+    ].filter(([, error]) => Boolean(error)).map(([label, error]) => `${label}: ${error}`);
+
+    let summary: string;
+    if (failures.length) {
+      summary = `Sincronizzazione parziale. ${failures.join(" · ")}`;
+      localStorage.setItem("last_supabase_sync_failure", summary);
+    } else {
+      const parts = [ddtResult.newHeadersCount ? `${ddtResult.newHeadersCount} nuovi DDT` : "DDT verificati"];
+      if (genCount > 0) parts.push(`${genCount} art. listino generale`);
+      if (cliCount > 0) parts.push(`${cliCount} listini clienti`);
+      summary = parts.join(", ");
+      localStorage.setItem("last_supabase_sync_timestamp", new Date().toISOString());
+      localStorage.setItem("last_supabase_sync_summary", summary);
+      localStorage.removeItem("last_supabase_sync_failure");
+    }
+
+    this.lastStatus = null;
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cloud-sync-status-updated"));
+    return { ddtResult, genCount, cliCount, summary, success: failures.length === 0 };
   }
 }
 

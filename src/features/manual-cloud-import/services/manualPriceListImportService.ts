@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { getDatabase } from "@/shared/data-layer/database";
 import { parseItalianNumber } from "@/shared/utils/numberUtils";
+import { deterministicUuid } from "@/shared/utils/deterministicUuid";
 
 export interface FileItemInfo {
   filename: string;
@@ -110,6 +111,13 @@ export async function readTextFileLossless(filePath: string): Promise<string> {
 export function parseSafeNum(val: unknown, defaultVal: number = 0): number {
   const num = parseItalianNumber(val);
   return num === null ? defaultVal : num;
+}
+
+/** Excel stores percentages as fractions. A textual % suffix explicitly gives percentage points. */
+export function parseExcelPricePercentage(value: unknown, fallback = 0): number {
+  const number = parseItalianNumber(value);
+  if (number === null) return fallback;
+  return typeof value === "string" && value.trim().endsWith("%") ? number / 100 : number;
 }
 
 export function normalizeArtCode(val: unknown): string {
@@ -367,31 +375,85 @@ export async function scanAndParseClientPriceLists(
   };
 }
 
+async function readCloudInventory<T>(
+  projectUrl: string, anonKey: string, table: string, columns: string,
+  onProgress?: (count: number) => void
+): Promise<T[]> {
+  const rows: T[] = [];
+  const url = new URL(`/rest/v1/${table}`, projectUrl);
+  url.searchParams.set("select", columns);
+  url.searchParams.set("order", "id.asc");
+  url.searchParams.set("limit", "1000");
+  while (true) {
+    url.searchParams.set("offset", String(rows.length));
+    const response = await fetch(url.toString(), {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    });
+    if (!response.ok) throw new Error(`Inventario Supabase ${table} incompleto: HTTP ${response.status}`);
+    const chunk = await response.json();
+    if (!Array.isArray(chunk)) throw new Error(`Inventario Supabase ${table} non valido`);
+    if (!chunk.length) return rows;
+    rows.push(...chunk);
+    onProgress?.(rows.length);
+  }
+}
+
+function groupByPayloadColumns(records: Record<string, unknown>[]): Record<string, unknown>[][] {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const row of records) {
+    const shape = JSON.stringify(Object.keys(row).filter((key) => row[key] !== undefined).sort());
+    const group = groups.get(shape);
+    if (group) group.push(row);
+    else groups.set(shape, [row]);
+  }
+  return [...groups.values()];
+}
+
+async function writePriceListBatches(
+  projectUrl: string, anonKey: string, table: string, records: Record<string, unknown>[],
+  onProgress?: (current: number, total: number) => void
+): Promise<{ inserted: number; updated: number; failed: number }> {
+  let inserted = 0;
+  let updated = 0;
+  let failed = 0;
+  for (const group of groupByPayloadColumns(records)) {
+    for (let offset = 0; offset < group.length; offset += 200) {
+      const chunk = group.slice(offset, offset + 200);
+      const existing = chunk[0].id != null;
+      try {
+        const response = await fetch(new URL(`/rest/v1/${table}`, projectUrl), {
+          method: "POST",
+          headers: {
+            apikey: anonKey, Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json",
+            Prefer: existing ? "resolution=merge-duplicates,return=minimal" : "return=minimal",
+          },
+          body: JSON.stringify(chunk),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (existing) updated += chunk.length;
+        else inserted += chunk.length;
+      } catch {
+        failed += chunk.length;
+      }
+      onProgress?.(inserted + updated + failed, records.length);
+    }
+  }
+  return { inserted, updated, failed };
+}
+
 export async function uploadClientPriceListsToSupabase(
   rows: ParsedListinoClienteRow[],
   projectUrl: string,
   anonKey: string,
   onProgress?: (processed: number, total: number) => void
 ): Promise<{ inserted: number; updated: number; failed: number }> {
-  const cloudMap = new Map<string, { id: number }>();
-  let offset = 0;
-  const PAGE_SIZE = 1000;
-  while (true) {
-    const res = await fetch(
-      `${projectUrl}/rest/v1/listini_clienti?select=id,cliente,descrizione&limit=${PAGE_SIZE}&offset=${offset}`,
-      { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` } }
-    );
-    if (!res.ok) break;
-    const data = (await res.json()) as { id: number; cliente: string; descrizione: string }[];
-    if (data.length === 0) break;
-    for (const c of data) {
-      const k = `${String(c.cliente || "").trim().toLowerCase()}___${String(c.descrizione || "").trim().toLowerCase()}`;
-      cloudMap.set(k, { id: c.id });
-    }
-    offset += data.length;
-    if (data.length < PAGE_SIZE) break;
-  }
-
+  const inventory = await readCloudInventory<{ id: number; cliente: string; descrizione: string }>(
+    projectUrl, anonKey, "listini_clienti", "id,cliente,descrizione"
+  );
+  const cloudMap = new Map(inventory.map((row) => [
+    `${String(row.cliente || "").trim().toLowerCase()}___${String(row.descrizione || "").trim().toLowerCase()}`,
+    row,
+  ]));
   const nowIso = new Date().toISOString();
   const toUpsert: Record<string, unknown>[] = rows.map((r) => {
     const k = `${r.cliente.trim().toLowerCase()}___${r.descrizione.trim().toLowerCase()}`;
@@ -413,39 +475,7 @@ export async function uploadClientPriceListsToSupabase(
     return payload;
   });
 
-  let inserted = 0;
-  let updated = 0;
-  let failed = 0;
-  const BATCH_SIZE = 200;
-
-  for (let i = 0; i < toUpsert.length; i += BATCH_SIZE) {
-    const chunk = toUpsert.slice(i, i + BATCH_SIZE);
-    try {
-      const res = await fetch(`${projectUrl}/rest/v1/listini_clienti`, {
-        method: "POST",
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=minimal",
-        },
-        body: JSON.stringify(chunk),
-      });
-      if (res.ok) {
-        for (const item of chunk) {
-          if (item.id != null) updated++;
-          else inserted++;
-        }
-      } else {
-        failed += chunk.length;
-      }
-    } catch {
-      failed += chunk.length;
-    }
-    if (onProgress) onProgress(Math.min(i + BATCH_SIZE, toUpsert.length), toUpsert.length);
-  }
-
-  return { inserted, updated, failed };
+  return writePriceListBatches(projectUrl, anonKey, "listini_clienti", toUpsert, onProgress);
 }
 
 /* =====================================================================
@@ -514,18 +544,18 @@ export async function scanAndParseGeneralPriceLists(
         data: r.DATA != null ? String(r.DATA).trim() : null,
         descrizione: desc,
         um: r.UM ? String(r.UM).trim() : "NR.",
-        perc_pub: parseSafeNum(r["% PUB"] ?? r["%PUB"] ?? r.perc_pub),
+        perc_pub: parseExcelPricePercentage(r["% PUB"] ?? r["%PUB"] ?? r.perc_pub),
         prezzo_pubblico: parseSafeNum(r.PUBBLICO ?? r.prezzo_pubblico),
-        perc_prof: parseSafeNum(r["% PROF"] ?? r["%PROF"] ?? r.perc_prof),
+        perc_prof: parseExcelPricePercentage(r["% PROF"] ?? r["%PROF"] ?? r.perc_prof),
         prezzo_profess: parseSafeNum(r.PROFESS ?? r.prezzo_profess),
-        perc_fatt: parseSafeNum(r["% FATT"] ?? r["%FATT"] ?? r.perc_fatt),
+        perc_fatt: parseExcelPricePercentage(r["% FATT"] ?? r["%FATT"] ?? r.perc_fatt),
         prezzo_fattura: parseSafeNum(r.FATTURA ?? r.prezzo_fattura),
         prezzo_acquisto: parseSafeNum(r.ACQUISTO ?? r.prezzo_acquisto),
-        aumento: parseSafeNum(r.AUMENTO ?? r.aumento),
+        aumento: parseExcelPricePercentage(r.AUMENTO ?? r.aumento),
         r1: parseSafeNum(r.R1 ?? r.r1),
-        maga: parseSafeNum(r.MAGA ?? r.maga),
+        maga: parseExcelPricePercentage(r.MAGA ?? r.maga),
         r2: parseSafeNum(r.R2 ?? r.r2),
-        perc_iva: parseSafeNum(r.IVA ?? r["%IVA"] ?? r.perc_iva, 0.22),
+        perc_iva: parseExcelPricePercentage(r.IVA ?? r["%IVA"] ?? r.perc_iva, 0.22),
         note: r.NOTE ? String(r.NOTE).trim() : null,
         isVari: false,
       });
@@ -569,18 +599,18 @@ export async function scanAndParseGeneralPriceLists(
             data: r.DATA != null ? String(r.DATA).trim() : null,
             descrizione: desc,
             um: r.UM ? String(r.UM).trim() : "NR.",
-            perc_pub: parseSafeNum(r["% PUB"] ?? r["%PUB"] ?? r.perc_pub),
+            perc_pub: parseExcelPricePercentage(r["% PUB"] ?? r["%PUB"] ?? r.perc_pub),
             prezzo_pubblico: parseSafeNum(r.PUBBLICO ?? r.prezzo_pubblico),
-            perc_prof: parseSafeNum(r["% PROF"] ?? r["%PROF"] ?? r.perc_prof),
+            perc_prof: parseExcelPricePercentage(r["% PROF"] ?? r["%PROF"] ?? r.perc_prof),
             prezzo_profess: parseSafeNum(r.PROFESS ?? r.prezzo_profess),
-            perc_fatt: parseSafeNum(r["% FATT"] ?? r["%FATT"] ?? r.perc_fatt),
+            perc_fatt: parseExcelPricePercentage(r["% FATT"] ?? r["%FATT"] ?? r.perc_fatt),
             prezzo_fattura: parseSafeNum(r.FATTURA ?? r.prezzo_fattura),
             prezzo_acquisto: parseSafeNum(r.ACQUISTO ?? r.prezzo_acquisto),
-            aumento: parseSafeNum(r.AUMENTO ?? r.aumento),
+            aumento: parseExcelPricePercentage(r.AUMENTO ?? r.aumento),
             r1: parseSafeNum(r.R1 ?? r.r1),
-            maga: parseSafeNum(r.MAGA ?? r.maga),
+            maga: parseExcelPricePercentage(r.MAGA ?? r.maga),
             r2: parseSafeNum(r.R2 ?? r.r2),
-            perc_iva: parseSafeNum(r.IVA ?? r["%IVA"] ?? r.perc_iva, 0.22),
+            perc_iva: parseExcelPricePercentage(r.IVA ?? r["%IVA"] ?? r.perc_iva, 0.22),
             note: r.NOTE ? String(r.NOTE).trim() : null,
             isVari: true,
           });
@@ -612,171 +642,39 @@ export async function uploadGeneralListsToSupabase(
   anonKey: string,
   onProgress?: (stage: string, processed: number, total: number) => void
 ): Promise<{ genInserted: number; genUpdated: number; varInserted: number; varUpdated: number; failed: number }> {
-  let genInserted = 0;
-  let genUpdated = 0;
-  let varInserted = 0;
-  let varUpdated = 0;
-  let failed = 0;
+  type InventoryRow = { id: number; codice_articolo: string; descrizione: string };
+  const columns = "id,codice_articolo,descrizione";
+  const [generalInventory, variInventory] = await Promise.all([
+    rowsGenerale.length ? readCloudInventory<InventoryRow>(projectUrl, anonKey, "listino_generale", columns) : [],
+    rowsVari.length ? readCloudInventory<InventoryRow>(projectUrl, anonKey, "listini_vari", columns) : [],
+  ]);
 
-  if (rowsGenerale.length > 0) {
-    const cloudMapGen = new Map<string, { id: number }>();
-    let offset = 0;
-    while (true) {
-      const res = await fetch(
-        `${projectUrl}/rest/v1/listino_generale?select=id,codice_articolo,descrizione&limit=1000&offset=${offset}`,
-        { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` } }
-      );
-      if (!res.ok) break;
-      const data = (await res.json()) as { id: number; codice_articolo: string; descrizione: string }[];
-      if (data.length === 0) break;
-      for (const c of data) {
-        const k = `${normalizeArtCode(c.codice_articolo)}___${String(c.descrizione || "").trim().toLowerCase()}`;
-        cloudMapGen.set(k, { id: c.id });
-      }
-      offset += data.length;
-      if (data.length < 1000) break;
-    }
-
-    const nowIso = new Date().toISOString();
-    const toUpsert = rowsGenerale.map((r) => {
-      const k = `${normalizeArtCode(r.codice_articolo)}___${r.descrizione.trim().toLowerCase()}`;
-      const match = cloudMapGen.get(k);
-      const payload: Record<string, unknown> = {
-        cat: r.cat,
-        fornitore: r.fornitore,
-        codice_articolo: r.codice_articolo || null,
-        data: r.data,
-        descrizione: r.descrizione,
-        um: r.um,
-        perc_pub: r.perc_pub,
-        prezzo_pubblico: r.prezzo_pubblico,
-        perc_prof: r.perc_prof,
-        prezzo_profess: r.prezzo_profess,
-        perc_fatt: r.perc_fatt,
-        prezzo_fattura: r.prezzo_fattura,
-        prezzo_acquisto: r.prezzo_acquisto,
-        aumento: r.aumento,
-        r1: r.r1,
-        maga: r.maga,
-        r2: r.r2,
-        perc_iva: r.perc_iva,
-        note: r.note,
-        modificato_da: "Migrazione Manuale Last",
-        updated_at: nowIso,
+  const now = new Date().toISOString();
+  const articleKey = (row: { codice_articolo?: string | null; descrizione: string }) =>
+    `${normalizeArtCode(row.codice_articolo)}___${String(row.descrizione || "").trim().toLowerCase()}`;
+  const prepareRows = (rows: ParsedListinoGeneraleRow[], inventory: InventoryRow[]) => {
+    const cloud = new Map(inventory.map((row) => [articleKey(row), row.id]));
+    return rows.map((row) => {
+      const { isVari: _isVari, cloudId: _cloudId, ...payload } = row;
+      const id = cloud.get(articleKey(row));
+      return {
+        ...payload, codice_articolo: row.codice_articolo || null, updated_at: now,
+        ...(id == null ? {} : { id }),
       };
-      if (match) payload.id = match.id;
-      return payload;
     });
-
-    const BATCH_SIZE = 250;
-    for (let i = 0; i < toUpsert.length; i += BATCH_SIZE) {
-      const chunk = toUpsert.slice(i, i + BATCH_SIZE);
-      try {
-        const res = await fetch(`${projectUrl}/rest/v1/listino_generale`, {
-          method: "POST",
-          headers: {
-            apikey: anonKey,
-            Authorization: `Bearer ${anonKey}`,
-            "Content-Type": "application/json",
-            Prefer: "resolution=merge-duplicates,return=minimal",
-          },
-          body: JSON.stringify(chunk),
-        });
-        if (res.ok) {
-          for (const item of chunk) {
-            if (item.id != null) genUpdated++;
-            else genInserted++;
-          }
-        } else {
-          failed += chunk.length;
-        }
-      } catch {
-        failed += chunk.length;
-      }
-      if (onProgress) onProgress("Listino Generale", Math.min(i + BATCH_SIZE, toUpsert.length), toUpsert.length);
-    }
-  }
-
-  if (rowsVari.length > 0) {
-    const cloudMapVar = new Map<string, { id: number }>();
-    let offset = 0;
-    while (true) {
-      const res = await fetch(
-        `${projectUrl}/rest/v1/listini_vari?select=id,codice_articolo,descrizione&limit=1000&offset=${offset}`,
-        { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` } }
-      );
-      if (!res.ok) break;
-      const data = (await res.json()) as { id: number; codice_articolo: string; descrizione: string }[];
-      if (data.length === 0) break;
-      for (const c of data) {
-        const k = `${normalizeArtCode(c.codice_articolo)}___${String(c.descrizione || "").trim().toLowerCase()}`;
-        cloudMapVar.set(k, { id: c.id });
-      }
-      offset += data.length;
-      if (data.length < 1000) break;
-    }
-
-    const nowIso = new Date().toISOString();
-    const toUpsert = rowsVari.map((r) => {
-      const k = `${normalizeArtCode(r.codice_articolo)}___${r.descrizione.trim().toLowerCase()}`;
-      const match = cloudMapVar.get(k);
-      const payload: Record<string, unknown> = {
-        cat: r.cat,
-        fornitore: r.fornitore,
-        codice_articolo: r.codice_articolo || null,
-        data: r.data,
-        descrizione: r.descrizione,
-        um: r.um,
-        perc_pub: r.perc_pub,
-        prezzo_pubblico: r.prezzo_pubblico,
-        perc_prof: r.perc_prof,
-        prezzo_profess: r.prezzo_profess,
-        perc_fatt: r.perc_fatt,
-        prezzo_fattura: r.prezzo_fattura,
-        prezzo_acquisto: r.prezzo_acquisto,
-        aumento: r.aumento,
-        r1: r.r1,
-        maga: r.maga,
-        r2: r.r2,
-        perc_iva: r.perc_iva,
-        note: r.note,
-        modificato_da: "Migrazione Manuale Last",
-        updated_at: nowIso,
-      };
-      if (match) payload.id = match.id;
-      return payload;
-    });
-
-    const BATCH_SIZE = 250;
-    for (let i = 0; i < toUpsert.length; i += BATCH_SIZE) {
-      const chunk = toUpsert.slice(i, i + BATCH_SIZE);
-      try {
-        const res = await fetch(`${projectUrl}/rest/v1/listini_vari`, {
-          method: "POST",
-          headers: {
-            apikey: anonKey,
-            Authorization: `Bearer ${anonKey}`,
-            "Content-Type": "application/json",
-            Prefer: "resolution=merge-duplicates,return=minimal",
-          },
-          body: JSON.stringify(chunk),
-        });
-        if (res.ok) {
-          for (const item of chunk) {
-            if (item.id != null) varUpdated++;
-            else varInserted++;
-          }
-        } else {
-          failed += chunk.length;
-        }
-      } catch {
-        failed += chunk.length;
-      }
-      if (onProgress) onProgress("Listini Vari", Math.min(i + BATCH_SIZE, toUpsert.length), toUpsert.length);
-    }
-  }
-
-  return { genInserted, genUpdated, varInserted, varUpdated, failed };
+  };
+  const general = await writePriceListBatches(
+    projectUrl, anonKey, "listino_generale", prepareRows(rowsGenerale, generalInventory),
+    (current, total) => onProgress?.("Listino Generale", current, total)
+  );
+  const vari = await writePriceListBatches(
+    projectUrl, anonKey, "listini_vari", prepareRows(rowsVari, variInventory),
+    (current, total) => onProgress?.("Listini Vari", current, total)
+  );
+  return {
+    genInserted: general.inserted, genUpdated: general.updated,
+    varInserted: vari.inserted, varUpdated: vari.updated, failed: general.failed + vari.failed,
+  };
 }
 
 /* =====================================================================
@@ -1120,173 +1018,122 @@ export async function uploadDdtToSupabase(
   anonKey: string,
   onProgress?: (stage: string, processed: number, total: number) => void
 ): Promise<{ headersUploaded: number; rowsUploaded: number; failed: number }> {
+  type CloudHeader = { id: string; anno: number; numero: number };
+  type CloudLine = Pick<ParsedDdtRow, "anno" | "numero_ddt" | "riga_nr" | "descrizione">;
+  const headerKey = (year: number, number: number) => `${year}_${number}`;
+  const lineKey = (row: CloudLine) => JSON.stringify([
+    row.anno, row.numero_ddt, row.riga_nr, String(row.descrizione ?? "").trim().toLowerCase(),
+  ]);
+
+  onProgress?.("Verifica DDT e righe esistenti su Supabase", 0, headers.length + rows.length);
+  const [cloudHeaders, cloudLines] = await Promise.all([
+    readCloudInventory<CloudHeader>(projectUrl, anonKey, "ddt", "id,anno,numero"),
+    readCloudInventory<CloudLine>(projectUrl, anonKey, "ddt_righe", "anno,numero_ddt,riga_nr,descrizione"),
+  ]);
+  const headerIds = new Map(cloudHeaders.map((row) => [headerKey(row.anno, row.numero), row.id]));
+  const missingHeaders = [...new Map(headers.map((row) => [headerKey(row.anno, row.numero), row])).values()]
+    .filter((row) => !headerIds.has(headerKey(row.anno, row.numero)));
+
+  const requestHeaders = {
+    apikey: anonKey, Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json",
+  };
   let headersUploaded = 0;
   let rowsUploaded = 0;
   let failed = 0;
-
-  // 1. Recupera tutti i DDT già presenti su Supabase per sincronizzare SOLO quelli mancanti (Delta Sync)
-  if (onProgress) onProgress("Verifica DDT esistenti su Supabase", 0, headers.length);
-  const existingNumSetByYear = new Map<number, Set<number>>();
-  const ddtIdMap = new Map<string, string>(); // key: `${anno}_${numero}` -> uuid
-
-  let offset = 0;
-  while (true) {
-    const res = await fetch(
-      `${projectUrl}/rest/v1/ddt?select=id,anno,numero&limit=1000&offset=${offset}`,
-      { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` } }
-    );
-    if (!res.ok) break;
-    const data = (await res.json()) as { id: string; anno: number; numero: number }[];
-    if (data.length === 0) break;
-    for (const d of data) {
-      if (!existingNumSetByYear.has(d.anno)) existingNumSetByYear.set(d.anno, new Set());
-      existingNumSetByYear.get(d.anno)!.add(d.numero);
-      ddtIdMap.set(`${d.anno}_${d.numero}`, d.id);
+  let refreshHeaders = false;
+  const nowIso = new Date().toISOString();
+  for (let offset = 0; offset < missingHeaders.length; offset += 200) {
+    const chunk = await Promise.all(missingHeaders.slice(offset, offset + 200).map(async (h) => ({
+      id: await deterministicUuid(`last:ddt:${headerKey(h.anno, h.numero)}`),
+      numero: h.numero,
+      anno: h.anno,
+      data: h.data,
+      cliente: h.cliente,
+      indirizzo: h.indirizzo ?? null,
+      citta: h.citta ?? null,
+      pagamento: h.pagamento ?? null,
+      destinazione: h.destinazione ?? null,
+      citta_dest: h.citta_dest ?? null,
+      nr_vs_ordine: h.nr_vs_ordine ?? null,
+      causale: h.causale ?? null,
+      porto: h.porto ?? null,
+      aspetto: h.aspetto ?? null,
+      colli: h.colli ?? null,
+      peso_kg: h.peso_kg ?? 0,
+      vettore: h.vettore ?? null,
+      operatore: h.operatore ?? null,
+      note: h.note ?? null,
+      totale_imponibile: h.totale_imponibile ?? 0,
+      totale_iva: h.totale_iva ?? 0,
+      totale_documento: h.totale_documento ?? 0,
+      prezzo_acquisto_totale: h.prezzo_acquisto_totale ?? 0,
+      ricavo: h.ricavo ?? 0,
+      ricarico_totale: h.ricarico_totale ?? 0,
+      sconto_totale: h.sconto_totale ?? 0,
+      stato: h.stato || "confermato",
+      piva: h.piva ?? null,
+      cod_fiscale: h.cod_fiscale ?? null,
+      sdi: h.sdi ?? null,
+      ultima_modifica: nowIso,
+    })));
+    try {
+      const response = await fetch(new URL("/rest/v1/ddt?on_conflict=anno,numero", projectUrl), {
+        method: "POST",
+        headers: { ...requestHeaders, Prefer: "resolution=ignore-duplicates,return=representation" },
+        body: JSON.stringify(chunk),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const inserted = await response.json() as CloudHeader[];
+      if (!Array.isArray(inserted)) throw new Error("Risposta inserimento DDT non valida");
+      for (const row of inserted) headerIds.set(headerKey(row.anno, row.numero), row.id);
+      headersUploaded += inserted.length;
+      refreshHeaders ||= inserted.length < chunk.length;
+    } catch {
+      failed += chunk.length;
     }
-    offset += data.length;
-    if (data.length < 1000) break;
+    onProgress?.("Invio Nuovi DDT", Math.min(offset + 200, missingHeaders.length), missingHeaders.length);
+  }
+  if (refreshHeaders) {
+    const current = await readCloudInventory<CloudHeader>(projectUrl, anonKey, "ddt", "id,anno,numero");
+    for (const row of current) headerIds.set(headerKey(row.anno, row.numero), row.id);
   }
 
-  // 2. Filtra SOLO le testate DDT mancanti
-  const missingHeaders = headers.filter((h) => {
-    const set = existingNumSetByYear.get(h.anno);
-    return !set || !set.has(h.numero);
-  });
-
-  if (missingHeaders.length > 0) {
-    const HEADER_BATCH = 200;
-    const nowIso = new Date().toISOString();
-
-    for (let i = 0; i < missingHeaders.length; i += HEADER_BATCH) {
-      const chunk = missingHeaders.slice(i, i + HEADER_BATCH).map((h) => ({
-        numero: h.numero,
-        anno: h.anno,
-        data: h.data,
-        cliente: h.cliente,
-        indirizzo: h.indirizzo,
-        citta: h.citta,
-        pagamento: h.pagamento,
-        destinazione: h.destinazione,
-        citta_dest: h.citta_dest,
-        nr_vs_ordine: h.nr_vs_ordine,
-        causale: h.causale,
-        porto: h.porto,
-        aspetto: h.aspetto,
-        colli: h.colli,
-        peso_kg: h.peso_kg,
-        vettore: h.vettore,
-        operatore: h.operatore,
-        note: h.note,
-        totale_imponibile: h.totale_imponibile,
-        totale_iva: h.totale_iva,
-        totale_documento: h.totale_documento,
-        prezzo_acquisto_totale: h.prezzo_acquisto_totale,
-        ricavo: h.ricavo,
-        ricarico_totale: h.ricarico_totale,
-        sconto_totale: h.sconto_totale,
-        stato: h.stato || "confermato",
-        ultima_modifica: nowIso,
-      }));
-
+  const existingLines = new Set(cloudLines.map(lineKey));
+  const missingLines = [...new Map(rows.map((row) => [lineKey(row), row])).values()]
+    .filter((row) => !existingLines.has(lineKey(row)));
+  for (let offset = 0; offset < missingLines.length; offset += 300) {
+    const candidates = missingLines.slice(offset, offset + 300);
+    const chunk = [];
+    for (const row of candidates) {
+      const parent = headerIds.get(headerKey(row.anno, row.numero_ddt));
+      if (!parent) {
+        failed++;
+        continue;
+      }
+      chunk.push({
+        id: await deterministicUuid(`last:ddt-riga:${parent}:${lineKey(row)}`),
+        ddt_id: parent,
+        anno: row.anno, numero_ddt: row.numero_ddt, riga_nr: row.riga_nr,
+        um: row.um ?? "", quantita: row.quantita, descrizione: row.descrizione, prezzo: row.prezzo ?? 0,
+        sconto_pct: row.sconto_pct ?? 0, importo: row.importo ?? 0, iva_pct: row.iva_pct ?? 22,
+        prezzo_acquisto: row.prezzo_acquisto ?? 0, prezzo_scontato: row.prezzo_scontato ?? 0, ricavo: row.ricavo ?? 0,
+      });
+    }
+    if (chunk.length) {
       try {
-        const res = await fetch(`${projectUrl}/rest/v1/ddt?on_conflict=anno,numero`, {
+        const response = await fetch(new URL("/rest/v1/ddt_righe?on_conflict=id", projectUrl), {
           method: "POST",
-          headers: {
-            apikey: anonKey,
-            Authorization: `Bearer ${anonKey}`,
-            "Content-Type": "application/json",
-            Prefer: "resolution=merge-duplicates,return=representation",
-          },
+          headers: { ...requestHeaders, Prefer: "resolution=ignore-duplicates,return=minimal" },
           body: JSON.stringify(chunk),
         });
-        if (res.ok) {
-          const inserted = (await res.json()) as { id: string; anno: number; numero: number }[];
-          for (const d of inserted) {
-            ddtIdMap.set(`${d.anno}_${d.numero}`, d.id);
-          }
-          headersUploaded += chunk.length;
-        } else {
-          failed += chunk.length;
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        rowsUploaded += chunk.length;
       } catch {
         failed += chunk.length;
       }
-      if (onProgress) onProgress("Invio Nuovi DDT", Math.min(i + HEADER_BATCH, missingHeaders.length), missingHeaders.length);
     }
+    onProgress?.("Invio Nuove Righe Articoli", Math.min(offset + 300, missingLines.length), missingLines.length);
   }
-
-  // 3. Verifica righe articoli già presenti su Supabase per inviare solo quelle mancanti
-  if (onProgress) onProgress("Verifica righe articoli DDT su Supabase", 0, rows.length);
-  const cloudRowKeys = new Set<string>();
-  offset = 0;
-  while (true) {
-    const res = await fetch(
-      `${projectUrl}/rest/v1/ddt_righe?select=anno,numero_ddt,riga_nr,descrizione&limit=1000&offset=${offset}`,
-      { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` } }
-    );
-    if (!res.ok) break;
-    const data = (await res.json()) as { anno: number; numero_ddt: number; riga_nr: number; descrizione: string }[];
-    if (data.length === 0) break;
-    for (const d of data) {
-      const k = `${d.anno}_${d.numero_ddt}_${d.riga_nr}_${String(d.descrizione || "").trim().toLowerCase()}`;
-      cloudRowKeys.add(k);
-    }
-    offset += data.length;
-    if (data.length < 1000) break;
-  }
-
-  const missingRows = rows.filter((r) => {
-    const k = `${r.anno}_${r.numero_ddt}_${r.riga_nr}_${String(r.descrizione || "").trim().toLowerCase()}`;
-    return !cloudRowKeys.has(k);
-  });
-
-  if (missingRows.length > 0) {
-    const rowsPayload = missingRows.map((r) => {
-      const parentId = ddtIdMap.get(`${r.anno}_${r.numero_ddt}`);
-      return {
-        ddt_id: parentId || null,
-        anno: r.anno,
-        numero_ddt: r.numero_ddt,
-        riga_nr: r.riga_nr,
-        um: r.um,
-        quantita: r.quantita,
-        descrizione: r.descrizione,
-        prezzo: r.prezzo,
-        sconto_pct: r.sconto_pct,
-        importo: r.importo,
-        iva_pct: r.iva_pct,
-        prezzo_acquisto: r.prezzo_acquisto,
-        prezzo_scontato: r.prezzo_scontato,
-        ricavo: r.ricavo,
-      };
-    });
-
-    const ROW_BATCH = 300;
-    for (let i = 0; i < rowsPayload.length; i += ROW_BATCH) {
-      const chunk = rowsPayload.slice(i, i + ROW_BATCH);
-      try {
-        const res = await fetch(`${projectUrl}/rest/v1/ddt_righe`, {
-          method: "POST",
-          headers: {
-            apikey: anonKey,
-            Authorization: `Bearer ${anonKey}`,
-            "Content-Type": "application/json",
-            Prefer: "return=minimal",
-          },
-          body: JSON.stringify(chunk),
-        });
-        if (res.ok) {
-          rowsUploaded += chunk.length;
-        } else {
-          failed += chunk.length;
-        }
-      } catch {
-        failed += chunk.length;
-      }
-      if (onProgress) onProgress("Invio Nuove Righe Articoli", Math.min(i + ROW_BATCH, rowsPayload.length), rowsPayload.length);
-    }
-  }
-
   return { headersUploaded, rowsUploaded, failed };
 }
 
@@ -1315,22 +1162,7 @@ export async function downloadSupabaseSnapshot(
   table: string,
   onProgress?: (count: number) => void
 ): Promise<Record<string, unknown>[]> {
-  const records: Record<string, unknown>[] = [];
-  let offset = 0;
-  const limit = 1000;
-  while (true) {
-    const res = await fetch(`${projectUrl}/rest/v1/${table}?select=*&limit=${limit}&offset=${offset}`, {
-      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
-    });
-    if (!res.ok) break;
-    const batch = (await res.json()) as Record<string, unknown>[];
-    if (!Array.isArray(batch) || batch.length === 0) break;
-    records.push(...batch);
-    offset += batch.length;
-    if (onProgress) onProgress(records.length);
-    if (batch.length < limit) break;
-  }
-  return records;
+  return readCloudInventory<Record<string, unknown>>(projectUrl, anonKey, table, "*", onProgress);
 }
 
 export function saveJsonToFileLocally(data: unknown, filename: string): void {
@@ -1352,33 +1184,8 @@ export async function restoreSupabaseSnapshot(
   records: Record<string, unknown>[],
   onProgress?: (current: number, total: number) => void
 ): Promise<{ restored: number; failed: number }> {
-  let restored = 0;
-  let failed = 0;
-  const BATCH_SIZE = 200;
-  for (let i = 0; i < records.length; i += BATCH_SIZE) {
-    const chunk = records.slice(i, i + BATCH_SIZE);
-    try {
-      const res = await fetch(`${projectUrl}/rest/v1/${table}`, {
-        method: "POST",
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=minimal",
-        },
-        body: JSON.stringify(chunk),
-      });
-      if (res.ok) {
-        restored += chunk.length;
-      } else {
-        failed += chunk.length;
-      }
-    } catch {
-      failed += chunk.length;
-    }
-    if (onProgress) onProgress(Math.min(i + BATCH_SIZE, records.length), records.length);
-  }
-  return { restored, failed };
+  const { inserted, updated, failed } = await writePriceListBatches(projectUrl, anonKey, table, records, onProgress);
+  return { restored: inserted + updated, failed };
 }
 
 export async function syncClientRowsToLocalSqlite(
@@ -1433,6 +1240,7 @@ export async function syncClientRowsToLocalSqlite(
     const chunk = rows.slice(i, i + BATCH_SIZE);
     for (let j = 0; j < chunk.length; j++) {
       const r = chunk[j];
+      const purchaseText = r.acquisto_old?.trim() ? r.acquisto_old : null;
       const key = `${r.cliente.trim().toLowerCase()}___${r.descrizione.trim().toLowerCase()}`;
       const matchedIds = existingByKey.get(key);
 
@@ -1442,7 +1250,7 @@ export async function syncClientRowsToLocalSqlite(
             `UPDATE listini_clienti SET
               prezzo_fattura = $1,
               prezzo_acquisto = $2,
-              acquisto_old = $3,
+              acquisto_old = COALESCE($3, acquisto_old),
               ricarico = $4,
               note = $5,
               note1 = $6,
@@ -1452,7 +1260,7 @@ export async function syncClientRowsToLocalSqlite(
             [
               r.prezzo_fattura,
               r.prezzo_acquisto,
-              r.acquisto_old || null,
+              purchaseText,
               r.ricarico,
               r.note ?? null,
               r.note1 ?? null,
@@ -1479,7 +1287,7 @@ export async function syncClientRowsToLocalSqlite(
             r.descrizione,
             r.prezzo_fattura,
             r.prezzo_acquisto,
-            r.acquisto_old || null,
+            purchaseText,
             r.ricarico,
             r.note ?? null,
             r.note1 ?? null,

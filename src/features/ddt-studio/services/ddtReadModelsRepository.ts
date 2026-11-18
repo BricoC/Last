@@ -1,3 +1,4 @@
+import { ddtQuantitySql, parseDdtQuantity } from "../utils/ddtQuantity";
 import { getDatabase } from "@/shared/data-layer/database";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { useAppSettingsStore } from "@/shared/stores/useAppSettingsStore";
@@ -43,9 +44,9 @@ export async function getDdtListViewRows(): Promise<DdtListViewRow[]> {
       d.destination_name, d.destination_city, d.status, d.total_taxable_subunits,
       d.operator, d.transport_reason, d.order_reference, d.payment_method,
       COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN
-        i.purchase_price_subunits * CAST(REPLACE(COALESCE(NULLIF(TRIM(i.quantity), ''), '0'), ',', '.') AS REAL) ELSE 0 END), 0) AS purchase_subunits,
+        i.purchase_price_subunits * ${ddtQuantitySql("i.quantity")} ELSE 0 END), 0) AS purchase_subunits,
       COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN
-        i.unit_price_subunits * CAST(REPLACE(COALESCE(NULLIF(TRIM(i.quantity), ''), '0'), ',', '.') AS REAL) ELSE 0 END), 0) AS gross_subunits,
+        i.unit_price_subunits * ${ddtQuantitySql("i.quantity")} ELSE 0 END), 0) AS gross_subunits,
       COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN i.net_amount_subunits ELSE 0 END), 0) AS net_rows_subunits
     FROM ddt_documents d
     LEFT JOIN ddt_items i ON i.ddt_id = d.id
@@ -195,7 +196,7 @@ export async function getClientArticleHistory(options: {
   const rows = await db.select<any[]>(query, params);
 
   return rows.map((row) => {
-    const qty = parseFloat(String(row.quantity || "0").replace(",", ".")) || 0;
+    const qty = parseDdtQuantity(row.quantity) ?? 0;
     const netAmount = Number(row.net_amount_subunits || 0);
     const purchaseUnit = Number(row.purchase_price_subunits || 0);
     const totalPurchase = Math.round(purchaseUnit * qty);

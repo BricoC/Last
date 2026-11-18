@@ -164,8 +164,7 @@ export const TopNavBar: React.FC = () => {
         return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
       }
     }
-    const now = new Date();
-    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    return null;
   });
 
   const fetchCloudStatus = async (force = false) => {
@@ -176,6 +175,8 @@ export const TopNavBar: React.FC = () => {
       if (s.localLastSyncDate) {
         const d = s.localLastSyncDate;
         setLastSyncTime(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+      } else {
+        setLastSyncTime(null);
       }
     } finally {
       setIsCheckingCloudStatus(false);
@@ -202,8 +203,6 @@ export const TopNavBar: React.FC = () => {
     setIsSyncing(true);
     try {
       const res = await cloudSyncStatusService.executeFullSync();
-      const now = new Date();
-      setLastSyncTime(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
       if (res.ddtResult.unresolvedGaps && res.ddtResult.unresolvedGaps.length > 0) {
         const text = res.ddtResult.unresolvedGaps
           .map((g) => `Anno ${g.year}: DDT mancanti [${g.missingNumbers.join(", ")}]`)
@@ -213,6 +212,8 @@ export const TopNavBar: React.FC = () => {
         setGapWarning(null);
       }
       await fetchCloudStatus(true);
+    } catch (error) {
+      console.warn("[TopNavBar] Sincronizzazione cloud:", error);
     } finally {
       setIsSyncing(false);
     }
@@ -708,6 +709,8 @@ export const TopNavBar: React.FC = () => {
             <span>
               {isSyncing
                 ? "Sync in corso..."
+                : cloudStatus?.error
+                ? "Cloud: verifica incompleta"
                 : cloudStatus?.hasPendingRemoteChanges
                 ? "Cloud: Nuovi dati!"
                 : lastSyncTime

@@ -5,6 +5,7 @@ import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import { DdtItem } from "../models/ddt";
 import { calculateRowAmounts, formatCascadeDiscountDisplay } from "../utils/ddtCalculations";
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import DDTTextEditor from "./DDTTextEditor";
 import { isCellInRange, parseTsv, formatTsv, normalizeExcelRowCells, type CellRange } from "@/shared/utils/gridClipboardHelper";
@@ -21,8 +22,7 @@ export function isTextOnlyRow(item?: Partial<DdtItem> | null): boolean {
   const hasPrice = isPositivePrice(item.unit_price);
   const hasCost = isPositivePrice(item.purchase_price);
   const hasCode = Boolean(item.code && String(item.code).trim().length > 0);
-  const rawQ = item.quantity ? String(item.quantity).trim().replace(",", ".") : "";
-  const hasQta = Boolean(rawQ && parseFloat(rawQ) > 0);
+  const hasQta = (parseDdtQuantity(item.quantity) ?? 0) > 0;
   return hasDesc && !hasPrice && !hasCost && !hasCode && !hasQta;
 }
 

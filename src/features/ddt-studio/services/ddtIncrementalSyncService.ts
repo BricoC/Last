@@ -142,7 +142,7 @@ class DdtIncrementalSyncService {
       linesUrl.searchParams.set("anno", `eq.${year}`);
       linesUrl.searchParams.set("numero_ddt", `in.(${numbers.join(",")})`);
       linesUrl.searchParams.set("select", LINE_FIELDS);
-      linesUrl.searchParams.set("order", "numero_ddt.asc,riga_nr.asc");
+      linesUrl.searchParams.set("order", "numero_ddt.asc,riga_nr.asc,id.asc");
       linesUrl.searchParams.set("limit", String(PAGE_LIMIT));
       linesUrl.searchParams.set("offset", String(offset));
 
@@ -150,12 +150,12 @@ class DdtIncrementalSyncService {
         headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
       });
 
-      if (!linesRes.ok) break;
+      if (!linesRes.ok) throw new Error(`Download righe DDT: HTTP ${linesRes.status}`);
       const fetchedLines = (await linesRes.json()) as CloudLine[];
-      if (!fetchedLines || fetchedLines.length === 0) break;
+      if (!Array.isArray(fetchedLines)) throw new Error("Risposta Supabase non valida per le righe DDT");
+      if (fetchedLines.length === 0) break;
       allLines.push(...fetchedLines);
-      if (fetchedLines.length < PAGE_LIMIT) break;
-      offset += PAGE_LIMIT;
+      offset += fetchedLines.length;
     }
 
     return allLines;
@@ -210,7 +210,7 @@ class DdtIncrementalSyncService {
       // 1. Carica configurazione Supabase
       const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
       if (!status?.config?.projectUrl || !status?.config?.anonKey) {
-        return { newHeadersCount: 0, newLinesCount: 0, backupPath: null };
+        return { newHeadersCount: 0, newLinesCount: 0, backupPath: null, error: "Configurazione Supabase assente" };
       }
 
       const projectUrl = status.config.projectUrl.trim().replace(/\/$/, "");
@@ -270,7 +270,8 @@ class DdtIncrementalSyncService {
             const gapRes = await fetch(gapUrl.toString(), {
               headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
             });
-            if (gapRes.ok) {
+            if (!gapRes.ok) throw new Error(`Download DDT mancanti: HTTP ${gapRes.status}`);
+            {
               const gapHeaders = (await gapRes.json()) as CloudHeader[];
               const foundSet = new Set((gapHeaders || []).map((h) => Number(h.numero)));
               for (const gNum of chunk) {
@@ -304,7 +305,7 @@ class DdtIncrementalSyncService {
             fetchedHeadersForYear.push(...fetchedHeaders);
           }
         } else {
-          console.warn(`[Sync Incrementale] Errore fetch testate anno ${year}: ${headersRes.status}`);
+          throw new Error(`Download testate DDT ${year}: HTTP ${headersRes.status}`);
         }
 
         // 2c-bis. Controllo Conflitto su localMax e su eventuali DDT pending: se esiste su Supabase un DDT con lo stesso numero ma contenuto diverso
@@ -356,7 +357,8 @@ class DdtIncrementalSyncService {
                     const confLinesRes = await fetch(confLinesUrl.toString(), {
                       headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
                     });
-                    const confLines = confLinesRes.ok ? ((await confLinesRes.json()) as CloudLine[]) : [];
+                    if (!confLinesRes.ok) throw new Error(`Download righe DDT in conflitto: HTTP ${confLinesRes.status}`);
+                    const confLines = await confLinesRes.json() as CloudLine[];
 
                     if (typeof window !== "undefined") {
                       window.dispatchEvent(
@@ -433,7 +435,8 @@ class DdtIncrementalSyncService {
             headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
           });
 
-          if (modRes.ok) {
+          if (!modRes.ok) throw new Error(`Controllo modifiche DDT: HTTP ${modRes.status}`);
+          {
             const recentModHeaders = (await modRes.json()) as CloudHeader[];
             for (const remoteH of recentModHeaders) {
               const num = Number(remoteH.numero);
@@ -560,7 +563,7 @@ class DdtIncrementalSyncService {
             }
           }
         } catch (histErr) {
-          console.warn(`[Sync Incrementale] Controllo modifiche storiche anno ${year} warning:`, histErr);
+          throw new Error(`Controllo modifiche storiche DDT ${year}: ${String(histErr)}`);
         }
       }
 

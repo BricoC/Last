@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   X,
@@ -229,8 +230,8 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
           comparison = (a.unit || "").localeCompare(b.unit || "");
           break;
         case "quantity": {
-          const qa = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
-          const qb = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          const qa = parseDdtQuantity(a.quantity) ?? 0;
+          const qb = parseDdtQuantity(b.quantity) ?? 0;
           comparison = qa - qb;
           break;
         }
@@ -247,8 +248,8 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
           break;
         }
         case "netPrice": {
-          const qa = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
-          const qb = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          const qa = parseDdtQuantity(a.quantity) ?? 0;
+          const qb = parseDdtQuantity(b.quantity) ?? 0;
           const na = a.net_amount?.toSubunits?.() ?? 0;
           const nb = b.net_amount?.toSubunits?.() ?? 0;
           const pa = qa > 0 ? na / qa : (a.unit_price?.toSubunits?.() ?? 0);
@@ -278,8 +279,8 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
           break;
         }
         case "revenue": {
-          const qa = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
-          const qb = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          const qa = parseDdtQuantity(a.quantity) ?? 0;
+          const qb = parseDdtQuantity(b.quantity) ?? 0;
           const na = a.net_amount?.toSubunits?.() ?? 0;
           const nb = b.net_amount?.toSubunits?.() ?? 0;
           const pa = a.purchase_price?.toSubunits?.() ?? 0;
@@ -290,8 +291,8 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
           break;
         }
         case "markup": {
-          const qa = parseFloat((a.quantity || "0").replace(",", ".")) || 0;
-          const qb = parseFloat((b.quantity || "0").replace(",", ".")) || 0;
+          const qa = parseDdtQuantity(a.quantity) ?? 0;
+          const qb = parseDdtQuantity(b.quantity) ?? 0;
           const na = a.net_amount?.toSubunits?.() ?? 0;
           const nb = b.net_amount?.toSubunits?.() ?? 0;
           const pa = a.purchase_price?.toSubunits?.() ?? 0;
@@ -346,7 +347,7 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
       const net = it.net_amount?.toSubunits?.() ?? 0;
       taxableSubunits += net;
 
-      const qty = parseFloat((it.quantity || "0").replace(",", ".")) || 0;
+      const qty = parseDdtQuantity(it.quantity) ?? 0;
       const purchaseUnit = it.purchase_price?.toSubunits?.() ?? 0;
       purchaseSubunits += Math.round(purchaseUnit * qty);
     }
@@ -780,7 +781,7 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
                     const unitPriceSub = it.unit_price?.toSubunits?.() ?? 0;
                     const netSub = it.net_amount?.toSubunits?.() ?? 0;
                     const purchaseSub = it.purchase_price?.toSubunits?.() ?? 0;
-                    const qty = parseFloat((it.quantity || "0").replace(",", ".")) || 0;
+                    const qty = parseDdtQuantity(it.quantity) ?? 0;
                     const unitNet = qty > 0 ? netSub / qty : unitPriceSub;
                     const totalPurchase = Math.round(purchaseSub * qty);
                     const revenue = netSub - totalPurchase;

@@ -1,4 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import type { Quote } from "../models/quote";
 import { formatQuoteCode } from "../models/quoteDraft";
 import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
@@ -20,7 +21,7 @@ function parseDataJson(raw: any): Record<string, any> {
 }
 
 function extractAndNormalizeItems(dataJson: Record<string, any>): any[] {
-  if (Array.isArray(dataJson.items) && dataJson.items.length > 0) {
+  if (Array.isArray(dataJson.items)) {
     return dataJson.items.map((it: any, idx: number) => ({
       id: it.id || crypto.randomUUID(),
       row_index: it.row_index ?? idx + 1,
@@ -94,19 +95,21 @@ function extractAndNormalizeItems(dataJson: Record<string, any>): any[] {
   return [];
 }
 
-async function syncQuoteItemsIntoDb(
-  db: any,
+function buildQuoteItemWrites(
   quoteId: string,
   items: any[],
   createdAt: string,
   updatedAt: string
-): Promise<void> {
-  if (!items || items.length === 0) return;
-  await db.execute("DELETE FROM quote_items WHERE quote_id = $1", [quoteId]);
+): SqliteWrite[] {
+  const writes: SqliteWrite[] = [{
+    sql: `UPDATE quote_items SET deleted_at = $1, updated_at = $1, sync_status = 'synced'
+      WHERE quote_id = $2 AND deleted_at IS NULL AND id NOT IN (SELECT value FROM json_each($3))`,
+    params: [updatedAt, quoteId, JSON.stringify(items.map((item) => item.id))],
+  }];
   for (let idx = 0; idx < items.length; idx++) {
     const it = items[idx];
-    await db.execute(
-      `INSERT OR REPLACE INTO quote_items (
+    writes.push({
+      sql: `INSERT INTO quote_items (
         id, quote_id, row_index, product_id, supplier, supplier_item_code,
         code, description, unit, quantity, purchase_price_subunits,
         markup_pct, base_unit_price_subunits, effective_unit_price_subunits, forced_unit_price_subunits,
@@ -120,8 +123,24 @@ async function syncQuoteItemsIntoDb(
         $16, $17, $18, $19,
         $20, $21, $22, $23,
         $24, $25, $26, $27, $28, $29, 'synced'
-      )`,
-      [
+      ) ON CONFLICT(id) DO UPDATE SET
+        row_index = excluded.row_index, product_id = excluded.product_id,
+        supplier = excluded.supplier, supplier_item_code = excluded.supplier_item_code,
+        code = excluded.code, description = excluded.description,
+        unit = excluded.unit, quantity = excluded.quantity,
+        purchase_price_subunits = excluded.purchase_price_subunits, markup_pct = excluded.markup_pct,
+        base_unit_price_subunits = excluded.base_unit_price_subunits, effective_unit_price_subunits = excluded.effective_unit_price_subunits,
+        forced_unit_price_subunits = excluded.forced_unit_price_subunits, discount_pct = excluded.discount_pct,
+        effective_markup_pct = excluded.effective_markup_pct, margin_pct = excluded.margin_pct,
+        net_amount_subunits = excluded.net_amount_subunits, cost_total_subunits = excluded.cost_total_subunits,
+        gross_profit_subunits = excluded.gross_profit_subunits, vat_rate = excluded.vat_rate,
+        vat_amount_subunits = excluded.vat_amount_subunits, availability = excluded.availability,
+        notes = excluded.notes, created_at = excluded.created_at,
+        updated_at = excluded.updated_at, updated_by = excluded.updated_by,
+        deleted_at = excluded.deleted_at, sync_status = excluded.sync_status
+      WHERE quote_items.quote_id = excluded.quote_id`,
+      expectedRows: 1,
+      params: [
         it.id || crypto.randomUUID(),
         quoteId,
         it.row_index ?? idx + 1,
@@ -151,9 +170,141 @@ async function syncQuoteItemsIntoDb(
         updatedAt || new Date().toISOString(),
         "supabase",
         null,
-      ]
-    );
+      ],
+    });
   }
+  return writes;
+}
+
+async function applyRemoteQuote(r: Record<string, any>): Promise<boolean> {
+  if (!r?.id) return false;
+  const db = await getDatabase();
+  const [local] = await db.select<{ updated_at: string; sync_status: string }[]>(
+    "SELECT updated_at, sync_status FROM quotes WHERE id = $1", [r.id]
+  );
+  const remoteTimestamp = r.updated_at || r.created_at || null;
+  const remoteTime = Date.parse(remoteTimestamp ?? "");
+  const localTime = Date.parse(local?.updated_at ?? "");
+  if (local?.sync_status === "pending" ||
+    (Number.isFinite(localTime) && (!Number.isFinite(remoteTime) || remoteTime < localTime))) {
+    return false;
+  }
+
+  const createdAt = r.created_at || new Date().toISOString();
+  const updatedAt = remoteTimestamp || createdAt;
+  const dataJson = parseDataJson(r.data_json);
+  const items = extractAndNormalizeItems(dataJson);
+  if (new Set(items.map((item) => item.id)).size !== items.length) {
+    throw new Error(`Identificativi riga duplicati nel preventivo ${r.id}`);
+  }
+  const header: SqliteWrite = {
+    sql: `INSERT INTO quotes (
+          id, quote_number, year, quote_date, status,
+          client_id, client_name, client_address, client_city, client_postal_code,
+          client_province, client_vat, client_fiscal_code, client_sdi, client_pec,
+          client_phones_json, destination_name, destination_address, destination_city,
+          subject, global_discount_pct, validity_days, payment_method, delivery_date,
+          delivery_terms, default_supplier, internal_notes, customer_notes,
+          total_taxable_subunits, total_vat_subunits, total_document_subunits,
+          total_cost_subunits, total_profit_subunits,
+          created_at, updated_at, updated_by, deleted_at, sync_status
+        ) VALUES (
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15,
+          $16, $17, $18, $19,
+          $20, $21, $22, $23, $24,
+          $25, $26, $27, $28,
+          $29, $30, $31,
+          $32, $33,
+          $34, $35, $36, $37, 'synced'
+        )
+        ON CONFLICT(id) DO UPDATE SET
+          quote_number = excluded.quote_number,
+          year = excluded.year,
+          quote_date = excluded.quote_date,
+          status = excluded.status,
+          client_id = excluded.client_id,
+          client_name = excluded.client_name,
+          client_address = excluded.client_address,
+          client_city = excluded.client_city,
+          client_postal_code = excluded.client_postal_code,
+          client_province = excluded.client_province,
+          client_vat = excluded.client_vat,
+          client_fiscal_code = excluded.client_fiscal_code,
+          client_sdi = excluded.client_sdi,
+          client_pec = excluded.client_pec,
+          client_phones_json = excluded.client_phones_json,
+          destination_name = excluded.destination_name,
+          destination_address = excluded.destination_address,
+          destination_city = excluded.destination_city,
+          subject = excluded.subject,
+          global_discount_pct = excluded.global_discount_pct,
+          validity_days = excluded.validity_days,
+          payment_method = excluded.payment_method,
+          delivery_date = excluded.delivery_date,
+          delivery_terms = excluded.delivery_terms,
+          default_supplier = excluded.default_supplier,
+          internal_notes = excluded.internal_notes,
+          customer_notes = excluded.customer_notes,
+          total_taxable_subunits = excluded.total_taxable_subunits,
+          total_vat_subunits = excluded.total_vat_subunits,
+          total_document_subunits = excluded.total_document_subunits,
+          total_cost_subunits = excluded.total_cost_subunits,
+          total_profit_subunits = excluded.total_profit_subunits,
+          updated_at = excluded.updated_at,
+          updated_by = excluded.updated_by,
+          deleted_at = excluded.deleted_at,
+          sync_status = 'synced'
+        WHERE COALESCE(quotes.sync_status, '') <> 'pending'
+          AND (julianday(quotes.updated_at) IS NULL OR julianday($38) >= julianday(quotes.updated_at))`,
+    expectedRows: 1,
+    params: [
+          r.id,
+          r.quote_number != null ? Number(r.quote_number) : null,
+          Number(r.anno) || new Date().getFullYear(),
+          r.data || new Date().toISOString().split("T")[0],
+          r.stato || "bozza",
+          dataJson.client_id || null,
+          r.cliente || "",
+          dataJson.client_address || null,
+          dataJson.client_city || null,
+          dataJson.client_postal_code || null,
+          dataJson.client_province || null,
+          dataJson.client_vat || null,
+          dataJson.client_fiscal_code || null,
+          dataJson.client_sdi || null,
+          dataJson.client_pec || null,
+          JSON.stringify(dataJson.client_phones || []),
+          dataJson.destination_name || null,
+          dataJson.destination_address || null,
+          dataJson.destination_city || null,
+          r.oggetto || "",
+          String(r.sconto_globale_pct || "0"),
+          Number(r.validita_giorni) || 30,
+          r.pagamento || null,
+          r.data_consegna || null,
+          dataJson.delivery_terms || null,
+          dataJson.default_supplier || null,
+          dataJson.internal_notes || null,
+          dataJson.customer_notes || null,
+          Math.round((Number(r.totale_imponibile) || 0) * 100000),
+          Math.round((Number(r.totale_iva) || 0) * 100000),
+          Math.round((Number(r.totale_documento) || 0) * 100000),
+          Math.round((Number(r.totale_costo) || 0) * 100000),
+          Math.round((Number(r.totale_profitto) || 0) * 100000),
+          createdAt,
+          updatedAt,
+          r.updated_by || "supabase",
+          r.deleted_at || null,
+          remoteTimestamp,
+        ],
+  };
+
+  const hasItemsSnapshot = Array.isArray(dataJson.items) || Array.isArray(dataJson.righe);
+  const writes = hasItemsSnapshot ? buildQuoteItemWrites(r.id, items, createdAt, updatedAt) : [];
+  await applyLocalDatabaseBatch([header, ...writes]);
+  return true;
 }
 
 export class QuoteSyncService {
@@ -262,7 +413,7 @@ export class QuoteSyncService {
 
       if (res.ok) {
         const db = await getDatabase();
-        await db.execute("UPDATE quotes SET sync_status = 'synced' WHERE id = $1", [quote.id]);
+        await db.execute("UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2", [quote.id, quote.updated_at]);
         return true;
       } else {
         const txt = await res.text();
@@ -310,296 +461,42 @@ export class QuoteSyncService {
    * Scarica i preventivi da Supabase Cloud e aggiorna la copia locale SQLite
    */
   public static async pullQuotes(): Promise<number> {
-    try {
-      const creds = await getSupabaseCredentials();
-      if (!creds) return 0;
-
-      const url = `${creds.projectUrl}/rest/v1/preventivi?order=created_at.desc&limit=500`;
-      const res = await fetch(url, {
-        method: "GET",
-        headers: {
-          apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
-        },
-      });
-
-      if (!res.ok) return 0;
-
-      const remoteRows = await res.json();
-      if (!Array.isArray(remoteRows) || remoteRows.length === 0) return 0;
-
-      const db = await getDatabase();
-      let imported = 0;
-
-      for (const r of remoteRows) {
-        if (!r.id) continue;
-
-        // Verifica se esiste già in locale
-        const local = await db.select<{ id: string; updated_at: string }[]>(
-          "SELECT id, updated_at FROM quotes WHERE id = $1",
-          [r.id]
-        );
-
-        const dataJson = parseDataJson(r.data_json);
-        const items = extractAndNormalizeItems(dataJson);
-
-        // Inserisci o aggiorna la testata
-        await db.execute(
-          `INSERT INTO quotes (
-            id, quote_number, year, quote_date, status,
-            client_id, client_name, client_address, client_city, client_postal_code,
-            client_province, client_vat, client_fiscal_code, client_sdi, client_pec,
-            client_phones_json, destination_name, destination_address, destination_city,
-            subject, global_discount_pct, validity_days, payment_method, delivery_date,
-            delivery_terms, default_supplier, internal_notes, customer_notes,
-            total_taxable_subunits, total_vat_subunits, total_document_subunits,
-            total_cost_subunits, total_profit_subunits,
-            created_at, updated_at, updated_by, deleted_at, sync_status
-          ) VALUES (
-            $1, $2, $3, $4, $5,
-            $6, $7, $8, $9, $10,
-            $11, $12, $13, $14, $15,
-            $16, $17, $18, $19,
-            $20, $21, $22, $23, $24,
-            $25, $26, $27, $28,
-            $29, $30, $31,
-            $32, $33,
-            $34, $35, $36, $37, 'synced'
-          )
-          ON CONFLICT(id) DO UPDATE SET
-            quote_number = excluded.quote_number,
-            year = excluded.year,
-            quote_date = excluded.quote_date,
-            status = excluded.status,
-            client_id = excluded.client_id,
-            client_name = excluded.client_name,
-            client_address = excluded.client_address,
-            client_city = excluded.client_city,
-            client_postal_code = excluded.client_postal_code,
-            client_province = excluded.client_province,
-            client_vat = excluded.client_vat,
-            client_fiscal_code = excluded.client_fiscal_code,
-            client_sdi = excluded.client_sdi,
-            client_pec = excluded.client_pec,
-            client_phones_json = excluded.client_phones_json,
-            destination_name = excluded.destination_name,
-            destination_address = excluded.destination_address,
-            destination_city = excluded.destination_city,
-            subject = excluded.subject,
-            global_discount_pct = excluded.global_discount_pct,
-            validity_days = excluded.validity_days,
-            payment_method = excluded.payment_method,
-            delivery_date = excluded.delivery_date,
-            delivery_terms = excluded.delivery_terms,
-            default_supplier = excluded.default_supplier,
-            internal_notes = excluded.internal_notes,
-            customer_notes = excluded.customer_notes,
-            total_taxable_subunits = excluded.total_taxable_subunits,
-            total_vat_subunits = excluded.total_vat_subunits,
-            total_document_subunits = excluded.total_document_subunits,
-            total_cost_subunits = excluded.total_cost_subunits,
-            total_profit_subunits = excluded.total_profit_subunits,
-            updated_at = excluded.updated_at,
-            updated_by = excluded.updated_by,
-            deleted_at = excluded.deleted_at,
-            sync_status = 'synced'`,
-          [
-            r.id,
-            r.quote_number != null ? Number(r.quote_number) : null,
-            Number(r.anno) || new Date().getFullYear(),
-            r.data || new Date().toISOString().split("T")[0],
-            r.stato || "bozza",
-            dataJson.client_id || null,
-            r.cliente || "",
-            dataJson.client_address || null,
-            dataJson.client_city || null,
-            dataJson.client_postal_code || null,
-            dataJson.client_province || null,
-            dataJson.client_vat || null,
-            dataJson.client_fiscal_code || null,
-            dataJson.client_sdi || null,
-            dataJson.client_pec || null,
-            JSON.stringify(dataJson.client_phones || []),
-            dataJson.destination_name || null,
-            dataJson.destination_address || null,
-            dataJson.destination_city || null,
-            r.oggetto || "",
-            String(r.sconto_globale_pct || "0"),
-            Number(r.validita_giorni) || 30,
-            r.pagamento || null,
-            r.data_consegna || null,
-            dataJson.delivery_terms || null,
-            dataJson.default_supplier || null,
-            dataJson.internal_notes || null,
-            dataJson.customer_notes || null,
-            Math.round((Number(r.totale_imponibile) || 0) * 100000),
-            Math.round((Number(r.totale_iva) || 0) * 100000),
-            Math.round((Number(r.totale_documento) || 0) * 100000),
-            Math.round((Number(r.totale_costo) || 0) * 100000),
-            Math.round((Number(r.totale_profitto) || 0) * 100000),
-            r.created_at || new Date().toISOString(),
-            r.updated_at || new Date().toISOString(),
-            r.updated_by || "supabase",
-            r.deleted_at || null,
-          ]
-        );
-
-        // Verifica quante righe attive sono memorizzate in locale
-        const existingItems = await db.select<{ count: number }[]>(
-          "SELECT count(*) as count FROM quote_items WHERE quote_id = $1 AND deleted_at IS NULL",
-          [r.id]
-        );
-        const localItemCount = existingItems[0]?.count ?? 0;
-        const remoteUpdatedAt = new Date(r.updated_at || r.created_at || 0).getTime();
-        const localUpdatedAt = local[0] ? new Date(local[0].updated_at || 0).getTime() : 0;
-
-        // Se non ci sono righe locali o il record remoto è più recente, sincronizza le righe
-        if ((localItemCount === 0 || remoteUpdatedAt >= localUpdatedAt) && items.length > 0) {
-          await syncQuoteItemsIntoDb(db, r.id, items, r.created_at || new Date().toISOString(), r.updated_at || new Date().toISOString());
-        }
-
-        imported++;
+    const creds = await getSupabaseCredentials();
+    if (!creds) throw new Error("Configurazione Supabase assente per i preventivi");
+    const url = new URL("/rest/v1/preventivi", creds.projectUrl);
+    url.searchParams.set("order", "id.asc");
+    url.searchParams.set("limit", "500");
+    const headers = { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` };
+    let imported = 0;
+    let offset = 0;
+    while (true) {
+      url.searchParams.set("offset", String(offset));
+      const response = await fetch(url.toString(), { headers });
+      if (!response.ok) throw new Error(`Download preventivi: HTTP ${response.status}`);
+      const rows = await response.json();
+      if (!Array.isArray(rows)) throw new Error("Risposta preventivi non valida");
+      if (!rows.length) return imported;
+      for (const row of rows) {
+        if (await applyRemoteQuote(row)) imported++;
       }
-
-      return imported;
-    } catch (err) {
-      console.warn("[QuoteSyncService] Errore pull preventivi da Supabase:", err);
-      return 0;
+      offset += rows.length;
     }
   }
 
-  /**
-   * Scarica un singolo preventivo da Supabase per ID, aggiorna SQLite locale (testata e righe)
-   */
   public static async pullQuoteById(id: string): Promise<boolean> {
     try {
       const creds = await getSupabaseCredentials();
       if (!creds) return false;
-
-      const url = `${creds.projectUrl}/rest/v1/preventivi?id=eq.${encodeURIComponent(id)}&select=*`;
-      const res = await fetch(url, {
-        method: "GET",
-        headers: {
-          apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
-        },
+      const url = new URL("/rest/v1/preventivi", creds.projectUrl);
+      url.searchParams.set("id", `eq.${id}`);
+      const response = await fetch(url, {
+        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
       });
-
-      if (!res.ok) return false;
-      const rows = await res.json();
-      if (!Array.isArray(rows) || rows.length === 0) return false;
-
-      const r = rows[0];
-      const db = await getDatabase();
-      const dataJson = parseDataJson(r.data_json);
-      const items = extractAndNormalizeItems(dataJson);
-
-      await db.execute(
-        `INSERT INTO quotes (
-          id, quote_number, year, quote_date, status,
-          client_id, client_name, client_address, client_city, client_postal_code,
-          client_province, client_vat, client_fiscal_code, client_sdi, client_pec,
-          client_phones_json, destination_name, destination_address, destination_city,
-          subject, global_discount_pct, validity_days, payment_method, delivery_date,
-          delivery_terms, default_supplier, internal_notes, customer_notes,
-          total_taxable_subunits, total_vat_subunits, total_document_subunits,
-          total_cost_subunits, total_profit_subunits,
-          created_at, updated_at, updated_by, deleted_at, sync_status
-        ) VALUES (
-          $1, $2, $3, $4, $5,
-          $6, $7, $8, $9, $10,
-          $11, $12, $13, $14, $15,
-          $16, $17, $18, $19,
-          $20, $21, $22, $23, $24,
-          $25, $26, $27, $28,
-          $29, $30, $31,
-          $32, $33,
-          $34, $35, $36, $37, 'synced'
-        )
-        ON CONFLICT(id) DO UPDATE SET
-          quote_number = excluded.quote_number,
-          year = excluded.year,
-          quote_date = excluded.quote_date,
-          status = excluded.status,
-          client_id = excluded.client_id,
-          client_name = excluded.client_name,
-          client_address = excluded.client_address,
-          client_city = excluded.client_city,
-          client_postal_code = excluded.client_postal_code,
-          client_province = excluded.client_province,
-          client_vat = excluded.client_vat,
-          client_fiscal_code = excluded.client_fiscal_code,
-          client_sdi = excluded.client_sdi,
-          client_pec = excluded.client_pec,
-          client_phones_json = excluded.client_phones_json,
-          destination_name = excluded.destination_name,
-          destination_address = excluded.destination_address,
-          destination_city = excluded.destination_city,
-          subject = excluded.subject,
-          global_discount_pct = excluded.global_discount_pct,
-          validity_days = excluded.validity_days,
-          payment_method = excluded.payment_method,
-          delivery_date = excluded.delivery_date,
-          delivery_terms = excluded.delivery_terms,
-          default_supplier = excluded.default_supplier,
-          internal_notes = excluded.internal_notes,
-          customer_notes = excluded.customer_notes,
-          total_taxable_subunits = excluded.total_taxable_subunits,
-          total_vat_subunits = excluded.total_vat_subunits,
-          total_document_subunits = excluded.total_document_subunits,
-          total_cost_subunits = excluded.total_cost_subunits,
-          total_profit_subunits = excluded.total_profit_subunits,
-          updated_at = excluded.updated_at,
-          updated_by = excluded.updated_by,
-          deleted_at = excluded.deleted_at,
-          sync_status = 'synced'`,
-        [
-          r.id,
-          r.quote_number != null ? Number(r.quote_number) : null,
-          Number(r.anno) || new Date().getFullYear(),
-          r.data || new Date().toISOString().split("T")[0],
-          r.stato || "bozza",
-          dataJson.client_id || null,
-          r.cliente || "",
-          dataJson.client_address || null,
-          dataJson.client_city || null,
-          dataJson.client_postal_code || null,
-          dataJson.client_province || null,
-          dataJson.client_vat || null,
-          dataJson.client_fiscal_code || null,
-          dataJson.client_sdi || null,
-          dataJson.client_pec || null,
-          JSON.stringify(dataJson.client_phones || []),
-          dataJson.destination_name || null,
-          dataJson.destination_address || null,
-          dataJson.destination_city || null,
-          r.oggetto || "",
-          String(r.sconto_globale_pct || "0"),
-          Number(r.validita_giorni) || 30,
-          r.pagamento || null,
-          r.data_consegna || null,
-          dataJson.delivery_terms || null,
-          dataJson.default_supplier || null,
-          dataJson.internal_notes || null,
-          dataJson.customer_notes || null,
-          Math.round((Number(r.totale_imponibile) || 0) * 100000),
-          Math.round((Number(r.totale_iva) || 0) * 100000),
-          Math.round((Number(r.totale_documento) || 0) * 100000),
-          Math.round((Number(r.totale_costo) || 0) * 100000),
-          Math.round((Number(r.totale_profitto) || 0) * 100000),
-          r.created_at || new Date().toISOString(),
-          r.updated_at || new Date().toISOString(),
-          r.updated_by || "supabase",
-          r.deleted_at || null,
-        ]
-      );
-
-      if (items.length > 0) {
-        await syncQuoteItemsIntoDb(db, r.id, items, r.created_at || new Date().toISOString(), r.updated_at || new Date().toISOString());
-      }
-      return true;
-    } catch (err) {
-      console.warn("[QuoteSyncService] Errore pullQuoteById:", err);
+      if (!response.ok) return false;
+      const rows = await response.json();
+      return Array.isArray(rows) && rows.length === 1 && await applyRemoteQuote(rows[0]);
+    } catch (error) {
+      console.warn("[QuoteSyncService] Errore pullQuoteById:", error);
       return false;
     }
   }

@@ -1,9 +1,9 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
 /**
  * Migrazione v25: Tabelle Cestino per Note e Offerte (FIFO max 10 elementi)
  */
-export async function migrateTrashSchemaV25(db: Database): Promise<void> {
+export async function migrateTrashSchemaV25(db: MigrationDatabase): Promise<void> {
   // 1. Cestino Note
   await db.execute(`
     CREATE TABLE IF NOT EXISTS notes_trash (

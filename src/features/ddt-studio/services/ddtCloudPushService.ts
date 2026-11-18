@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import {
@@ -144,7 +145,7 @@ export function buildSupabaseDdtPayloads(doc: LocalDdtRow, items: LocalDdtItemRo
         (it.purchase_price_subunits ?? 0) === 0 &&
         (!it.code || !String(it.code).trim()));
 
-    const qty = isNote ? 0 : parseNumericString(it.quantity, 1);
+    const qty = isNote ? 0 : parseDdtQuantity(it.quantity) ?? (it.quantity?.trim() ? 0 : 1);
     const unitPrice = isNote ? 0 : (it.unit_price_subunits || 0) / 100000;
     const cascadeDiscounts = isNote ? [] : parseCascadeDiscounts(it.discount_pct);
     const discountFactor = cascadeDiscounts.reduce((acc, pct) => acc * (1 - pct / 100), 1);

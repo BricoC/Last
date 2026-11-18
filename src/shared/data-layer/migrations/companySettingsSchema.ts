@@ -1,6 +1,6 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migrateCompanySettingsSchemaV7(db: Database): Promise<void> {
+export async function migrateCompanySettingsSchemaV7(db: MigrationDatabase): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS company_settings (
       id TEXT PRIMARY KEY,

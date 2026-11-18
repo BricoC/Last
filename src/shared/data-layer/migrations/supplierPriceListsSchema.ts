@@ -1,6 +1,6 @@
-import Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migrateSupplierPriceListsSchemaV27(db: Database): Promise<void> {
+export async function migrateSupplierPriceListsSchemaV27(db: MigrationDatabase): Promise<void> {
   // Tabella dei file listini indicizzati da cartella condivisa (OneDrive / Rete Locale)
   await db.execute(`
     CREATE TABLE IF NOT EXISTS supplier_price_list_files (
@@ -36,17 +36,9 @@ export async function migrateSupplierPriceListsSchemaV27(db: Database): Promise<
     );
   `);
 
-  try {
-    await db.execute("ALTER TABLE supplier_price_list_items ADD COLUMN net_price REAL DEFAULT 0;");
-  } catch {
-    // Colonna già presente
-  }
+  await db.addColumnIfMissing("supplier_price_list_items", "net_price", "REAL DEFAULT 0");
 
-  try {
-    await db.execute("ALTER TABLE supplier_price_list_items ADD COLUMN extra_code TEXT;");
-  } catch {
-    // Colonna già presente
-  }
+  await db.addColumnIfMissing("supplier_price_list_items", "extra_code", "TEXT");
 
   // Indici ad altissima velocità per ricerca istantanea su centinaia di migliaia di righe
   await db.execute(`

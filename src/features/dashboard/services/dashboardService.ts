@@ -1,3 +1,4 @@
+import { ddtQuantitySql } from "@/features/ddt-studio/utils/ddtQuantity";
 import { getDatabase } from "@/shared/data-layer/database";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { normalizeArticleDescription } from "@/features/ddt-studio/utils/articleDescriptionNormalizer";
@@ -254,7 +255,7 @@ export class DashboardService {
          d.year,
          CAST(strftime('%m', d.doc_date) AS INTEGER) AS month,
          SUM(i.net_amount_subunits) AS net_subunits,
-         SUM(CAST(i.purchase_price_subunits AS REAL) * CAST(REPLACE(i.quantity, ',', '.') AS REAL)) AS cost_subunits
+         SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
        WHERE d.deleted_at IS NULL 
@@ -490,7 +491,7 @@ export class DashboardService {
     }[]>(
       `SELECT 
          d.year,
-         SUM(CAST(i.purchase_price_subunits AS REAL) * CAST(REPLACE(i.quantity, ',', '.') AS REAL)) AS cost_subunits
+         SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
        WHERE d.deleted_at IS NULL 
@@ -538,7 +539,7 @@ export class DashboardService {
     }[]>(
       `SELECT 
          d.year,
-         SUM(CAST(i.purchase_price_subunits AS REAL) * CAST(REPLACE(i.quantity, ',', '.') AS REAL)) AS cost_subunits
+         SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
        WHERE d.deleted_at IS NULL 
@@ -766,7 +767,7 @@ export class DashboardService {
       SELECT 
         COALESCE(i.code, '') AS code,
         i.description,
-        SUM(CAST(REPLACE(i.quantity, ',', '.') AS REAL)) AS total_qty,
+        SUM(${ddtQuantitySql("i.quantity")}) AS total_qty,
         SUM(i.net_amount_subunits) AS total_turnover_subunits
       FROM ddt_items i
       JOIN ddt_documents d ON d.id = i.ddt_id
@@ -809,7 +810,7 @@ export class DashboardService {
       const canonical =
         normalizeArticleDescription(r.description) || r.description.trim().toUpperCase();
       const existing = map.get(canonical);
-      const qty = Math.round(Number(r.total_qty) || 0);
+      const qty = Number(r.total_qty) || 0;
       const turnover = (Number(r.total_turnover_subunits) || 0) / 100000;
 
       if (!existing) {
@@ -967,7 +968,7 @@ export class DashboardService {
     const costRows = await db.select<{ month: number; cost_subunits: number }[]>(
       `SELECT 
          CAST(strftime('%m', d.doc_date) AS INTEGER) AS month,
-         SUM(CAST(i.purchase_price_subunits AS REAL) * CAST(REPLACE(i.quantity, ',', '.') AS REAL)) AS cost_subunits
+         SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
        WHERE d.deleted_at IS NULL 
@@ -1255,9 +1256,9 @@ export class DashboardService {
         d.destination_name, d.destination_city, d.status, d.total_taxable_subunits,
         d.operator, d.transport_reason, d.order_reference, d.payment_method,
         COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN
-          i.purchase_price_subunits * CAST(COALESCE(NULLIF(REPLACE(i.quantity, ',', '.'), ''), '0') AS REAL) ELSE 0 END), 0) AS purchase_subunits,
+          i.purchase_price_subunits * ${ddtQuantitySql("i.quantity")} ELSE 0 END), 0) AS purchase_subunits,
         COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN
-          i.unit_price_subunits * CAST(COALESCE(NULLIF(REPLACE(i.quantity, ',', '.'), ''), '0') AS REAL) ELSE 0 END), 0) AS gross_subunits,
+          i.unit_price_subunits * ${ddtQuantitySql("i.quantity")} ELSE 0 END), 0) AS gross_subunits,
         COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN i.net_amount_subunits ELSE 0 END), 0) AS net_rows_subunits
       FROM ddt_documents d
       LEFT JOIN ddt_items i ON i.ddt_id = d.id

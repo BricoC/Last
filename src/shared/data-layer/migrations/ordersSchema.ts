@@ -1,4 +1,4 @@
-import Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
 /**
  * Migrazione v16: Tabelle per Order Manager
@@ -6,7 +6,7 @@ import Database from "@tauri-apps/plugin-sql";
  * - `suppliers`: anagrafica fornitori
  * - `order_audit_logs`: storico modifiche e backup
  */
-export async function migrateOrdersSchemaV16(db: Database): Promise<void> {
+export async function migrateOrdersSchemaV16(db: MigrationDatabase): Promise<void> {
   // 1. Tabella Fornitori
   await db.execute(`
     CREATE TABLE IF NOT EXISTS suppliers (

@@ -59,17 +59,16 @@ export const CustomerPriceListTrashModal: React.FC<CustomerPriceListTrashModalPr
     setRestoringId(row.id);
     setError(null);
     try {
-      const restored = await priceListRepository.restoreFromClientTrash(row.id);
+      const restored = await priceListSyncService.restoreClientFromTrash(row.id);
       if (restored) {
         setTrashItems((prev) => prev.filter((item) => item.id !== row.id));
         setFeedback(`"${row.descrizione || row.codice_articolo || 'Articolo'}" (${row.cliente}) ripristinato con successo!`);
         onItemRestored(restored);
-        void priceListSyncService.deleteClientTrashFromSupabase(row.id);
         setTimeout(() => setFeedback(null), 4000);
       }
     } catch (err: any) {
       console.error("Errore ripristino articolo cliente:", err);
-      setError("Errore durante il ripristino dell'articolo.");
+      setError(`Ripristino incompleto. Riprova dal cestino. ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setRestoringId(null);
     }
@@ -219,7 +218,7 @@ export const CustomerPriceListTrashModal: React.FC<CustomerPriceListTrashModalPr
                       <button
                         type="button"
                         onClick={() => handleRestore(row)}
-                        disabled={restoringId === row.id}
+                        disabled={restoringId !== null}
                         className="inline-flex items-center space-x-1 px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 text-[11px] font-sans font-semibold transition-all disabled:opacity-50"
                       >
                         {restoringId === row.id ? (

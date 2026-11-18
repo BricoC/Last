@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { forwardRef, useState, useEffect, useMemo } from "react";
 import { DdtDocument, DdtItem } from "../models/ddt";
 import { safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
@@ -717,7 +718,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                     const hasContent = Boolean(
                       (r.description && r.description.trim().length > 0) ||
                       hasPrice ||
-                      (r.quantity && parseFloat(String(r.quantity).replace(",", ".")) > 0) ||
+                      ((parseDdtQuantity(r.quantity) ?? 0) > 0) ||
                       hasVat
                     );
 

@@ -11,6 +11,11 @@ mod manual_import_commands;
 mod quote_commands;
 mod quote_persistence;
 mod quote_types;
+mod sqlite_backup;
+mod sqlite_batch;
+mod sqlite_migrations;
+#[cfg(test)]
+mod sqlite_test_support;
 mod sqlite_utils;
 mod supabase_config;
 mod supabase_ddt_import;
@@ -505,6 +510,10 @@ pub fn run() {
             send_email_with_attachments,
             copy_files_to_clipboard,
             ddt_commands::save_ddt_transaction,
+            ddt_commands::replace_ddt_transaction,
+            sqlite_batch::apply_local_database_batch,
+            sqlite_utils::initialize_local_database,
+            sqlite_migrations::run_local_migrations,
             ddt_delete_command::soft_delete_ddt_transaction,
             supabase_config::load_supabase_config,
             supabase_config::save_supabase_config,

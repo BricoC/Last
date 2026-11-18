@@ -1,10 +1,13 @@
+use crate::sqlite_backup::{
+    check_different_paths, checkpoint, has_sidecars, open_database, snapshot_suffix, StagedSnapshot,
+};
+use crate::sqlite_utils::{local_database_path, DATABASE_KEY};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Connection, SqliteConnection};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "windows")]
@@ -223,169 +226,82 @@ pub fn read_backup_file(file_path: String) -> Result<String, String> {
     Ok(content)
 }
 
-/// Crea uno snapshot fisico atomico e coerente del database SQLite LastData.db nella cartella di destinazione tramite VACUUM INTO
+static BACKUP_FILE_OPERATION: tauri::async_runtime::Mutex<()> =
+    tauri::async_runtime::Mutex::const_new(());
+
+/// Writes a consistent SQLite snapshot before replacing the destination file.
 #[tauri::command]
 pub async fn copy_database_file(app: AppHandle, target_file_path: String) -> Result<u64, String> {
-    let mut db_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Impossibile ottenere cartella app_data_dir: {}", e))?;
-    db_path.push("LastData.db");
+    let _operation = BACKUP_FILE_OPERATION.lock().await;
+    let db_path = local_database_path(&app)?;
+    let target = Path::new(&target_file_path);
+    check_different_paths(&db_path, target)?;
 
-    if !db_path.exists() {
-        return Err(format!(
-            "Il database principale non esiste nel percorso: {:?}",
-            db_path
-        ));
-    }
-
-    let target_path = Path::new(&target_file_path);
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Errore creazione cartella destinazione: {}", e))?;
-    }
-
-    // Esegui VACUUM INTO su un file temporaneo nella stessa cartella per non distruggere un eventuale backup esistente in caso di errore
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let tmp_target_path = target_path.with_extension(format!("db.tmp_{}", ts));
-    if tmp_target_path.exists() {
-        let _ = fs::remove_file(&tmp_target_path);
-    }
-    let tmp_target_str = tmp_target_path.to_string_lossy().to_string();
-
-    // Connettiti a LastData.db ed esegui VACUUM INTO per ottenere uno snapshot ACID atomico al 100%
-    let options = SqliteConnectOptions::new()
-        .filename(&db_path)
-        .busy_timeout(std::time::Duration::from_secs(30));
-    let mut conn = SqliteConnection::connect_with(&options)
-        .await
-        .map_err(|e| format!("Impossibile connettersi al database per il backup: {}", e))?;
-
-    if let Err(e) = sqlx::query("VACUUM INTO $1")
-        .bind(&tmp_target_str)
-        .execute(&mut conn)
-        .await
-    {
-        let _ = fs::remove_file(&tmp_target_path);
-        return Err(format!("Errore VACUUM INTO durante la copia del database SQLite: {}", e));
-    }
-    drop(conn);
-
-    if target_path.exists() {
-        if let Err(e) = fs::remove_file(target_path) {
-            let _ = fs::remove_file(&tmp_target_path);
-            return Err(format!("Impossibile sostituire il file di backup esistente: {}", e));
-        }
-    }
-    if let Err(e) = fs::rename(&tmp_target_path, target_path) {
-        let _ = fs::remove_file(&tmp_target_path);
-        return Err(format!("Impossibile finalizzare il file di backup: {}", e));
-    }
-
-    let len = fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
-    Ok(len)
+    let stage = StagedSnapshot::new(target)?;
+    let mut source = open_database(&db_path, true).await?;
+    stage.capture(&mut source).await?;
+    source.close().await.map_err(|error| error.to_string())?;
+    stage.validate(false).await?;
+    stage.install(target)
 }
 
-/// Ripristina fisicamente il database LastData.db partendo da un file .db di backup certificandone prima l'integrità
+/// Restores an independent snapshot of the selected database, including its WAL.
 #[tauri::command]
 pub async fn restore_database_file(app: AppHandle, source_file_path: String) -> Result<u64, String> {
+    use tauri_plugin_sql::{DbInstances, DbPool};
+    let _operation = BACKUP_FILE_OPERATION.lock().await;
+    let db_path = local_database_path(&app)?;
     let source_path = Path::new(&source_file_path);
-    if !source_path.exists() {
-        return Err(format!("File di origine non trovato: {}", source_file_path));
-    }
+    check_different_paths(source_path, &db_path)?;
 
-    let mut db_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Impossibile ottenere cartella app_data_dir: {}", e))?;
-    db_path.push("LastData.db");
+    let stage = StagedSnapshot::new(&db_path)?;
+    let mut source = open_database(source_path, true).await?;
+    stage.capture(&mut source).await?;
+    source.close().await.map_err(|error| error.to_string())?;
+    stage.validate(true).await?;
 
-    if db_path.exists() {
-        if let (Ok(src_canon), Ok(dst_canon)) = (fs::canonicalize(source_path), fs::canonicalize(&db_path)) {
-            if src_canon == dst_canon {
-                return Err("Impossibile ripristinare il database attivo su sé stesso.".to_string());
-            }
-        }
-    }
-
-    // 1. Verifica preventiva dell'integrità del file di backup prima di toccare il database attivo
-    let source_options = SqliteConnectOptions::new()
-        .filename(source_path)
-        .read_only(true)
-        .busy_timeout(std::time::Duration::from_secs(10));
-    let mut source_conn = SqliteConnection::connect_with(&source_options)
-        .await
-        .map_err(|e| format!("Il file di backup non è un database SQLite valido o è corrotto: {}", e))?;
-
-    let (quick_res,): (String,) = sqlx::query_as("PRAGMA quick_check(1);")
-        .fetch_one(&mut source_conn)
-        .await
-        .map_err(|e| format!("Il file di backup non è un database SQLite valido o è illeggibile: {}", e))?;
-    drop(source_conn);
-
-    if quick_res.to_lowercase() != "ok" {
-        return Err(format!("Il backup non ha superato il controllo di integrità SQLite: {}", quick_res));
-    }
-
-    // 2. Copia prima il file sorgente in staging locale per assicurare che lettura e copia riescano prima di chiudere il pool
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let staging_path = db_path.with_file_name(format!("LastData_restore_staging_{}.db", ts));
-    fs::copy(source_path, &staging_path)
-        .map_err(|e| format!("Impossibile leggere o copiare il file di backup: {}. Operazione annullata.", e))?;
-
-    // 3. Esegui checkpoint WAL sul pool attivo e chiudilo per rilasciare tutti i lock e consolidare i dati prima della safety copy
-    if let Some(db_instances) = app.try_state::<tauri_plugin_sql::DbInstances>() {
-        let pool_to_close = {
-            let mut instances = db_instances.0.write().await;
-            instances.remove("sqlite:LastData.db")
-        };
-        if let Some(tauri_plugin_sql::DbPool::Sqlite(pool)) = pool_to_close {
-            if let Ok(mut conn) = pool.acquire().await {
-                let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);").execute(&mut *conn).await;
-            }
+    // Stop local writers until the old database is consolidated and the swap completes.
+    let state = app.state::<DbInstances>();
+    let mut instances = state.0.write().await;
+    let previous_options = match instances.remove(DATABASE_KEY) {
+        Some(DbPool::Sqlite(pool)) => {
+            let options = pool.connect_options();
             pool.close().await;
+            Some(options)
+        }
+        None => None,
+    };
+    let result = replace_active_database(&db_path, &stage).await;
+    if let (Err(error), Some(options)) = (&result, previous_options) {
+        match sqlx::SqlitePool::connect_with((*options).clone()).await {
+            Ok(pool) => {
+                instances.insert(DATABASE_KEY.into(), DbPool::Sqlite(pool));
+            }
+            Err(reopen_error) => {
+                return Err(format!(
+                    "{error}. Riapertura del database originale fallita: {reopen_error}"
+                ));
+            }
         }
     }
+    result
+}
 
-    // 4. Crea preventivamente una copia di sicurezza del DB attuale consolidato prima di sovrascriverlo
-    let safety_copy = db_path.with_file_name(format!("LastData_pre_restore_safety_{}.db", ts));
-    if db_path.exists() {
-        if let Err(e) = fs::copy(&db_path, &safety_copy) {
-            let _ = fs::remove_file(&staging_path);
-            return Err(format!(
-                "Impossibile creare copia preventiva di sicurezza (riavvia l'app prima di riprovare): {}.",
-                e
-            ));
-        }
+async fn replace_active_database(db_path: &Path, stage: &StagedSnapshot) -> Result<u64, String> {
+    if db_path.try_exists().map_err(|error| error.to_string())? {
+        let safety_path = db_path.with_file_name(format!(
+            "LastData_pre_restore_safety_{}.db",
+            snapshot_suffix()
+        ));
+        let safety = StagedSnapshot::new(&safety_path)?;
+        let mut active = open_database(db_path, false).await?;
+        checkpoint(&mut active).await?;
+        safety.capture(&mut active).await?;
+        active.close().await.map_err(|error| error.to_string())?;
+        safety.validate(false).await?;
+        safety.install(&safety_path)?;
     }
-
-    // 5. Rimuovi eventuali file WAL e SHM residui
-    let wal_path = db_path.with_file_name("LastData.db-wal");
-    if wal_path.exists() {
-        let _ = fs::remove_file(&wal_path);
-    }
-    let shm_path = db_path.with_file_name("LastData.db-shm");
-    if shm_path.exists() {
-        let _ = fs::remove_file(&shm_path);
-    }
-
-    if let Err(e) = fs::rename(&staging_path, &db_path).or_else(|_| fs::copy(&staging_path, &db_path).map(|_| ())) {
-        let _ = fs::remove_file(&staging_path);
-        if safety_copy.exists() {
-            let _ = fs::copy(&safety_copy, &db_path);
-        }
-        return Err(format!("Errore durante la sostituzione del database (riavvia l'app): {}", e));
-    }
-    let _ = fs::remove_file(&staging_path);
-
-    let len = fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
-    Ok(len)
+    stage.install(db_path)
 }
 
 fn is_managed_backup_file(fname: &str, ext: &str) -> bool {
@@ -504,19 +420,6 @@ pub fn clean_old_backups(folder_path: String, keep_count: usize) -> Result<usize
         return Ok(0);
     }
 
-    // Pulisci automaticamente eventuali file temporanei SQLite (-shm e -wal) residui dei backup
-    if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let ep = entry.path();
-            if let Some(name) = ep.file_name().and_then(|n| n.to_str()) {
-                let lower = name.to_lowercase();
-                if lower.starts_with("backup ") && (lower.ends_with(".db-wal") || lower.ends_with(".db-shm")) {
-                    let _ = fs::remove_file(&ep);
-                }
-            }
-        }
-    }
-
     let list = list_backups_in_directory(folder_path)?;
     if list.len() <= keep_count {
         return Ok(0);
@@ -528,7 +431,9 @@ pub fn clean_old_backups(folder_path: String, keep_count: usize) -> Result<usize
 
     for item in to_delete {
         let fpath = Path::new(&item.path);
-        if fpath.exists() && fpath.is_file() {
+        if fpath.is_file()
+            && (item.backup_type != "full_db" || matches!(has_sidecars(fpath), Ok(false)))
+        {
             if fs::remove_file(fpath).is_ok() {
                 deleted_count += 1;
             }

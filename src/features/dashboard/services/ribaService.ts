@@ -141,11 +141,11 @@ export async function saveRemoteRibaPaid(
       deadline_key: deadlineKey,
       deadline_date: deadlineStr,
       is_paid: true,
-      sent_at: sentAt,
+      sent_at: new Date(sentAt).toISOString(),
       updated_at: new Date().toISOString(),
     };
 
-    const url = `${creds.projectUrl}/rest/v1/riba_pagamenti`;
+    const url = `${creds.projectUrl}/rest/v1/riba_pagamenti?on_conflict=deadline_key`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -172,12 +172,10 @@ export async function saveRemoteRibaPaid(
 
 /**
  * Prepara l'email di autorizzazione banca e la visualizza tramite Outlook (Tauri command).
- * Se l'apertura ha successo, salva immediatamente lo stato pagata su Supabase.
  */
-export async function prepareAndSendRibaEmail(info: {
+export async function openRibaEmailDraft(info: {
   deadlineStr: string;
-  deadlineKey: string;
-}): Promise<{ success: boolean; sentAt?: string; error?: string }> {
+}): Promise<{ success: boolean; error?: string }> {
   try {
     const settings = await getEmailSettings();
     const to = settings.bank_to.trim();
@@ -208,18 +206,10 @@ export async function prepareAndSendRibaEmail(info: {
       attachments: [],
     });
 
-    // Formattazione data odierna: DD/MM/YYYY ore HH:mm
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const sentAt = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ore ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-
-    // Salvataggio su Supabase
-    await saveRemoteRibaPaid(info.deadlineKey, info.deadlineStr, sentAt);
-
-    return { success: true, sentAt };
+    return { success: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[ribaService] Errore prepareAndSendRibaEmail:", msg);
+    console.error("[ribaService] Errore openRibaEmailDraft:", msg);
     return { success: false, error: msg };
   }
 }

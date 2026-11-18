@@ -1046,7 +1046,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                                 quantity: "1",
                                 unit_price: priceVal,
                                 purchase_price: acqVal,
-                                vat_rate: row.vatRate || 22,
+                                vat_rate: row.vatRate ?? 22,
                               });
                             }}
                             className="hover:bg-emerald-600/15 cursor-pointer transition-colors group"

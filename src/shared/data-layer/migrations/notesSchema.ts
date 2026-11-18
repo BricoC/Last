@@ -1,9 +1,9 @@
-import Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
 /**
  * Migrazione v23: Tabella Note (Gestore Note e Word Editor)
  */
-export async function migrateNotesSchemaV23(db: Database): Promise<void> {
+export async function migrateNotesSchemaV23(db: MigrationDatabase): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS notes (
       id TEXT PRIMARY KEY,
@@ -30,9 +30,7 @@ export async function migrateNotesSchemaV23(db: Database): Promise<void> {
 /**
  * Migrazione v24: Aggiunta colonna supabase_id per sincronizzazione cloud
  */
-export async function migrateNotesSchemaV24(db: Database): Promise<void> {
-  try {
-    await db.execute(`ALTER TABLE notes ADD COLUMN supabase_id INTEGER;`);
-  } catch {}
+export async function migrateNotesSchemaV24(db: MigrationDatabase): Promise<void> {
+  await db.addColumnIfMissing("notes", "supabase_id", "INTEGER");
 }
 

@@ -1,6 +1,6 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migrateEmailSettingsSchemaV20(db: Database): Promise<void> {
+export async function migrateEmailSettingsSchemaV20(db: MigrationDatabase): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS email_settings (
       id TEXT PRIMARY KEY,
@@ -22,33 +22,10 @@ export async function migrateEmailSettingsSchemaV20(db: Database): Promise<void>
     );
   `);
 
-  const existing = await db.select<{ id: string }[]>(
-    "SELECT id FROM email_settings WHERE id = 'email_config'"
-  );
-  if (existing.length === 0) {
-    const now = new Date().toISOString();
-    await db.execute(
-      `INSERT INTO email_settings (
-        id, carrara_to, carrara_cc, wepa_salanetti_to, wepa_salanetti_cc,
-        wepa_ralletta_to, wepa_ralletta_cc, bank_to, bank_cc,
-        accountant_to, accountant_cc,
-        created_at, updated_at, updated_by, deleted_at, sync_status
-      ) VALUES (
-        'email_config',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        $1, $1, 'system', NULL, 'pending'
-      )`,
-      [now]
-    );
-  }
+  await db.execute(`
+    INSERT INTO email_settings (id, created_at, updated_at, updated_by)
+    VALUES ('email_config', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'system')
+    ON CONFLICT (id) DO NOTHING
+  `);
 }
 

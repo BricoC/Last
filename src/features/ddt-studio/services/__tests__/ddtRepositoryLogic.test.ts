@@ -19,6 +19,7 @@ vi.mock("@/shared/data-layer/database", () => ({
 
 import { money } from "@/shared/domain/monetaryValue";
 import { calculateDdtTotals } from "../../utils/ddtCalculations";
+import { ddtCloudPushService } from "../ddtCloudPushService";
 import { DdtDocument, DdtItem } from "../../models/ddt";
 import {
   buildDdtSavePayloadFromImported,
@@ -33,6 +34,19 @@ describe("DdtRepository Logic & Life-cycle", () => {
     mockSelect.mockReset();
     mockExecute.mockResolvedValue({ rowsAffected: 1 });
     mockSelect.mockResolvedValue([]);
+  });
+
+  it("calcola il prossimo numero DDT sull'intero anno e considera il massimo cloud", async () => {
+    mockSelect.mockResolvedValueOnce([{ next_num: 41 }]);
+    const loadRemoteMax = vi.spyOn(ddtCloudPushService, "getRemoteMaxDocNumber").mockResolvedValue(44);
+    try {
+      await expect(ddtRepository.getNextDocNumberWithCloud(2026)).resolves.toBe(45);
+      expect(mockSelect).toHaveBeenCalledWith(expect.stringContaining("WHERE year = $1 AND deleted_at IS NULL"), [2026]);
+      expect(mockSelect.mock.calls[0][0]).not.toMatch(/series|status/);
+      expect(loadRemoteMax).toHaveBeenCalledWith(2026);
+    } finally {
+      loadRemoteMax.mockRestore();
+    }
   });
   it("crea una bozza valida con totali a 5 decimali corretti", () => {
     const items: DdtItem[] = [
@@ -243,7 +257,7 @@ describe("DdtRepository Logic & Life-cycle", () => {
     expect(normalized.items[0].unit_price?.toSubunits()).toBe(5000000);
   });
 
-  it("ripristina il DDT locale se replaceLocalDdtWithImported fallisce durante save_ddt_transaction", async () => {
+  it("delega la sostituzione e il rollback DDT a un solo comando Rust", async () => {
     mockInvoke.mockRejectedValueOnce(new Error("Simulated Rust failure"));
 
     await expect(
@@ -254,14 +268,11 @@ describe("DdtRepository Logic & Life-cycle", () => {
       )
     ).rejects.toThrow("Simulated Rust failure");
 
-    const rollbackDocCall = mockExecute.mock.calls.find((call) =>
-      String(call[0]).includes("UPDATE ddt_documents SET deleted_at = NULL")
-    );
-    const rollbackItemsCall = mockExecute.mock.calls.find((call) =>
-      String(call[0]).includes("UPDATE ddt_items SET deleted_at = NULL")
-    );
-    expect(rollbackDocCall).toBeDefined();
-    expect(rollbackItemsCall).toBeDefined();
+    expect(mockInvoke).toHaveBeenCalledExactlyOnceWith("replace_ddt_transaction", expect.objectContaining({
+      localId: "local-ddt-1",
+      payload: expect.objectContaining({ id: "imp-2", doc_number: 12 }),
+    }));
+    expect(mockExecute).not.toHaveBeenCalled();
   });
 
   it("mantiene doc_number = null nelle bozze e calcola sconto a cascata + quantita zero", async () => {

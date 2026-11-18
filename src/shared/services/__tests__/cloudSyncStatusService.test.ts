@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   formatSyncTimestamp,
   formatRelativeTime,
+  cloudSyncStatusService,
 } from "../cloudSyncStatusService";
+import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
+import { priceListSyncService } from "@/features/price-lists/services/priceListSyncService";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("cloudSyncStatusService formatting", () => {
   it("formatta correttamente timestamp null o non validi", () => {
@@ -39,5 +47,27 @@ describe("cloudSyncStatusService formatting", () => {
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600 * 1000);
     expect(formatRelativeTime(twoDaysAgo)).toBe("2 gg fa");
   });
+});
+
+it("mantiene l'ultimo timestamp riuscito quando un modulo segnala un errore", async () => {
+  const storage = new Map([["last_supabase_sync_timestamp", "2026-01-01T08:00:00Z"]]);
+  vi.stubGlobal("localStorage", {
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    getItem: (key: string) => storage.get(key) ?? null,
+  });
+  vi.spyOn(ddtIncrementalSyncService, "syncNewDdtsFromSupabase").mockResolvedValue({
+    newHeadersCount: 0, newLinesCount: 0, backupPath: null, error: "HTTP 503",
+  });
+  vi.spyOn(priceListSyncService, "syncIncrementalGeneralFromSupabase").mockResolvedValue({
+    updatedCount: 2, updatedRows: [],
+  });
+  vi.spyOn(priceListSyncService, "syncIncrementalClientiFromSupabase").mockResolvedValue({
+    updatedCount: 0, updatedRows: [],
+  });
+  const result = await cloudSyncStatusService.executeFullSync();
+  expect(result).toMatchObject({ success: false, genCount: 2, summary: expect.stringContaining("DDT: HTTP 503") });
+  expect(storage.get("last_supabase_sync_timestamp")).toBe("2026-01-01T08:00:00Z");
+  expect(storage.get("last_supabase_sync_failure")).toBe(result.summary);
 });
 

@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import React, { useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { 
@@ -183,7 +184,7 @@ export const DDTArticleResocontoView: React.FC<DDTArticleResocontoViewProps> = (
 
       if (r.description) group.originalDescSet.add(r.description.trim());
 
-      const qty = parseFloat(r.quantity.replace(",", ".")) || 0;
+      const qty = parseDdtQuantity(r.quantity) ?? 0;
       const unitNet = qty > 0 ? r.netAmountSubunits / qty : r.unitPriceSubunits;
       const purchaseUnit = r.purchasePriceSubunits || 0;
 

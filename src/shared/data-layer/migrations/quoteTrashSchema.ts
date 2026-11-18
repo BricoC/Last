@@ -1,6 +1,6 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migrateQuoteTrashSchemaV21(db: Database): Promise<void> {
+export async function migrateQuoteTrashSchemaV21(db: MigrationDatabase): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS quotes_trash (
       id TEXT PRIMARY KEY,
@@ -30,15 +30,11 @@ export async function migrateQuoteTrashSchemaV21(db: Database): Promise<void> {
   `);
 
   // Inizializza la sequenza con il massimo numero preventivo registrato per ogni anno
-  try {
-    await db.execute(`
-      INSERT OR IGNORE INTO quote_sequences (year, last_number)
-      SELECT year, COALESCE(MAX(quote_number), 0)
-      FROM quotes
-      GROUP BY year;
-    `);
-  } catch (err) {
-    console.warn("[migrateQuoteTrashSchemaV21] Inizializzazione quote_sequences:", err);
-  }
+  await db.execute(`
+    INSERT OR IGNORE INTO quote_sequences (year, last_number)
+    SELECT year, COALESCE(MAX(quote_number), 0)
+    FROM quotes
+    GROUP BY year;
+  `);
 }
 

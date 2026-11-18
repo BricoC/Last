@@ -1043,7 +1043,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   );
 
   const handleItemRestored = useCallback((restored: ListinoClienteRow) => {
-    setItems((prev) => [restored, ...prev]);
+    setItems((prev) => [restored, ...prev.filter((row) => row.id !== restored.id)]);
     setOriginalRowsSnapshot((prev) => new Map(prev).set(restored.id, { ...restored }));
     setTrashCount((c) => Math.max(0, c - 1));
   }, []);

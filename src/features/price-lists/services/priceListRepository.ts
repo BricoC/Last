@@ -1,4 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import {
   ListinoGeneraleRow,
   ListinoClienteRow,
@@ -11,6 +12,12 @@ import { resolveClientPriceLists } from "@/features/ddt-studio/utils/clientPrice
 function cleanNum5(val: number | null | undefined): number | null {
   if (val == null || isNaN(val) || !isFinite(val)) return null;
   return Math.round(val * 100000) / 100000;
+}
+
+function preservePendingPriceListRows(table: string): string {
+  return `WHERE ${table}.sync_revision IS NULL AND ${table}.id NOT GLOB 'new_*'
+    AND (julianday(${table}.updated_at) IS NULL
+      OR julianday(excluded.updated_at) >= julianday(${table}.updated_at))`;
 }
 
 export class PriceListRepository {
@@ -342,9 +349,14 @@ export class PriceListRepository {
   /**
    * Salva o aggiorna un lotto di articoli del Listino Generale nel database SQLite locale.
    */
-  async saveGeneralRows(rows: ListinoGeneraleRow[]): Promise<void> {
+  async saveGeneralRows(rows: ListinoGeneraleRow[], source: "local" | "cloud" = "local"): Promise<void> {
     if (rows.length === 0) return;
-    const db = await getDatabase();
+    await getDatabase();
+    await applyLocalDatabaseBatch(this.buildGeneralWrites(rows, source));
+  }
+
+  buildGeneralWrites(rows: ListinoGeneraleRow[], source: "local" | "cloud"): SqliteWrite[] {
+    const writes: SqliteWrite[] = [];
     const CHUNK_SIZE = 50;
     for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
@@ -352,10 +364,14 @@ export class PriceListRepository {
       const params: unknown[] = [];
 
       chunk.forEach((row, rIdx) => {
-        const offset = rIdx * 23;
-        const placeholders = Array.from({ length: 23 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
+        const offset = rIdx * 24;
+        const placeholders = Array.from({ length: 24 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
         valueClauses.push(`(${placeholders})`);
 
+        if (source === "local") {
+          row.updated_at = new Date().toISOString();
+          row.sync_revision = crypto.randomUUID();
+        }
         params.push(
           row.id,
           row.source_table || "listino_generale",
@@ -380,15 +396,15 @@ export class PriceListRepository {
           row.note ?? null,
           row.created_at || new Date().toISOString(),
           row.updated_at || new Date().toISOString(),
+          source === "local" ? row.sync_revision : null,
         );
       });
 
-      try {
-        const sql = `INSERT INTO listino_generale (
+      const sql = `INSERT INTO listino_generale (
           id, source_table, cat, fornitore, codice_articolo, data_ref,
           descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
           perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
-          perc_iva, note, created_at, updated_at
+          perc_iva, note, created_at, updated_at, sync_revision
         ) VALUES ${valueClauses.join(", ")}
         ON CONFLICT(id) DO UPDATE SET
           cat = excluded.cat,
@@ -410,14 +426,12 @@ export class PriceListRepository {
           r2 = excluded.r2,
           perc_iva = excluded.perc_iva,
           note = excluded.note,
-          updated_at = excluded.updated_at;`;
-
-        await db.execute(sql, params);
-      } catch (err) {
-        console.error("[PriceListRepository] Errore salvataggio chunk listino generale:", err);
-        throw err;
-      }
+          updated_at = excluded.updated_at,
+          sync_revision = excluded.sync_revision
+        ${source === "cloud" ? preservePendingPriceListRows("listino_generale") : ""};`;
+      writes.push({ sql, params });
     }
+    return writes;
   }
 
   /**
@@ -557,9 +571,14 @@ export class PriceListRepository {
   /**
    * Salva o aggiorna un batch di righe di Listini Clienti in SQLite.
    */
-  async saveClientRows(rows: ListinoClienteRow[]): Promise<void> {
+  async saveClientRows(rows: ListinoClienteRow[], source: "local" | "cloud" = "local"): Promise<void> {
     if (rows.length === 0) return;
-    const db = await getDatabase();
+    await getDatabase();
+    await applyLocalDatabaseBatch(this.buildClientWrites(rows, source));
+  }
+
+  buildClientWrites(rows: ListinoClienteRow[], source: "local" | "cloud"): SqliteWrite[] {
+    const writes: SqliteWrite[] = [];
     const CHUNK_SIZE = 50;
     for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
@@ -567,10 +586,14 @@ export class PriceListRepository {
       const params: unknown[] = [];
 
       chunk.forEach((row, rIdx) => {
-        const offset = rIdx * 18;
-        const placeholders = Array.from({ length: 18 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
+        const offset = rIdx * 19;
+        const placeholders = Array.from({ length: 19 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
         valueClauses.push(`(${placeholders})`);
 
+        if (source === "local") {
+          row.updated_at = new Date().toISOString();
+          row.sync_revision = crypto.randomUUID();
+        }
         params.push(
           row.id,
           row.cliente,
@@ -590,15 +613,15 @@ export class PriceListRepository {
           row.note2 ?? null,
           row.created_at || new Date().toISOString(),
           row.updated_at || new Date().toISOString(),
+          source === "local" ? row.sync_revision : null,
         );
       });
 
-      try {
-        const sql = `INSERT INTO listini_clienti (
+      const sql = `INSERT INTO listini_clienti (
           id, cliente, fornitore, codice_articolo, descrizione,
           prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto,
           data_acquisto, acquisto_old, ricarico, data_ref,
-          note, note1, note2, created_at, updated_at
+          note, note1, note2, created_at, updated_at, sync_revision
         ) VALUES ${valueClauses.join(", ")}
         ON CONFLICT(id) DO UPDATE SET
           cliente = excluded.cliente,
@@ -616,14 +639,12 @@ export class PriceListRepository {
           note = excluded.note,
           note1 = excluded.note1,
           note2 = excluded.note2,
-          updated_at = excluded.updated_at;`;
-
-        await db.execute(sql, params);
-      } catch (err) {
-        console.error("[PriceListRepository] Errore salvataggio chunk listini clienti:", err);
-        throw err;
-      }
+          updated_at = excluded.updated_at,
+          sync_revision = excluded.sync_revision
+        ${source === "cloud" ? preservePendingPriceListRows("listini_clienti") : ""};`;
+      writes.push({ sql, params });
     }
+    return writes;
   }
 
   /**
@@ -648,9 +669,9 @@ export class PriceListRepository {
       await db.execute(
         `INSERT INTO listini_clienti_cestino (
           id, deleted_at, deleted_by, cliente, fornitore, codice_articolo, descrizione,
-          prezzo_fattura, acquisto_eur, perc_acquisto, data_acquisto,
+          prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto, data_acquisto,
           acquisto_old, ricarico, data_ref, note, note1, note2, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         ON CONFLICT(id) DO UPDATE SET
           deleted_at = excluded.deleted_at,
           deleted_by = excluded.deleted_by;`,
@@ -663,6 +684,7 @@ export class PriceListRepository {
           row.codice_articolo ?? null,
           row.descrizione,
           cleanNum5(row.prezzo_fattura),
+          cleanNum5(row.prezzo_acquisto),
           cleanNum5(row.acquisto_eur),
           cleanNum5(row.perc_acquisto),
           row.data_acquisto ?? null,
@@ -718,19 +740,38 @@ export class PriceListRepository {
   /**
    * Ripristina un articolo dal Cestino al Listino Clienti attivo.
    */
-  async restoreFromClientTrash(id: string): Promise<ListinoClienteRow | null> {
+  async restoreFromClientTrash(
+    id: string,
+    restoreCloud: (row: TrashListinoClienteRow) => Promise<ListinoClienteRow>
+  ): Promise<ListinoClienteRow | null> {
     const db = await getDatabase();
-    const rows = await db.select<ListinoClienteRow[]>(
+    const rows = await db.select<TrashListinoClienteRow[]>(
       "SELECT * FROM listini_clienti_cestino WHERE id = $1 LIMIT 1;",
       [id]
     );
-    if (!rows || rows.length === 0) return null;
+    const trashed = rows[0];
+    if (!trashed) return null;
 
-    const row = rows[0];
-    await this.saveClientRows([row]);
-    await db.execute("DELETE FROM listini_clienti_cestino WHERE id = $1;", [id]);
+    const localOnly = id.startsWith("new_");
+    const row = localOnly ? trashed : await restoreCloud(trashed);
+    const writes: SqliteWrite[] = [
+      {
+        sql: "DELETE FROM listini_clienti_cestino WHERE id = $1 AND deleted_at = $2",
+        params: [id, trashed.deleted_at],
+        expectedRows: 1,
+      },
+      ...this.buildClientWrites([row], localOnly ? "local" : "cloud"),
+    ];
+    if (!localOnly) {
+      writes.push({
+        sql: "UPDATE listini_clienti SET sync_confirmed_at = $1 WHERE id = $2",
+        params: [new Date().toISOString(), row.id],
+      });
+    }
+    await applyLocalDatabaseBatch(writes);
 
-    return row;
+    const current = await db.select<ListinoClienteRow[]>("SELECT * FROM listini_clienti WHERE id = $1", [row.id]);
+    return current[0] ?? row;
   }
 
   /**

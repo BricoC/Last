@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createClient, SupabaseClient, RealtimeChannel } from "@supabase/supabase-js";
 import { getDatabase } from "@/shared/data-layer/database";
+import { deterministicUuid } from "@/shared/utils/deterministicUuid";
 import { OrderItem, Supplier, OrderViewMode } from "../types/order";
 import { parseHighlights, TODAY } from "../utils/constants";
 
@@ -28,6 +29,7 @@ export interface OfflineQueueItem {
     | "highlight"
     | "upsert_supplier"
     | "delete_supplier";
+  remoteId?: string;
   payload?: any;
   timestamp: string;
 }
@@ -41,6 +43,8 @@ export class OrderSupabaseService {
   private queueIntervalId: ReturnType<typeof setInterval> | null = null;
   public recentlyPushedRemoteIds = new Set<string>();
   private isProcessingQueue = false;
+  private processingItemId?: string;
+  private readonly resolvedDrafts = new Map<string, string>();
 
   private async getCredentials(): Promise<SupabaseConfig | null> {
     try {
@@ -54,12 +58,13 @@ export class OrderSupabaseService {
     }
   }
 
-  async getClient(): Promise<SupabaseClient | null> {
-    if (this.client) return this.client;
+  async getClient(requireFreshConfig = false): Promise<SupabaseClient | null> {
+    if (this.client && !requireFreshConfig) return this.client;
     const creds = await this.getCredentials();
     if (!creds) return null;
-    this.client = createClient(creds.projectUrl, creds.anonKey);
-    return this.client;
+    const client = createClient(creds.projectUrl, creds.anonKey);
+    if (!requireFreshConfig) this.client = client;
+    return client;
   }
 
   /**
@@ -149,8 +154,8 @@ export class OrderSupabaseService {
    * Carica ordini direttamente da Supabase Cloud.
    * Se offline o errore di rete, legge dalla cache SQLite locale.
    */
-  async fetchOrders(viewMode: OrderViewMode = "attivi"): Promise<OrderItem[]> {
-    const supabase = await this.getClient();
+  async fetchOrders(viewMode: OrderViewMode = "attivi", requireCloud = false): Promise<OrderItem[]> {
+    const supabase = await this.getClient(requireCloud);
     if (supabase && navigator.onLine) {
       try {
         let query = supabase.from("ordini").select("*");
@@ -165,75 +170,91 @@ export class OrderSupabaseService {
             .order("created_at", { ascending: true });
         }
 
-        const { data, error } = await query;
-        if (!error && Array.isArray(data)) {
-          const mapped: OrderItem[] = data.map((r: any) => ({
-            id: r.id,
-            supabase_id: r.id,
-            order_date: r.data || "",
-            supplier_name: r.fornitore || "",
-            article_code: r.articolo || "",
-            description: (r.descrizione || "").toUpperCase(),
-            quantity: String(r.quantita || ""),
-            price: String(r.prezzo || ""),
-            ordered_date: r.ordinato || null,
-            notes: r.note || "",
-            user_name: r.utente || "",
-            is_archived: Boolean(r.archiviato),
-            is_deleted: Boolean(r.eliminato),
-            highlights: parseHighlights(r.evidenze),
-            created_at: r.created_at || new Date().toISOString(),
-            updated_at: r.ultima_modifica || new Date().toISOString(),
-            sync_status: "synced",
-          }));
+        const data = await this.readCloudPages(query.order("id"));
 
-          // Salva in background nella cache locale SQLite (senza bloccare)
-          void this.cacheOrdersToSqlite(mapped, viewMode);
+        const mapped: OrderItem[] = data.map((r: any) => ({
+          id: r.id,
+          supabase_id: r.id,
+          order_date: r.data || "",
+          supplier_name: r.fornitore || "",
+          article_code: r.articolo || "",
+          description: (r.descrizione || "").toUpperCase(),
+          quantity: String(r.quantita || ""),
+          price: String(r.prezzo || ""),
+          ordered_date: r.ordinato || null,
+          notes: r.note || "",
+          user_name: r.utente || "",
+          is_archived: Boolean(r.archiviato),
+          is_deleted: Boolean(r.eliminato),
+          highlights: parseHighlights(r.evidenze),
+          created_at: r.created_at || new Date().toISOString(),
+          updated_at: r.ultima_modifica || new Date().toISOString(),
+          sync_status: "synced",
+        }));
 
-          return mapped;
-        }
+        // Salva in background nella cache locale SQLite (senza bloccare)
+        if (requireCloud) await this.cacheOrdersToSqlite(mapped, viewMode, true);
+        else void this.cacheOrdersToSqlite(mapped, viewMode);
+
+        return mapped;
       } catch (err) {
+        if (requireCloud) throw err;
         console.warn("[OrderSupabaseService] Errore fetch Supabase, fallback SQLite:", err);
       }
     }
 
     // Fallback SQLite locale
+    if (requireCloud) throw new Error("Cloud ordini non disponibile");
     return this.loadOrdersFromSqlite(viewMode);
   }
 
   /**
    * Carica fornitori direttamente da Supabase Cloud
    */
-  async fetchSuppliers(): Promise<Supplier[]> {
-    const supabase = await this.getClient();
+  async fetchSuppliers(requireCloud = false): Promise<Supplier[]> {
+    const supabase = await this.getClient(requireCloud);
     if (supabase && navigator.onLine) {
       try {
-        const { data, error } = await supabase.from("fornitori").select("*").order("nome");
-        if (!error && Array.isArray(data)) {
-          const mapped: Supplier[] = data.map((r: any) => ({
-            id: String(r.id),
-            supabase_id: r.id,
-            name: r.nome || "",
-            representative: r.rappresentante || "",
-            email: r.email || "",
-            phone: r.telefono || "",
-            address: r.indirizzo || "",
-            vat_number: r.piva || "",
-            notes: r.note || "",
-            created_at: r.created_at || new Date().toISOString(),
-            updated_at: r.created_at || new Date().toISOString(),
-            sync_status: "synced",
-          }));
+        const data = await this.readCloudPages(supabase.from("fornitori").select("*").order("nome").order("id"));
 
-          void this.cacheSuppliersToSqlite(mapped);
-          return mapped;
-        }
+        const mapped: Supplier[] = data.map((r: any) => ({
+          id: String(r.id),
+          supabase_id: r.id,
+          name: r.nome || "",
+          representative: r.rappresentante || "",
+          email: r.email || "",
+          phone: r.telefono || "",
+          address: r.indirizzo || "",
+          vat_number: r.piva || "",
+          notes: r.note || "",
+          created_at: r.created_at || new Date().toISOString(),
+          updated_at: r.created_at || new Date().toISOString(),
+          sync_status: "synced",
+        }));
+
+        if (requireCloud) await this.cacheSuppliersToSqlite(mapped, true);
+        else void this.cacheSuppliersToSqlite(mapped);
+        return mapped;
       } catch (err) {
+        if (requireCloud) throw err;
         console.warn("[OrderSupabaseService] Errore fetch fornitori Supabase, fallback SQLite:", err);
       }
     }
 
+    if (requireCloud) throw new Error("Cloud fornitori non disponibile");
     return this.loadSuppliersFromSqlite();
+  }
+
+  private async readCloudPages<T>(query: {
+    range(from: number, to: number): PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
+  }): Promise<T[]> {
+    const rows: T[] = [];
+    for (;;) {
+      const { data, error } = await query.range(rows.length, rows.length + 999);
+      if (error || !Array.isArray(data)) throw new Error(error?.message || "Risposta Supabase non valida");
+      if (!data.length) return rows;
+      rows.push(...data);
+    }
   }
 
   /**
@@ -245,7 +266,12 @@ export class OrderSupabaseService {
   ): Promise<{ success: boolean; data?: OrderItem; error?: string }> {
     const nowIso = new Date().toISOString();
     const autoDate = order.order_date?.trim() ? order.order_date : TODAY();
-    const cleanId = this.cleanId(order.supabase_id) || this.cleanId(order.id);
+    const resolvedId = this.resolvedDrafts.get(order.id);
+    const cleanId = resolvedId || this.cleanId(order.supabase_id) || this.cleanId(order.id);
+    const inserting = !resolvedId && (isDraft || !cleanId);
+    const localId = cleanId || order.id || "ord_offline_" + crypto.randomUUID();
+    const remoteId = inserting ? await deterministicUuid(`last:order:${localId}`) : undefined;
+    const queued = this.getOfflineQueue().some((item) => item.targetId === localId);
 
     const remotePayload = {
       data: autoDate,
@@ -263,10 +289,10 @@ export class OrderSupabaseService {
       ultima_modifica: nowIso,
     };
 
-    const supabase = await this.getClient();
+    const supabase = queued ? null : await this.getClient();
     if (supabase && navigator.onLine) {
       try {
-        if (!isDraft && cleanId) {
+        if (!inserting && cleanId) {
           // Update riga esistente
           this.recentlyPushedRemoteIds.add(cleanId);
           setTimeout(() => this.recentlyPushedRemoteIds.delete(cleanId), 30000);
@@ -286,10 +312,11 @@ export class OrderSupabaseService {
           return { success: true, data: updatedItem };
         } else {
           // Insert nuova riga
-          const { data, error } = await supabase.from("ordini").insert([remotePayload]).select();
+          const { data, error } = await supabase.from("ordini").upsert([{ ...remotePayload, id: remoteId }], { onConflict: "id" }).select();
           if (error) throw error;
           if (data && data[0]) {
             const newId = String(data[0].id);
+            this.resolvedDrafts.set(localId, newId);
             this.recentlyPushedRemoteIds.add(newId);
             setTimeout(() => this.recentlyPushedRemoteIds.delete(newId), 30000);
 
@@ -313,7 +340,6 @@ export class OrderSupabaseService {
     }
 
     // Modalità Offline: Salva localmente e accoda per l'invio quando torna online
-    const localId = cleanId || order.id || "ord_offline_" + Date.now();
     const offlineItem: OrderItem = {
       ...order,
       id: localId,
@@ -325,7 +351,8 @@ export class OrderSupabaseService {
     this.enqueueOffline({
       id: "q_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
       targetId: localId,
-      action: !isDraft && cleanId ? "update" : "insert",
+      action: inserting ? "insert" : "update",
+      remoteId,
       payload: remotePayload,
       timestamp: nowIso,
     });
@@ -757,139 +784,115 @@ export class OrderSupabaseService {
   }
 
   private saveOfflineQueue(queue: OfflineQueueItem[]): void {
-    try {
-      localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue));
-    } catch {}
+    localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue));
   }
 
   private enqueueOffline(item: OfflineQueueItem): void {
     const queue = this.getOfflineQueue();
-    queue.push(item);
+    const last = [...queue].reverse().find((entry) => entry.targetId === item.targetId);
+    if (item.action === "insert" && last?.action === "insert" && last.id !== this.processingItemId) {
+      last.payload = item.payload;
+      last.timestamp = item.timestamp;
+      last.remoteId ??= item.remoteId;
+    } else {
+      queue.push(item);
+    }
     this.saveOfflineQueue(queue);
   }
 
-  /**
-   * Svuota la coda offline inviando le modifiche accumulate a Supabase non appena torna la connessione
-   */
+  private acknowledgeOfflineItem(item: OfflineQueueItem, remoteId?: string): void {
+    const queue = this.getOfflineQueue().filter((entry) => entry.id !== item.id);
+    if (remoteId) {
+      this.resolvedDrafts.set(item.targetId, remoteId);
+      for (const entry of queue) {
+        if (entry.targetId !== item.targetId || entry.action.includes("supplier")) continue;
+        entry.targetId = remoteId;
+        if (entry.action === "insert") entry.action = "update";
+      }
+    }
+    this.saveOfflineQueue(queue);
+  }
+
   async processOfflineQueue(): Promise<number> {
     if (this.isProcessingQueue || !navigator.onLine) return 0;
-    const queue = this.getOfflineQueue();
-    if (queue.length === 0) return 0;
-
-    const supabase = await this.getClient();
-    if (!supabase) return 0;
+    const initialQueue = this.getOfflineQueue();
+    if (initialQueue.length === 0) return 0;
 
     this.isProcessingQueue = true;
     let processedCount = 0;
-    const remainingQueue: OfflineQueueItem[] = [];
-
-    for (const item of queue) {
-      try {
-        const cleanId = this.cleanId(item.targetId);
-        const nowIso = new Date().toISOString();
-
-        if (item.action === "insert" && item.payload) {
-          const { data, error } = await supabase.from("ordini").insert([item.payload]).select();
-          if (error) throw error;
-          if (data && data[0]) {
-            const r = data[0];
-            const remoteId = String(r.id);
-            const oldTargetId = item.targetId;
-            // Aggiorna i riferimenti nelle operazioni successive accodate offline sulla stessa riga
-            for (const queuedItem of queue) {
-              if (queuedItem.targetId === oldTargetId) {
-                queuedItem.targetId = remoteId;
-              }
+    const failedTargets = new Set<string>();
+    try {
+      const supabase = await this.getClient();
+      if (!supabase) return 0;
+      for (const initial of initialQueue) {
+        const item = this.getOfflineQueue().find((entry) => entry.id === initial.id);
+        if (!item || failedTargets.has(item.targetId)) continue;
+        this.processingItemId = item.id;
+        try {
+          const cleanId = this.cleanId(item.targetId);
+          if (item.action === "insert" && item.payload) {
+            if (!item.remoteId) {
+              item.remoteId = await deterministicUuid(`last:order:${item.targetId}`);
+              this.saveOfflineQueue(this.getOfflineQueue().map((entry) => entry.id === item.id ? item : entry));
             }
-            await this.cacheSingleOrderToSqlite(
-              {
-                id: remoteId,
-                supabase_id: remoteId,
-                order_date: r.data || "",
-                supplier_name: r.fornitore || "",
-                article_code: r.articolo || "",
-                description: (r.descrizione || "").toUpperCase(),
-                quantity: String(r.quantita || ""),
-                price: String(r.prezzo || ""),
-                ordered_date: r.ordinato || null,
-                notes: r.note || "",
-                user_name: r.utente || "",
-                is_archived: Boolean(r.archiviato),
-                is_deleted: Boolean(r.eliminato),
-                highlights: parseHighlights(r.evidenze),
-                created_at: r.created_at || nowIso,
-                updated_at: r.ultima_modifica || nowIso,
-                sync_status: "synced",
-              },
-              oldTargetId
-            );
+            const { data, error } = await supabase.from("ordini")
+              .upsert([{ ...item.payload, id: item.remoteId }], { onConflict: "id" }).select();
+            if (error) throw error;
+            const remote = data?.[0];
+            if (!remote?.id) throw new Error("Ordine non confermato da Supabase");
+            const remoteId = String(remote.id);
+            this.acknowledgeOfflineItem(item, remoteId);
             processedCount++;
+            const now = new Date().toISOString();
+            await this.cacheSingleOrderToSqlite({
+              id: remoteId, supabase_id: remoteId, order_date: remote.data || "",
+              supplier_name: remote.fornitore || "", article_code: remote.articolo || "",
+              description: (remote.descrizione || "").toUpperCase(),
+              quantity: String(remote.quantita ?? ""), price: String(remote.prezzo ?? ""),
+              ordered_date: remote.ordinato || null, notes: remote.note || "",
+              user_name: remote.utente || "", is_archived: Boolean(remote.archiviato),
+              is_deleted: Boolean(remote.eliminato), highlights: parseHighlights(remote.evidenze),
+              created_at: remote.created_at || now, updated_at: remote.ultima_modifica || now,
+              sync_status: "synced",
+            }, item.targetId);
             continue;
           }
-        } else if (item.action === "update" && item.payload && cleanId) {
-          const { error } = await supabase.from("ordini").update(item.payload).eq("id", cleanId);
-          if (error) throw error;
-          processedCount++;
-          continue;
-        } else if (item.action === "soft_delete" && cleanId) {
-          const { error } = await supabase.from("ordini").update({ eliminato: true, ultima_modifica: nowIso }).eq("id", cleanId);
-          if (error) throw error;
-          processedCount++;
-          continue;
-        } else if (item.action === "restore_trash" && cleanId) {
-          const { error } = await supabase.from("ordini").update({ eliminato: false, ultima_modifica: nowIso }).eq("id", cleanId);
-          if (error) throw error;
-          processedCount++;
-          continue;
-        } else if (item.action === "restore_archive" && cleanId) {
-          const { error } = await supabase.from("ordini").update({ archiviato: false, ultima_modifica: nowIso }).eq("id", cleanId);
-          if (error) throw error;
-          processedCount++;
-          continue;
-        } else if (item.action === "archive" && cleanId) {
-          const { error } = await supabase.from("ordini").update({ archiviato: true, ultima_modifica: nowIso }).eq("id", cleanId);
-          if (error) throw error;
-          processedCount++;
-          continue;
-        } else if (item.action === "permanent_delete" && cleanId) {
-          const { error } = await supabase.from("ordini").delete().eq("id", cleanId);
-          if (error) throw error;
-          processedCount++;
-          continue;
-        } else if (item.action === "highlight" && cleanId && item.payload) {
-          const { error } = await supabase.from("ordini").update({ evidenze: item.payload, ultima_modifica: nowIso }).eq("id", cleanId);
-          if (error) throw error;
-          processedCount++;
-          continue;
-        } else if (item.action === "upsert_supplier" && item.payload) {
-          if (cleanId) {
-            const { error } = await supabase.from("fornitori").update(item.payload).eq("id", cleanId);
-            if (error) throw error;
+
+          const now = new Date().toISOString();
+          const flags = {
+            soft_delete: { eliminato: true }, restore_trash: { eliminato: false },
+            restore_archive: { archiviato: false }, archive: { archiviato: true },
+            highlight: { evidenze: item.payload },
+          };
+          let result: { error: unknown };
+          if (item.action === "upsert_supplier" && item.payload) {
+            const suppliers = supabase.from("fornitori");
+            result = cleanId ? await suppliers.update(item.payload).eq("id", cleanId) : await suppliers.insert([item.payload]);
+          } else if (cleanId && (item.action === "permanent_delete" || item.action === "delete_supplier")) {
+            result = await supabase.from(item.action === "delete_supplier" ? "fornitori" : "ordini").delete().eq("id", cleanId);
+          } else if (cleanId && item.action === "update" && item.payload) {
+            result = await supabase.from("ordini").update(item.payload).eq("id", cleanId);
+          } else if (cleanId && item.action in flags) {
+            result = await supabase.from("ordini")
+              .update({ ...flags[item.action as keyof typeof flags], ultima_modifica: now }).eq("id", cleanId);
           } else {
-            const { error } = await supabase.from("fornitori").insert([item.payload]);
-            if (error) throw error;
+            continue;
           }
+          if (result.error) throw result.error;
+          this.acknowledgeOfflineItem(item);
           processedCount++;
-          continue;
-        } else if (item.action === "delete_supplier" && cleanId) {
-          const { error } = await supabase.from("fornitori").delete().eq("id", cleanId);
-          if (error) throw error;
-          processedCount++;
-          continue;
+        } catch (error) {
+          failedTargets.add(item.targetId);
+          console.warn(`[OrderSupabaseService] Errore elaborazione coda per ${item.id}:`, error);
         }
-      } catch (err) {
-        console.warn(`[OrderSupabaseService] Errore elaborazione coda per ${item.id}:`, err);
-        remainingQueue.push(item);
       }
+    } finally {
+      this.processingItemId = undefined;
+      this.isProcessingQueue = false;
     }
-
-    this.saveOfflineQueue(remainingQueue);
-    this.isProcessingQueue = false;
-
     if (processedCount > 0) {
       window.dispatchEvent(new CustomEvent("order_offline_queue_synced", { detail: { processedCount } }));
     }
-
     return processedCount;
   }
 
@@ -897,7 +900,7 @@ export class OrderSupabaseService {
   // CACHE SQLITE LOCALE (PER MODALITÀ OFFLINE)
   // ==========================================
 
-  private async cacheOrdersToSqlite(orders: OrderItem[], viewMode?: OrderViewMode): Promise<void> {
+  private async cacheOrdersToSqlite(orders: OrderItem[], viewMode?: OrderViewMode, strict = false): Promise<void> {
     try {
       const db = await getDatabase();
       const now = new Date().toISOString();
@@ -973,7 +976,9 @@ export class OrderSupabaseService {
           }
         }
       }
-    } catch {}
+    } catch (error) {
+      if (strict) throw error;
+    }
   }
 
   /**
@@ -1102,7 +1107,7 @@ export class OrderSupabaseService {
     } catch {}
   }
 
-  private async cacheSuppliersToSqlite(suppliers: Supplier[]): Promise<void> {
+  private async cacheSuppliersToSqlite(suppliers: Supplier[], strict = false): Promise<void> {
     try {
       const db = await getDatabase();
       const now = new Date().toISOString();
@@ -1136,7 +1141,9 @@ export class OrderSupabaseService {
           ]
         );
       }
-    } catch {}
+    } catch (error) {
+      if (strict) throw error;
+    }
   }
 
   private async cacheSingleSupplierToSqlite(item: Supplier): Promise<void> {

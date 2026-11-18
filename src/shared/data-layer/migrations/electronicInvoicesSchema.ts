@@ -1,6 +1,6 @@
-import Database from "@tauri-apps/plugin-sql";
+import type { MigrationDatabase } from "../migrationPlan";
 
-export async function migrateElectronicInvoicesSchemaV15(db: Database): Promise<void> {
+export async function migrateElectronicInvoicesSchemaV15(db: MigrationDatabase): Promise<void> {
   // 1. Tabella Testate Fatture Fornitori
   await db.execute(`
     CREATE TABLE IF NOT EXISTS supplier_invoices (

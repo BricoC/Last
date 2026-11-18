@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
 
 export interface TableCountItem {
@@ -174,7 +175,7 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
     id: "notes",
     label: "Note e Cestino Note",
     description: "Tutte le note di testo, fogli di lavoro e storico cestino a 10 elementi.",
-    tables: ["notes", "notes_trash"],
+    tables: ["notes", "notes_trash", "note_deletions"],
   },
   {
     id: "offers",
@@ -340,10 +341,13 @@ export async function pushBackupSettingsToSupabase(config: BackupConfig): Promis
 /**
  * Scarica la configurazione di backup dal Cloud Supabase
  */
-export async function pullBackupSettingsFromSupabase(): Promise<BackupConfig | null> {
+export async function pullBackupSettingsFromSupabase(requireCloud = false): Promise<BackupConfig | null> {
   try {
     const creds = await getSupabaseCredentials();
-    if (!creds) return null;
+    if (!creds) {
+      if (requireCloud) throw new Error("Configurazione Supabase assente");
+      return null;
+    }
 
     const url = `${creds.projectUrl}/rest/v1/backup_settings?id=eq.backup_config&select=*`;
     const res = await fetch(url, {
@@ -354,9 +358,13 @@ export async function pullBackupSettingsFromSupabase(): Promise<BackupConfig | n
       },
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (requireCloud) throw new Error(`HTTP ${res.status}`);
+      return null;
+    }
 
     const data = await res.json();
+    if (requireCloud && !Array.isArray(data)) throw new Error("Risposta Supabase non valida");
     if (Array.isArray(data) && data.length > 0 && data[0]) {
       const r = data[0];
       const parsed: BackupConfig = {
@@ -377,6 +385,7 @@ export async function pullBackupSettingsFromSupabase(): Promise<BackupConfig | n
       return parsed;
     }
   } catch (err) {
+    if (requireCloud) throw err;
     console.warn("[backupService] Errore pull backup_settings da Supabase:", err);
   }
   return null;
@@ -719,95 +728,66 @@ export async function restoreModularBackup(
   const restoredCounts: Record<string, number> = {};
 
   try {
-    const tablesToRestoreList: string[] = [];
-    const seen = new Set<string>();
-    for (const cat of BACKUP_CATEGORIES) {
-      if (categoriesToRestore.includes(cat.id)) {
-        for (const t of cat.tables) {
-          if (!seen.has(t)) {
-            seen.add(t);
-            tablesToRestoreList.push(t);
-          }
-        }
-      }
-    }
-
-    // Verifica quali tabelle esistono realmente nel DB locale (evita errori su tabelle lazy non ancora create)
-    const existingRes = await db.select<{ name: string }[]>(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';"
+    const selectedTables = new Set(
+      BACKUP_CATEGORIES.filter((category) => categoriesToRestore.includes(category.id))
+        .flatMap((category) => category.tables)
     );
-    const existingTables = new Set(existingRes.map((r) => r.name));
-    const activeTables = tablesToRestoreList.filter((t) => existingTables.has(t));
-
-    // In modalità replace elimina prima le tabelle figlie (ordine inverso) per rispettare ON DELETE RESTRICT
-    if (mode === "replace") {
-      for (let i = activeTables.length - 1; i >= 0; i--) {
-        const table = activeTables[i];
-        const rows = pkg.tables[table];
-        if (!Array.isArray(rows) || rows.length === 0) continue;
-        await db.execute(`DELETE FROM "${table}";`);
-      }
-    }
-
-    for (const table of activeTables) {
+    const writes: SqliteWrite[] = [];
+    for (const table of selectedTables) {
+      if (!Object.prototype.hasOwnProperty.call(pkg.tables, table)) continue;
       const rows = pkg.tables[table];
-      if (!Array.isArray(rows) || rows.length === 0) {
-        restoredCounts[table] = 0;
-        continue;
+      if (!Array.isArray(rows)) throw new Error("Tabella backup non valida: " + table);
+
+      const tableInfo = await db.select<{ name: string; pk: number }[]>('PRAGMA table_info("' + table + '")');
+      if (tableInfo.length === 0) {
+        if (rows.length === 0) continue;
+        throw new Error("Tabella non disponibile nel database locale: " + table);
       }
 
-      // Determina la chiave primaria reale per eseguire UPSERT (ON CONFLICT DO UPDATE) in merge senza attivare ON DELETE CASCADE
-      const tableInfo = await db.select<{ name: string; pk: number }[]>(`PRAGMA table_info("${table}");`);
-      const validCols = new Set(tableInfo.map((c) => c.name));
-      const pkCols = tableInfo
-        .filter((c) => c.pk > 0)
-        .sort((a, b) => a.pk - b.pk)
-        .map((c) => c.name);
+      if (mode === "replace") {
+        writes.push({ sql: 'DELETE FROM "' + table + '"', params: [] });
+      }
+      const columns = tableInfo.map((column) => column.name);
+      const primaryKey = tableInfo.filter((column) => column.pk > 0)
+        .sort((a, b) => a.pk - b.pk).map((column) => column.name);
 
-      let count = 0;
-      const CHUNK_SIZE = 50;
-      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-        const chunk = rows.slice(i, i + CHUNK_SIZE);
-        if (chunk.length === 0) continue;
-
-        const keys = Object.keys(chunk[0]).filter((k) => validCols.has(k));
-        if (keys.length === 0) continue;
-        const columns = keys.map((k) => `"${k}"`).join(", ");
-
-        const valuePlaceholders: string[] = [];
-        const flatValues: unknown[] = [];
-        let pIndex = 1;
-
-        for (const row of chunk) {
-          const rowPlaceholders: string[] = [];
-          for (const k of keys) {
-            rowPlaceholders.push(`$${pIndex++}`);
-            flatValues.push(row[k] ?? null);
-          }
-          valuePlaceholders.push(`(${rowPlaceholders.join(", ")})`);
-          count++;
+      // Older backups can omit columns. Group equal row shapes without replacing defaults with NULL.
+      const groups = new Map<string, { keys: string[]; rows: Record<string, unknown>[] }>();
+      for (const row of rows) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) {
+          throw new Error("Riga backup non valida in " + table);
         }
-
-        const hasFullPk = pkCols.length > 0 && pkCols.every((pk) => keys.includes(pk));
-        const nonPkKeys = keys.filter((k) => !pkCols.includes(k));
-
-        let sql: string;
-        if (hasFullPk && nonPkKeys.length > 0) {
-          const conflictTarget = pkCols.map((k) => `"${k}"`).join(", ");
-          const updateClauses = nonPkKeys.map((k) => `"${k}" = excluded."${k}"`).join(", ");
-          sql = `INSERT INTO "${table}" (${columns}) VALUES ${valuePlaceholders.join(", ")} ON CONFLICT(${conflictTarget}) DO UPDATE SET ${updateClauses};`;
-        } else if (hasFullPk) {
-          const conflictTarget = pkCols.map((k) => `"${k}"`).join(", ");
-          sql = `INSERT INTO "${table}" (${columns}) VALUES ${valuePlaceholders.join(", ")} ON CONFLICT(${conflictTarget}) DO NOTHING;`;
-        } else {
-          sql = `INSERT OR REPLACE INTO "${table}" (${columns}) VALUES ${valuePlaceholders.join(", ")};`;
+        const keys = columns.filter((column) => Object.prototype.hasOwnProperty.call(row, column));
+        if (keys.length === 0 || primaryKey.some((key) => !keys.includes(key) || row[key] == null)) {
+          throw new Error("Colonne o chiave primaria mancanti nel backup di " + table);
         }
-        await db.execute(sql, flatValues);
+        const shape = JSON.stringify(keys);
+        const group = groups.get(shape);
+        if (group) group.rows.push(row);
+        else groups.set(shape, { keys, rows: [row] });
       }
 
-      restoredCounts[table] = count;
+      const quote = (identifier: string) => '"' + identifier.replace(/"/g, '""') + '"';
+      for (const group of groups.values()) {
+        const { keys } = group;
+        const insert = "INSERT INTO " + quote(table) + " (" + keys.map(quote).join(", ") + ") VALUES ";
+        const updates = keys.filter((key) => !primaryKey.includes(key))
+          .map((key) => quote(key) + " = excluded." + quote(key));
+        const conflict = mode === "merge" && primaryKey.length
+          ? " ON CONFLICT (" + primaryKey.map(quote).join(", ") + ") DO " +
+            (updates.length ? "UPDATE SET " + updates.join(", ") : "NOTHING")
+          : "";
+        for (let index = 0; index < group.rows.length; index += 50) {
+          const chunk = group.rows.slice(index, index + 50);
+          const params: unknown[] = [];
+          const values = chunk.map((row) => "(" + keys.map((key) => "$" + params.push(row[key] ?? null)).join(", ") + ")");
+          writes.push({ sql: insert + values.join(", ") + conflict, params });
+        }
+      }
+      restoredCounts[table] = rows.length;
     }
 
+    await applyLocalDatabaseBatch(writes, true);
     return { success: true, restoredCounts };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

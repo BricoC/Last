@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "./ddtQuantity";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { DdtItem, DdtTotals } from "../models/ddt";
 
@@ -159,8 +160,7 @@ export function calculateRowAmounts(
 ): { netAmount: MonetaryValue; vatAmount: MonetaryValue } {
   const price = safeMoney(unitPriceRaw);
   
-  const qStr = String(quantityRaw ?? "").trim().replace(",", ".");
-  const q = qStr ? parseFloat(qStr) : (price.isPositive() ? 1 : 0);
+  const q = parseDdtQuantity(quantityRaw) ?? (String(quantityRaw ?? "").trim() ? 0 : (price.isPositive() ? 1 : 0));
   
   if (q <= 0 || price.isZero()) {
     return { netAmount: money(0), vatAmount: money(0) };
@@ -203,7 +203,7 @@ export function calculateDdtTotals(items: Partial<DdtItem>[]): DdtTotals {
     }
 
     const { netAmount, vatAmount } = calculateRowAmounts(
-      item.quantity || "1",
+      item.quantity ?? "1",
       item.unit_price || money(0),
       item.discount_pct || "0",
       item.vat_rate
@@ -214,8 +214,7 @@ export function calculateDdtTotals(items: Partial<DdtItem>[]): DdtTotals {
 
     if (isPositivePrice(item.purchase_price)) {
       const pCost = safeMoney(item.purchase_price);
-      const qStr = String(item.quantity || "1").trim().replace(",", ".");
-      const q = qStr ? parseFloat(qStr) : 1;
+      const q = parseDdtQuantity(item.quantity) ?? (item.quantity?.trim() ? 0 : 1);
       totalCost = totalCost.plus(pCost.times(q));
     }
   }
@@ -241,8 +240,7 @@ export function isRowFilled(r: Partial<DdtItem>): boolean {
   const hasDesc = Boolean(r.description && r.description.trim().length > 0);
   const hasCode = Boolean(r.code && r.code.trim().length > 0);
   const hasPrice = isPositivePrice(r.unit_price);
-  const rawQ = r.quantity ? String(r.quantity).trim().replace(",", ".") : "";
-  const hasQta = Boolean(rawQ && parseFloat(rawQ) > 0);
+  const hasQta = (parseDdtQuantity(r.quantity) ?? 0) > 0;
   const hasUnit = Boolean(r.unit && r.unit.trim().length > 0);
   return hasDesc || hasCode || hasPrice || hasQta || hasUnit;
 }

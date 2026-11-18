@@ -1,3 +1,4 @@
+import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
@@ -654,7 +655,7 @@ export class DdtRepository {
 
     // 2. Ripristino forzato con Assegnazione Nuovo Numero
     if (mode === "new_number") {
-      const nextNum = await this.getNextDocNumberWithCloud(doc.year, doc.series || "");
+      const nextNum = await this.getNextDocNumberWithCloud(doc.year);
       await db.execute(
         `UPDATE ddt_documents SET doc_number = $1, status = 'confermato', deleted_at = NULL, updated_at = $2, sync_status = 'pending' WHERE id = $3`,
         [nextNum, now, id]
@@ -674,7 +675,7 @@ export class DdtRepository {
       [doc.year, doc.doc_number, id]
     );
     const cloudTaken =
-      conflictRows.length === 0 && !doc.series
+      conflictRows.length === 0
         ? await ddtCloudPushService.isNumberTakenOnCloud(doc.year, doc.doc_number, id)
         : false;
     if (conflictRows.length > 0 || cloudTaken) {
@@ -709,50 +710,27 @@ export class DdtRepository {
     importedHeader: any,
     importedLines: any[]
   ): Promise<void> {
-    const db = await getDatabase();
-    const now = new Date().toISOString();
+    await getDatabase();
     const payload = buildDdtSavePayloadFromImported(importedHeader, importedLines);
-
-    // 1. Sposta il DDT locale corrente nel Cestino prima dell'inserimento
-    await db.execute(
-      "UPDATE ddt_documents SET deleted_at = $1, updated_at = $1, updated_by = 'conflict-resolver', sync_status = 'pending' WHERE id = $2",
-      [now, localId]
-    );
-    await db.execute(
-      "UPDATE ddt_items SET deleted_at = $1, updated_at = $1, updated_by = 'conflict-resolver', sync_status = 'pending' WHERE ddt_id = $2",
-      [now, localId]
-    );
-
-    try {
-      // 2. Inserisci il DDT importato con il numero ufficiale e le sue righe
-      await invoke("save_ddt_transaction", { payload });
-    } catch (err) {
-      // Ripristina il DDT locale se il salvataggio della versione importata fallisce
-      await db.execute(
-        "UPDATE ddt_documents SET deleted_at = NULL, updated_at = $1 WHERE id = $2 AND deleted_at = $3",
-        [now, localId, now]
-      );
-      await db.execute(
-        "UPDATE ddt_items SET deleted_at = NULL, updated_at = $1 WHERE ddt_id = $2 AND deleted_at = $3",
-        [now, localId, now]
-      );
-      throw err;
-    }
-
-    await this.pruneTrash();
+    await invoke("replace_ddt_transaction", {
+      localId,
+      deletedAt: new Date().toISOString(),
+      payload,
+    });
+    await this.pruneTrash().catch((error) => console.warn("[DDT] Pulizia cestino:", error));
     notifyDdtUpdated();
   }
 
   /**
-   * Calcola il prossimo numero progressivo disponibile per l'anno e serie specificati (solo SQLite locale)
+   * Calcola il prossimo numero annuale nel database locale, condiviso tra le serie.
    */
-  public async getNextDocNumber(year: number, series = ""): Promise<number> {
+  public async getNextDocNumber(year: number): Promise<number> {
     const db = await getDatabase();
     const rows = await db.select<{ next_num: number }[]>(
-      `SELECT COALESCE(MAX(doc_number), 0) + 1 as next_num 
-       FROM ddt_documents 
-       WHERE year = $1 AND series = $2 AND deleted_at IS NULL AND status <> 'bozza'`,
-      [year, series]
+      `SELECT COALESCE(MAX(doc_number), 0) + 1 as next_num
+       FROM ddt_documents
+       WHERE year = $1 AND deleted_at IS NULL`,
+      [year]
     );
     return rows[0]?.next_num ?? 1;
   }
@@ -760,9 +738,8 @@ export class DdtRepository {
   /**
    * Calcola il prossimo numero progressivo considerando sia il DB locale sia Supabase (per evitare collisioni multi-PC)
    */
-  public async getNextDocNumberWithCloud(year: number, series = ""): Promise<number> {
-    const localNext = await this.getNextDocNumber(year, series);
-    if (series) return localNext;
+  public async getNextDocNumberWithCloud(year: number): Promise<number> {
+    const localNext = await this.getNextDocNumber(year);
     const remoteMax = await ddtCloudPushService.getRemoteMaxDocNumber(year);
     return Math.max(localNext, remoteMax + 1);
   }
@@ -785,11 +762,11 @@ export class DdtRepository {
       status = "confermato";
       if (isNewEmission) {
         if (docNumber === null) {
-          docNumber = await this.getNextDocNumberWithCloud(year, series);
-        } else if (!series) {
+          docNumber = await this.getNextDocNumberWithCloud(year);
+        } else {
           const cloudTaken = await ddtCloudPushService.isNumberTakenOnCloud(year, docNumber, docId);
           if (cloudTaken) {
-            docNumber = await this.getNextDocNumberWithCloud(year, series);
+            docNumber = await this.getNextDocNumberWithCloud(year);
           }
         }
       }
@@ -808,7 +785,7 @@ export class DdtRepository {
         !isPositivePrice(it.unit_price) &&
         (!it.purchase_price || !isPositivePrice(it.purchase_price)) &&
         (!it.code || !it.code.trim()) &&
-        (!it.quantity || !parseFloat(String(it.quantity).replace(",", ".")))
+        !parseDdtQuantity(it.quantity)
       );
       const p = isNote ? money(0) : safeMoney(it.unit_price);
       const hasExplicitQty =
