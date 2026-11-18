@@ -11,14 +11,22 @@ export function buildQuoteDdtConversion(input: QuoteDraftInput, ddtId: string) {
   const totals = calculateQuoteTotals(calculations);
   const items: DdtItem[] = activeItems.map((item, index) => {
     const calculated = calculations[index];
+    const hasLineDiscount = Boolean(item.discount_pct && item.discount_pct > 0);
+    const hasGlobalDiscount = Boolean(input.global_discount_pct && input.global_discount_pct !== 0);
+    const ddtUnitPrice = hasLineDiscount && !hasGlobalDiscount
+      ? calculated.base_unit_price
+      : calculated.effective_unit_price;
+    const ddtDiscountPct = hasLineDiscount && !hasGlobalDiscount
+      ? String(item.discount_pct)
+      : "0";
     return {
       id: crypto.randomUUID(), created_at: now, updated_at: now, updated_by: "system",
       deleted_at: null, sync_status: "pending", ddt_id: ddtId, row_index: index + 1,
       product_id: item.product_id ?? undefined, code: item.code ?? undefined,
       description: item.description.trim(), unit: item.unit?.trim() || "NR", quantity: String(item.quantity),
-      unit_price: item.discount_pct ? calculated.base_unit_price : calculated.effective_unit_price,
+      unit_price: ddtUnitPrice,
       base_price: calculated.base_unit_price,
-      discount_pct: item.discount_pct ? String(item.discount_pct) : "0", net_amount: calculated.net_amount, vat_rate: item.vat_rate,
+      discount_pct: ddtDiscountPct, net_amount: calculated.net_amount, vat_rate: item.vat_rate,
       vat_amount: calculated.vat_amount, purchase_price: item.purchase_price ?? money(0),
     };
   });
@@ -50,7 +58,7 @@ export function buildQuoteDdtConversion(input: QuoteDraftInput, ddtId: string) {
     items: items.map((item, index) => ({
       id: item.id, row_index: index + 1, product_id: item.product_id ?? null, code: item.code ?? null,
       description: item.description, unit: item.unit, quantity: item.quantity,
-      unit_price_subunits: item.unit_price.toSubunits(), discount_pct: "0",
+      unit_price_subunits: item.unit_price.toSubunits(), discount_pct: item.discount_pct || "0",
       net_amount_subunits: item.net_amount.toSubunits(), vat_rate: Number(item.vat_rate ?? 0),
       vat_amount_subunits: item.vat_amount.toSubunits(), purchase_price_subunits: item.purchase_price?.toSubunits() ?? 0,
     })),

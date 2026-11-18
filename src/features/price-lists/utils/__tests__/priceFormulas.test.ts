@@ -56,5 +56,14 @@ describe("priceFormulas logic", () => {
     const reversePerc = calculatePercProfess(prezzoProfess, r2, iva);
     expect(reversePerc).toBeCloseTo(68.32, 1);
   });
+
+  it("preserva frazioni <= 2%, ricarichi > 200% (es. 400% = 4.0) e IVA esplicita 0%", () => {
+    expect(calculateR1(100, 0.02)).toBe(102);
+    expect(calculateR2(100, 1.5)).toBe(250);
+    expect(calculatePrezzoFattura(10, 4.0)).toBe(50); // 400% ricarico -> 10 * (1 + 4) = 50
+    expect(calculatePrezzoPubblico(10, 0.02, 0)).toBe(10.2); // 2% ricarico + 0% IVA
+    expect(calculatePrezzoProfess(10, 4.0, 0)).toBe(50); // 400% ricarico + 0% IVA
+    expect(calculatePercPubblico(10.2, 10, 0)).toBeCloseTo(2, 4);
+  });
 });
 

@@ -15,15 +15,14 @@ import { priceListRepository } from "./priceListRepository";
 const EXCEL_EXPORT_FOLDER_KEY = "last_price_list_excel_export_folder_v1";
 
 /**
- * Converte una percentuale memorizzata su SQLite (es. 22 oppure 0.22 oppure 114.6)
- * in frazione decimale per Excel con formato `0.0%` (es. 0.22 o 1.146).
+ * Normalizza una frazione decimale memorizzata su SQLite (es. 0.02 -> 2%, 0.22 -> 22%, 4.0 -> 400%)
+ * per celle Excel con formato `0.0%`.
  */
 export function toExcelFraction(
-  val: number | null | undefined,
-  fractionThreshold = 2
+  val: number | null | undefined
 ): number | null {
   if (val == null || isNaN(val) || !isFinite(val)) return null;
-  return val > fractionThreshold ? round5(val / 100) : round5(val);
+  return round5(val);
 }
 
 /**
@@ -185,13 +184,13 @@ export function buildGeneralPriceListWorkbook(rows: ListinoGeneraleRow[]): Excel
 
     const acq = item.prezzo_acquisto != null && isFinite(item.prezzo_acquisto) ? item.prezzo_acquisto : null;
     const hasCost = acq != null && acq > 0;
-    const aumFrac = toExcelFraction(item.aumento ?? 0, 1) ?? 0;
-    const magaFrac = toExcelFraction(item.maga ?? 0, 1) ?? 0;
-    const ivaFrac = toExcelFraction(item.perc_iva ?? 0.22, 1) ?? 0.22;
+    const aumFrac = toExcelFraction(item.aumento ?? 0) ?? 0;
+    const magaFrac = toExcelFraction(item.maga ?? 0) ?? 0;
+    const ivaFrac = toExcelFraction(item.perc_iva ?? 0.22) ?? 0.22;
 
-    const riPubFrac = toExcelFraction(item.perc_pub, 2);
-    const riProfFrac = toExcelFraction(item.perc_prof, 2);
-    const riFattFrac = toExcelFraction(item.perc_fatt, 2);
+    const riPubFrac = toExcelFraction(item.perc_pub);
+    const riProfFrac = toExcelFraction(item.perc_prof);
+    const riFattFrac = toExcelFraction(item.perc_fatt);
 
     const r1Calc = hasCost ? calculateR1(acq, aumFrac) : item.r1;
     const r2Calc = hasCost && r1Calc != null ? calculateR2(r1Calc, magaFrac) : item.r2;
@@ -246,7 +245,7 @@ export function buildGeneralPriceListWorkbook(rows: ListinoGeneraleRow[]): Excel
     excelRow.getCell(13).value = acq;
     excelRow.getCell(13).numFmt = "€ #,##0.00000";
 
-    excelRow.getCell(14).value = hasCost ? aumFrac : item.aumento != null ? toExcelFraction(item.aumento, 1) : null;
+    excelRow.getCell(14).value = hasCost ? aumFrac : item.aumento != null ? toExcelFraction(item.aumento) : null;
     excelRow.getCell(14).numFmt = "0%";
 
     if (hasCost) {
@@ -259,7 +258,7 @@ export function buildGeneralPriceListWorkbook(rows: ListinoGeneraleRow[]): Excel
     }
     excelRow.getCell(15).numFmt = "€ #,##0.00000";
 
-    excelRow.getCell(16).value = hasCost ? magaFrac : item.maga != null ? toExcelFraction(item.maga, 1) : null;
+    excelRow.getCell(16).value = hasCost ? magaFrac : item.maga != null ? toExcelFraction(item.maga) : null;
     excelRow.getCell(16).numFmt = "0.0%";
 
     if (hasCost) {

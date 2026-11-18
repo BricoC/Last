@@ -263,9 +263,12 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
           break;
         }
         case "vatRate": {
-          const va = parseFloat(String(a.vat_rate ?? "22").replace(",", ".")) || 22;
-          const vb = parseFloat(String(b.vat_rate ?? "22").replace(",", ".")) || 22;
-          comparison = va - vb;
+          const parseVat = (v: unknown) => {
+            if (v === null || v === undefined || String(v).trim() === "") return 0;
+            const n = parseFloat(String(v).replace(",", "."));
+            return Number.isFinite(n) ? n : 0;
+          };
+          comparison = parseVat(a.vat_rate) - parseVat(b.vat_rate);
           break;
         }
         case "purchasePrice": {

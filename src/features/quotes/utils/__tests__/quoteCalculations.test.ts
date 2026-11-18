@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { money } from "@/shared/domain/monetaryValue";
 import { calculateQuoteItem, calculateQuoteTotals } from "../quoteCalculations";
+import { buildQuoteDdtConversion } from "../../services/quoteDdtConversion";
+import { buildQuoteSavePayload } from "../../services/quotePayload";
 import { QuoteItemInput } from "../../models/quote";
 import { formatQuoteCode, createEmptyQuoteDraft } from "../../models/quoteDraft";
 import { makeQuotePdfFilename } from "../quoteExportManager";
@@ -126,5 +128,94 @@ describe("quoteCalculations", () => {
     // Con caratteri non ammessi da Windows
     draft.client_name = 'ROSSI: "IMPIANTI" / S.R.L.?';
     expect(makeQuotePdfFilename(draft)).toBe("Preventivo 2026.1 ROSSI IMPIANTI S.R.L..pdf");
+  });
+
+  it("preserva coerenza sconti in buildQuoteDdtConversion e genera ID univoci in buildQuoteSavePayload", () => {
+    const convLineOnly = buildQuoteDdtConversion(
+      {
+        client_name: "ACME",
+        quote_date: "2026-11-18",
+        subject: "Offerta",
+        global_discount_pct: 0,
+        items: [
+          {
+            description: "TRAPANO",
+            quantity: "2",
+            purchase_price: money(50),
+            markup_pct: 100, // base = 100
+            discount_pct: 10, // net = 180
+            vat_rate: 22,
+          },
+        ],
+      },
+      "ddt-conv-1"
+    );
+    expect(convLineOnly.payload.items[0].unit_price_subunits).toBe(10_000_000);
+    expect(convLineOnly.payload.items[0].discount_pct).toBe("10");
+    expect(convLineOnly.payload.items[0].net_amount_subunits).toBe(18_000_000);
+
+    const convWithGlobal = buildQuoteDdtConversion(
+      {
+        client_name: "ACME",
+        quote_date: "2026-11-18",
+        subject: "Offerta",
+        global_discount_pct: 10,
+        items: [
+          {
+            description: "TRAPANO",
+            quantity: "2",
+            purchase_price: money(50),
+            markup_pct: 100, // base 100, -10% riga = 90, -10% globale = 81
+            discount_pct: 10,
+            vat_rate: 22,
+          },
+        ],
+      },
+      "ddt-conv-2"
+    );
+    expect(convWithGlobal.payload.items[0].unit_price_subunits).toBe(8_100_000);
+    expect(convWithGlobal.payload.items[0].discount_pct).toBe("0");
+    expect(convWithGlobal.payload.items[0].net_amount_subunits).toBe(16_200_000);
+
+    // Dopo cancellazione della prima riga e inserimento di una nuova riga senza id,
+    // buildQuoteSavePayload non deve riutilizzare posizionalmente l'id della riga spostata (che causerebbe duplicati)
+    const existingQuote: any = {
+      id: "q-1",
+      created_at: "2026-11-18T10:00:00Z",
+      quote_number: 1,
+      items: [{ id: "row-keep-or-deleted" }, { id: "row-2" }],
+    };
+    const savePayload = buildQuoteSavePayload(
+      {
+        client_name: "ACME",
+        subject: "Test",
+        global_discount_pct: 0,
+        items: [
+          {
+            id: "row-2",
+            description: "RIGA SPOSTATA IN POSIZIONE 0",
+            quantity: "1",
+            purchase_price: money(10),
+            markup_pct: 20,
+            discount_pct: 0,
+            vat_rate: 22,
+          },
+          {
+            description: "NUOVA RIGA IN POSIZIONE 1",
+            quantity: "1",
+            purchase_price: money(10),
+            markup_pct: 20,
+            discount_pct: 0,
+            vat_rate: 22,
+          },
+        ],
+      },
+      existingQuote,
+      "2026-11-18T11:00:00Z",
+      "q-1"
+    );
+    const ids = savePayload.items.map((it) => it.id);
+    expect(ids[0]).toBe("row-2");
+    expect(new Set(ids).size).toBe(2);
   });
 });

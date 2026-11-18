@@ -19,25 +19,14 @@ export function euroToCents(euro: number): number {
   return Math.round(euro * 100);
 }
 
+import { parseItalianNumber } from "@/shared/utils/numberUtils";
+
 /**
- * Converte una stringa utente (es. "12,50", "12.50 €", " 15 ") in centesimi interi.
+ * Converte una stringa utente (es. "12,50", "1.234,56 €", " 15 ") in centesimi interi.
  */
 export function parseEuroStringToCents(input: string | number): number {
-  if (typeof input === "number") {
-    return euroToCents(input);
-  }
-
-  if (!input || typeof input !== "string") return 0;
-
-  // Rimuovi spazi, simboli di valuta e sostituisci virgola con punto
-  const cleaned = input
-    .replace(/[^\d,.-]/g, "")
-    .replace(",", ".")
-    .trim();
-
-  const parsed = parseFloat(cleaned);
-  if (isNaN(parsed) || !isFinite(parsed)) return 0;
-
+  const parsed = parseItalianNumber(input);
+  if (parsed === null) return 0;
   return Math.round(parsed * 100);
 }
 

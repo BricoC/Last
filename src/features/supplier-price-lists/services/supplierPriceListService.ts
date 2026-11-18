@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as XLSX from "xlsx";
 import { getDatabase } from "@/shared/data-layer/database";
+import { parseItalianNumber } from "@/shared/utils/numberUtils";
 import type {
   SupplierPriceListItem,
   SupplierPriceListFile,
@@ -476,23 +477,11 @@ export class SupplierPriceListService {
 
       // Estrazione Prezzo Listino Lordo
       const listPriceRaw = listPriceColIdx !== -1 ? row[listPriceColIdx] : 0;
-      let listPriceNum = 0;
-      if (typeof listPriceRaw === "number") {
-        listPriceNum = listPriceRaw;
-      } else if (typeof listPriceRaw === "string") {
-        const cleanPrice = listPriceRaw.replace("€", "").replace(/\s+/g, "").replace(",", ".");
-        listPriceNum = parseFloat(cleanPrice) || 0;
-      }
+      const listPriceNum = parseItalianNumber(listPriceRaw) ?? 0;
 
       // Estrazione Prezzo Netto
       const netPriceRaw = netPriceColIdx !== -1 ? row[netPriceColIdx] : 0;
-      let netPriceNum = 0;
-      if (typeof netPriceRaw === "number") {
-        netPriceNum = netPriceRaw;
-      } else if (typeof netPriceRaw === "string") {
-        const cleanNet = netPriceRaw.replace("€", "").replace(/\s+/g, "").replace(",", ".");
-        netPriceNum = parseFloat(cleanNet) || 0;
-      }
+      const netPriceNum = parseItalianNumber(netPriceRaw) ?? 0;
 
       const barcodeRaw =
         barcodeColIdx !== -1 && row[barcodeColIdx]

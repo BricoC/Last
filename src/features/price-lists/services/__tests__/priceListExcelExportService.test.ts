@@ -14,11 +14,12 @@ describe("priceListExcelExportService", () => {
     expect(sanitizeExcelFilename("   ")).toBe("Cliente");
   });
 
-  it("converts stored percentages cleanly to Excel decimal fractions", () => {
-    expect(toExcelFraction(0.22, 1)).toBe(0.22);
-    expect(toExcelFraction(22, 1)).toBe(0.22);
-    expect(toExcelFraction(1.14604, 2)).toBe(1.14604);
-    expect(toExcelFraction(114.604, 2)).toBe(1.14604);
+  it("preserves stored decimal fractions cleanly for Excel cells (including <=2% and >200%)", () => {
+    expect(toExcelFraction(0.02)).toBe(0.02);
+    expect(toExcelFraction(0.22)).toBe(0.22);
+    expect(toExcelFraction(1.14604)).toBe(1.14604);
+    expect(toExcelFraction(4.0)).toBe(4);
+    expect(toExcelFraction(0)).toBe(0);
     expect(toExcelFraction(null)).toBeNull();
   });
 

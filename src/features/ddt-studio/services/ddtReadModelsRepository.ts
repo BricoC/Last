@@ -43,9 +43,9 @@ export async function getDdtListViewRows(): Promise<DdtListViewRow[]> {
       d.destination_name, d.destination_city, d.status, d.total_taxable_subunits,
       d.operator, d.transport_reason, d.order_reference, d.payment_method,
       COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN
-        i.purchase_price_subunits * CAST(COALESCE(NULLIF(i.quantity, ''), '0') AS REAL) ELSE 0 END), 0) AS purchase_subunits,
+        i.purchase_price_subunits * CAST(REPLACE(COALESCE(NULLIF(TRIM(i.quantity), ''), '0'), ',', '.') AS REAL) ELSE 0 END), 0) AS purchase_subunits,
       COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN
-        i.unit_price_subunits * CAST(COALESCE(NULLIF(i.quantity, ''), '0') AS REAL) ELSE 0 END), 0) AS gross_subunits,
+        i.unit_price_subunits * CAST(REPLACE(COALESCE(NULLIF(TRIM(i.quantity), ''), '0'), ',', '.') AS REAL) ELSE 0 END), 0) AS gross_subunits,
       COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN i.net_amount_subunits ELSE 0 END), 0) AS net_rows_subunits
     FROM ddt_documents d
     LEFT JOIN ddt_items i ON i.ddt_id = d.id
@@ -78,7 +78,7 @@ export async function getDdtArticleViewRows(): Promise<DdtArticleViewRow[]> {
       i.purchase_price_subunits
     FROM ddt_items i
     JOIN ddt_documents d ON d.id = i.ddt_id
-    WHERE d.deleted_at IS NULL AND d.status <> 'bozza' AND d.doc_number IS NOT NULL
+    WHERE i.deleted_at IS NULL AND d.deleted_at IS NULL AND d.status <> 'bozza' AND d.doc_number IS NOT NULL
     ORDER BY d.year DESC, d.doc_number DESC, d.doc_date DESC, i.row_index ASC
   `);
   return rows.map((row) => ({

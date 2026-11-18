@@ -65,7 +65,7 @@ export class MonetaryValue {
   }
 
   private static parseItalianOrStandard(str: string): Decimal {
-    let clean = str.trim().replace(/\s+/g, "").replace(/€/g, "");
+    let clean = str.trim().replace(/\s+/g, "").replace(/[€%]/g, "");
     if (!clean) return new Decimal(0);
 
     // Se contiene sia '.' che ',', stabiliamo quale è il separatore decimale
@@ -82,7 +82,10 @@ export class MonetaryValue {
       }
     } else if (lastComma !== -1) {
       // Solo virgola: 12,34567 -> 12.34567
-      clean = clean.replace(",", ".");
+      clean = clean.replace(/,/g, ".");
+    } else if (/^[+-]?\d{1,3}(\.\d{3}){2,}$/.test(clean)) {
+      // Più separatori delle migliaia senza virgola: 1.234.567 -> 1234567
+      clean = clean.replace(/\./g, "");
     }
 
     try {
@@ -92,23 +95,27 @@ export class MonetaryValue {
     }
   }
 
+  private static toDecimal(val: Decimal.Value | MonetaryValue | null | undefined): Decimal {
+    if (val === null || val === undefined || val === "") return new Decimal(0);
+    if (val instanceof MonetaryValue) return val.d;
+    if (typeof val === "string") return MonetaryValue.parseItalianOrStandard(val);
+    return new Decimal(val);
+  }
+
   public plus(other: Decimal.Value | MonetaryValue): MonetaryValue {
-    const otherDec = other instanceof MonetaryValue ? other.d : new MonetaryValue(other).d;
-    return new MonetaryValue(this.d.plus(otherDec));
+    return new MonetaryValue(this.d.plus(MonetaryValue.toDecimal(other)));
   }
 
   public minus(other: Decimal.Value | MonetaryValue): MonetaryValue {
-    const otherDec = other instanceof MonetaryValue ? other.d : new MonetaryValue(other).d;
-    return new MonetaryValue(this.d.minus(otherDec));
+    return new MonetaryValue(this.d.minus(MonetaryValue.toDecimal(other)));
   }
 
   public times(factor: Decimal.Value | MonetaryValue): MonetaryValue {
-    const factorDec = factor instanceof MonetaryValue ? factor.d : new Decimal(factor || 0);
-    return new MonetaryValue(this.d.times(factorDec));
+    return new MonetaryValue(this.d.times(MonetaryValue.toDecimal(factor)));
   }
 
   public dividedBy(divisor: Decimal.Value | MonetaryValue): MonetaryValue {
-    const divisorDec = divisor instanceof MonetaryValue ? divisor.d : new Decimal(divisor || 1);
+    const divisorDec = MonetaryValue.toDecimal(divisor);
     if (divisorDec.isZero()) {
       return new MonetaryValue(0);
     }
@@ -119,7 +126,7 @@ export class MonetaryValue {
    * Applica una percentuale di sconto (es. sconto 15% -> restituisce importo scontato)
    */
   public applyDiscount(discountPercent: Decimal.Value): MonetaryValue {
-    const sc = new Decimal(discountPercent || 0);
+    const sc = MonetaryValue.toDecimal(discountPercent);
     if (sc.isZero()) return this;
     const discountAmount = this.d.times(sc).dividedBy(100);
     return new MonetaryValue(this.d.minus(discountAmount));
@@ -129,7 +136,7 @@ export class MonetaryValue {
    * Calcola l'IVA su questo imponibile data l'aliquota (es. 22 -> imponibile * 0.22)
    */
   public calculateVat(vatRatePercent: Decimal.Value): MonetaryValue {
-    const rate = new Decimal(vatRatePercent || 0);
+    const rate = MonetaryValue.toDecimal(vatRatePercent);
     if (rate.isZero()) return new MonetaryValue(0);
     return new MonetaryValue(this.d.times(rate).dividedBy(100));
   }

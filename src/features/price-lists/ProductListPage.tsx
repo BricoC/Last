@@ -22,6 +22,7 @@ import {
   Receipt,
 } from "lucide-react";
 import { ListinoGeneraleRow, PriceListLogEntry, TrashListinoRow } from "./models/priceList";
+import { parseItalianNumber } from "@/shared/utils/numberUtils";
 import { priceListRepository } from "./services/priceListRepository";
 import { priceListSyncService } from "./services/priceListSyncService";
 import { orderRepository } from "@/features/orders/services/orderRepository";
@@ -167,16 +168,14 @@ function createBlankRow(): ListinoGeneraleRow {
 }
 
 function parseInputNumber(val: string): number | null {
-  const clean = val.trim().replace("€", "").replace("%", "").replace(/\s+/g, "").replace(",", ".");
-  if (clean === "") return null;
-  const num = parseFloat(clean);
-  return isNaN(num) ? null : round5(num);
+  const num = parseItalianNumber(val);
+  return num == null ? null : round5(num);
 }
 
 function parseInputPercent(val: string): number | null {
   const num = parseInputNumber(val);
   if (num == null) return null;
-  return round5(num > 2 ? num / 100 : num);
+  return round5(num / 100);
 }
 
 function formatSellingPrice(val: number | null | undefined): string {
@@ -197,7 +196,7 @@ function formatCostPrice(val: number | null | undefined): string {
 
 function formatPercentClean(val: number | null | undefined): string {
   if (val == null || isNaN(val)) return "—";
-  const pct = val > 2 ? val : val * 100;
+  const pct = val * 100;
   const rounded = Math.round(pct * 100) / 100;
   return `${rounded.toLocaleString("it-IT", {
     minimumFractionDigits: 0,
@@ -216,7 +215,7 @@ function getFormattedInitValue(val: any, col: string, char?: string): string {
     col === "maga" ||
     col === "perc_iva"
   ) {
-    const pct = val > 2 ? val : val * 100;
+    const pct = val * 100;
     return `${round5(pct)}%`;
   }
   if (col === "prezzo_pubblico" || col === "prezzo_profess" || col === "prezzo_fattura") {

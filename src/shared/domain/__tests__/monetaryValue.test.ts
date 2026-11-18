@@ -90,4 +90,13 @@ describe("MonetaryValue (Requisito 5 Decimali Esatti)", () => {
     expect(money("").toCanonicalString()).toBe("0.00000");
     expect(money(null).toCanonicalString()).toBe("0.00000");
   });
+
+  it("gestisce dividedBy(0) e stringhe italiane in times/dividedBy/applyDiscount/calculateVat", () => {
+    expect(money(100).dividedBy(0).toCanonicalString()).toBe("0.00000");
+    expect(money(100).dividedBy("0").toCanonicalString()).toBe("0.00000");
+    expect(money(100).dividedBy("2,5").toCanonicalString()).toBe("40.00000");
+    expect(money(10).times("1,5").toCanonicalString()).toBe("15.00000");
+    expect(money("12,34567").applyDiscount("3,5").toCanonicalString()).toBe("11.91357");
+    expect(money(100).calculateVat("22,5").toCanonicalString()).toBe("22.50000");
+  });
 });

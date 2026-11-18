@@ -1,7 +1,7 @@
 import { getDatabase } from "@/shared/data-layer/database";
 import { invoke } from "@tauri-apps/api/core";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
-import { parseInvoiceXml, ParsedInvoiceResult } from "./invoiceXmlParser";
+import { parseInvoiceXmlAll, ParsedInvoiceResult } from "./invoiceXmlParser";
 
 export interface SupplierInvoice {
   id?: number;
@@ -209,7 +209,9 @@ export class ElectronicInvoicesService {
             Number(r.sconto_3) || 0,
             Number(r.prezzo_scontato) || 0,
             Number(r.prezzo_totale) || 0,
-            Number(r.aliquota_iva) || 22,
+            r.aliquota_iva !== null && r.aliquota_iva !== undefined && r.aliquota_iva !== "" && Number.isFinite(Number(r.aliquota_iva))
+              ? Number(r.aliquota_iva)
+              : 22,
           ]
         );
       }
@@ -230,7 +232,7 @@ export class ElectronicInvoicesService {
    * 4. Sincronizza automaticamente le nuove fatture su Supabase Cloud
    */
   async importXmlFiles(
-    files: { name: string; content: string }[],
+    files: { name: string; content: string | ArrayBuffer | Uint8Array }[],
     onProgress?: (msg: string, percent: number) => void
   ): Promise<ImportXmlResult> {
     const errors: { fileName: string; error: string }[] = [];
@@ -238,12 +240,12 @@ export class ElectronicInvoicesService {
 
     onProgress?.("Parsing dei file XML in corso...", 5);
 
-    // 1. Parsing di ciascun file
+    // 1. Parsing di ciascun file (supporta multi-FatturaElettronicaBody e .p7m binari)
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       try {
-        const parsed = parseInvoiceXml(f.content, f.name);
-        parsedList.push(parsed);
+        const parsedBatch = parseInvoiceXmlAll(f.content, f.name);
+        parsedList.push(...parsedBatch);
       } catch (err) {
         errors.push({
           fileName: f.name,

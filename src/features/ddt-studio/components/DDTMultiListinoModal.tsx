@@ -714,7 +714,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
           if (p.value !== "" && p.value !== null && p.value !== undefined) {
             return `${p.value}%`;
           }
-          return "22%";
+          return "";
         },
       },
       {

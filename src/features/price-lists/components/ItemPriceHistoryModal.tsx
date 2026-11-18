@@ -181,7 +181,7 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
       return "(vuoto)";
     }
     if (isPct) {
-      const pct = val > 2 ? val : val * 100;
+      const pct = val * 100;
       return `${round5(pct)}%`;
     }
     if (isMoney) {

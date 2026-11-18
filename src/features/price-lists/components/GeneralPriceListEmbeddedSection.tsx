@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo, forwardRef, useImperativeHandle } from "react";
 import { Plus, RotateCcw, Save, Loader2 } from "lucide-react";
 import { ListinoGeneraleRow } from "../models/priceList";
+import { parseItalianNumber } from "@/shared/utils/numberUtils";
 import { priceListRepository } from "../services/priceListRepository";
 import {
   getCachedGeneralList,
@@ -100,16 +101,14 @@ function createBlankGeneralRow(): ListinoGeneraleRow {
 }
 
 function parseInputNumber(val: string): number | null {
-  const clean = val.trim().replace("€", "").replace("%", "").replace(/\s+/g, "").replace(",", ".");
-  if (clean === "") return null;
-  const num = parseFloat(clean);
-  return isNaN(num) ? null : round5(num);
+  const num = parseItalianNumber(val);
+  return num == null ? null : round5(num);
 }
 
 function parseInputPercent(val: string): number | null {
   const num = parseInputNumber(val);
   if (num == null) return null;
-  return round5(num > 2 ? num / 100 : num);
+  return round5(num / 100);
 }
 
 function formatEuro(val: number | null | undefined, decimals = 2): string {
@@ -124,8 +123,8 @@ function formatEuro(val: number | null | undefined, decimals = 2): string {
 
 function formatPercent(val: number | null | undefined): string {
   if (val == null || isNaN(val)) return "—";
-  const p = val <= 2 ? val * 100 : val;
-  return `${Math.round(p)}%`;
+  const p = val * 100;
+  return `${Math.round(p * 100) / 100}%`;
 }
 
 function tokenizeSearch(rawQuery: string): string[] {

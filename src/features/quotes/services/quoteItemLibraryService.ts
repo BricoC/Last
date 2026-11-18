@@ -333,7 +333,13 @@ export class QuoteItemLibraryService {
           ? MonetaryValue.fromSubunits(row.forced_unit_price_subunits)
           : null,
       discount_pct: Number(row.discount_pct || 0),
-      vat_rate: (Number(row.vat_rate) || 22) as QuoteVatRate,
+      vat_rate: (
+        row.vat_rate !== null &&
+        row.vat_rate !== undefined &&
+        Number.isFinite(Number(row.vat_rate))
+          ? Number(row.vat_rate)
+          : 22
+      ) as QuoteVatRate,
       availability: row.availability,
       notes: row.notes,
       usage_count: row.usage_count || 0,
@@ -365,7 +371,13 @@ export class QuoteItemLibraryService {
           ? MonetaryValue.fromSubunits(row.forced_unit_price_subunits)
           : null,
       discount_pct: Number(row.discount_pct || 0),
-      vat_rate: (Number(row.vat_rate) || 22) as QuoteVatRate,
+      vat_rate: (
+        row.vat_rate !== null &&
+        row.vat_rate !== undefined &&
+        Number.isFinite(Number(row.vat_rate))
+          ? Number(row.vat_rate)
+          : 22
+      ) as QuoteVatRate,
       availability: row.availability,
       notes: row.notes,
     };

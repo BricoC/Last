@@ -526,14 +526,14 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     setImportProgress({ msg: "Lettura file...", pct: 5 });
 
     try {
-      const payload: { name: string; content: string }[] = [];
+      const payload: { name: string; content: string | ArrayBuffer }[] = [];
       for (let i = 0; i < xmlFiles.length; i++) {
         const file = xmlFiles[i];
         setImportProgress({
           msg: `Lettura ${file.name} (${i + 1}/${xmlFiles.length})...`,
           pct: Math.round(((i + 1) / xmlFiles.length) * 20),
         });
-        const content = await file.text();
+        const content = await file.arrayBuffer();
         payload.push({ name: file.name, content });
       }
 
@@ -670,7 +670,10 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
         const it = filteredItems[i];
         const lineTotal = it.total_price || 0;
         taxable += lineTotal;
-        const lineVat = lineTotal * ((it.vat_rate || 22) / 100);
+        const rate = it.vat_rate !== null && it.vat_rate !== undefined && Number.isFinite(Number(it.vat_rate))
+          ? Number(it.vat_rate)
+          : 22;
+        const lineVat = lineTotal * (rate / 100);
         vat += lineVat;
         total += lineTotal + lineVat;
       }

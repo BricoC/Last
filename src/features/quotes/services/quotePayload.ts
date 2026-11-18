@@ -1,4 +1,4 @@
-import type { Quote, QuoteDraftInput, QuoteItem, QuoteItemInput } from "../models/quote";
+import type { Quote, QuoteDraftInput, QuoteItemInput } from "../models/quote";
 import { isQuoteDraftItemActive } from "../models/quoteDraft";
 import { calculateQuoteItem, calculateQuoteTotals } from "../utils/quoteCalculations";
 
@@ -28,18 +28,17 @@ export function buildQuoteSavePayload(input: QuoteDraftInput, existing: Quote | 
     total_taxable_subunits: totals.taxable.toSubunits(), total_vat_subunits: totals.vat.toSubunits(),
     total_document_subunits: totals.total.toSubunits(), total_cost_subunits: totals.cost.toSubunits(),
     total_profit_subunits: totals.gross_profit.toSubunits(),
-    items: items.map((item, index) => buildItemPayload(item, calculations[index], index + 1, existing?.items[index])),
+    items: items.map((item, index) => buildItemPayload(item, calculations[index], index + 1)),
   };
 }
 
 function buildItemPayload(
   item: QuoteItemInput,
   calculation: ReturnType<typeof calculateQuoteItem>,
-  rowIndex: number,
-  existing?: QuoteItem
+  rowIndex: number
 ) {
   return {
-    id: item.id || existing?.id || crypto.randomUUID(), row_index: rowIndex,
+    id: item.id || crypto.randomUUID(), row_index: rowIndex,
     product_id: item.product_id ?? null, supplier: item.supplier ?? null,
     supplier_item_code: item.supplier_item_code ?? null, code: item.code ?? null,
     description: item.description.trim(), unit: item.unit?.trim() || "NR", quantity: String(item.quantity),

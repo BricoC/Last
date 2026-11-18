@@ -362,7 +362,10 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
           unit: item.um || "NR.",
           unit_price: prezziIvaEnabled ? (item.prezzo_fattura || 0) : 0,
           purchase_price: item.prezzo_acquisto || 0,
-          vat_rate: prezziIvaEnabled && item.perc_iva ? Math.round(item.perc_iva * 100) : undefined,
+          vat_rate:
+            prezziIvaEnabled && item.perc_iva !== null && item.perc_iva !== undefined
+              ? Math.round(item.perc_iva * 100)
+              : undefined,
         });
       } else {
         const item = selected as ListinoClienteRow;

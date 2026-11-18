@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { getDatabase } from "@/shared/data-layer/database";
+import { parseItalianNumber } from "@/shared/utils/numberUtils";
 
 export interface FileItemInfo {
   filename: string;
@@ -107,11 +108,8 @@ export async function readTextFileLossless(filePath: string): Promise<string> {
 }
 
 export function parseSafeNum(val: unknown, defaultVal: number = 0): number {
-  if (val === null || val === undefined || val === "") return defaultVal;
-  if (typeof val === "number") return isNaN(val) ? defaultVal : val;
-  const s = String(val).replace(/,/g, ".").replace(/[^\d.-]/g, "");
-  const num = parseFloat(s);
-  return isNaN(num) ? defaultVal : num;
+  const num = parseItalianNumber(val);
+  return num === null ? defaultVal : num;
 }
 
 export function normalizeArtCode(val: unknown): string {
@@ -171,7 +169,7 @@ export function parseAnyDate(dateVal: unknown, annoFallback: number = 2026): {
         const p1 = parseInt(parts[1], 10);
         const p2 = parseInt(parts[2], 10);
         y = p2;
-        if (p0 <= 12 && p1 <= 31) {
+        if (p1 > 12 && p0 <= 12) {
           m = p0;
           d = p1;
         } else {

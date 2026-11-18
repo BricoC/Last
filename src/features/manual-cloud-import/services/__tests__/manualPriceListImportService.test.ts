@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCustomerPriceListExcelRow } from "../manualPriceListImportService";
+import { parseAnyDate, parseCustomerPriceListExcelRow, parseSafeNum } from "../manualPriceListImportService";
 
 describe("manualPriceListImportService - parseCustomerPriceListExcelRow", () => {
   it("parses standard FATTURA as well as spaced ' FATTURA' and VENDITA header variants", () => {
@@ -52,5 +52,13 @@ describe("manualPriceListImportService - parseCustomerPriceListExcelRow", () => 
   it("ignores empty or '0' description rows cleanly", () => {
     expect(parseCustomerPriceListExcelRow({ DESCRIZIONE: "", FATTURA: 5 }, "LIST_A", "A.xls")).toBeNull();
     expect(parseCustomerPriceListExcelRow({ DESCRIZIONE: "0", FATTURA: 5 }, "LIST_A", "A.xls")).toBeNull();
+  });
+
+  it("parses Italian thousands separators and DD/MM/YYYY dates accurately", () => {
+    expect(parseSafeNum("1.234,56 €")).toBe(1234.56);
+    expect(parseSafeNum("1.234.567")).toBe(1234567);
+    expect(parseAnyDate("05/11/2026").iso).toBe("2026-11-05");
+    expect(parseAnyDate("25/11/2026").iso).toBe("2026-11-25");
+    expect(parseAnyDate("11/25/2026").iso).toBe("2026-11-25");
   });
 });
