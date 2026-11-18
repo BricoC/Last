@@ -477,6 +477,52 @@ const MIGRATIONS: Migration[] = [
   },
 ];
 
+const BUSY_RETRY_DELAYS_MS = [150, 300, 600, 1200, 2000];
+
+export function isSqliteBusyError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes("database is locked") ||
+    msg.includes("database table is locked") ||
+    msg.includes("(code: 5)") ||
+    msg.includes("sqlite_busy")
+  );
+}
+
+export async function withSqliteBusyRetry<T>(op: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= BUSY_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await op();
+    } catch (err) {
+      lastErr = err;
+      if (!isSqliteBusyError(err) || attempt === BUSY_RETRY_DELAYS_MS.length) {
+        throw err;
+      }
+      const jitter = Math.floor(Math.random() * 100);
+      await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_DELAYS_MS[attempt] + jitter));
+    }
+  }
+  throw lastErr;
+}
+
+function wrapDatabaseWithBusyRetry(db: Database): Database {
+  return new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop === "execute") {
+        return (query: string, bindValues?: unknown[]) =>
+          withSqliteBusyRetry(() => target.execute(query, bindValues));
+      }
+      if (prop === "select") {
+        return <T>(query: string, bindValues?: unknown[]) =>
+          withSqliteBusyRetry(() => target.select<T>(query, bindValues));
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 /**
  * Inizializza o restituisce l'istanza singleton di SQLite locale.
  * Esegue automaticamente le migrazioni versionate al primo avvio.
@@ -492,12 +538,13 @@ export async function getDatabase(): Promise<Database> {
 
   initPromise = (async () => {
     try {
-      const db = await Database.load(DB_FILENAME);
+      const rawDb = await Database.load(DB_FILENAME);
+      const db = wrapDatabaseWithBusyRetry(rawDb);
 
       // Ottimizzazioni PRAGMA SQLite per concorrenza multi-connessione e integrità referenziale
       await db.execute("PRAGMA journal_mode = WAL;");
       await db.execute("PRAGMA synchronous = NORMAL;");
-      await db.execute("PRAGMA busy_timeout = 5000;");
+      await db.execute("PRAGMA busy_timeout = 30000;");
       await db.execute("PRAGMA foreign_keys = ON;");
 
       // Esecuzione migrazioni versionate

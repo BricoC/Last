@@ -7,9 +7,11 @@ mod backup_commands;
 mod ddt_commands;
 mod ddt_delete_command;
 mod ddt_types;
+mod manual_import_commands;
 mod quote_commands;
 mod quote_persistence;
 mod quote_types;
+mod sqlite_utils;
 mod supabase_config;
 mod supabase_ddt_import;
 mod supabase_ddt_preview;
@@ -471,6 +473,7 @@ pub fn run() {
             supabase_monitor::fetch_supabase_cloud_metrics,
             supabase_ddt_preview::load_local_ddt_preview_keys,
             supabase_ddt_import::import_supabase_ddt_into_local,
+            manual_import_commands::sync_client_price_lists_to_local,
             quote_commands::save_quote_transaction,
             quote_commands::soft_delete_quote_transaction,
             quote_commands::convert_quote_to_ddt_transaction,

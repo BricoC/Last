@@ -1,24 +1,14 @@
 use crate::ddt_types::DdtSavePayload;
 use std::collections::HashSet;
 use tauri::State;
-use tauri_plugin_sql::{DbInstances, DbPool};
-
-const DATABASE_KEY: &str = "sqlite:LastData.db";
+use tauri_plugin_sql::DbInstances;
 
 #[tauri::command]
 pub async fn save_ddt_transaction(
     db_instances: State<'_, DbInstances>,
     payload: DdtSavePayload,
 ) -> Result<(), String> {
-    let pool = {
-        let instances = db_instances.0.read().await;
-        match instances.get(DATABASE_KEY) {
-            Some(DbPool::Sqlite(pool)) => pool.clone(),
-            None => return Err("Il database Last non è stato inizializzato".to_string()),
-        }
-    };
-
-    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
     sqlx::query("BEGIN IMMEDIATE")
         .execute(&mut *connection)
         .await

@@ -251,7 +251,9 @@ pub async fn copy_database_file(app: AppHandle, target_file_path: String) -> Res
     }
 
     // Connettiti a LastData.db ed esegui VACUUM INTO per ottenere uno snapshot ACID atomico al 100%
-    let options = SqliteConnectOptions::new().filename(&db_path);
+    let options = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .busy_timeout(std::time::Duration::from_secs(30));
     let mut conn = SqliteConnection::connect_with(&options)
         .await
         .map_err(|e| format!("Impossibile connettersi al database per il backup: {}", e))?;

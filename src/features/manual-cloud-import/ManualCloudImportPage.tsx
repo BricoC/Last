@@ -213,7 +213,10 @@ export const ManualCloudImportPage: React.FC = () => {
 
       if (syncToLocalDb) {
         addStructuredLog("info", "Sincronizzazione SQLite Locale", "Salvataggio dei dati puliti nella tabella listini_clienti locale...");
-        await syncClientRowsToLocalSqlite(clientAnalysis.rows);
+        await syncClientRowsToLocalSqlite(clientAnalysis.rows, (c, t) => {
+          setProgressText(`Sincronizzazione SQLite locale ${c} di ${t}`);
+          setProgressPct(t > 0 ? Math.round((c / t) * 100) : 100);
+        });
         addStructuredLog("success", "SQLite Locale Sincronizzato con Successo");
       }
       await loadDbCounts();
@@ -494,7 +497,10 @@ export const ManualCloudImportPage: React.FC = () => {
 
       if (syncToLocalDb) {
         addStructuredLog("info", "Sincronizzazione finale database SQLite locale...");
-        await syncClientRowsToLocalSqlite(cliRes.rows);
+        await syncClientRowsToLocalSqlite(cliRes.rows, (c, t) => {
+          setProgressText(`[3/3 SQLite Locale] ${c}/${t}`);
+          setProgressPct(t > 0 ? Math.round((c / t) * 100) : 100);
+        });
       }
 
       await loadDbCounts();

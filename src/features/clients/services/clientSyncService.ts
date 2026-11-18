@@ -386,11 +386,10 @@ export class ClientSyncService {
       }
     }
 
-    // Esecuzione batch in una singola transazione atomica SQLite
+    // Esecuzione batch senza transazione SQL multi-statement sul pool tauri-plugin-sql
+    // (evita lock residui su connessioni diverse del pool sqlx)
     const now = new Date().toISOString();
-    await db.execute("BEGIN IMMEDIATE");
-    try {
-      for (const w of writes) {
+    for (const w of writes) {
         if (w.isUpdate) {
           await db.execute(
             `UPDATE clients SET
@@ -462,12 +461,6 @@ export class ClientSyncService {
           }
         }
       }
-
-      await db.execute("COMMIT");
-    } catch (err) {
-      await db.execute("ROLLBACK");
-      throw err;
-    }
 
     return {
       totalFetched: rows.length,
@@ -731,10 +724,7 @@ export class ClientSyncService {
     const now = new Date().toISOString();
     const savedClients: Client[] = [];
 
-    // Ottimizzazione P1: Esecuzione in una singola transazione atomica SQLite
-    await db.execute("BEGIN IMMEDIATE");
-    try {
-      for (const [aliasName, canonicalTarget] of canonicalReassignments.entries()) {
+    for (const [aliasName, canonicalTarget] of canonicalReassignments.entries()) {
         await db.execute(
           `UPDATE ddt_documents
            SET client_name = $1, client_id = $2, updated_at = $3
@@ -799,13 +789,8 @@ export class ClientSyncService {
         });
         added++;
       }
-      await db.execute("COMMIT");
-    } catch (err) {
-      await db.execute("ROLLBACK");
-      throw err;
-    }
 
-    // Sincronizza in background su Supabase Cloud dopo il commit locale
+    // Sincronizza in background su Supabase Cloud dopo il salvataggio locale
     for (const saved of savedClients) {
       void this.pushClientToSupabase(saved);
     }

@@ -3,17 +3,14 @@ use crate::ddt_types::DdtSavePayload;
 use crate::quote_persistence::persist_quote;
 use crate::quote_types::QuoteSavePayload;
 use tauri::State;
-use tauri_plugin_sql::{DbInstances, DbPool};
-
-const DATABASE_KEY: &str = "sqlite:LastData.db";
+use tauri_plugin_sql::DbInstances;
 
 #[tauri::command]
 pub async fn save_quote_transaction(
     db_instances: State<'_, DbInstances>,
     payload: QuoteSavePayload,
 ) -> Result<(), String> {
-    let pool = get_pool(&db_instances).await?;
-    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
     sqlx::query("BEGIN IMMEDIATE")
         .execute(&mut *connection)
         .await
@@ -32,8 +29,7 @@ pub async fn soft_delete_quote_transaction(
     deleted_at: String,
     updated_by: String,
 ) -> Result<(), String> {
-    let pool = get_pool(&db_instances).await?;
-    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
     sqlx::query("BEGIN IMMEDIATE")
         .execute(&mut *connection)
         .await
@@ -86,8 +82,7 @@ pub async fn convert_quote_to_ddt_transaction(
     let quote_id = quote_payload.id.clone();
     let updated_at = ddt_payload.updated_at.clone();
     let updated_by = ddt_payload.updated_by.clone();
-    let pool = get_pool(&db_instances).await?;
-    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
     sqlx::query("BEGIN IMMEDIATE")
         .execute(&mut *connection)
         .await
@@ -122,14 +117,6 @@ pub async fn convert_quote_to_ddt_transaction(
         Err(error) => rollback(&mut connection, error, "conversione preventivo-DDT")
             .await
             .map(|()| ddt_id),
-    }
-}
-
-async fn get_pool(db_instances: &DbInstances) -> Result<sqlx::SqlitePool, String> {
-    let instances = db_instances.0.read().await;
-    match instances.get(DATABASE_KEY) {
-        Some(DbPool::Sqlite(pool)) => Ok(pool.clone()),
-        None => Err("Il database Last non è stato inizializzato".to_string()),
     }
 }
 

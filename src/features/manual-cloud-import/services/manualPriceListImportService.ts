@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { getDatabase } from "@/shared/data-layer/database";
@@ -1387,53 +1387,98 @@ export async function syncClientRowsToLocalSqlite(
   rows: ParsedListinoClienteRow[],
   onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
+  if (rows.length === 0) {
+    onProgress?.(0, 0);
+    return;
+  }
+
+  if (isTauri()) {
+    const CHUNK_SIZE = 5000;
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE).map((r) => ({
+        cloud_id: r.cloudId ?? null,
+        cliente: r.cliente,
+        descrizione: r.descrizione,
+        prezzo_fattura: r.prezzo_fattura,
+        prezzo_acquisto: r.prezzo_acquisto,
+        acquisto_old: r.acquisto_old ?? "",
+        ricarico: r.ricarico,
+        note: r.note ?? null,
+        note1: r.note1 ?? null,
+        note2: r.note2 ?? null,
+      }));
+      await invoke("sync_client_price_lists_to_local", { rows: chunk });
+      onProgress?.(Math.min(i + CHUNK_SIZE, rows.length), rows.length);
+    }
+    return;
+  }
+
   const db = await getDatabase();
   const nowIso = new Date().toISOString();
-  const BATCH_SIZE = 250;
+  const existingRows = await db.select<{ id: string | null; cliente: string; descrizione: string }[]>(
+    "SELECT id, cliente, descrizione FROM listini_clienti"
+  );
+  const existingByKey = new Map<string, string[]>();
+  const usedIds = new Set<string>();
+  for (const row of existingRows) {
+    if (!row.id) continue;
+    usedIds.add(row.id);
+    const key = `${row.cliente.trim().toLowerCase()}___${row.descrizione.trim().toLowerCase()}`;
+    const list = existingByKey.get(key);
+    if (list) list.push(row.id);
+    else existingByKey.set(key, [row.id]);
+  }
 
+  const BATCH_SIZE = 250;
+  const nowMs = Date.now();
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const chunk = rows.slice(i, i + BATCH_SIZE);
+    for (let j = 0; j < chunk.length; j++) {
+      const r = chunk[j];
+      const key = `${r.cliente.trim().toLowerCase()}___${r.descrizione.trim().toLowerCase()}`;
+      const matchedIds = existingByKey.get(key);
 
-    for (const r of chunk) {
-      await db.execute(
-        `INSERT INTO listini_clienti (
-          cliente, descrizione, prezzo_fattura, prezzo_acquisto, acquisto_old,
-          ricarico, note, note1, note2, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        ON CONFLICT(cliente, descrizione) DO UPDATE SET
-          prezzo_fattura = excluded.prezzo_fattura,
-          prezzo_acquisto = excluded.prezzo_acquisto,
-          acquisto_old = excluded.acquisto_old,
-          ricarico = excluded.ricarico,
-          note = excluded.note,
-          note1 = excluded.note1,
-          note2 = excluded.note2,
-          updated_at = excluded.updated_at;`,
-        [
-          r.cliente,
-          r.descrizione,
-          r.prezzo_fattura,
-          r.prezzo_acquisto,
-          r.acquisto_old || null,
-          r.ricarico,
-          r.note ?? null,
-          r.note1 ?? null,
-          r.note2 ?? null,
-          nowIso,
-        ]
-      ).catch(async () => {
+      if (matchedIds && matchedIds.length > 0) {
+        for (const id of matchedIds) {
+          await db.execute(
+            `UPDATE listini_clienti SET
+              prezzo_fattura = $1,
+              prezzo_acquisto = $2,
+              acquisto_old = $3,
+              ricarico = $4,
+              note = $5,
+              note1 = $6,
+              note2 = $7,
+              updated_at = $8
+            WHERE id = $9;`,
+            [
+              r.prezzo_fattura,
+              r.prezzo_acquisto,
+              r.acquisto_old || null,
+              r.ricarico,
+              r.note ?? null,
+              r.note1 ?? null,
+              r.note2 ?? null,
+              nowIso,
+              id,
+            ]
+          );
+        }
+      } else {
+        let newId = r.cloudId != null ? `cli_${r.cloudId}` : `new_mig_${nowMs}_${i + j}`;
+        if (usedIds.has(newId)) {
+          newId = `new_mig_${nowMs}_${i + j}_${Math.random().toString(36).slice(2, 6)}`;
+        }
+        usedIds.add(newId);
         await db.execute(
-          `UPDATE listini_clienti SET
-            prezzo_fattura = $1,
-            prezzo_acquisto = $2,
-            acquisto_old = $3,
-            ricarico = $4,
-            note = $5,
-            note1 = $6,
-            note2 = $7,
-            updated_at = $8
-          WHERE cliente = $9 AND descrizione = $10;`,
+          `INSERT INTO listini_clienti (
+            id, cliente, descrizione, prezzo_fattura, prezzo_acquisto, acquisto_old,
+            ricarico, note, note1, note2, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);`,
           [
+            newId,
+            r.cliente,
+            r.descrizione,
             r.prezzo_fattura,
             r.prezzo_acquisto,
             r.acquisto_old || null,
@@ -1442,15 +1487,13 @@ export async function syncClientRowsToLocalSqlite(
             r.note1 ?? null,
             r.note2 ?? null,
             nowIso,
-            r.cliente,
-            r.descrizione,
+            nowIso,
           ]
         );
-      });
+        existingByKey.set(key, [newId]);
+      }
     }
 
-    if (onProgress) {
-      onProgress(Math.min(i + BATCH_SIZE, rows.length), rows.length);
-    }
+    onProgress?.(Math.min(i + BATCH_SIZE, rows.length), rows.length);
   }
 }
