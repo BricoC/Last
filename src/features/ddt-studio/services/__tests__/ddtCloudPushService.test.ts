@@ -281,4 +281,63 @@ describe("ddtCloudPushService", () => {
       ["doc-active"]
     );
   });
+
+  it("maps cascade discount (10+3 -> 0.127) and explicit zero quantity without coercing to 1", () => {
+    const doc = {
+      id: "ddt-cascade",
+      doc_number: 3050,
+      year: 2026,
+      series: "",
+      doc_date: "2026-11-18",
+      status: "confermato",
+      client_name: "TEST CLIENT",
+      client_phones_json: "[]",
+      total_taxable_subunits: 8730000,
+      total_vat_subunits: 1920600,
+      total_document_subunits: 10650600,
+      created_at: "2026-11-18T10:00:00.000Z",
+      updated_at: "2026-11-18T10:00:00.000Z",
+      deleted_at: null,
+      sync_status: "pending",
+    } as any;
+
+    const items = [
+      {
+        id: "item-cascade",
+        ddt_id: "ddt-cascade",
+        row_index: 1,
+        code: "C1",
+        description: "ARTICOLO CON SCONTO DOPPIO",
+        row_kind: "item",
+        unit: "NR",
+        quantity: "2",
+        unit_price_subunits: 5000000,
+        discount_pct: "10+3",
+        net_amount_subunits: 8730000,
+        vat_rate: 22,
+        purchase_price_subunits: 0,
+        deleted_at: null,
+      },
+      {
+        id: "item-zero",
+        ddt_id: "ddt-cascade",
+        row_index: 2,
+        code: "C2",
+        description: "ARTICOLO QTA ZERO",
+        row_kind: "item",
+        unit: "NR",
+        quantity: "0",
+        unit_price_subunits: 5000000,
+        discount_pct: "0",
+        net_amount_subunits: 0,
+        vat_rate: 22,
+        purchase_price_subunits: 0,
+        deleted_at: null,
+      },
+    ] as any[];
+
+    const { linePayloads } = buildSupabaseDdtPayloads(doc, items);
+    expect(linePayloads[0].sconto_pct).toBe(0.127);
+    expect(linePayloads[1].quantita).toBe(0);
+  });
 });

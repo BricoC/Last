@@ -252,4 +252,33 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
       expect(isTextOnlyRow({ description: "", unit_price: money(0), quantity: "" })).toBe(false);
     });
   });
+
+  it("termina senza loop infinito quando un singolo articolo supera gli slot dell'ultima pagina", () => {
+    const longDescription = Array.from({ length: 48 }, (_, i) => `Riga descrittiva ${i + 1}`).join("\n");
+    const makeFullItem = (id: string, row_index: number, description: string, unit_price: number): DdtItem => ({
+      id,
+      ddt_id: "d-oversize",
+      row_index,
+      description,
+      unit: "NR",
+      quantity: "1",
+      unit_price: money(unit_price),
+      discount_pct: "0",
+      vat_rate: 22,
+      net_amount: money(unit_price),
+      vat_amount: money(unit_price * 0.22),
+      created_at: "",
+      updated_at: "",
+      updated_by: "",
+      deleted_at: null,
+      sync_status: "pending",
+    });
+    const items: DdtItem[] = [
+      makeFullItem("r1", 1, "Articolo 1", 10),
+      makeFullItem("r2", 2, longDescription, 20),
+    ];
+    const pages = paginateDdtRows(items);
+    expect(pages.length).toBeGreaterThanOrEqual(2);
+    expect(pages.flatMap((p) => p.rows).some((r) => r.id === "r2")).toBe(true);
+  });
 });

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { createPortal } from "react-dom";
 import { LoaderCircle } from "lucide-react";
 import { DdtArchiveEntry, DdtDocument, DdtItem } from "./models/ddt";
-import { ddtRepository } from "./services/ddtRepository";
+import { ddtRepository, normalizeImportedDdt } from "./services/ddtRepository";
 import { subscribeToOpenDdt } from "./services/ddtNavigation";
 import { ddtCloudPushService } from "./services/ddtCloudPushService";
 import { DdtFieldConflict } from "./services/ddtMergeUtils";
@@ -708,7 +708,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       });
     }
     return () => { active = false; };
-  }, [signature, items, globalDiscount, globalMarkup]);
+  }, [ddt.id, ddt.doc_number, ddt.year, ddt.series, signature]);
 
   // Nuovo DDT vuoto con numero progressivo già visibile
   const handleNewDdt = async () => {
@@ -954,13 +954,25 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         );
         showToast(`DDT ${activeConflict.docNumber} sostituito con la versione importata (precedente nel Cestino)`);
       } else if (action === "draft") {
-        const draftHeader = { ...activeConflict.incomingDoc.rawHeader, doc_number: null, status: "bozza" };
-        await ddtRepository.saveDraft(draftHeader, activeConflict.incomingDoc.rawLines);
+        const { doc, items: importedItems } = normalizeImportedDdt(
+          activeConflict.incomingDoc.rawHeader,
+          activeConflict.incomingDoc.rawLines
+        );
+        const draftId = crypto.randomUUID();
+        const draftHeader = { ...doc, id: draftId, doc_number: null, status: "bozza" as const };
+        const draftLines = importedItems.map((it) => ({ ...it, id: crypto.randomUUID(), ddt_id: draftId }));
+        await ddtRepository.saveDraft(draftHeader, draftLines);
         showToast("DDT importato salvato tra le Bozze");
       } else if (action === "new_number") {
-        const nextNum = await ddtRepository.getNextDocNumber(activeConflict.year);
-        const numberedHeader = { ...activeConflict.incomingDoc.rawHeader, doc_number: nextNum, status: "confermato" };
-        await ddtRepository.emitDdt(numberedHeader, activeConflict.incomingDoc.rawLines);
+        const { doc, items: importedItems } = normalizeImportedDdt(
+          activeConflict.incomingDoc.rawHeader,
+          activeConflict.incomingDoc.rawLines
+        );
+        const nextNum = await ddtRepository.getNextDocNumberWithCloud(activeConflict.year);
+        const newDocId = crypto.randomUUID();
+        const numberedHeader = { ...doc, id: newDocId, doc_number: nextNum, status: "bozza" as const };
+        const numberedLines = importedItems.map((it) => ({ ...it, id: crypto.randomUUID(), ddt_id: newDocId }));
+        await ddtRepository.emitDdt(numberedHeader, numberedLines);
         showToast(`DDT importato registrato come DDT ${nextNum}`);
       } else {
         showToast("DDT importato ignorato");

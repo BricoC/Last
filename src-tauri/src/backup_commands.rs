@@ -245,10 +245,16 @@ pub async fn copy_database_file(app: AppHandle, target_file_path: String) -> Res
             .map_err(|e| format!("Errore creazione cartella destinazione: {}", e))?;
     }
 
-    // Se il file di destinazione esiste già, rimuovilo prima di VACUUM INTO perché SQLite rifiuta di sovrascrivere
-    if target_path.exists() {
-        let _ = fs::remove_file(target_path);
+    // Esegui VACUUM INTO su un file temporaneo nella stessa cartella per non distruggere un eventuale backup esistente in caso di errore
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let tmp_target_path = target_path.with_extension(format!("db.tmp_{}", ts));
+    if tmp_target_path.exists() {
+        let _ = fs::remove_file(&tmp_target_path);
     }
+    let tmp_target_str = tmp_target_path.to_string_lossy().to_string();
 
     // Connettiti a LastData.db ed esegui VACUUM INTO per ottenere uno snapshot ACID atomico al 100%
     let options = SqliteConnectOptions::new()
@@ -258,11 +264,26 @@ pub async fn copy_database_file(app: AppHandle, target_file_path: String) -> Res
         .await
         .map_err(|e| format!("Impossibile connettersi al database per il backup: {}", e))?;
 
-    sqlx::query("VACUUM INTO $1")
-        .bind(&target_file_path)
+    if let Err(e) = sqlx::query("VACUUM INTO $1")
+        .bind(&tmp_target_str)
         .execute(&mut conn)
         .await
-        .map_err(|e| format!("Errore VACUUM INTO durante la copia del database SQLite: {}", e))?;
+    {
+        let _ = fs::remove_file(&tmp_target_path);
+        return Err(format!("Errore VACUUM INTO durante la copia del database SQLite: {}", e));
+    }
+    drop(conn);
+
+    if target_path.exists() {
+        if let Err(e) = fs::remove_file(target_path) {
+            let _ = fs::remove_file(&tmp_target_path);
+            return Err(format!("Impossibile sostituire il file di backup esistente: {}", e));
+        }
+    }
+    if let Err(e) = fs::rename(&tmp_target_path, target_path) {
+        let _ = fs::remove_file(&tmp_target_path);
+        return Err(format!("Impossibile finalizzare il file di backup: {}", e));
+    }
 
     let len = fs::metadata(target_path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
@@ -276,51 +297,75 @@ pub async fn restore_database_file(app: AppHandle, source_file_path: String) -> 
         return Err(format!("File di origine non trovato: {}", source_file_path));
     }
 
-    // 1. Verifica preventiva dell'integrità del file di backup prima di toccare il database attivo
-    let source_options = SqliteConnectOptions::new().filename(source_path);
-    let mut source_conn = SqliteConnection::connect_with(&source_options)
-        .await
-        .map_err(|e| format!("Il file di backup non è un database SQLite valido o è corrotto: {}", e))?;
-
-    let quick_check: Result<(String,), _> = sqlx::query_as("PRAGMA quick_check(1);")
-        .fetch_one(&mut source_conn)
-        .await;
-
-    if let Ok((res,)) = quick_check {
-        if res.to_lowercase() != "ok" {
-            return Err(format!("Il backup non ha superato il controllo di integrità SQLite: {}", res));
-        }
-    }
-
     let mut db_path = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Impossibile ottenere cartella app_data_dir: {}", e))?;
     db_path.push("LastData.db");
 
-    // 2. Crea preventivamente una copia di sicurezza certificata del DB attuale prima del ripristino
     if db_path.exists() {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let safety_copy = db_path.with_file_name(format!("LastData_pre_restore_safety_{}.db", ts));
-        fs::copy(&db_path, &safety_copy)
-            .map_err(|e| format!("Impossibile creare copia preventiva di sicurezza: {}. Operazione annullata.", e))?;
+        if let (Ok(src_canon), Ok(dst_canon)) = (fs::canonicalize(source_path), fs::canonicalize(&db_path)) {
+            if src_canon == dst_canon {
+                return Err("Impossibile ripristinare il database attivo su sé stesso.".to_string());
+            }
+        }
     }
 
-    // 3. Chiudi ed elimina dal registro attivo il pool di connessioni SQLite in memoria per rilasciare i file lock su Windows
+    // 1. Verifica preventiva dell'integrità del file di backup prima di toccare il database attivo
+    let source_options = SqliteConnectOptions::new()
+        .filename(source_path)
+        .read_only(true)
+        .busy_timeout(std::time::Duration::from_secs(10));
+    let mut source_conn = SqliteConnection::connect_with(&source_options)
+        .await
+        .map_err(|e| format!("Il file di backup non è un database SQLite valido o è corrotto: {}", e))?;
+
+    let (quick_res,): (String,) = sqlx::query_as("PRAGMA quick_check(1);")
+        .fetch_one(&mut source_conn)
+        .await
+        .map_err(|e| format!("Il file di backup non è un database SQLite valido o è illeggibile: {}", e))?;
+    drop(source_conn);
+
+    if quick_res.to_lowercase() != "ok" {
+        return Err(format!("Il backup non ha superato il controllo di integrità SQLite: {}", quick_res));
+    }
+
+    // 2. Copia prima il file sorgente in staging locale per assicurare che lettura e copia riescano prima di chiudere il pool
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let staging_path = db_path.with_file_name(format!("LastData_restore_staging_{}.db", ts));
+    fs::copy(source_path, &staging_path)
+        .map_err(|e| format!("Impossibile leggere o copiare il file di backup: {}. Operazione annullata.", e))?;
+
+    // 3. Esegui checkpoint WAL sul pool attivo e chiudilo per rilasciare tutti i lock e consolidare i dati prima della safety copy
     if let Some(db_instances) = app.try_state::<tauri_plugin_sql::DbInstances>() {
         let pool_to_close = {
             let mut instances = db_instances.0.write().await;
             instances.remove("sqlite:LastData.db")
         };
         if let Some(tauri_plugin_sql::DbPool::Sqlite(pool)) = pool_to_close {
+            if let Ok(mut conn) = pool.acquire().await {
+                let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);").execute(&mut *conn).await;
+            }
             pool.close().await;
         }
     }
 
-    // 4. Rimuovi eventuali file WAL e SHM temporanei per evitare conflitti con la cache del vecchio DB
+    // 4. Crea preventivamente una copia di sicurezza del DB attuale consolidato prima di sovrascriverlo
+    let safety_copy = db_path.with_file_name(format!("LastData_pre_restore_safety_{}.db", ts));
+    if db_path.exists() {
+        if let Err(e) = fs::copy(&db_path, &safety_copy) {
+            let _ = fs::remove_file(&staging_path);
+            return Err(format!(
+                "Impossibile creare copia preventiva di sicurezza (riavvia l'app prima di riprovare): {}.",
+                e
+            ));
+        }
+    }
+
+    // 5. Rimuovi eventuali file WAL e SHM residui
     let wal_path = db_path.with_file_name("LastData.db-wal");
     if wal_path.exists() {
         let _ = fs::remove_file(&wal_path);
@@ -330,13 +375,30 @@ pub async fn restore_database_file(app: AppHandle, source_file_path: String) -> 
         let _ = fs::remove_file(&shm_path);
     }
 
-    fs::copy(source_path, &db_path)
-        .map_err(|e| format!("Errore durante il ripristino del database: {}", e))?;
+    if let Err(e) = fs::rename(&staging_path, &db_path).or_else(|_| fs::copy(&staging_path, &db_path).map(|_| ())) {
+        let _ = fs::remove_file(&staging_path);
+        if safety_copy.exists() {
+            let _ = fs::copy(&safety_copy, &db_path);
+        }
+        return Err(format!("Errore durante la sostituzione del database (riavvia l'app): {}", e));
+    }
+    let _ = fs::remove_file(&staging_path);
+
     let len = fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
 }
 
-/// Elenca i file di backup presenti nella cartella selezionata ordinati per nome/data decrescente
+fn is_managed_backup_file(fname: &str, ext: &str) -> bool {
+    if ext == "lastbackup" {
+        return true;
+    }
+    if ext == "db" || ext == "json" {
+        return fname.to_lowercase().starts_with("backup ");
+    }
+    false
+}
+
+/// Elenca i file di backup presenti nella cartella selezionata ordinati per data di modifica decrescente
 #[tauri::command]
 pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileInfo>, String> {
     let path = Path::new(&folder_path);
@@ -345,7 +407,7 @@ pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileIn
     }
 
     let entries = fs::read_dir(path).map_err(|e| format!("Errore scansione cartella: {}", e))?;
-    let mut files = Vec::new();
+    let mut files: Vec<(u64, BackupFileInfo)> = Vec::new();
 
     for entry in entries.flatten() {
         let fpath = entry.path();
@@ -361,18 +423,20 @@ pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileIn
                 .unwrap_or("")
                 .to_lowercase();
 
-            if ext == "lastbackup" || ext == "json" || ext == "db" {
+            if is_managed_backup_file(&fname, &ext) {
                 let meta = entry.metadata().ok();
                 let size_bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
 
-                let modified_iso = meta
+                let modified_secs = meta
                     .and_then(|m| m.modified().ok())
-                    .and_then(|time| {
-                        let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
-                        let secs = duration.as_secs();
-                        Some(format!("{}", secs))
-                    })
-                    .unwrap_or_default();
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let modified_iso = if modified_secs > 0 {
+                    modified_secs.to_string()
+                } else {
+                    String::new()
+                };
 
                 let backup_type = if ext == "db" {
                     "full_db".to_string()
@@ -382,21 +446,24 @@ pub fn list_backups_in_directory(folder_path: String) -> Result<Vec<BackupFileIn
                     "unknown".to_string()
                 };
 
-                files.push(BackupFileInfo {
-                    filename: fname,
-                    path: fpath.to_string_lossy().to_string(),
-                    size_bytes,
-                    modified_iso,
-                    backup_type,
-                });
+                files.push((
+                    modified_secs,
+                    BackupFileInfo {
+                        filename: fname,
+                        path: fpath.to_string_lossy().to_string(),
+                        size_bytes,
+                        modified_iso,
+                        backup_type,
+                    },
+                ));
             }
         }
     }
 
-    // Ordina dal più recente al più vecchio (alfabeticamente per nome decrescente, dato che usano YYYY-MM-DD_HH-mm-ss)
-    files.sort_by(|a, b| b.filename.cmp(&a.filename));
+    // Ordina dal più recente al più vecchio per timestamp di modifica reale (nome file solo come tie-breaker)
+    files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.filename.cmp(&a.1.filename)));
 
-    Ok(files)
+    Ok(files.into_iter().map(|(_, info)| info).collect())
 }
 
 /// Controlla se nella cartella condivisa esiste già un backup per la data specificata (es. "2026-11-07" o "2026.11.07")
@@ -437,12 +504,13 @@ pub fn clean_old_backups(folder_path: String, keep_count: usize) -> Result<usize
         return Ok(0);
     }
 
-    // Pulisci automaticamente eventuali file temporanei SQLite (-shm e -wal) residui nella cartella
+    // Pulisci automaticamente eventuali file temporanei SQLite (-shm e -wal) residui dei backup
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
             let ep = entry.path();
             if let Some(name) = ep.file_name().and_then(|n| n.to_str()) {
-                if name.ends_with(".db-wal") || name.ends_with(".db-shm") {
+                let lower = name.to_lowercase();
+                if lower.starts_with("backup ") && (lower.ends_with(".db-wal") || lower.ends_with(".db-shm")) {
                     let _ = fs::remove_file(&ep);
                 }
             }
@@ -514,11 +582,12 @@ pub async fn inspect_sqlite_backup_file(
     let mut total_records: i64 = 0;
 
     for name in table_names {
-        let count_query = format!("SELECT COUNT(*) FROM \"{}\"", name);
+        let escaped_name = name.replace('"', "\"\"");
+        let count_query = format!("SELECT COUNT(*) FROM \"{}\"", escaped_name);
         let count = sqlx::query_scalar::<_, i64>(&count_query)
             .fetch_one(&mut conn)
             .await
-            .unwrap_or(0);
+            .map_err(|e| format!("Errore conteggio tabella '{}': {}", name, e))?;
 
         total_records += count;
         tables.push(TableInspectionInfo { name, count });

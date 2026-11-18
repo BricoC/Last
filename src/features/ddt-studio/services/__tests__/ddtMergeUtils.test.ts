@@ -235,4 +235,38 @@ describe("ddtMergeUtils - 3-way merge multi-PC", () => {
     expect(result.merged.items).toHaveLength(1);
     expect(result.merged.items[0].unit_price_subunits).toBe(4500000);
   });
+
+  it("computes cascade discounts (10+3) and preserves explicit zero quantity accurately during merge", () => {
+    const base: DdtSnapshot = {
+      header: makeHeader(),
+      items: [
+        makeItem({ id: "r-disc", row_index: 1, quantity: "2", unit_price_subunits: 5000000, discount_pct: "0" }),
+        makeItem({ id: "r-zero", row_index: 2, quantity: "1", unit_price_subunits: 2000000, discount_pct: "0" }),
+      ],
+    };
+    const local: DdtSnapshot = {
+      header: makeHeader(),
+      items: [
+        makeItem({ id: "r-disc", row_index: 1, quantity: "2", unit_price_subunits: 5000000, discount_pct: "10+3" }),
+        makeItem({ id: "r-zero", row_index: 2, quantity: "0", unit_price_subunits: 2000000, discount_pct: "0" }),
+      ],
+    };
+    const remote: DdtSnapshot = {
+      header: makeHeader(),
+      items: [
+        makeItem({ id: "r-disc", row_index: 1, quantity: "2", unit_price_subunits: 5000000, discount_pct: "0" }),
+        makeItem({ id: "r-zero", row_index: 2, quantity: "1", unit_price_subunits: 2000000, discount_pct: "0" }),
+      ],
+    };
+
+    const result = mergeDdtSnapshots(base, local, new Set(), remote);
+    expect(result.conflicts).toHaveLength(0);
+    const discItem = result.merged.items.find((i) => i.id === "r-disc");
+    const zeroItem = result.merged.items.find((i) => i.id === "r-zero");
+    // 2 * 50 * 0.90 * 0.97 = 87.30 EUR -> 8_730_000 subunits
+    expect(discItem?.net_amount_subunits).toBe(8730000);
+    // quantity "0" must produce 0, not fallback to 1
+    expect(zeroItem?.net_amount_subunits).toBe(0);
+    expect(zeroItem?.vat_amount_subunits).toBe(0);
+  });
 });

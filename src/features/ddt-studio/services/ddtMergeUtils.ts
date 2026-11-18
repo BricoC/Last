@@ -1,4 +1,5 @@
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
+import { calculateRowAmounts } from "../utils/ddtCalculations";
 import {
   CloudHeader,
   CloudLine,
@@ -152,12 +153,14 @@ function recomputeItemAmounts(item: DdtItemSnapshot): DdtItemSnapshot {
     };
   }
 
-  const qtyNum = parseFloat((item.quantity || "1").replace(",", ".")) || 1;
-  const discNum = parseFloat((item.discount_pct || "0").replace(",", ".")) || 0;
+  const rawQty = (item.quantity ?? "").trim();
   const unitMoney = MonetaryValue.fromSubunits(item.unit_price_subunits || 0);
-  const net = unitMoney.times(qtyNum).applyDiscount(discNum);
-  const vatRate = Number(item.vat_rate || 0);
-  const vat = vatRate > 0 ? net.calculateVat(vatRate) : MonetaryValue.fromSubunits(0);
+  const { netAmount: net, vatAmount: vat } = calculateRowAmounts(
+    rawQty === "" ? "1" : rawQty,
+    unitMoney,
+    item.discount_pct,
+    item.vat_rate
+  );
 
   return {
     ...item,

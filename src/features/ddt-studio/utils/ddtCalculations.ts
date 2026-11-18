@@ -383,20 +383,29 @@ export function paginateDdtRows(items: DdtItem[]): DdtPageData[] {
 
   // Verifica che l'ultima pagina non superi LAST_PAGE_MULTI_SLOTS (40)
   while (pagesChunks.length > 1 && pagesChunks[pagesChunks.length - 1].usedSlots > LAST_PAGE_MULTI_SLOTS) {
-    const last = pagesChunks.pop()!;
+    const last = pagesChunks[pagesChunks.length - 1];
+    // Una singola riga sovradimensionata non può essere ulteriormente spezzata su più pagine
+    if (last.chunk.length <= 1) {
+      break;
+    }
+    pagesChunks.pop();
     const c1: (Partial<DdtItem> & { net_amount?: MonetaryValue })[] = [];
     const c2: (Partial<DdtItem> & { net_amount?: MonetaryValue })[] = [];
     let s1 = 0;
     let s2 = 0;
     for (const it of last.chunk) {
       const s = getItemRowSlots(it);
-      if (c2.length === 0 && s1 + s <= MIDDLE_PAGE_SLOTS && (last.chunk.length - c1.length > 1)) {
+      if (c2.length === 0 && (c1.length === 0 || s1 + s <= MIDDLE_PAGE_SLOTS) && (last.chunk.length - c1.length > 1)) {
         c1.push(it);
         s1 += s;
       } else {
         c2.push(it);
         s2 += s;
       }
+    }
+    if (c1.length === 0 || c2.length === 0) {
+      pagesChunks.push(last);
+      break;
     }
     pagesChunks.push({ chunk: c1, usedSlots: s1 });
     pagesChunks.push({ chunk: c2, usedSlots: s2 });

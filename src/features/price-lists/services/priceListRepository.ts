@@ -728,7 +728,7 @@ export class PriceListRepository {
 
     const row = rows[0];
     await this.saveClientRows([row]);
-    await db.execute("DELETE FROM listini_clienti WHERE id = $1;", [id]);
+    await db.execute("DELETE FROM listini_clienti_cestino WHERE id = $1;", [id]);
 
     return row;
   }

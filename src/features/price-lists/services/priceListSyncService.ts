@@ -27,11 +27,45 @@ export interface SyncProgress {
 const PAGE_SIZE = 1000;
 
 async function getSupabaseCredentials(): Promise<SupabaseConfig> {
-  const status = await invoke<ConfigStatus>("get_supabase_config");
+  const status = await invoke<ConfigStatus>("load_supabase_config");
   if (!status.config || !status.config.projectUrl || !status.config.anonKey) {
     throw new Error("Configurazione Supabase mancante. Configurala in Impostazioni -> Cloud & Database.");
   }
   return status.config;
+}
+
+function buildAuthHeaders(anonKey: string, extra?: Record<string, string>): Record<string, string> {
+  return {
+    apikey: anonKey,
+    Authorization: `Bearer ${anonKey}`,
+    ...extra,
+  };
+}
+
+const CLIENT_SELECT_FIELDS =
+  "id,created_at,updated_at,cliente,fornitore,codice_articolo,descrizione,prezzo_fattura,prezzo_acquisto,acquisto_eur,perc_acquisto,data_acquisto,acquisto_old,ricarico,data_ref,note,note1,note2";
+
+function mapSupabaseClientRow(r: any): ListinoClienteRow {
+  return {
+    id: `cli_${r.id}`,
+    cliente: r.cliente ?? "",
+    fornitore: r.fornitore ?? null,
+    codice_articolo: r.codice_articolo ?? null,
+    descrizione: r.descrizione ?? "",
+    prezzo_fattura: r.prezzo_fattura != null ? Number(r.prezzo_fattura) : null,
+    prezzo_acquisto: r.prezzo_acquisto != null ? Number(r.prezzo_acquisto) : null,
+    acquisto_eur: r.acquisto_eur != null ? Number(r.acquisto_eur) : null,
+    perc_acquisto: r.perc_acquisto != null ? Number(r.perc_acquisto) : null,
+    data_acquisto: r.data_acquisto ?? null,
+    acquisto_old: r.acquisto_old ?? null,
+    ricarico: r.ricarico != null ? Number(r.ricarico) : null,
+    data_ref: r.data_ref ?? null,
+    note: r.note ?? null,
+    note1: r.note1 ?? null,
+    note2: r.note2 ?? null,
+    created_at: r.created_at ?? undefined,
+    updated_at: r.updated_at ?? undefined,
+  };
 }
 
 async function fetchAllPages<T>(
@@ -54,10 +88,7 @@ async function fetchAllPages<T>(
 
     const response = await fetch(pageUrl.toString(), {
       method: "GET",
-      headers: {
-        apikey: anonKey,
-        Prefer: "count=exact",
-      },
+      headers: buildAuthHeaders(anonKey, { Prefer: "count=exact" }),
     });
 
     if (!response.ok) {
@@ -108,15 +139,13 @@ async function fetchPagesWithFilter<T>(
     const pageUrl = new URL(`/rest/v1/${table}`, baseUrl);
     pageUrl.searchParams.set("select", select);
     pageUrl.searchParams.set(filterParam, filterVal);
-    pageUrl.searchParams.set("order", "updated_at.desc");
+    pageUrl.searchParams.set("order", "updated_at.desc,id.asc");
     pageUrl.searchParams.set("limit", String(PAGE_SIZE));
     pageUrl.searchParams.set("offset", String(offset));
 
     const response = await fetch(pageUrl.toString(), {
       method: "GET",
-      headers: {
-        apikey: anonKey,
-      },
+      headers: buildAuthHeaders(anonKey),
     });
 
     if (!response.ok) {
@@ -203,14 +232,11 @@ export class PriceListSyncService {
       total: 18558,
     });
 
-    const cliFields =
-      "id,created_at,updated_at,cliente,codice_articolo,descrizione,prezzo_fattura,prezzo_acquisto,ricarico,note,note1,note2";
-
     const rawClienti = await fetchAllPages<any>(
       creds.projectUrl,
       creds.anonKey,
       "listini_clienti",
-      cliFields,
+      CLIENT_SELECT_FIELDS,
       (current, total) => {
         onProgress?.({
           stage: "clienti",
@@ -284,92 +310,15 @@ export class PriceListSyncService {
     ];
 
     // Mappatura Listini Clienti (18558 voci)
-    const clientRows: ListinoClienteRow[] = rawClienti.map((r: any): ListinoClienteRow => ({
-      id: `cli_${r.id}`,
-      cliente: r.cliente ?? "",
-      codice_articolo: r.codice_articolo ?? null,
-      descrizione: r.descrizione ?? "",
-      prezzo_fattura: r.prezzo_fattura != null ? Number(r.prezzo_fattura) : null,
-      prezzo_acquisto: r.prezzo_acquisto != null ? Number(r.prezzo_acquisto) : null,
-      ricarico: r.ricarico != null ? Number(r.ricarico) : null,
-      note: r.note ?? null,
-      note1: r.note1 ?? null,
-      note2: r.note2 ?? null,
-      created_at: r.created_at ?? undefined,
-      updated_at: r.updated_at ?? undefined,
-    }));
+    const clientRows: ListinoClienteRow[] = rawClienti.map(mapSupabaseClientRow);
 
-    // Inserimento batch in SQLite
-    // 1. Pulizia e reinserimento listino generale
-      await db.execute("DELETE FROM listino_generale;");
-      const BATCH_SIZE = 100;
+    // Inserimento batch in SQLite preservando eventuali nuove righe locali non ancora inviate
+    const { priceListRepository } = await import("./priceListRepository");
+    await db.execute("DELETE FROM listino_generale WHERE id NOT LIKE 'new_%';");
+    await priceListRepository.saveGeneralRows(generalRows);
 
-      for (let i = 0; i < generalRows.length; i += BATCH_SIZE) {
-        const chunk = generalRows.slice(i, i + BATCH_SIZE);
-        for (const row of chunk) {
-          await db.execute(
-            `INSERT INTO listino_generale (
-              id, source_table, cat, fornitore, codice_articolo, data_ref,
-              descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
-              perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
-              perc_iva, note, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
-            [
-              row.id,
-              row.source_table,
-              row.cat,
-              row.fornitore,
-              row.codice_articolo,
-              row.data_ref,
-              row.descrizione,
-              row.um,
-              row.perc_pub,
-              row.prezzo_pubblico,
-              row.perc_prof,
-              row.prezzo_profess,
-              row.perc_fatt,
-              row.prezzo_fattura,
-              row.prezzo_acquisto,
-              row.aumento,
-              row.r1,
-              row.maga,
-              row.r2,
-              row.perc_iva,
-              row.note,
-              row.created_at ?? null,
-              row.updated_at ?? null,
-            ]
-          );
-        }
-      }
-
-      // 2. Pulizia e reinserimento listini clienti
-      await db.execute("DELETE FROM listini_clienti;");
-      for (let i = 0; i < clientRows.length; i += BATCH_SIZE) {
-        const chunk = clientRows.slice(i, i + BATCH_SIZE);
-        for (const row of chunk) {
-          await db.execute(
-            `INSERT INTO listini_clienti (
-              id, cliente, codice_articolo, descrizione, prezzo_fattura,
-              prezzo_acquisto, ricarico, note, note1, note2, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-            [
-              row.id,
-              row.cliente,
-              row.codice_articolo,
-              row.descrizione,
-              row.prezzo_fattura,
-              row.prezzo_acquisto,
-              row.ricarico,
-              row.note,
-              row.note1,
-              row.note2,
-              row.created_at ?? null,
-              row.updated_at ?? null,
-            ]
-          );
-        }
-      }
+    await db.execute("DELETE FROM listini_clienti WHERE id NOT LIKE 'new_%';");
+    await priceListRepository.saveClientRows(clientRows);
 
     onProgress?.({
       stage: "completed",
@@ -431,38 +380,40 @@ export class PriceListSyncService {
             payload.created_at = new Date().toISOString();
             const res = await fetch(`${creds.projectUrl}/rest/v1/${table}`, {
               method: "POST",
-              headers: {
-                apikey: creds.anonKey,
+              headers: buildAuthHeaders(creds.anonKey, {
                 "Content-Type": "application/json",
                 Prefer: "return=representation",
-              },
+              }),
               body: JSON.stringify(payload),
             });
-            if (res.ok) {
-              const inserted = await res.json();
-              if (inserted && inserted[0]?.id) {
-                const prefix = table === "listino_generale" ? "gen_" : "var_";
-                const newDbId = `${prefix}${inserted[0].id}`;
-                await db.execute(
-                  "UPDATE listino_generale SET id = $1 WHERE id = $2;",
-                  [newDbId, r.id]
-                );
-                r.id = newDbId;
-              }
+            if (!res.ok) {
+              throw new Error(`Errore POST Supabase su ${table}: HTTP ${res.status}`);
+            }
+            const inserted = await res.json();
+            if (inserted && inserted[0]?.id) {
+              const prefix = table === "listino_generale" ? "gen_" : "var_";
+              const newDbId = `${prefix}${inserted[0].id}`;
+              await db.execute(
+                "UPDATE listino_generale SET id = $1 WHERE id = $2;",
+                [newDbId, r.id]
+              );
+              r.id = newDbId;
             }
           } else {
             const rawIdStr = r.id.replace(/^(gen_|var_)/, "");
             const numId = parseInt(rawIdStr, 10);
             const targetId = isNaN(numId) ? rawIdStr : numId;
 
-            await fetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
+            const res = await fetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
               method: "PATCH",
-              headers: {
-                apikey: creds.anonKey,
+              headers: buildAuthHeaders(creds.anonKey, {
                 "Content-Type": "application/json",
-              },
+              }),
               body: JSON.stringify(payload),
             });
+            if (!res.ok) {
+              throw new Error(`Errore PATCH Supabase su ${table}: HTTP ${res.status}`);
+            }
           }
         }
       };
@@ -497,12 +448,13 @@ export class PriceListSyncService {
         const numId = parseInt(rawIdStr, 10);
         const targetId = isNaN(numId) ? rawIdStr : numId;
 
-        await fetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
+        const res = await fetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
           method: "DELETE",
-          headers: {
-            apikey: creds.anonKey,
-          },
+          headers: buildAuthHeaders(creds.anonKey),
         });
+        if (!res.ok) {
+          console.warn(`[PriceListSyncService] Delete Supabase HTTP ${res.status} su ${table}#${targetId}`);
+        }
       }
     } catch (err) {
       console.warn("[PriceListSyncService] Delete Supabase asincrono non riuscito:", err);
@@ -530,15 +482,17 @@ export class PriceListSyncService {
         um: r.um || "NR.",
       }));
 
-      await fetch(`${creds.projectUrl}/rest/v1/listino_generale_cestino`, {
+      const res = await fetch(`${creds.projectUrl}/rest/v1/listino_generale_cestino`, {
         method: "POST",
-        headers: {
-          apikey: creds.anonKey,
+        headers: buildAuthHeaders(creds.anonKey, {
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates",
-        },
+        }),
         body: JSON.stringify(payload),
       });
+      if (!res.ok) {
+        console.warn(`[PriceListSyncService] Push Cestino Supabase HTTP ${res.status}`);
+      }
     } catch (err) {
       console.warn("[PriceListSyncService] Push Cestino Supabase (asincrono / offline):", err);
     }
@@ -550,12 +504,13 @@ export class PriceListSyncService {
   async deleteTrashFromSupabase(id: string): Promise<void> {
     try {
       const creds = await getSupabaseCredentials();
-      await fetch(`${creds.projectUrl}/rest/v1/listino_generale_cestino?id=eq.${id}`, {
+      const res = await fetch(`${creds.projectUrl}/rest/v1/listino_generale_cestino?id=eq.${id}`, {
         method: "DELETE",
-        headers: {
-          apikey: creds.anonKey,
-        },
+        headers: buildAuthHeaders(creds.anonKey),
       });
+      if (!res.ok) {
+        console.warn(`[PriceListSyncService] Delete Cestino Supabase HTTP ${res.status}`);
+      }
     } catch (err) {
       console.warn("[PriceListSyncService] Delete Cestino Supabase:", err);
     }
@@ -597,36 +552,38 @@ export class PriceListSyncService {
         if (isNew) {
           const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti`, {
             method: "POST",
-            headers: {
-              apikey: creds.anonKey,
+            headers: buildAuthHeaders(creds.anonKey, {
               "Content-Type": "application/json",
               Prefer: "return=representation",
-            },
+            }),
             body: JSON.stringify(payload),
           });
-          if (res.ok) {
-            const inserted = await res.json();
-            if (Array.isArray(inserted) && inserted[0]?.id) {
-              const newCloudId = `cli_${inserted[0].id}`;
-              await db.execute("UPDATE listini_clienti SET id = $1 WHERE id = $2;", [
-                newCloudId,
-                r.id,
-              ]);
-            }
+          if (!res.ok) {
+            throw new Error(`Errore POST Supabase su listini_clienti: HTTP ${res.status}`);
+          }
+          const inserted = await res.json();
+          if (Array.isArray(inserted) && inserted[0]?.id) {
+            const newCloudId = `cli_${inserted[0].id}`;
+            await db.execute("UPDATE listini_clienti SET id = $1 WHERE id = $2;", [
+              newCloudId,
+              r.id,
+            ]);
           }
         } else {
           const rawIdStr = r.id.replace(/^cli_/, "");
           const numId = parseInt(rawIdStr, 10);
           const targetId = isNaN(numId) ? rawIdStr : numId;
 
-          await fetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
+          const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
             method: "PATCH",
-            headers: {
-              apikey: creds.anonKey,
+            headers: buildAuthHeaders(creds.anonKey, {
               "Content-Type": "application/json",
-            },
+            }),
             body: JSON.stringify(payload),
           });
+          if (!res.ok) {
+            throw new Error(`Errore PATCH Supabase su listini_clienti: HTTP ${res.status}`);
+          }
         }
       }
 
@@ -653,12 +610,13 @@ export class PriceListSyncService {
         const numId = parseInt(rawIdStr, 10);
         const targetId = isNaN(numId) ? rawIdStr : numId;
 
-        await fetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
+        const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
           method: "DELETE",
-          headers: {
-            apikey: creds.anonKey,
-          },
+          headers: buildAuthHeaders(creds.anonKey),
         });
+        if (!res.ok) {
+          console.warn(`[PriceListSyncService] Delete Clienti Supabase HTTP ${res.status} su #${targetId}`);
+        }
       }
     } catch (err) {
       console.warn("[PriceListSyncService] Delete Clienti Supabase asincrono non riuscito:", err);
@@ -692,15 +650,17 @@ export class PriceListSyncService {
         note2: r.note2,
       }));
 
-      await fetch(`${creds.projectUrl}/rest/v1/listini_clienti_cestino`, {
+      const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti_cestino`, {
         method: "POST",
-        headers: {
-          apikey: creds.anonKey,
+        headers: buildAuthHeaders(creds.anonKey, {
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates",
-        },
+        }),
         body: JSON.stringify(payload),
       });
+      if (!res.ok) {
+        console.warn(`[PriceListSyncService] Push Cestino Clienti Supabase HTTP ${res.status}`);
+      }
     } catch (err) {
       console.warn("[PriceListSyncService] Push Cestino Clienti Supabase:", err);
     }
@@ -712,12 +672,13 @@ export class PriceListSyncService {
   async deleteClientTrashFromSupabase(id: string): Promise<void> {
     try {
       const creds = await getSupabaseCredentials();
-      await fetch(`${creds.projectUrl}/rest/v1/listini_clienti_cestino?id=eq.${id}`, {
+      const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti_cestino?id=eq.${id}`, {
         method: "DELETE",
-        headers: {
-          apikey: creds.anonKey,
-        },
+        headers: buildAuthHeaders(creds.anonKey),
       });
+      if (!res.ok) {
+        console.warn(`[PriceListSyncService] Delete Cestino Clienti Supabase HTTP ${res.status}`);
+      }
     } catch (err) {
       console.warn("[PriceListSyncService] Delete Cestino Clienti Supabase:", err);
     }
@@ -873,14 +834,11 @@ export class PriceListSyncService {
 
       const sinceIso = new Date(referenceDate.getTime() - 10000).toISOString();
 
-      const cliFields =
-        "id,created_at,updated_at,cliente,codice_articolo,descrizione,prezzo_fattura,prezzo_acquisto,ricarico,note,note1,note2";
-
       const rawClienti = await fetchPagesWithFilter<any>(
         creds.projectUrl,
         creds.anonKey,
         "listini_clienti",
-        cliFields,
+        CLIENT_SELECT_FIELDS,
         "updated_at",
         `gt.${sinceIso}`
       );
@@ -889,20 +847,7 @@ export class PriceListSyncService {
         return { updatedCount: 0, updatedRows: [] };
       }
 
-      const rowsToUpsert: ListinoClienteRow[] = rawClienti.map((r: any): ListinoClienteRow => ({
-        id: `cli_${r.id}`,
-        cliente: r.cliente ?? "",
-        codice_articolo: r.codice_articolo ?? null,
-        descrizione: r.descrizione ?? "",
-        prezzo_fattura: r.prezzo_fattura != null ? Number(r.prezzo_fattura) : null,
-        prezzo_acquisto: r.prezzo_acquisto != null ? Number(r.prezzo_acquisto) : null,
-        ricarico: r.ricarico != null ? Number(r.ricarico) : null,
-        note: r.note ?? null,
-        note1: r.note1 ?? null,
-        note2: r.note2 ?? null,
-        created_at: r.created_at ?? undefined,
-        updated_at: r.updated_at ?? undefined,
-      }));
+      const rowsToUpsert: ListinoClienteRow[] = rawClienti.map(mapSupabaseClientRow);
 
       const { priceListRepository } = await import("./priceListRepository");
       await priceListRepository.saveClientRows(rowsToUpsert);

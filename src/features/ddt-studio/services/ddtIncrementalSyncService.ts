@@ -232,7 +232,7 @@ class DdtIncrementalSyncService {
         const allDocRows = await db.select<{ doc_number: number; deleted_at: string | null }[]>(
           `SELECT doc_number, deleted_at
            FROM ddt_documents 
-           WHERE doc_number IS NOT NULL AND year = $1
+           WHERE doc_number IS NOT NULL AND year = $1 AND (status <> 'bozza' OR deleted_at IS NOT NULL)
            ORDER BY doc_number ASC`,
           [year]
         );

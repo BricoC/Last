@@ -146,13 +146,16 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
       "listino_generale_cestino",
       "listini_clienti_cestino",
       "listini_prezzi_log",
+      "products",
+      "supplier_price_list_files",
+      "supplier_price_list_items",
     ],
   },
   {
     id: "ddt",
     label: "DDT e Righe Documento",
     description: "Tutti i DDT archiviati (11.000+), righe articoli (32.000+), destinazioni e log.",
-    tables: ["ddt_documents", "ddt_items", "ddt_logs"],
+    tables: ["ddt_documents", "ddt_items", "ddt_logs", "ddt_sync_snapshots"],
   },
   {
     id: "clients",
@@ -182,7 +185,7 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
     id: "quotes",
     label: "Preventivi e Cestino",
     description: "Preventivi clienti emessi, righe articoli, sequenze annuali e cestino.",
-    tables: ["quotes", "quote_items", "quotes_trash", "quote_sequences"],
+    tables: ["quotes", "quote_items", "quotes_trash", "quote_sequences", "quote_favorite_items"],
   },
   {
     id: "orders",
@@ -742,25 +745,50 @@ export async function restoreModularBackup(
   const restoredCounts: Record<string, number> = {};
 
   try {
-    const tablesToRestore = new Set<string>();
+    const tablesToRestoreList: string[] = [];
+    const seen = new Set<string>();
     for (const cat of BACKUP_CATEGORIES) {
       if (categoriesToRestore.includes(cat.id)) {
         for (const t of cat.tables) {
-          tablesToRestore.add(t);
+          if (!seen.has(t)) {
+            seen.add(t);
+            tablesToRestoreList.push(t);
+          }
         }
       }
     }
 
-    for (const table of tablesToRestore) {
+    // Verifica quali tabelle esistono realmente nel DB locale (evita errori su tabelle lazy non ancora create)
+    const existingRes = await db.select<{ name: string }[]>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';"
+    );
+    const existingTables = new Set(existingRes.map((r) => r.name));
+    const activeTables = tablesToRestoreList.filter((t) => existingTables.has(t));
+
+    // In modalità replace elimina prima le tabelle figlie (ordine inverso) per rispettare ON DELETE RESTRICT
+    if (mode === "replace") {
+      for (let i = activeTables.length - 1; i >= 0; i--) {
+        const table = activeTables[i];
+        const rows = pkg.tables[table];
+        if (!Array.isArray(rows) || rows.length === 0) continue;
+        await db.execute(`DELETE FROM "${table}";`);
+      }
+    }
+
+    for (const table of activeTables) {
       const rows = pkg.tables[table];
       if (!Array.isArray(rows) || rows.length === 0) {
         restoredCounts[table] = 0;
         continue;
       }
 
-      if (mode === "replace") {
-        await db.execute(`DELETE FROM ${table};`);
-      }
+      // Determina la chiave primaria reale per eseguire UPSERT (ON CONFLICT DO UPDATE) in merge senza attivare ON DELETE CASCADE
+      const tableInfo = await db.select<{ name: string; pk: number }[]>(`PRAGMA table_info("${table}");`);
+      const validCols = new Set(tableInfo.map((c) => c.name));
+      const pkCols = tableInfo
+        .filter((c) => c.pk > 0)
+        .sort((a, b) => a.pk - b.pk)
+        .map((c) => c.name);
 
       let count = 0;
       const CHUNK_SIZE = 50;
@@ -768,7 +796,7 @@ export async function restoreModularBackup(
         const chunk = rows.slice(i, i + CHUNK_SIZE);
         if (chunk.length === 0) continue;
 
-        const keys = Object.keys(chunk[0]);
+        const keys = Object.keys(chunk[0]).filter((k) => validCols.has(k));
         if (keys.length === 0) continue;
         const columns = keys.map((k) => `"${k}"`).join(", ");
 
@@ -786,7 +814,20 @@ export async function restoreModularBackup(
           count++;
         }
 
-        const sql = `INSERT OR REPLACE INTO ${table} (${columns}) VALUES ${valuePlaceholders.join(", ")};`;
+        const hasFullPk = pkCols.length > 0 && pkCols.every((pk) => keys.includes(pk));
+        const nonPkKeys = keys.filter((k) => !pkCols.includes(k));
+
+        let sql: string;
+        if (hasFullPk && nonPkKeys.length > 0) {
+          const conflictTarget = pkCols.map((k) => `"${k}"`).join(", ");
+          const updateClauses = nonPkKeys.map((k) => `"${k}" = excluded."${k}"`).join(", ");
+          sql = `INSERT INTO "${table}" (${columns}) VALUES ${valuePlaceholders.join(", ")} ON CONFLICT(${conflictTarget}) DO UPDATE SET ${updateClauses};`;
+        } else if (hasFullPk) {
+          const conflictTarget = pkCols.map((k) => `"${k}"`).join(", ");
+          sql = `INSERT INTO "${table}" (${columns}) VALUES ${valuePlaceholders.join(", ")} ON CONFLICT(${conflictTarget}) DO NOTHING;`;
+        } else {
+          sql = `INSERT OR REPLACE INTO "${table}" (${columns}) VALUES ${valuePlaceholders.join(", ")};`;
+        }
         await db.execute(sql, flatValues);
       }
 

@@ -15,6 +15,7 @@ import {
   mergeDdtSnapshots,
 } from "./ddtMergeUtils";
 import { getDdtBaseSnapshot, saveDdtBaseSnapshot } from "./ddtSnapshotService";
+import { parseCascadeDiscounts } from "../utils/ddtCalculations";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -143,10 +144,11 @@ export function buildSupabaseDdtPayloads(doc: LocalDdtRow, items: LocalDdtItemRo
         (it.purchase_price_subunits ?? 0) === 0 &&
         (!it.code || !String(it.code).trim()));
 
-    const qty = isNote ? 0 : parseNumericString(it.quantity, 1) || 1;
+    const qty = isNote ? 0 : parseNumericString(it.quantity, 1);
     const unitPrice = isNote ? 0 : (it.unit_price_subunits || 0) / 100000;
-    const discountPct = isNote ? 0 : parseNumericString(it.discount_pct, 0);
-    const discountDecimal = round5(discountPct / 100);
+    const cascadeDiscounts = isNote ? [] : parseCascadeDiscounts(it.discount_pct);
+    const discountFactor = cascadeDiscounts.reduce((acc, pct) => acc * (1 - pct / 100), 1);
+    const discountDecimal = round5(1 - discountFactor);
     const netAmount = isNote ? 0 : (it.net_amount_subunits || 0) / 100000;
     const purchaseUnit = isNote ? 0 : (it.purchase_price_subunits || 0) / 100000;
     const discountedUnit = !isNote && qty > 0 ? round5(netAmount / qty) : 0;
