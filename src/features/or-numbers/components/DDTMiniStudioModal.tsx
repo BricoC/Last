@@ -15,6 +15,9 @@ interface DDTMiniStudioModalProps {
 interface EditableRow {
   id: string;
   row_index: number;
+  product_id?: string;
+  code?: string;
+  row_kind?: "item" | "note";
   description: string;
   quantity: string;
   unit: string;
@@ -82,17 +85,23 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
         setGoodsAppearance(loaded.goods_appearance || "A vista");
         setCarrier(loaded.carrier || "Nessuno");
 
-        // Popolamento righe
+        // Popolamento righe (preservando precisione fino a 5 decimali e metadati riga)
         const initialRows: EditableRow[] = (loaded.items || []).map((it, idx) => ({
           id: it.id || crypto.randomUUID(),
           row_index: it.row_index || idx + 1,
+          product_id: it.product_id || undefined,
+          code: it.code || undefined,
+          row_kind: it.row_kind || "item",
           description: it.description || "",
           quantity: it.quantity ? String(it.quantity) : "1",
           unit: it.unit || "PZ",
-          unit_price: it.unit_price ? it.unit_price.formatIT(false, 2, 2) : "0,00",
+          unit_price: it.unit_price ? it.unit_price.formatIT(false, 2, 5) : "0,00",
           discount_pct: it.discount_pct ? String(it.discount_pct) : "",
           vat_rate: it.vat_rate !== undefined && it.vat_rate !== null ? String(it.vat_rate) : "22",
-          purchase_price: it.purchase_price ? it.purchase_price.formatIT(false, 2, 2) : "",
+          purchase_price:
+            it.purchase_price && !it.purchase_price.isZero()
+              ? it.purchase_price.formatIT(false, 2, 5)
+              : "",
         }));
 
         setRows(initialRows.length > 0 ? initialRows : [createEmptyRow(1)]);
@@ -217,7 +226,9 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
           id: r.id,
           ddt_id: doc.id,
           row_index: idx + 1,
-          row_kind: "item",
+          product_id: r.product_id,
+          code: r.code,
+          row_kind: r.row_kind || "item",
           description: r.description.trim(),
           unit: r.unit.trim() || "PZ",
           quantity: r.quantity.trim() || "1",

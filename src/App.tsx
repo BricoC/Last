@@ -178,7 +178,10 @@ export function App() {
 
   // Renderer del contenuto delle finestre desktop in base al componentId
   const renderWindowContent = (componentId: string, windowId: string) => {
-    if (currentUser && !isPageAllowedForUser(currentUser, componentId)) {
+    if (!currentUser) {
+      return null;
+    }
+    if (!isPageAllowedForUser(currentUser, componentId)) {
       return (
         <div className="p-8 max-w-xl mx-auto flex flex-col items-center justify-center text-center space-y-4 select-none">
           <div className="p-4 rounded-full bg-red-500/10 text-red-400 border border-red-500/30">

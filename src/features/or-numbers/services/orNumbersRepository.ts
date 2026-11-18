@@ -162,7 +162,7 @@ export class OrNumbersRepository {
         const lastDay = new Date(year, month, 0).getDate();
         const endDate = `${year}-${mm}-${String(lastDay).padStart(2, "0")}`;
         url.searchParams.set("data", `gte.${startDate}`);
-        url.searchParams.set("data", `lte.${endDate}`);
+        url.searchParams.append("data", `lte.${endDate}`);
       }
       url.searchParams.set("nr_vs_ordine", "not.is.null");
       url.searchParams.set("select", "id,numero,anno,nr_vs_ordine");
@@ -309,11 +309,11 @@ export class OrNumbersRepository {
     if (discountPercent !== undefined && !isNaN(discountPercent)) {
       await db.execute(
         `UPDATE ddt_items 
-         SET discount_percent = $1,
+         SET discount_pct = $1,
              updated_at = datetime('now'),
              sync_status = 'pending'
          WHERE ddt_id = $2 AND deleted_at IS NULL`,
-        [discountPercent, ddtId]
+        [String(discountPercent), ddtId]
       );
     }
 

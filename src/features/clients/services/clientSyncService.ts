@@ -210,8 +210,8 @@ export class ClientSyncService {
    * Sincronizza e scarica tutti i clienti da Supabase nel database locale
    */
   public async syncAllFromSupabase(): Promise<SyncClientsResult> {
-    // Prima di scaricare da Supabase, propaga eventuali cancellazioni locali pendenti
-    await this.syncPendingDeletionsToSupabase().catch(() => 0);
+    // Prima di scaricare da Supabase, propaga eventuali modifiche ed eliminazioni locali pendenti
+    await this.syncPendingClientsToSupabase().catch(() => ({ pushed: 0, deleted: 0 }));
 
     const creds = await this.getCredentials();
     const availablePriceLists = await clientRepository.getAllAvailablePriceLists();
@@ -516,10 +516,11 @@ export class ClientSyncService {
         }
       }
 
-      // Fallback: se non trovato per nome ma presente P.IVA, cerca per P.IVA
+      // Fallback: se non trovato per nome ma presente P.IVA, cerca per P.IVA solo se univoca e compatibile
       if (supId === null && client.vat_number && client.vat_number.trim().length >= 8) {
         const vatUrl = new URL("/rest/v1/clienti", creds.projectUrl);
         vatUrl.searchParams.set("piva", `eq.${client.vat_number.trim()}`);
+        vatUrl.searchParams.set("select", "id,cliente");
         const vatRes = await fetch(vatUrl.toString(), {
           headers: {
             apikey: creds.anonKey,
@@ -528,8 +529,22 @@ export class ClientSyncService {
         });
         if (vatRes.ok) {
           const foundVat = await vatRes.json();
-          if (Array.isArray(foundVat) && foundVat.length > 0 && typeof foundVat[0]?.id === "number") {
-            supId = foundVat[0].id;
+          if (Array.isArray(foundVat) && foundVat.length === 1 && typeof foundVat[0]?.id === "number") {
+            const remoteName = String(foundVat[0]?.cliente || "").trim().toLowerCase();
+            const localName = client.business_name.trim().toLowerCase();
+            if (!remoteName || remoteName === localName) {
+              supId = foundVat[0].id;
+            } else {
+              // Se il record remoto con questa P.IVA appartiene a un cliente diverso presente in locale, non sovrascriverlo
+              const localDb = await getDatabase();
+              const otherLocal = await localDb.select<{ id: string }[]>(
+                "SELECT id FROM clients WHERE LOWER(TRIM(business_name)) = $1 AND deleted_at IS NULL AND id <> $2 LIMIT 1",
+                [remoteName, client.id]
+              );
+              if (otherLocal.length === 0) {
+                supId = foundVat[0].id;
+              }
+            }
           }
         }
       }

@@ -746,9 +746,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       savedSignature.current = signature(saved, syncedItems, globalDiscount, globalMarkup);
       await loadRecentDdts();
 
-      // Salvataggio automatico silenzioso del cliente in anagrafica
+      // Salvataggio automatico silenzioso del cliente in anagrafica senza duplicazione
       if (ddt.client_name?.trim()) {
-        void clientRepository.createOrUpdateClient({
+        void clientRepository.upsertClientFromDocument({
+          id: saved.client_id || ddt.client_id,
           business_name: ddt.client_name.trim(),
           address: ddt.client_address || undefined,
           city: ddt.client_city || undefined,
@@ -760,6 +761,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           destination_address: ddt.destination_address || undefined,
           destination_city: ddt.destination_city || undefined,
           phones: ddt.client_phones || [],
+        }).then((upserted) => {
+          setDdt((prev) => (prev.id === saved.id && !prev.client_id ? { ...prev, client_id: upserted.id } : prev));
         }).catch((e) => console.warn("Auto-salvataggio cliente bozza:", e));
       }
 
@@ -792,9 +795,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       savedSignature.current = signature(saved, syncedItems, globalDiscount, globalMarkup);
       await loadRecentDdts();
 
-      // Salvataggio automatico del cliente in anagrafica
+      // Salvataggio automatico del cliente in anagrafica senza duplicazione
       if (saved.client_name?.trim()) {
-        void clientRepository.createOrUpdateClient({
+        void clientRepository.upsertClientFromDocument({
+          id: saved.client_id || ddt.client_id,
           business_name: saved.client_name.trim(),
           address: saved.client_address || undefined,
           city: saved.client_city || undefined,
@@ -806,6 +810,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           destination_address: saved.destination_address || undefined,
           destination_city: saved.destination_city || undefined,
           phones: saved.client_phones || [],
+        }).then((upserted) => {
+          setDdt((prev) => (prev.id === saved.id && !prev.client_id ? { ...prev, client_id: upserted.id } : prev));
         }).catch((e) => console.warn("Auto-salvataggio cliente emissione:", e));
       }
 

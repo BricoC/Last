@@ -37,6 +37,8 @@ const QUEUE_STORAGE_KEY = "last_order_offline_queue";
 export class OrderSupabaseService {
   private client: SupabaseClient | null = null;
   private realtimeChannel: RealtimeChannel | null = null;
+  private onlineHandler: (() => void) | null = null;
+  private queueIntervalId: ReturnType<typeof setInterval> | null = null;
   public recentlyPushedRemoteIds = new Set<string>();
   private isProcessingQueue = false;
 
@@ -96,16 +98,21 @@ export class OrderSupabaseService {
     void this.reconcileFullOrdersCache();
 
     // Ascolta il ritorno della connessione internet per svuotare la coda offline
-    window.addEventListener("online", () => {
-      void this.processOfflineQueue();
-    });
+    if (!this.onlineHandler) {
+      this.onlineHandler = () => {
+        void this.processOfflineQueue();
+      };
+      window.addEventListener("online", this.onlineHandler);
+    }
 
     // Controllo periodico coda ogni 15 secondi
-    setInterval(() => {
-      if (navigator.onLine) {
-        void this.processOfflineQueue();
-      }
-    }, 15000);
+    if (!this.queueIntervalId) {
+      this.queueIntervalId = setInterval(() => {
+        if (navigator.onLine) {
+          void this.processOfflineQueue();
+        }
+      }, 15000);
+    }
   }
 
   stopRealtime(): void {
@@ -113,19 +120,29 @@ export class OrderSupabaseService {
       void this.client.removeChannel(this.realtimeChannel);
       this.realtimeChannel = null;
     }
+    if (this.onlineHandler) {
+      window.removeEventListener("online", this.onlineHandler);
+      this.onlineHandler = null;
+    }
+    if (this.queueIntervalId) {
+      clearInterval(this.queueIntervalId);
+      this.queueIntervalId = null;
+    }
   }
 
   /**
-   * Pulisce e risolve un ID, rimuovendo prefissi "ord_" e identificando UUID
+   * Pulisce e risolve un ID, rimuovendo prefissi "ord_" e scartando ID sintetici locali
    */
   public cleanId(id: string | number | null | undefined): string | null {
     if (!id) return null;
-    let s = String(id);
+    let s = String(id).trim();
     if (s.startsWith("ord_") && !s.startsWith("ord_draft_")) {
       s = s.slice(4);
     }
-    if (s.startsWith("draft_") || s.startsWith("new_")) return null;
-    return s.length > 10 ? s : null;
+    if (!s || s.startsWith("ord_draft_") || s.startsWith("draft_") || s.startsWith("new_") || s.startsWith("offline_")) {
+      return null;
+    }
+    return s;
   }
 
   /**
@@ -776,10 +793,18 @@ export class OrderSupabaseService {
           if (error) throw error;
           if (data && data[0]) {
             const r = data[0];
+            const remoteId = String(r.id);
+            const oldTargetId = item.targetId;
+            // Aggiorna i riferimenti nelle operazioni successive accodate offline sulla stessa riga
+            for (const queuedItem of queue) {
+              if (queuedItem.targetId === oldTargetId) {
+                queuedItem.targetId = remoteId;
+              }
+            }
             await this.cacheSingleOrderToSqlite(
               {
-                id: String(r.id),
-                supabase_id: String(r.id),
+                id: remoteId,
+                supabase_id: remoteId,
                 order_date: r.data || "",
                 supplier_name: r.fornitore || "",
                 article_code: r.articolo || "",
@@ -796,7 +821,7 @@ export class OrderSupabaseService {
                 updated_at: r.ultima_modifica || nowIso,
                 sync_status: "synced",
               },
-              item.targetId
+              oldTargetId
             );
             processedCount++;
             continue;

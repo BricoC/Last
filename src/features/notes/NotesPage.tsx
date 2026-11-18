@@ -251,6 +251,7 @@ CREATE POLICY "Accesso note per tutti" ON public.note FOR ALL TO anon USING (tru
       }
 
       saveTimeoutRef.current = setTimeout(async () => {
+        saveTimeoutRef.current = null;
         try {
           const tempDiv = document.createElement("div");
           tempDiv.innerHTML = newHtml;
@@ -330,45 +331,67 @@ CREATE POLICY "Accesso note per tutti" ON public.note FOR ALL TO anon USING (tru
     triggerAutoSave(title, html);
   };
 
-  // Selezione nota dall'elenco laterale con salvataggio al volo della precedente se necessario
-  const handleSelectNote = (id: string) => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-      const html = editorRef.current?.innerHTML || "";
-      const tempDiv = document.createElement("div");
-      tempDiv.innerHTML = html;
-      const textOnly = tempDiv.innerText || tempDiv.textContent || "";
-      if (activeNoteIdRef.current && (title.trim() || textOnly.trim())) {
-        void notesRepository.saveNote({
-          id: activeNoteIdRef.current,
-          title: title.trim() || "Nuova Nota",
-          content_html: html,
-          content_text: textOnly.trim(),
+  const flushPendingDraft = useCallback(() => {
+    if (!saveTimeoutRef.current) return;
+    clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = null;
+
+    const draftTitle = title;
+    const draftHtml = editorRef.current?.innerHTML || "";
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = draftHtml;
+    const draftText = (tempDiv.innerText || tempDiv.textContent || "").trim();
+    const targetId = activeNoteIdRef.current;
+
+    if (!draftTitle.trim() && !draftText) return;
+
+    void (async () => {
+      try {
+        let noteId = targetId;
+        if (!noteId) {
+          const created = await notesRepository.createNote({
+            title: draftTitle.trim() || "Nuova Nota",
+            created_by: currentUser,
+          });
+          noteId = created.id;
+          setNotes((prev) => [created, ...prev]);
+        }
+        await notesRepository.saveNote({
+          id: noteId,
+          title: draftTitle.trim() || "Nuova Nota",
+          content_html: draftHtml,
+          content_text: draftText,
           updated_by: currentUser,
         });
+        setNotes((prev) =>
+          prev.map((n) =>
+            n.id === noteId
+              ? {
+                  ...n,
+                  title: draftTitle.trim() || "Nuova Nota",
+                  content_html: draftHtml,
+                  content_text: draftText,
+                  updated_at: new Date().toISOString(),
+                }
+              : n
+          )
+        );
+        void notesSyncService.sync();
+      } catch (err) {
+        console.error("[NotesPage] Errore flush automatico bozza:", err);
       }
-    }
+    })();
+  }, [currentUser, title]);
+
+  // Selezione nota dall'elenco laterale con salvataggio al volo della precedente se necessario
+  const handleSelectNote = (id: string) => {
+    flushPendingDraft();
     setActiveNoteId(id);
   };
 
   // Creazione nuova nota / foglio vuoto pronto per scrivere
   const handleCreateNewNote = () => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-      const html = editorRef.current?.innerHTML || "";
-      const tempDiv = document.createElement("div");
-      tempDiv.innerHTML = html;
-      const textOnly = tempDiv.innerText || tempDiv.textContent || "";
-      if (activeNoteIdRef.current && (title.trim() || textOnly.trim())) {
-        void notesRepository.saveNote({
-          id: activeNoteIdRef.current,
-          title: title.trim() || "Nuova Nota",
-          content_html: html,
-          content_text: textOnly.trim(),
-          updated_by: currentUser,
-        });
-      }
-    }
+    flushPendingDraft();
     setActiveNoteId(null);
     activeNoteIdRef.current = null;
     setTitle("");

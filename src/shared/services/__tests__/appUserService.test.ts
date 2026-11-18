@@ -66,6 +66,17 @@ describe("isPageAllowedForUser", () => {
     expect(isPageAllowedForUser(undefined, "dashboard")).toBe(false);
   });
 
+  it("denies all pages when allowed_pages is explicitly empty (Deseleziona tutte) for non-admin", () => {
+    const zeroAccessUser: AppUser = {
+      ...restrictedUser,
+      allowed_pages: [],
+      can_access_settings: false,
+    };
+    for (const mod of ALL_APP_PAGE_MODULES) {
+      expect(isPageAllowedForUser(zeroAccessUser, mod.id)).toBe(false);
+    }
+  });
+
   it("denies settings access if can_access_settings is false, even if in allowed_pages", () => {
     const userWithSettingsInList: AppUser = {
       ...restrictedUser,

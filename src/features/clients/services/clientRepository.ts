@@ -128,6 +128,76 @@ export class ClientRepository {
     return saved;
   }
 
+  /**
+   * Aggiorna o crea un cliente a partire da un documento (DDT/Preventivo) senza duplicare
+   * record esistenti e senza sovrascrivere listini, destinazioni, codice, PEC, email o note.
+   */
+  public async upsertClientFromDocument(input: CreateClientInput & { id?: string }): Promise<Client> {
+    const db = await getDatabase();
+    const trimmedName = input.business_name.trim();
+    let existing: Client | null = null;
+
+    if (input.id) {
+      existing = await this.getClientById(input.id);
+    }
+    if (!existing && trimmedName) {
+      const rows = await db.select<ClientRow[]>(
+        "SELECT * FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL LIMIT 1",
+        [trimmedName]
+      );
+      if (rows.length > 0) {
+        existing = this.mapRowToClient(rows[0]);
+      }
+    }
+
+    if (!existing) {
+      return this.createOrUpdateClient(input);
+    }
+
+    const mergedPhones = input.phones && input.phones.length > 0 ? input.phones : existing.phones;
+    const merged: CreateClientInput & { id: string } = {
+      id: existing.id,
+      code: existing.code,
+      business_name: existing.business_name || trimmedName,
+      address: input.address?.trim() || existing.address,
+      city: input.city?.trim() || existing.city,
+      postal_code: existing.postal_code,
+      province: existing.province,
+      vat_number: input.vat_number?.trim() || existing.vat_number,
+      fiscal_code: input.fiscal_code?.trim() || existing.fiscal_code,
+      sdi_code: input.sdi_code?.trim() || existing.sdi_code,
+      pec: existing.pec,
+      email: existing.email,
+      payment_method: input.payment_method?.trim() || existing.payment_method,
+      destination_name: input.destination_name?.trim() || existing.destination_name,
+      destination_address: input.destination_address?.trim() || existing.destination_address,
+      destination_city: input.destination_city?.trim() || existing.destination_city,
+      destinations: existing.destinations,
+      price_lists: existing.price_lists,
+      phones: mergedPhones,
+      notes: existing.notes,
+      is_active: existing.is_active,
+    };
+
+    const changed =
+      merged.address !== existing.address ||
+      merged.city !== existing.city ||
+      merged.vat_number !== existing.vat_number ||
+      merged.fiscal_code !== existing.fiscal_code ||
+      merged.sdi_code !== existing.sdi_code ||
+      merged.payment_method !== existing.payment_method ||
+      merged.destination_name !== existing.destination_name ||
+      merged.destination_address !== existing.destination_address ||
+      merged.destination_city !== existing.destination_city ||
+      JSON.stringify(merged.phones) !== JSON.stringify(existing.phones);
+
+    if (!changed) {
+      return existing;
+    }
+
+    return this.createOrUpdateClient(merged);
+  }
+
   public async softDeleteClient(id: string): Promise<void> {
     const db = await getDatabase();
     const now = new Date().toISOString();
@@ -177,7 +247,10 @@ export class ClientRepository {
       ricarico: number | null;
       note: string | null;
     }[]>(
-      `SELECT id, cliente, codice_articolo, descrizione, prezzo_fattura, prezzo_acquisto, ricarico, note 
+      `SELECT id, cliente, codice_articolo, descrizione, prezzo_fattura,
+              COALESCE(acquisto_eur, prezzo_acquisto, 0) AS prezzo_acquisto,
+              COALESCE(perc_acquisto, ricarico, 0) AS ricarico,
+              note 
        FROM listini_clienti 
        WHERE cliente IN (${placeholders})
        ORDER BY codice_articolo ASC`,

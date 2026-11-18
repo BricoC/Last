@@ -51,6 +51,7 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const focusedSupplierRef = useRef<string | null>(null);
   const activeDraftRowKeyRef = useRef<string | null>(null);
+  const pendingSaveByRowKeyRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -527,22 +528,36 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         setFilledCount(count);
       }
 
-      // Salvataggio DIRETTO su Supabase
-      const res = await orderSupabaseService.saveOrder(data, isDraftRow);
-      if (res.success && res.data) {
-        data.id = res.data.id;
-        data.supabase_id = res.data.supabase_id;
-        if (node?.data) {
-          node.data.id = res.data.id;
-          node.data.supabase_id = res.data.supabase_id;
-        }
-        if (gridRef.current?.api && node) {
-          gridRef.current.api.refreshCells({
-            rowNodes: [node],
-            columns: ["col_actions"],
-            force: true,
-          });
-        }
+      // Salvataggio DIRETTO su Supabase serializzato per riga per evitare duplicati su Tab rapidi
+      const rowKey = data._rowKey || String(data.id);
+      const prevSave = pendingSaveByRowKeyRef.current.get(rowKey) ?? Promise.resolve();
+      const chainedSave = prevSave
+        .catch(() => {})
+        .then(async () => {
+          const stillDraft =
+            String(data.id).startsWith("ord_draft_") ||
+            String(data.id).startsWith("new_");
+          const res = await orderSupabaseService.saveOrder(data, stillDraft);
+          if (res.success && res.data) {
+            data.id = res.data.id;
+            data.supabase_id = res.data.supabase_id;
+            if (node?.data) {
+              node.data.id = res.data.id;
+              node.data.supabase_id = res.data.supabase_id;
+            }
+            if (gridRef.current?.api && node) {
+              gridRef.current.api.refreshCells({
+                rowNodes: [node],
+                columns: ["col_actions"],
+                force: true,
+              });
+            }
+          }
+        });
+      pendingSaveByRowKeyRef.current.set(rowKey, chainedSave);
+      await chainedSave;
+      if (pendingSaveByRowKeyRef.current.get(rowKey) === chainedSave) {
+        pendingSaveByRowKeyRef.current.delete(rowKey);
       }
     },
     [currentUser]
@@ -662,15 +677,12 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
         });
       }
 
-      // 5. Mantieni sincronizzato lo stato React orders
-      setOrders((prev) =>
-        prev.filter((o) => {
-          if (row._rowKey && o._rowKey === row._rowKey) return false;
-          if (row.id && String(o.id) === String(row.id)) return false;
-          if (row.supabase_id && String(o.supabase_id) === String(row.supabase_id)) return false;
-          return true;
-        })
-      );
+      // 5. Mantieni sincronizzato lo stato React orders dallo snapshot reale AG Grid (preserva eventuali modifiche in-place)
+      const syncedRows: OrderItem[] = [];
+      api.forEachNode((n: any) => {
+        if (n.data) syncedRows.push(n.data);
+      });
+      setOrders(syncedRows);
 
       // 6. Ricalcola conteggio righe piene
       let count = 0;
@@ -729,8 +741,11 @@ export const OrdersActiveTab: React.FC<OrdersActiveTabProps> = ({
       });
     }
 
-    const trashKeys = new Set(toTrash.map((r) => r._rowKey || r.id));
-    setOrders((prev) => prev.filter((o) => !trashKeys.has(o._rowKey || o.id)));
+    const syncedRows: OrderItem[] = [];
+    api.forEachNode((n: any) => {
+      if (n.data) syncedRows.push(n.data);
+    });
+    setOrders(syncedRows);
 
     let count = 0;
     api.forEachNode((n: any) => {

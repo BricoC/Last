@@ -63,6 +63,19 @@ export class NotesSyncService {
     try {
       const db = await getDatabase();
 
+      // 0. PROPAGA ELIMINAZIONI OFFLINE: elimina da Supabase eventuali note rimaste nel cestino con supabase_id
+      const trashedWithRemote = await db.select<{ id: string; supabase_id: number | null; deleted_at: string }[]>(
+        `SELECT id, supabase_id, deleted_at FROM notes_trash`
+      );
+      for (const trashRow of trashedWithRemote) {
+        if (trashRow.supabase_id) {
+          const deletedOk = await this.deleteRemoteNote(trashRow.supabase_id);
+          if (deletedOk) {
+            await db.execute(`UPDATE notes_trash SET supabase_id = NULL WHERE id = $1`, [trashRow.id]);
+          }
+        }
+      }
+
       // 1. PUSH: Invia le note con sync_status = 'pending' verso Supabase
       const pendings = await db.select<NoteRecord[]>(
         `SELECT * FROM notes WHERE sync_status = 'pending'`
@@ -104,15 +117,15 @@ export class NotesSyncService {
             throw new Error(`Errore invio Supabase: ${errBody?.message || res.statusText || res.status}`);
           }
         } else {
-          // POST nuova riga
-          const url = new URL("/rest/v1/note", creds.projectUrl);
+          // POST upsert con on_conflict=local_id per evitare 409 Conflict dopo restore dal cestino
+          const url = new URL("/rest/v1/note?on_conflict=local_id", creds.projectUrl);
           const res = await fetch(url.toString(), {
             method: "POST",
             headers: {
               apikey: creds.anonKey,
               Authorization: `Bearer ${creds.anonKey}`,
               "Content-Type": "application/json",
-              Prefer: "return=representation",
+              Prefer: "resolution=merge-duplicates,return=representation",
             },
             body: JSON.stringify(payload),
           });
@@ -159,6 +172,16 @@ export class NotesSyncService {
 
         if (Array.isArray(remoteList)) {
           for (const rem of remoteList) {
+            // Non resuscitare una nota eliminata localmente nel cestino dopo l'ultimo aggiornamento remoto
+            const trashedMatch = trashedWithRemote.find(
+              (t) =>
+                (rem.local_id && t.id === rem.local_id) ||
+                (t.supabase_id !== null && t.supabase_id === rem.id)
+            );
+            if (trashedMatch && (!rem.updated_at || trashedMatch.deleted_at >= rem.updated_at)) {
+              continue;
+            }
+
             const existing = await db.select<{ id: string; sync_status: string; updated_at: string }[]>(
               `SELECT id, sync_status, updated_at FROM notes WHERE supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL) LIMIT 1`,
               [rem.id, rem.local_id || null]
@@ -239,22 +262,33 @@ export class NotesSyncService {
   /**
    * Elimina una nota da Supabase se possiede un ID remoto
    */
-  public async deleteRemoteNote(supabaseId: number | null | undefined): Promise<void> {
-    if (!supabaseId) return;
+  public async deleteRemoteNote(supabaseId: number | null | undefined): Promise<boolean> {
+    if (!supabaseId) return false;
     const creds = await this.getSupabaseCredentials();
-    if (!creds) return;
+    if (!creds) return false;
 
     try {
       const url = new URL(`/rest/v1/note?id=eq.${supabaseId}`, creds.projectUrl);
-      await fetch(url.toString(), {
+      const res = await fetch(url.toString(), {
         method: "DELETE",
         headers: {
           apikey: creds.anonKey,
           Authorization: `Bearer ${creds.anonKey}`,
         },
       });
+      if (res.ok || res.status === 404) {
+        try {
+          const db = await getDatabase();
+          await db.execute(`UPDATE notes_trash SET supabase_id = NULL WHERE supabase_id = $1`, [supabaseId]);
+        } catch {
+          // ignore cleanup failure
+        }
+        return true;
+      }
+      return false;
     } catch (err) {
       console.warn("[NotesSync] Impossibile eliminare nota da Supabase:", err);
+      return false;
     }
   }
 }

@@ -50,7 +50,7 @@ export function isPageAllowedForUser(user: AppUser | null | undefined, pageId: s
   if (pageId === "settings") {
     return Boolean(user.can_access_settings);
   }
-  if (!user.allowed_pages || user.allowed_pages.length === 0) {
+  if (!Array.isArray(user.allowed_pages)) {
     return true;
   }
   return user.allowed_pages.includes(pageId);
