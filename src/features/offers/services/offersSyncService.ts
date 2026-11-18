@@ -64,6 +64,7 @@ export class OffersSyncService {
   private realtimeClient: SupabaseClient | null = null;
   private realtimeClientKey: string | null = null;
   private realtimeChannel: RealtimeChannel | null = null;
+  private realtimeStartPromise: Promise<void> | null = null;
   private realtimeSubscribers = 0;
   private recentlyDeletedRemoteIds = new Map<number, number>();
 
@@ -96,30 +97,39 @@ export class OffersSyncService {
   public async startRealtime(): Promise<void> {
     this.realtimeSubscribers++;
     if (this.realtimeChannel) return;
+    if (this.realtimeStartPromise) return this.realtimeStartPromise;
 
-    try {
-      const creds = await this.getSupabaseCredentials();
-      if (!creds || this.realtimeSubscribers <= 0) return;
+    this.realtimeStartPromise = (async () => {
+      try {
+        const creds = await this.getSupabaseCredentials();
+        if (!creds || this.realtimeSubscribers <= 0 || this.realtimeChannel) return;
 
-      const clientKey = `${creds.projectUrl}::${creds.anonKey}`;
-      if (!this.realtimeClient || this.realtimeClientKey !== clientKey) {
-        this.realtimeClient = createClient(creds.projectUrl, creds.anonKey);
-        this.realtimeClientKey = clientKey;
+        const clientKey = `${creds.projectUrl}::${creds.anonKey}`;
+        if (!this.realtimeClient || this.realtimeClientKey !== clientKey) {
+          this.realtimeClient = createClient(creds.projectUrl, creds.anonKey);
+          this.realtimeClientKey = clientKey;
+        }
+
+        if (this.realtimeSubscribers <= 0 || this.realtimeChannel) return;
+
+        this.realtimeChannel = this.realtimeClient
+          .channel("realtime_offerte")
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "offerte" },
+            () => {
+              void this.sync().catch(() => {});
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn("[OffersSync] Impossibile avviare Supabase Realtime:", err);
+      } finally {
+        this.realtimeStartPromise = null;
       }
+    })();
 
-      this.realtimeChannel = this.realtimeClient
-        .channel("realtime_offerte")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "offerte" },
-          () => {
-            void this.sync().catch(() => {});
-          }
-        )
-        .subscribe();
-    } catch (err) {
-      console.warn("[OffersSync] Impossibile avviare Supabase Realtime:", err);
-    }
+    return this.realtimeStartPromise;
   }
 
   /**

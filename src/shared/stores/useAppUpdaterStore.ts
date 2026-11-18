@@ -60,12 +60,21 @@ export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
       return;
     }
 
+    const currentStatus = get().status;
+    if (currentStatus === "checking" || currentStatus === "downloading") {
+      return;
+    }
+
     set({ status: "checking", errorMessage: null });
 
     try {
+      const prevUpdate = get().pendingUpdate;
       const update = await check();
 
       if (update && update.available) {
+        if (prevUpdate && prevUpdate !== update) {
+          void prevUpdate.close().catch(() => {});
+        }
         set({
           pendingUpdate: update,
           newVersion: update.version,
@@ -77,6 +86,9 @@ export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
         // Scarica e prepara silenziosamente in background in stile Windows Update
         await get().downloadAndInstall();
       } else {
+        if (prevUpdate) {
+          void prevUpdate.close().catch(() => {});
+        }
         set({ status: "up-to-date", pendingUpdate: null });
       }
     } catch (err: any) {

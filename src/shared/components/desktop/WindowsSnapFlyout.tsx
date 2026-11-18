@@ -22,7 +22,7 @@ export const WindowsSnapFlyout: React.FC<WindowsSnapFlyoutProps> = ({ targetWind
     return {
       "data-snap-slot": slot,
       onMouseEnter: () => setHoveredSnapSlot(slot),
-      onMouseLeave: () => setHoveredSnapSlot("maximize"),
+      onMouseLeave: () => setHoveredSnapSlot(null),
       onClick: (e: React.MouseEvent) => {
         e.stopPropagation();
         handleSelectSlot(slot);

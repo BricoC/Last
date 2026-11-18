@@ -5,6 +5,23 @@ type CloseHandler = () => void;
 // Stack LIFO globale per gestire la chiusura in cascata dei modal con il tasto ESC
 const modalStack: CloseHandler[] = [];
 
+export function registerEscHandler(handler: CloseHandler): () => void {
+  modalStack.push(handler);
+  return () => {
+    const idx = modalStack.lastIndexOf(handler);
+    if (idx !== -1) {
+      modalStack.splice(idx, 1);
+    }
+  };
+}
+
+export function triggerTopEscHandler(): boolean {
+  const topHandler = modalStack.pop();
+  if (!topHandler) return false;
+  topHandler();
+  return true;
+}
+
 if (typeof window !== "undefined") {
   window.addEventListener(
     "keydown",
@@ -16,10 +33,7 @@ if (typeof window !== "undefined") {
         e.stopImmediatePropagation();
 
         // Estrae ed esegue SOLO l'ultimo modal aperto (in cima allo stack)
-        const topHandler = modalStack.pop();
-        if (topHandler) {
-          topHandler();
-        }
+        triggerTopEscHandler();
       }
     },
     { capture: true } // La fase di capture intercetta il tasto prima di chiunque altro
@@ -37,18 +51,9 @@ export function useEscClose(isOpen: boolean, onClose: () => void) {
   useEffect(() => {
     if (!isOpen) return;
 
-    const handler: CloseHandler = () => {
+    return registerEscHandler(() => {
       onCloseRef.current();
-    };
-
-    modalStack.push(handler);
-
-    return () => {
-      const idx = modalStack.lastIndexOf(handler);
-      if (idx !== -1) {
-        modalStack.splice(idx, 1);
-      }
-    };
+    });
   }, [isOpen]);
 }
 

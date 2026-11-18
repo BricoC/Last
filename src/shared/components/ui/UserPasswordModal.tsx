@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Lock, Eye, EyeOff, X, AlertCircle, ArrowRight, User } from "lucide-react";
 import { AppUser } from "@/shared/services/appUserService";
+import { useEscClose } from "@/shared/hooks/useEscClose";
 
 export interface UserPasswordModalProps {
   targetUser: AppUser | null;
@@ -39,17 +40,7 @@ export const UserPasswordModal: React.FC<UserPasswordModalProps> = ({
     }
   }, [isOpen, targetUser?.id]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onCancel]);
+  useEscClose(isOpen, onCancel);
 
   if (!isOpen || !targetUser) return null;
 

@@ -1,7 +1,8 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { useAppUpdaterStore } from "@/shared/stores/useAppUpdaterStore";
 import { RefreshCw, X, ShieldCheck, ArrowRight, Clock } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
+import { useEscClose } from "@/shared/hooks/useEscClose";
 
 export const UpdateReadyModal: React.FC = () => {
   const {
@@ -15,15 +16,7 @@ export const UpdateReadyModal: React.FC = () => {
     status,
   } = useAppUpdaterStore();
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isModalOpen) {
-        dismissModal();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isModalOpen, dismissModal]);
+  useEscClose(isModalOpen && status === "ready", dismissModal);
 
   if (!isModalOpen || status !== "ready") {
     return null;

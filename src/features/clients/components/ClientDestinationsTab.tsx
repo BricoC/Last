@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { MapPin, Trash2, GripVertical, Plus, Sparkles, Check, ChevronUp, ChevronDown } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { ClientDestination } from "../models/client";
@@ -24,8 +24,16 @@ export const ClientDestinationsTab: React.FC<ClientDestinationsTabProps> = ({
 
   const draggingIndexRef = useRef<number | null>(null);
   const overIndexRef = useRef<number | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
   const destinationsRef = useRef<ClientDestination[]>(destinations);
   destinationsRef.current = destinations;
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+    };
+  }, []);
 
   // Deduplicazione solo in caso di veri duplicati identici
   const deduped = deduplicateDestinations(destinations);
@@ -130,13 +138,19 @@ export const ClientDestinationsTab: React.FC<ClientDestinationsTabProps> = ({
       }
     };
 
-    const onPointerUp = () => {
+    const cleanupDrag = () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
-
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      if (dragCleanupRef.current === cleanupDrag) {
+        dragCleanupRef.current = null;
+      }
+    };
+
+    const onPointerUp = () => {
+      cleanupDrag();
 
       const from = draggingIndexRef.current;
       const to = overIndexRef.current;
@@ -154,6 +168,8 @@ export const ClientDestinationsTab: React.FC<ClientDestinationsTabProps> = ({
       overIndexRef.current = null;
     };
 
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = cleanupDrag;
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerUp);

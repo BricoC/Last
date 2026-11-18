@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { X, ArrowUp, ArrowDown, RotateCcw, Check, Move, GripVertical } from "lucide-react";
 import { NavModule } from "./TopNavBar";
 import { DEFAULT_TOPBAR_ORDER } from "@/shared/services/appUserService";
+import { useEscClose } from "@/shared/hooks/useEscClose";
 
 interface TopbarOrderModalProps {
   isOpen: boolean;
@@ -22,18 +23,8 @@ export const TopbarOrderModal: React.FC<TopbarOrderModalProps> = ({
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Chiusura tramite tasto ESC
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  // Chiusura tramite tasto ESC (stack LIFO globale)
+  useEscClose(isOpen, onClose);
 
   useEffect(() => {
     if (isOpen) {

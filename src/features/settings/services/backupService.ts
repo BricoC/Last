@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
 
 export interface TableCountItem {
   tableName: string;
@@ -248,34 +249,7 @@ export async function getDefaultDesktopFolder(): Promise<string> {
 
 const CONFIG_STORAGE_KEY = "last_backup_configuration_v1";
 
-interface SupabaseConfig {
-  projectUrl: string;
-  anonKey: string;
-}
-
-interface ConfigStatus {
-  config: SupabaseConfig | null;
-  configPath: string;
-}
-
-let cachedSupabaseConfig: SupabaseConfig | null = null;
-
-async function getSupabaseCredentials(): Promise<SupabaseConfig | null> {
-  if (cachedSupabaseConfig) return cachedSupabaseConfig;
-  try {
-    const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
-    if (status?.config?.projectUrl && status?.config?.anonKey) {
-      cachedSupabaseConfig = {
-        projectUrl: status.config.projectUrl.replace(/\/$/, ""),
-        anonKey: status.config.anonKey.trim(),
-      };
-      return cachedSupabaseConfig;
-    }
-  } catch (err) {
-    console.warn("[backupService] Impossibile recuperare credenziali Supabase:", err);
-  }
-  return null;
-}
+const getSupabaseCredentials = createCachedSupabaseConfigLoader("backupService");
 
 export function loadBackupConfig(): BackupConfig {
   try {

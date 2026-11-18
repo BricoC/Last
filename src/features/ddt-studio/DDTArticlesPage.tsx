@@ -57,7 +57,14 @@ export function DDTArticlesPage() {
     catch (cause) { setError(cause instanceof Error ? cause.message : "Impossibile leggere le righe DDT locali."); }
     finally { setLoading(false); }
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    const handleDdtUpdated = () => {
+      void load();
+    };
+    window.addEventListener("ddt-data-updated", handleDdtUpdated);
+    return () => window.removeEventListener("ddt-data-updated", handleDdtUpdated);
+  }, []);
 
   // Scorciatoia F4 per focalizzare la ricerca rapida come in noManV1
   useEffect(() => {

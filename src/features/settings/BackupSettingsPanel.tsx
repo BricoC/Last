@@ -52,6 +52,7 @@ import {
   type FullBackupReport,
 } from "./services/backupService";
 import { Trash2, FileSearch } from "lucide-react";
+import { useEscClose } from "@/shared/hooks/useEscClose";
 
 export const BackupSettingsPanel: React.FC = () => {
   const [config, setConfig] = useState<BackupConfig>(() => loadBackupConfig());
@@ -142,20 +143,9 @@ export const BackupSettingsPanel: React.FC = () => {
     })();
   }, [refreshCounts, refreshBackupsList]);
 
-  // Chiusura dei popup con il tasto ESC (Escape)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (reportModalOpen) {
-          setReportModalOpen(false);
-        } else if (inspectModalOpen) {
-          setInspectModalOpen(false);
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [reportModalOpen, inspectModalOpen]);
+  // Chiusura dei popup con il tasto ESC (stack LIFO globale)
+  useEscClose(reportModalOpen, () => setReportModalOpen(false));
+  useEscClose(inspectModalOpen, () => setInspectModalOpen(false));
 
   // Eliminazione manuale di un singolo file
   const handleDeleteBackup = async (filePath: string, filename: string) => {

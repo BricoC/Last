@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use tauri::Manager;
 
@@ -20,14 +20,58 @@ mod supabase_monitor;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+fn resolve_desktop_dir() -> Result<PathBuf, String> {
+    let candidates = [
+        std::env::var("USERPROFILE").ok().map(|p| PathBuf::from(p).join("Desktop")),
+        std::env::var("OneDrive").ok().map(|p| PathBuf::from(p).join("Desktop")),
+        std::env::var("USERPROFILE")
+            .ok()
+            .map(|p| PathBuf::from(p).join("OneDrive").join("Desktop")),
+        std::env::var("HOME").ok().map(|p| PathBuf::from(p).join("Desktop")),
+    ];
+
+    for candidate in candidates.iter().flatten() {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    candidates
+        .into_iter()
+        .flatten()
+        .next()
+        .ok_or_else(|| "Impossibile trovare la cartella Desktop dell'utente".to_string())
+}
+
+fn sanitize_safe_output_path(base_dir: &Path, filename: &str) -> Result<PathBuf, String> {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return Err("Nome file non valido o vuoto".to_string());
+    }
+    let rel = Path::new(trimmed);
+    if rel.is_absolute() {
+        return Err("Percorso assoluto non consentito nel nome file".to_string());
+    }
+    let mut normalized = PathBuf::new();
+    for comp in rel.components() {
+        match comp {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err("Percorso file non consentito (path traversal rilevato)".to_string());
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err("Nome file non valido".to_string());
+    }
+    Ok(base_dir.join(normalized))
+}
+
 #[tauri::command]
 fn save_file_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, String> {
-    let desktop_dir = std::env::var("USERPROFILE")
-        .map(|p| PathBuf::from(p).join("Desktop"))
-        .or_else(|_| std::env::var("HOME").map(|p| PathBuf::from(p).join("Desktop")))
-        .map_err(|_| "Impossibile trovare la cartella Desktop dell'utente".to_string())?;
-
-    let file_path = desktop_dir.join(&filename);
+    let desktop_dir = resolve_desktop_dir()?;
+    let file_path = sanitize_safe_output_path(&desktop_dir, &filename)?;
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Errore creazione cartella: {}", e))?;
     }
@@ -39,12 +83,8 @@ fn save_file_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, Stri
 #[tauri::command]
 fn save_file_base64_to_desktop(filename: String, base64_content: String) -> Result<String, String> {
     use base64::prelude::*;
-    let desktop_dir = std::env::var("USERPROFILE")
-        .map(|p| PathBuf::from(p).join("Desktop"))
-        .or_else(|_| std::env::var("HOME").map(|p| PathBuf::from(p).join("Desktop")))
-        .map_err(|_| "Impossibile trovare la cartella Desktop dell'utente".to_string())?;
-
-    let file_path = desktop_dir.join(&filename);
+    let desktop_dir = resolve_desktop_dir()?;
+    let file_path = sanitize_safe_output_path(&desktop_dir, &filename)?;
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Errore creazione cartella: {}", e))?;
     }
@@ -316,7 +356,7 @@ fn save_temp_file(filename: String, bytes: Vec<u8>) -> Result<String, String> {
     let temp_dir = std::env::temp_dir().join("brico_ddt_email");
     fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("Errore creazione cartella temporanea: {}", e))?;
-    let file_path = temp_dir.join(&filename);
+    let file_path = sanitize_safe_output_path(&temp_dir, &filename)?;
     fs::write(&file_path, bytes).map_err(|e| format!("Errore scrittura file temporaneo: {}", e))?;
     Ok(file_path.to_string_lossy().to_string())
 }
@@ -497,4 +537,22 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_safe_output_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn sanitize_safe_output_path_blocks_traversal_and_absolute_paths() {
+        let base = PathBuf::from("C:\\Users\\Test\\Desktop");
+        assert!(sanitize_safe_output_path(&base, "..\\escape.pdf").is_err());
+        assert!(sanitize_safe_output_path(&base, "sub/../../escape.pdf").is_err());
+        assert!(sanitize_safe_output_path(&base, "/abs/path.pdf").is_err());
+        assert!(sanitize_safe_output_path(&base, "").is_err());
+
+        let ok = sanitize_safe_output_path(&base, "DDT 12.pdf").expect("valid filename");
+        assert_eq!(ok, base.join("DDT 12.pdf"));
+    }
 }

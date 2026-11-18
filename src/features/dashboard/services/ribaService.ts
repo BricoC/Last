@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
+import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
 
 export interface RibaDeadlineInfo {
   deadlineDate: Date;
@@ -15,29 +16,7 @@ export interface SupabaseConfig {
   anonKey: string;
 }
 
-interface ConfigStatus {
-  config: SupabaseConfig | null;
-  configPath: string;
-}
-
-let cachedSupabaseConfig: SupabaseConfig | null = null;
-
-export async function getSupabaseCredentials(): Promise<SupabaseConfig | null> {
-  if (cachedSupabaseConfig) return cachedSupabaseConfig;
-  try {
-    const status = await invoke<ConfigStatus>("load_supabase_config");
-    if (status?.config?.projectUrl && status?.config?.anonKey) {
-      cachedSupabaseConfig = {
-        projectUrl: status.config.projectUrl.replace(/\/$/, ""),
-        anonKey: status.config.anonKey.trim(),
-      };
-      return cachedSupabaseConfig;
-    }
-  } catch (err) {
-    console.warn("[ribaService] Impossibile recuperare credenziali Supabase:", err);
-  }
-  return null;
-}
+export const getSupabaseCredentials = createCachedSupabaseConfigLoader("ribaService");
 
 /**
  * Calcola la prossima scadenza Ri.Ba. a partire da una data di riferimento (default: oggi).

@@ -1,16 +1,13 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { AppUser, DEFAULT_ALLOWED_PAGES, DEFAULT_TOPBAR_ORDER } from "./appUserService";
+import { createCachedSupabaseConfigLoader } from "./supabaseConfigCache";
 
 interface SupabaseConfig {
   projectUrl: string;
   anonKey: string;
 }
 
-interface ConfigStatus {
-  config: SupabaseConfig | null;
-  configPath: string;
-}
+const loadUserSyncSupabaseCredentials = createCachedSupabaseConfigLoader("UserSyncService");
 
 export interface SupabaseAppUserRow {
   id: string;
@@ -33,23 +30,8 @@ export interface SupabaseAppUserRow {
 }
 
 export class UserSyncService {
-  private static cachedConfig: SupabaseConfig | null = null;
-
   public static async getCredentials(): Promise<SupabaseConfig | null> {
-    if (this.cachedConfig) return this.cachedConfig;
-    try {
-      const status = await invoke<ConfigStatus>("load_supabase_config");
-      if (status?.config?.projectUrl && status?.config?.anonKey) {
-        this.cachedConfig = {
-          projectUrl: status.config.projectUrl.replace(/\/$/, ""),
-          anonKey: status.config.anonKey.trim(),
-        };
-        return this.cachedConfig;
-      }
-    } catch (err) {
-      console.warn("[UserSyncService] Impossibile caricare configurazione Supabase via Tauri:", err);
-    }
-    return null;
+    return loadUserSyncSupabaseCredentials();
   }
 
   /**

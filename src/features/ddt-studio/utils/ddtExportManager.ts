@@ -235,10 +235,12 @@ export async function exportDdtPdfToDesktop(
     } catch (err) {
       console.warn("Tauri invoke non riuscito, fallback download browser:", err);
       const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
+      link.href = url;
       link.download = filename;
       link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       savedPath = "Desktop (Download)";
     }
   }

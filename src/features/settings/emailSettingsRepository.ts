@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
 
 export interface EmailSettings {
   carrara_to: string;
@@ -31,34 +31,7 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   accountant_cc: "",
 };
 
-interface SupabaseConfig {
-  projectUrl: string;
-  anonKey: string;
-}
-
-interface ConfigStatus {
-  config: SupabaseConfig | null;
-  configPath: string;
-}
-
-let cachedSupabaseConfig: SupabaseConfig | null = null;
-
-export async function getSupabaseCredentials(): Promise<SupabaseConfig | null> {
-  if (cachedSupabaseConfig) return cachedSupabaseConfig;
-  try {
-    const status = await invoke<ConfigStatus>("load_supabase_config");
-    if (status?.config?.projectUrl && status?.config?.anonKey) {
-      cachedSupabaseConfig = {
-        projectUrl: status.config.projectUrl.replace(/\/$/, ""),
-        anonKey: status.config.anonKey.trim(),
-      };
-      return cachedSupabaseConfig;
-    }
-  } catch (err) {
-    console.warn("[emailSettingsRepository] Impossibile recuperare credenziali Supabase:", err);
-  }
-  return null;
-}
+export const getSupabaseCredentials = createCachedSupabaseConfigLoader("emailSettingsRepository");
 
 /**
  * Invia le impostazioni email al Cloud Supabase (UPSERT)

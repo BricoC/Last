@@ -28,6 +28,7 @@ import { isPageAllowedForUser } from "@/shared/services/appUserService";
 import { UserPasswordModal } from "@/shared/components/ui/UserPasswordModal";
 import { DdtBatchExportRunner } from "@/features/ddt-studio/components/DdtBatchExportRunner";
 import { AppUpdaterRunner } from "@/shared/components/updater/AppUpdaterRunner";
+import { UpdateReadyModal } from "@/shared/components/updater/UpdateReadyModal";
 import { IllidanCinematicOverlay } from "@/shared/easter-eggs/IllidanCinematicOverlay";
 import { EasterEggVaultModal } from "@/shared/easter-eggs/EasterEggVaultModal";
 import { MgsCodecOverlay } from "@/shared/easter-eggs/MgsCodecOverlay";
@@ -147,6 +148,7 @@ export function App() {
   // Blocco di sicurezza chiusura applicazione Desktop (Tauri)
   useEffect(() => {
     if (!isTauri()) return;
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
@@ -165,13 +167,18 @@ export function App() {
         });
       })
       .then((fn) => {
-        unlisten = fn;
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
       })
       .catch((err) => {
         console.warn("[App] Registrazione onCloseRequested non riuscita:", err);
       });
 
     return () => {
+      disposed = true;
       if (unlisten) unlisten();
     };
   }, []);
@@ -269,8 +276,9 @@ export function App() {
       {/* Runner Esportazione Report DDT in Background & Floating Widget */}
       <DdtBatchExportRunner />
 
-      {/* Runner Controllo & Download Aggiornamenti Automatici in Background */}
+      {/* Runner Controllo & Download Aggiornamenti Automatici + Modale Riavvio */}
       <AppUpdaterRunner />
+      <UpdateReadyModal />
 
       {/* Easter Egg Vault, Illidan Cinematic Overlay, MGS Codec & Street Fighter */}
       <IllidanCinematicOverlay />

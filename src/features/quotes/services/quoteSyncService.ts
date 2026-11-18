@@ -1,36 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import type { Quote } from "../models/quote";
 import { formatQuoteCode } from "../models/quoteDraft";
+import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
 
-interface SupabaseConfig {
-  projectUrl: string;
-  anonKey: string;
-}
-
-interface ConfigStatus {
-  config: SupabaseConfig | null;
-  configPath: string;
-}
-
-let cachedSupabaseConfig: SupabaseConfig | null = null;
-
-export async function getSupabaseCredentials(): Promise<SupabaseConfig | null> {
-  if (cachedSupabaseConfig) return cachedSupabaseConfig;
-  try {
-    const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
-    if (status?.config?.projectUrl && status?.config?.anonKey) {
-      cachedSupabaseConfig = {
-        projectUrl: status.config.projectUrl.replace(/\/$/, ""),
-        anonKey: status.config.anonKey.trim(),
-      };
-      return cachedSupabaseConfig;
-    }
-  } catch (err) {
-    console.warn("[QuoteSyncService] Impossibile recuperare credenziali Supabase:", err);
-  }
-  return null;
-}
+export const getSupabaseCredentials = createCachedSupabaseConfigLoader("QuoteSyncService");
 
 function parseDataJson(raw: any): Record<string, any> {
   if (!raw) return {};

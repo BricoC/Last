@@ -1,5 +1,6 @@
- import React, { useEffect } from "react";
+import React, { useEffect } from "react";
 import { AlertTriangle, X } from "lucide-react";
+import { useEscClose } from "@/shared/hooks/useEscClose";
 
 export interface UnsavedChangesModalProps {
   isOpen: boolean;
@@ -26,15 +27,13 @@ export const UnsavedChangesModal: React.FC<UnsavedChangesModalProps> = ({
   cancelLabel = "Annulla",
   isSaving = false,
 }) => {
+  useEscClose(isOpen, onCancel);
+
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onCancel();
-      } else if (e.key === "Enter" && onSave && !isSaving) {
+      if (e.key === "Enter" && onSave && !isSaving) {
         e.preventDefault();
         e.stopPropagation();
         onSave();
@@ -43,7 +42,7 @@ export const UnsavedChangesModal: React.FC<UnsavedChangesModalProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onCancel, onSave, isSaving]);
+  }, [isOpen, onSave, isSaving]);
 
   if (!isOpen) return null;
 

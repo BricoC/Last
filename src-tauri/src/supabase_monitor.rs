@@ -83,10 +83,29 @@ fn extract_project_ref(project_url: &str) -> Result<String, String> {
         .strip_prefix("https://")
         .and_then(|v| v.strip_suffix(".supabase.co"))
         .ok_or("URL progetto Supabase non valido (atteso https://<ref>.supabase.co)")?;
-    if ref_part.is_empty() {
-        return Err("Project ref Supabase mancante".into());
+    if ref_part.is_empty()
+        || ref_part.len() > 64
+        || !ref_part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return Err("Project ref Supabase non valido".into());
     }
     Ok(ref_part.to_string())
+}
+
+fn mask_mgmt_token(token: &str) -> String {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let tail: String = trimmed
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("sbp_••••••••{tail}")
 }
 
 fn validate_mgmt_config(cfg: &SupabaseManagementConfig) -> Result<(), String> {
@@ -117,7 +136,7 @@ pub fn load_supabase_management_config(app: AppHandle) -> Result<ManagementConfi
     let cfg = read_mgmt_config(&app)?;
     Ok(ManagementConfigStatus {
         has_token: !cfg.access_token.trim().is_empty(),
-        access_token: cfg.access_token,
+        access_token: mask_mgmt_token(&cfg.access_token),
         expires_at: cfg.expires_at,
     })
 }
@@ -130,8 +149,14 @@ pub fn save_supabase_management_config(
     let _guard = MGMT_LOCK
         .lock()
         .map_err(|_| "Configurazione temporaneamente non disponibile")?;
+    let incoming_token = config.access_token.trim();
+    let effective_token = if incoming_token.contains('•') {
+        read_mgmt_config(&app)?.access_token
+    } else {
+        incoming_token.to_string()
+    };
     let normalized = SupabaseManagementConfig {
-        access_token: config.access_token.trim().to_string(),
+        access_token: effective_token,
         expires_at: config.expires_at.trim().to_string(),
     };
     validate_mgmt_config(&normalized)?;
@@ -147,7 +172,7 @@ pub fn save_supabase_management_config(
 
     Ok(ManagementConfigStatus {
         has_token: !normalized.access_token.is_empty(),
-        access_token: normalized.access_token,
+        access_token: mask_mgmt_token(&normalized.access_token),
         expires_at: normalized.expires_at,
     })
 }
@@ -340,4 +365,26 @@ pub async fn fetch_supabase_cloud_metrics(app: AppHandle) -> Result<SupabaseClou
         egress_bytes,
         table_sizes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_project_ref, mask_mgmt_token};
+
+    #[test]
+    fn extract_project_ref_validates_strict_format() {
+        assert_eq!(
+            extract_project_ref("https://abcdef-123.supabase.co/").unwrap(),
+            "abcdef-123"
+        );
+        assert!(extract_project_ref("https://abc/../../evil.supabase.co").is_err());
+        assert!(extract_project_ref("https://abc?query=1.supabase.co").is_err());
+        assert!(extract_project_ref("http://abcdef.supabase.co").is_err());
+    }
+
+    #[test]
+    fn mask_mgmt_token_never_exposes_plaintext() {
+        assert_eq!(mask_mgmt_token(""), "");
+        assert_eq!(mask_mgmt_token("sbp_1234567890abcd"), "sbp_••••••••abcd");
+    }
 }

@@ -42,6 +42,8 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
   const [activeResizeDir, setActiveResizeDir] = useState<ResizeDirection | null>(null);
 
   const pendingSnapRef = useRef<SnapSlotType | "maximize" | null>(null);
+  const winWidthRef = useRef<number>(win.width || 960);
+  winWidthRef.current = win.width || 960;
 
   const dragStartRef = useRef({
     mouseX: 0,
@@ -125,7 +127,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
         }
 
         if (!dragStartRef.current.wasMaximized && dragStartRef.current.hasMoved) {
-          const currentW = win.width || 960;
+          const currentW = winWidthRef.current;
           const newX = Math.max(-currentW + 100, Math.min(window.innerWidth - 80, dragStartRef.current.startX + dx));
           const newY = Math.max(0, Math.min(window.innerHeight - 80, dragStartRef.current.startY + dy));
           updateWindowBounds(win.id, { x: newX, y: newY });
@@ -208,7 +210,7 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
         updateWindowBounds(win.id, { x: newX, y: newY, width: newW, height: newH });
       }
     },
-    [isDragging, activeResizeDir, win.id, win.width, updateWindowBounds, setSnapFlyoutVisible, setDraggingWindowId, setHoveredSnapSlot]
+    [isDragging, activeResizeDir, win.id, updateWindowBounds, setSnapFlyoutVisible, setDraggingWindowId, setHoveredSnapSlot]
   );
 
   // Al rilascio del tasto del mouse (mouseup): se è su uno slot aggancia allo slot, se a sx/dx affianca al 50%, se la schermata di scelta era visibile massimizza e chiude (Punto 1, 2, 3)

@@ -3,6 +3,7 @@ import { Copy, Folder, Search, Trash2, X } from "lucide-react";
 import type { Quote } from "../models/quote";
 import { formatQuoteCode } from "../models/quoteDraft";
 import { cn } from "@/shared/utils/cn";
+import { useEscClose } from "@/shared/hooks/useEscClose";
 
 export function QuoteArchiveSidebar({
   quotes,
@@ -29,21 +30,15 @@ export function QuoteArchiveSidebar({
 }) {
   const sidebarRef = useRef<HTMLElement>(null);
 
+  useEscClose(true, onClose);
+
   useEffect(() => {
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (event.target instanceof Node && !sidebarRef.current?.contains(event.target)) onClose();
     };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
-    window.addEventListener("keydown", closeOnEscape);
     return () => {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("keydown", closeOnEscape);
     };
   }, [onClose]);
 
