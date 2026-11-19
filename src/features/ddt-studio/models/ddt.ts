@@ -59,6 +59,7 @@ export interface DdtDocument extends BaseEntity {
   carrier?: string;
   pickup_date_time?: string;
   internal_notes?: string;
+  project_url?: string | null;
 
   // Totali
   total_taxable: MonetaryValue; // 5 decimali

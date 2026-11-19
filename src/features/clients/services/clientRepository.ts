@@ -32,7 +32,8 @@ export class ClientRepository {
     const destinationsJson = JSON.stringify(input.destinations || []);
     const priceListsJson = JSON.stringify(input.price_lists || []);
 
-    const projectUrl = getLastKnownSupabaseProjectUrl();
+    const projectUrl =
+      input.project_url !== undefined ? input.project_url : getLastKnownSupabaseProjectUrl();
     if (input.id) {
       await db.execute(
         `UPDATE clients SET
@@ -142,16 +143,34 @@ export class ClientRepository {
   public async upsertClientFromDocument(input: CreateClientInput & { id?: string }): Promise<Client> {
     const db = await getDatabase();
     const trimmedName = input.business_name.trim();
+    const hasExplicitProjectScope = input.project_url !== undefined;
+    const targetProjectUrl = input.project_url ?? null;
     let existing: Client | null = null;
 
     if (input.id) {
-      existing = await this.getClientById(input.id);
+      const candidate = await this.getClientById(input.id);
+      if (
+        candidate &&
+        (!hasExplicitProjectScope || (candidate.project_url ?? null) === targetProjectUrl)
+      ) {
+        existing = candidate;
+      }
     }
     if (!existing && trimmedName) {
-      const rows = await db.select<ClientRow[]>(
-        "SELECT * FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL LIMIT 1",
-        [trimmedName]
-      );
+      const rows = hasExplicitProjectScope
+        ? targetProjectUrl
+          ? await db.select<ClientRow[]>(
+              "SELECT * FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL AND project_url = $2 LIMIT 1",
+              [trimmedName, targetProjectUrl]
+            )
+          : await db.select<ClientRow[]>(
+              "SELECT * FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL AND project_url IS NULL LIMIT 1",
+              [trimmedName]
+            )
+        : await db.select<ClientRow[]>(
+            "SELECT * FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL LIMIT 1",
+            [trimmedName]
+          );
       if (rows.length > 0) {
         existing = this.mapRowToClient(rows[0]);
       }

@@ -762,6 +762,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           destination_address: ddt.destination_address || undefined,
           destination_city: ddt.destination_city || undefined,
           phones: ddt.client_phones || [],
+          project_url: saved.project_url ?? null,
         }).then((upserted) => {
           setDdt((prev) => (prev.id === saved.id && !prev.client_id ? { ...prev, client_id: upserted.id } : prev));
         }).catch((e) => console.warn("Auto-salvataggio cliente bozza:", e));
@@ -811,6 +812,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           destination_address: saved.destination_address || undefined,
           destination_city: saved.destination_city || undefined,
           phones: saved.client_phones || [],
+          project_url: saved.project_url ?? null,
         }).then((upserted) => {
           setDdt((prev) => (prev.id === saved.id && !prev.client_id ? { ...prev, client_id: upserted.id } : prev));
         }).catch((e) => console.warn("Auto-salvataggio cliente emissione:", e));
@@ -857,6 +859,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           destination_address: saved.destination_address || undefined,
           destination_city: saved.destination_city || undefined,
           phones: saved.client_phones || [],
+          project_url: saved.project_url ?? null,
         }).then((upserted) => {
           setDdt((prev) => (prev.id === saved.id && !prev.client_id ? { ...prev, client_id: upserted.id } : prev));
         }).catch((e) => console.warn("Auto-salvataggio cliente The One:", e));

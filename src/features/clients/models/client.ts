@@ -58,4 +58,5 @@ export interface CreateClientInput {
   phones?: ClientPhone[];
   notes?: string;
   is_active?: boolean;
+  project_url?: string | null;
 }

@@ -976,6 +976,7 @@ export class DdtRepository {
       updated_by: row.updated_by,
       deleted_at: row.deleted_at || undefined,
       sync_status: row.sync_status,
+      project_url: row.project_url ?? null,
       items,
     };
   }
