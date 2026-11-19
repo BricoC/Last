@@ -837,12 +837,24 @@ class DdtCloudPushService {
     return { success: true, docNumber: remoteSnap.header.doc_number };
   }
 
-  public async deleteRemoteDdt(id: string): Promise<boolean> {
+  public async deleteRemoteDdt(id: string, knownProjectUrl?: string | null): Promise<boolean> {
     this.markRecentlyDeleted(id);
     const creds = await this.getCredentials();
     if (!creds) return false;
 
     try {
+      const db = await getDatabase();
+      let docProjectUrl = knownProjectUrl;
+      if (docProjectUrl === undefined) {
+        const localRow = await db.select<{ project_url?: string | null }[]>(
+          `SELECT project_url FROM ddt_documents WHERE id = $1 LIMIT 1`,
+          [id]
+        );
+        docProjectUrl = localRow[0]?.project_url ?? null;
+      }
+      if (docProjectUrl && !matchesActiveSupabaseProject(docProjectUrl, creds.projectUrl)) {
+        return false;
+      }
       const linesUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
       linesUrl.searchParams.set("ddt_id", `eq.${id}`);
       const delLinesRes = await fetchWithTimeout(linesUrl.toString(), {
@@ -859,7 +871,6 @@ class DdtCloudPushService {
       });
       if (!delDocRes.ok) return false;
 
-      const db = await getDatabase();
       await db.execute(`UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`, [id]);
       await db.execute(`UPDATE ddt_items SET sync_status = 'synced' WHERE ddt_id = $1`, [id]);
       return true;
@@ -887,9 +898,12 @@ class DdtCloudPushService {
       if (docs.length === 0) return { success: false, error: "DDT non trovato" };
 
       const doc = docs[0];
+      if (doc.project_url && !matchesActiveSupabaseProject(doc.project_url, creds.projectUrl)) {
+        return { success: false, docNumber: doc.doc_number, error: "DDT appartenente a un altro progetto Supabase" };
+      }
       if (doc.deleted_at) {
         if (doc.doc_number !== null && doc.status !== "bozza") {
-          const ok = await this.deleteRemoteDdt(doc.id);
+          const ok = await this.deleteRemoteDdt(doc.id, doc.project_url ?? null);
           return { success: ok, docNumber: doc.doc_number };
         }
         return { success: true, docNumber: doc.doc_number };
@@ -968,7 +982,7 @@ class DdtCloudPushService {
           continue;
         }
         if (doc.deleted_at) {
-          const ok = await this.deleteRemoteDdt(doc.id);
+          const ok = await this.deleteRemoteDdt(doc.id, doc.project_url ?? null);
           if (ok) deleted++;
           else errors++;
         } else {

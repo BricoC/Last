@@ -294,7 +294,13 @@ export class OffersRepository {
     // 2. Rimuovi dalla tabella principale
     writes.push(
       { sql: "DELETE FROM offers WHERE id = $1 AND updated_at = $2", params: [id, offer.updated_at], expectedRows: 1 },
-      pendingCloudWrite("offers", id, "delete", { remoteId: offer.supabase_id ?? null }),
+      pendingCloudWrite(
+        "offers",
+        id,
+        "delete",
+        { remoteId: offer.supabase_id ?? null },
+        (offer as OfferRecord & { project_url?: string | null }).project_url ?? getLastKnownSupabaseProjectUrl()
+      ),
     );
 
     // 3. Tronca il cestino mantenendo rigorosamente le ultime 10 offerte (FIFO)
@@ -349,8 +355,8 @@ export class OffersRepository {
 
     // 1. Reinserisci nella tabella attiva con sync_status = 'pending'
     await applyLocalDatabaseBatch([{ sql: `INSERT INTO offers (
-        id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status
-      ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending')
+        id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status, project_url
+      ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', $13)
       ON CONFLICT(id) DO UPDATE SET
         supabase_id = excluded.supabase_id,
         offer_date = excluded.offer_date,
@@ -361,7 +367,8 @@ export class OffersRepository {
         is_urgent = excluded.is_urgent,
         is_archived = excluded.is_archived,
         updated_at = excluded.updated_at,
-        sync_status = 'pending'`,
+        sync_status = 'pending',
+        project_url = excluded.project_url`,
       params: [
         item.id,
         item.offer_date,
@@ -375,6 +382,7 @@ export class OffersRepository {
         item.updated_by,
         item.created_at,
         nowIso,
+        getLastKnownSupabaseProjectUrl(),
       ],
     },
 

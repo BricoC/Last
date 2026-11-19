@@ -428,8 +428,9 @@ class DdtIncrementalSyncService {
                 order_reference: string | null;
                 internal_notes: string | null;
                 sync_status: string;
+                project_url?: string | null;
               }>>(
-                `SELECT id, total_document_subunits, total_taxable_subunits, total_vat_subunits, updated_at, order_reference, internal_notes, sync_status
+                `SELECT id, total_document_subunits, total_taxable_subunits, total_vat_subunits, updated_at, order_reference, internal_notes, sync_status, project_url
                  FROM ddt_documents
                  WHERE year = $1 AND doc_number = $2 AND deleted_at IS NULL
                  LIMIT 1`,
@@ -438,8 +439,9 @@ class DdtIncrementalSyncService {
 
               if (localRows.length === 0) continue;
               const loc = localRows[0];
-              // Non sovrascrivere bozze o modifiche locali pendenti
+              // Non sovrascrivere bozze, modifiche locali pendenti o DDT appartenenti ad un altro progetto Supabase
               if (loc.sync_status === "pending") continue;
+              if (loc.project_url && loc.project_url.trim().replace(/\/+$/, "").toLowerCase() !== projectUrl.trim().replace(/\/+$/, "").toLowerCase()) continue;
 
               const remoteTotDoc = Math.round((Number(remoteH.totale_documento) || 0) * 100000);
               const remoteTaxable = Math.round((Number(remoteH.totale_imponibile) || 0) * 100000);

@@ -889,7 +889,7 @@ export class DdtRepository {
     const activeProjectUrl = getLastKnownSupabaseProjectUrl();
     if (activeProjectUrl) {
       const db = await getDatabase();
-      await db.execute("UPDATE ddt_documents SET project_url = $1 WHERE id = $2", [
+      await db.execute("UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
         activeProjectUrl,
         docId,
       ]);

@@ -63,7 +63,7 @@ export class ClientRepository {
           updated_at = $21,
           updated_by = $22,
           sync_status = 'pending',
-          project_url = $24
+          project_url = COALESCE(project_url, $24)
         WHERE id = $23 AND deleted_at IS NULL`,
         [
           input.code || null,

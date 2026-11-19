@@ -227,7 +227,7 @@ export class QuoteRepository {
     const activeProjectUrl = getLastKnownSupabaseProjectUrl();
     if (activeProjectUrl) {
       const db = await getDatabase();
-      await db.execute("UPDATE quotes SET project_url = $1 WHERE id = $2", [
+      await db.execute("UPDATE quotes SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
         activeProjectUrl,
         quoteId,
       ]);
@@ -286,7 +286,13 @@ export class QuoteRepository {
           data_json = excluded.data_json, deleted_at = excluded.deleted_at, deleted_by = excluded.deleted_by`,
         params: [id, quote.quote_number, remote.numero, quote.year, quote.quote_date, quote.client_name,
           quote.subject, quote.totals.total.toSubunits(), JSON.stringify(remote), deletedAt] },
-      pendingCloudWrite("quotes", id, "trash", { ...remote, deleted_at: deletedAt, updated_at: deletedAt, deleted_by: "system" }),
+      pendingCloudWrite(
+        "quotes",
+        id,
+        "trash",
+        { ...remote, deleted_at: deletedAt, updated_at: deletedAt, deleted_by: "system" },
+        (quote as typeof quote & { project_url?: string | null }).project_url ?? getLastKnownSupabaseProjectUrl()
+      ),
       { sql: `DELETE FROM quotes_trash WHERE id NOT IN (
           SELECT id FROM quotes_trash ORDER BY deleted_at DESC, id DESC LIMIT 5
         )`, params: [] },

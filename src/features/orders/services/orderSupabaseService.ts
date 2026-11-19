@@ -928,9 +928,14 @@ export class OrderSupabaseService {
       await this.cacheOrdersToSqlite(mapped, generation);
 
       const db = await getDatabase();
+      const activeProjectUrl =
+        getLastKnownSupabaseProjectUrl() ??
+        normalizeSupabaseProjectUrl((await this.getCredentials())?.projectUrl);
+      if (!activeProjectUrl) return;
       const remoteIds = new Set(mapped.map((m) => String(m.id)));
       const localAll = await db.select<{ id: string; supabase_id: string | null; sync_status: string }[]>(
-        `SELECT id, supabase_id, sync_status FROM orders`
+        `SELECT id, supabase_id, sync_status FROM orders WHERE project_url = $1`,
+        [activeProjectUrl]
       );
       for (const row of localAll) {
         if (this.mutationGeneration !== generation) return;

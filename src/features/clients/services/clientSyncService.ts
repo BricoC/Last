@@ -118,6 +118,15 @@ export class ClientSyncService {
       }
 
       const creds = await this.getCredentials();
+      if (localClientId) {
+        const localRow = await db.select<{ project_url?: string | null }[]>(
+          "SELECT project_url FROM clients WHERE id = $1 LIMIT 1",
+          [localClientId]
+        );
+        if (localRow[0]?.project_url && !matchesActiveSupabaseProject(localRow[0].project_url, creds.projectUrl)) {
+          return false;
+        }
+      }
       const listUrl = new URL("/rest/v1/clienti", creds.projectUrl);
       listUrl.searchParams.set("select", "id,cliente");
       listUrl.searchParams.set("order", "id.asc");
@@ -379,6 +388,9 @@ export class ClientSyncService {
 
       // Ricerca rapida in memoria O(1)
       const existing = existingMap.get(lowerName);
+      if (existing?.project_url && !matchesActiveSupabaseProject(existing.project_url, activeProjectUrl)) {
+        continue;
+      }
       if (existing?.sync_status === "pending") continue;
 
       let priceLists: string[] = [];
@@ -517,6 +529,10 @@ export class ClientSyncService {
   public async pushClientToSupabase(client: Client, oldBusinessName?: string): Promise<boolean> {
     try {
       const creds = await this.getCredentials();
+      const clientProjectUrl = (client as Client & { project_url?: string | null }).project_url;
+      if (clientProjectUrl && !matchesActiveSupabaseProject(clientProjectUrl, creds.projectUrl)) {
+        return false;
+      }
       const localita = [client.city, client.province].filter(Boolean).join(" - ");
 
       const payload = {

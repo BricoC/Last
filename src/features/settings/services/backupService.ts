@@ -205,7 +205,7 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
 ];
 
 const CATEGORY_PENDING_SCOPES: Record<string, string[]> = {
-  price_lists: ["price_lists"],
+  price_lists: ["listino_generale", "listini_clienti"],
   offers: ["offers"],
   quotes: ["quotes"],
 };
@@ -789,9 +789,15 @@ export async function restoreModularBackup(
           writes.push({ sql: 'DELETE FROM "' + table + '"', params: [] });
         }
       }
-      const columns = tableInfo.map((column) => column.name);
-      const primaryKey = tableInfo.filter((column) => column.pk > 0)
-        .sort((a, b) => a.pk - b.pk).map((column) => column.name);
+      const columns =
+        table === "pending_cloud_operations"
+          ? tableInfo.map((column) => column.name).filter((name) => name !== "sequence")
+          : tableInfo.map((column) => column.name);
+      const primaryKey =
+        table === "pending_cloud_operations"
+          ? []
+          : tableInfo.filter((column) => column.pk > 0)
+              .sort((a, b) => a.pk - b.pk).map((column) => column.name);
 
       // Older backups can omit columns. Group equal row shapes without replacing defaults with NULL.
       const groups = new Map<string, { keys: string[]; rows: Record<string, unknown>[] }>();
