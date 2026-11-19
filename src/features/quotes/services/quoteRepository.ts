@@ -224,13 +224,15 @@ export class QuoteRepository {
     const quoteId = input.id || crypto.randomUUID();
     const payload = buildQuoteSavePayload(inputWithNumber, existing, now, quoteId);
     await invoke("save_quote_transaction", { payload });
-    const activeProjectUrl = getLastKnownSupabaseProjectUrl();
-    if (activeProjectUrl) {
-      const db = await getDatabase();
-      await db.execute("UPDATE quotes SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
-        activeProjectUrl,
-        quoteId,
-      ]);
+    if (!existing) {
+      const activeProjectUrl = getLastKnownSupabaseProjectUrl();
+      if (activeProjectUrl) {
+        const db = await getDatabase();
+        await db.execute("UPDATE quotes SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
+          activeProjectUrl,
+          quoteId,
+        ]);
+      }
     }
     const saved = await this.getQuoteById(quoteId);
     if (!saved) throw new Error("Errore recupero preventivo salvato.");
@@ -259,6 +261,20 @@ export class QuoteRepository {
     await invoke<string>("convert_quote_to_ddt_transaction", {
       quotePayload, ddtPayload: conversion.payload,
     });
+    const activeProjectUrl = getLastKnownSupabaseProjectUrl();
+    if (activeProjectUrl) {
+      const db = await getDatabase();
+      if (!existing) {
+        await db.execute("UPDATE quotes SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
+          activeProjectUrl,
+          quoteId,
+        ]);
+      }
+      await db.execute("UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
+        activeProjectUrl,
+        conversion.payload.id,
+      ]);
+    }
     return { quoteId, quoteNumber, ...conversion };
   }
 

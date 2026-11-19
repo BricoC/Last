@@ -638,9 +638,12 @@ export class ClientSyncService {
    */
   public async importMissingClientsFromDdts(): Promise<{ added: number }> {
     const db = await getDatabase();
+    const creds = await this.getCredentials().catch(() => null);
+    const activeProjectUrl = creds ? normalizeSupabaseProjectUrl(creds.projectUrl) : null;
+    if (!activeProjectUrl) return { added: 0 };
     const availablePriceLists = await clientRepository.getAllAvailablePriceLists();
 
-    // Recupera tutti i DDT ordinati per data decrescente (i più recenti hanno priorità)
+    // Recupera tutti i DDT del progetto attivo ordinati per data decrescente (i più recenti hanno priorità)
     const ddtRows = await db.select<{
       client_name: string;
       client_address: string | null;
@@ -661,7 +664,9 @@ export class ClientSyncService {
          AND TRIM(client_name) <> '' 
          AND TRIM(client_name) <> 'Cliente'
          AND deleted_at IS NULL
-       ORDER BY doc_date DESC`
+         AND project_url = $1
+       ORDER BY doc_date DESC`,
+      [activeProjectUrl]
     );
 
     // Recupera l'elenco dei clienti già salvati (esatti e canonici) per evitare ricreazione di duplicati (es. CAMM vs C.A.M.M.)
@@ -786,8 +791,8 @@ export class ClientSyncService {
         await db.execute(
           `UPDATE ddt_documents
            SET client_name = $1, client_id = $2, updated_at = $3
-           WHERE LOWER(TRIM(client_name)) = LOWER(TRIM($4)) AND deleted_at IS NULL`,
-          [canonicalTarget.business_name, canonicalTarget.id, now, aliasName]
+           WHERE LOWER(TRIM(client_name)) = LOWER(TRIM($4)) AND deleted_at IS NULL AND project_url = $5`,
+          [canonicalTarget.business_name, canonicalTarget.id, now, aliasName, activeProjectUrl]
         );
       }
 
@@ -804,9 +809,9 @@ export class ClientSyncService {
             id, business_name, address, city, province, vat_number,
             fiscal_code, sdi_code, payment_method, destinations_json,
             price_lists_json, phones_json, is_active, created_at,
-            updated_at, updated_by, sync_status
+            updated_at, updated_by, sync_status, project_url
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $13, 'ddt_import', 'pending'
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $13, 'ddt_import', 'pending', $14
           )`,
           [
             id,
@@ -822,6 +827,7 @@ export class ClientSyncService {
             priceListsJson,
             phonesJson,
             now,
+            activeProjectUrl,
           ]
         );
 
@@ -844,6 +850,7 @@ export class ClientSyncService {
           updated_by: "ddt_import",
           deleted_at: null,
           sync_status: "pending",
+          project_url: activeProjectUrl,
         });
         added++;
       }
