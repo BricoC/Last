@@ -73,6 +73,7 @@ describe("ddtCloudPushService", () => {
       updated_at: "2026-11-17T09:05:00.000Z",
       deleted_at: null,
       sync_status: "pending",
+      project_url: "https://example.supabase.co",
     };
 
     const items = [
@@ -175,6 +176,7 @@ describe("ddtCloudPushService", () => {
       updated_at: "2026-11-17T10:00:00.000Z",
       deleted_at: null,
       sync_status: "pending",
+      project_url: "https://example.supabase.co",
     };
 
     mockSelect
@@ -216,8 +218,8 @@ describe("ddtCloudPushService", () => {
       [3027, "ddt-local-uuid"]
     );
     expect(mockExecute).toHaveBeenCalledWith(
-      `UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`,
-      ["ddt-local-uuid"]
+      `UPDATE ddt_documents SET sync_status = 'synced', project_url = $2 WHERE id = $1`,
+      ["ddt-local-uuid", "https://example.supabase.co"]
     );
     const headerPost = fetchCalls.find((c) => c.method === "POST" && c.url.includes("/rest/v1/ddt?"));
     expect(headerPost?.body).toContain('"numero":3027');
@@ -257,6 +259,7 @@ describe("ddtCloudPushService", () => {
       updated_at: "2026-11-17T10:00:00.000Z",
       deleted_at: null,
       sync_status: "pending",
+      project_url: "https://example.supabase.co",
     };
 
     const trashedDoc = {
@@ -281,8 +284,8 @@ describe("ddtCloudPushService", () => {
       ["doc-trashed"]
     );
     expect(mockExecute).toHaveBeenCalledWith(
-      `UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`,
-      ["doc-active"]
+      `UPDATE ddt_documents SET sync_status = 'synced', project_url = $2 WHERE id = $1`,
+      ["doc-active", "https://example.supabase.co"]
     );
   });
 

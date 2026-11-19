@@ -17,6 +17,15 @@ export function normalizeSupabaseProjectUrl(url?: string | null): string | null 
   return normalized || null;
 }
 
+export function matchesActiveSupabaseProject(
+  recordProjectUrl?: string | null,
+  activeProjectUrl?: string | null,
+): boolean {
+  const recordUrl = normalizeSupabaseProjectUrl(recordProjectUrl);
+  const activeUrl = normalizeSupabaseProjectUrl(activeProjectUrl);
+  return Boolean(recordUrl && activeUrl && recordUrl === activeUrl);
+}
+
 export function getLastKnownSupabaseProjectUrl(): string | null {
   return lastKnownProjectUrl;
 }

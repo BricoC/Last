@@ -1,6 +1,7 @@
 import { pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { getDatabase } from "@/shared/data-layer/database";
+import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import type { OfferRecord, OfferStatus, TrashOfferRow } from "../types/offer";
 import { offersSyncService } from "./offersSyncService";
 
@@ -91,9 +92,9 @@ export class OffersRepository {
 
     await db.execute(
       `INSERT INTO offers (
-        id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status
-      ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, 'pending')`,
-      [id, params.offer_date, requester, contact, items_text, status, is_urgent, created_by, updated_by, nowIso, nowIso]
+        id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status, project_url
+      ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, 'pending', $12)`,
+      [id, params.offer_date, requester, contact, items_text, status, is_urgent, created_by, updated_by, nowIso, nowIso, getLastKnownSupabaseProjectUrl()]
     );
 
     const created: OfferRecord = {
@@ -152,9 +153,10 @@ export class OffersRepository {
         is_urgent = $6,
         updated_by = $7,
         updated_at = $8,
-        sync_status = 'pending'
-       WHERE id = $9`,
-      [offer_date, requester, contact, items_text, status, is_urgent, updated_by, nowIso, id]
+        sync_status = 'pending',
+        project_url = COALESCE(project_url, $9)
+       WHERE id = $10`,
+      [offer_date, requester, contact, items_text, status, is_urgent, updated_by, nowIso, getLastKnownSupabaseProjectUrl(), id]
     );
 
     // Notifica la UI e sincronizza immediatamente

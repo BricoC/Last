@@ -1,6 +1,10 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import {
+  matchesActiveSupabaseProject,
+  normalizeSupabaseProjectUrl,
+} from "@/shared/services/supabaseConfigCache";
 import { Client, ClientDestination, ClientPhone } from "../models/client";
 import { clientRepository } from "./clientRepository";
 import { normalizeDestinationKey, deduplicateDestinations } from "../utils/destinationUtils";
@@ -164,16 +168,20 @@ export class ClientSyncService {
    */
   public async syncPendingDeletionsToSupabase(): Promise<number> {
     const db = await getDatabase();
-    const pendingDeleted = await db.select<{ id: string; business_name: string }[]>(
-      "SELECT id, business_name FROM clients WHERE deleted_at IS NOT NULL AND sync_status = 'pending'"
+    const creds = await this.getCredentials();
+    const pendingDeleted = await db.select<{ id: string; business_name: string; project_url?: string | null }[]>(
+      "SELECT id, business_name, project_url FROM clients WHERE deleted_at IS NOT NULL AND sync_status = 'pending'"
+    );
+    const matching = pendingDeleted.filter((row) =>
+      matchesActiveSupabaseProject(row.project_url, creds.projectUrl)
     );
     let syncedCount = 0;
-    for (const row of pendingDeleted) {
+    for (const row of matching) {
       const ok = await this.deleteClientFromSupabase(row.business_name, row.id);
       if (ok) syncedCount++;
     }
-    if (syncedCount !== pendingDeleted.length) {
-      throw new Error(`Eliminazioni clienti in sospeso: ${pendingDeleted.length - syncedCount}`);
+    if (syncedCount !== matching.length) {
+      throw new Error(`Eliminazioni clienti in sospeso: ${matching.length - syncedCount}`);
     }
     return syncedCount;
   }
@@ -200,13 +208,15 @@ export class ClientSyncService {
     }
 
     const db = await getDatabase();
-    const pendingRows = await db.select<{ id: string; pending_previous_name: string | null }[]>(
-      "SELECT id, pending_previous_name FROM clients WHERE deleted_at IS NULL AND sync_status = 'pending'"
+    const creds = await this.getCredentials().catch(() => null);
+    const pendingRows = await db.select<{ id: string; pending_previous_name: string | null; project_url?: string | null }[]>(
+      "SELECT id, pending_previous_name, project_url FROM clients WHERE deleted_at IS NULL AND sync_status = 'pending'"
     );
 
     let pushed = 0;
     let queued = 0;
     for (const row of pendingRows) {
+      if (!creds || !matchesActiveSupabaseProject(row.project_url, creds.projectUrl)) continue;
       const client = await clientRepository.getClientById(row.id);
       if (!client) continue;
       queued++;
@@ -263,11 +273,15 @@ export class ClientSyncService {
     const db = await getDatabase();
 
     // Evita di ricreare clienti la cui cancellazione locale non è ancora andata a buon fine sul cloud
-    const pendingDeletedRows = await db.select<{ business_name: string }[]>(
-      "SELECT business_name FROM clients WHERE deleted_at IS NOT NULL AND sync_status = 'pending'"
+    const activeProjectUrl = normalizeSupabaseProjectUrl(creds.projectUrl);
+    const pendingDeletedRows = await db.select<{ business_name: string; project_url?: string | null }[]>(
+      "SELECT business_name, project_url FROM clients WHERE deleted_at IS NOT NULL AND sync_status = 'pending'"
     );
     const pendingDeletedNames = new Set(
-      pendingDeletedRows.map((r) => r.business_name.trim().toLowerCase()).filter(Boolean)
+      pendingDeletedRows
+        .filter((r) => matchesActiveSupabaseProject(r.project_url, activeProjectUrl))
+        .map((r) => r.business_name.trim().toLowerCase())
+        .filter(Boolean)
     );
 
     // Ottimizzazione P1: Pre-caricamento in memoria di tutti i clienti locali in una Map per eliminare query N+1
@@ -276,10 +290,11 @@ export class ClientSyncService {
       business_name: string;
       price_lists_json: string | null;
       sync_status: string | null;
+      project_url?: string | null;
     }[]>(
-      "SELECT id, business_name, price_lists_json, sync_status FROM clients WHERE deleted_at IS NULL"
+      "SELECT id, business_name, price_lists_json, sync_status, project_url FROM clients WHERE deleted_at IS NULL"
     );
-    const existingMap = new Map<string, { id: string; price_lists_json: string | null; sync_status?: string | null }>();
+    const existingMap = new Map<string, { id: string; price_lists_json: string | null; sync_status?: string | null; project_url?: string | null }>();
     for (const r of existingRows) {
       existingMap.set(r.business_name.trim().toLowerCase(), r);
     }
@@ -421,8 +436,8 @@ export class ClientSyncService {
               vat_number = $5, fiscal_code = $6, sdi_code = $7, payment_method = $8,
               destinations_json = $9, phones_json = $10, price_lists_json = $11,
               is_active = 1, updated_at = $12, updated_by = 'supabase_sync',
-              sync_status = 'synced'
-            WHERE id = $13 AND deleted_at IS NULL AND COALESCE(sync_status, '') <> 'pending'`,
+              sync_status = 'synced', project_url = $13
+            WHERE id = $14 AND deleted_at IS NULL AND COALESCE(sync_status, '') <> 'pending'`,
             [
               w.businessName,
               w.address,
@@ -436,6 +451,7 @@ export class ClientSyncService {
               w.phonesJson,
               w.priceListsJson,
               now,
+              activeProjectUrl,
               w.id,
             ]
           );
@@ -445,9 +461,9 @@ export class ClientSyncService {
               id, business_name, address, city, province, vat_number,
               fiscal_code, sdi_code, payment_method, destinations_json,
               phones_json, price_lists_json, is_active, created_at,
-              updated_at, updated_by, sync_status
+              updated_at, updated_by, sync_status, project_url
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $13, 'supabase_sync', 'synced'
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $13, 'supabase_sync', 'synced', $14
             )`,
             [
               w.id,
@@ -463,6 +479,7 @@ export class ClientSyncService {
               w.phonesJson,
               w.priceListsJson,
               now,
+              activeProjectUrl,
             ]
           );
         }
@@ -474,6 +491,7 @@ export class ClientSyncService {
         for (const existing of existingRows) {
           if (
             existing.sync_status === "synced" &&
+            matchesActiveSupabaseProject(existing.project_url, activeProjectUrl) &&
             !remoteNamesLower.has(existing.business_name.trim().toLowerCase())
           ) {
             await db.execute(

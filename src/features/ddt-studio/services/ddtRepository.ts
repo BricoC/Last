@@ -1,6 +1,7 @@
 import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { DdtItem, DdtDocument, DdtArchiveEntry, DdtAccountOrBalance, DdtStatus } from "../models/ddt";
 import { calculateDdtTotals, calculateRowAmounts } from "../utils/ddtCalculations";
@@ -532,6 +533,13 @@ export class DdtRepository {
       id,
       deletedAt: new Date().toISOString(),
     });
+    const projectUrl = getLastKnownSupabaseProjectUrl();
+    if (projectUrl) {
+      await db.execute(
+        "UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2",
+        [projectUrl, id]
+      );
+    }
     // Tronca il cestino mantenendo rigorosamente le ultime 15 voci (FIFO)
     await this.pruneTrash();
 
@@ -878,6 +886,14 @@ export class DdtRepository {
     };
 
     await invoke("save_ddt_transaction", { payload });
+    const activeProjectUrl = getLastKnownSupabaseProjectUrl();
+    if (activeProjectUrl) {
+      const db = await getDatabase();
+      await db.execute("UPDATE ddt_documents SET project_url = $1 WHERE id = $2", [
+        activeProjectUrl,
+        docId,
+      ]);
+    }
 
     // Se è un DDT confermato/emesso, sincronizza subito su Supabase (con riallineamento numero su collisione in prima emissione)
     if (status !== "bozza" && docNumber !== null) {

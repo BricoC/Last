@@ -3,6 +3,11 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { invoke } from "@tauri-apps/api/core";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
+import {
+  getLastKnownSupabaseProjectUrl,
+  matchesActiveSupabaseProject,
+  normalizeSupabaseProjectUrl,
+} from "@/shared/services/supabaseConfigCache";
 import { parseInvoiceXmlAll, ParsedInvoiceResult } from "./invoiceXmlParser";
 
 export interface SupplierInvoice {
@@ -76,16 +81,21 @@ export class ElectronicInvoicesService {
 
   private async uploadPendingInvoices(): Promise<void> {
     const db = await getDatabase();
-    const invoices = await db.select<Array<SupplierInvoice & { id: number }>>(
+    const invoices = await db.select<Array<SupplierInvoice & { id: number; project_url?: string | null }>>(
       "SELECT * FROM supplier_invoices WHERE cloud_upload_pending = 1 ORDER BY id",
     );
     if (!invoices.length) return;
     const status = await invoke<ConfigStatus>("load_supabase_config");
     if (!status.config?.projectUrl || !status.config.anonKey) throw new Error("Invio fatture in attesa della connessione cloud.");
     const { projectUrl, anonKey } = status.config;
+    const activeProjectUrl = normalizeSupabaseProjectUrl(projectUrl);
+    const matchingInvoices = invoices.filter((inv) =>
+      matchesActiveSupabaseProject(inv.project_url, activeProjectUrl)
+    );
+    if (!matchingInvoices.length) return;
     const failures: string[] = [];
 
-    for (const invoice of invoices) {
+    for (const invoice of matchingInvoices) {
       const items = await db.select<SupplierInvoiceItem[]>(
         "SELECT * FROM supplier_invoice_items WHERE invoice_id = $1 OR (supplier_name = $2 AND doc_number = $3 AND doc_date = $4) ORDER BY line_number, id",
         [invoice.id, invoice.supplier_name, invoice.doc_number, invoice.doc_date],
@@ -199,8 +209,8 @@ export class ElectronicInvoicesService {
           sql: `INSERT INTO supplier_invoices (
             supplier_name, vat_number, fiscal_code, doc_number, doc_date, year,
             total_amount, taxable_amount, vat_amount, payment_method, due_date,
-            iban, bank_name, file_name, notes
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+            iban, bank_name, file_name, notes, project_url
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$17)
           ON CONFLICT(supplier_name, doc_number, doc_date) DO UPDATE SET
             vat_number = excluded.vat_number,
             fiscal_code = excluded.fiscal_code,
@@ -213,7 +223,8 @@ export class ElectronicInvoicesService {
             iban = excluded.iban,
             bank_name = excluded.bank_name,
             file_name = excluded.file_name,
-            notes = excluded.notes
+            notes = excluded.notes,
+            project_url = excluded.project_url
           WHERE supplier_invoices.cloud_upload_pending = 0
             AND (supplier_invoices.cloud_uploaded_at IS NULL
               OR julianday(supplier_invoices.cloud_uploaded_at) < julianday($16));`,
@@ -234,6 +245,7 @@ export class ElectronicInvoicesService {
             t.nome_file || null,
             t.note || null,
             startedAt,
+            normalizeSupabaseProjectUrl(projectUrl),
           ]
         });
       }
@@ -413,8 +425,8 @@ export class ElectronicInvoicesService {
         sql: `INSERT INTO supplier_invoices (
           supplier_name, vat_number, fiscal_code, doc_number, doc_date, year,
           total_amount, taxable_amount, vat_amount, payment_method, due_date,
-          iban, bank_name, file_name, notes, cloud_upload_pending
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,1);`,
+          iban, bank_name, file_name, notes, cloud_upload_pending, project_url
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,1,$16);`,
         params: [
           invoice.supplier_name,
           invoice.vat_number || null,
@@ -431,6 +443,7 @@ export class ElectronicInvoicesService {
           invoice.bank_name || null,
           invoice.file_name || null,
           invoice.notes || null,
+          getLastKnownSupabaseProjectUrl(),
         ],
       });
 

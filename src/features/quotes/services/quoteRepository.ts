@@ -1,5 +1,6 @@
 import { applyLocalDatabaseBatch } from "@/shared/data-layer/localDatabaseBatch";
 import { pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
+import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
@@ -223,6 +224,14 @@ export class QuoteRepository {
     const quoteId = input.id || crypto.randomUUID();
     const payload = buildQuoteSavePayload(inputWithNumber, existing, now, quoteId);
     await invoke("save_quote_transaction", { payload });
+    const activeProjectUrl = getLastKnownSupabaseProjectUrl();
+    if (activeProjectUrl) {
+      const db = await getDatabase();
+      await db.execute("UPDATE quotes SET project_url = $1 WHERE id = $2", [
+        activeProjectUrl,
+        quoteId,
+      ]);
+    }
     const saved = await this.getQuoteById(quoteId);
     if (!saved) throw new Error("Errore recupero preventivo salvato.");
     try {
@@ -263,9 +272,9 @@ export class QuoteRepository {
     const deletedAt = new Date().toISOString();
     const remote = QuoteSyncService.mapQuoteToSupabase(quote);
     await applyLocalDatabaseBatch([
-      { sql: `UPDATE quotes SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending'
+      { sql: `UPDATE quotes SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending', project_url = COALESCE(project_url, $4)
         WHERE id = $2 AND deleted_at IS NULL AND updated_at = $3`,
-        params: [deletedAt, id, quote.updated_at], expectedRows: 1 },
+        params: [deletedAt, id, quote.updated_at, getLastKnownSupabaseProjectUrl()], expectedRows: 1 },
       { sql: `UPDATE quote_items SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending'
         WHERE quote_id = $2 AND deleted_at IS NULL`, params: [deletedAt, id] },
       { sql: `INSERT INTO quotes_trash (id, quote_number, numero, year, quote_date, client_name, subject,
@@ -334,8 +343,8 @@ export class QuoteRepository {
     ];
     if (local) {
       await applyLocalDatabaseBatch([
-        { sql: "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE id = $2",
-          params: [now, id], expectedRows: 1 },
+        { sql: "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending', project_url = COALESCE(project_url, $3) WHERE id = $2",
+          params: [now, id, getLastKnownSupabaseProjectUrl()], expectedRows: 1 },
         { sql: "UPDATE quote_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE quote_id = $2",
           params: [now, id] },
         ...finish,

@@ -4,6 +4,7 @@ import { migrationTestDatabase } from "@/shared/data-layer/__tests__/migrationTe
 import { migrateNotesSchemaV23 } from "@/shared/data-layer/migrations/notesSchema";
 import { migrateTrashSchemaV25 } from "@/shared/data-layer/migrations/trashSchema";
 import { migrateNoteDeletionsV32 } from "@/shared/data-layer/migrations/noteDeletionsSchema";
+import { migrateSyncedEntitiesProjectUrlV37 } from "@/shared/data-layer/migrations/projectUrlSchema";
 
 vi.mock("@/shared/services/supabaseSession", () => ({
   supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
@@ -79,6 +80,7 @@ describe("NotesSyncService", () => {
           created_at: "2026-11-18T09:00:00Z",
           updated_at: "2026-11-18T10:05:00Z",
           sync_status: "pending",
+          project_url: "https://example.supabase.co",
         },
       ]);
 
@@ -156,6 +158,9 @@ describe("NotesSyncService", () => {
         }
       });
       await migrateNoteDeletionsV32(db);
+      await db.addColumnIfMissing("notes", "project_url", "TEXT");
+      await db.addColumnIfMissing("notes_trash", "project_url", "TEXT");
+      void migrateSyncedEntitiesProjectUrlV37;
       const insert = sqlite.prepare("INSERT INTO notes (id, supabase_id, title, created_at, updated_at) VALUES (?, ?, 'Nota', '2026-01-01', '2026-01-01')");
       for (let index = 1; index <= 11; index++) {
         insert.run(`nota-${index}`, index);

@@ -2,7 +2,7 @@ import { createSupabaseRealtimeSubscription } from "@/shared/services/supabaseRe
 import { flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
 import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSession";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
-import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
+import { matchesActiveSupabaseProject, normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import type { OfferRecord } from "../types/offer";
@@ -186,14 +186,16 @@ export class OffersSyncService {
 
       await this.flushDeletions(creds);
 
-      // 1. PUSH: Invia le offerte con sync_status = 'pending' verso Supabase
-      const pendings = await db.select<OfferRecord[]>(
+      // 1. PUSH: Invia le offerte con sync_status = 'pending' verso Supabase (solo per il progetto attivo)
+      const activeProjectUrl = normalizeSupabaseProjectUrl(creds.projectUrl);
+      const pendings = await db.select<Array<OfferRecord & { project_url?: string | null }>>(
         `SELECT * FROM offers WHERE sync_status = 'pending' AND NOT EXISTS (
           SELECT 1 FROM pending_cloud_operations WHERE scope = 'offers' AND record_id = offers.id
         )`
       );
 
       for (const item of pendings) {
+        if (!matchesActiveSupabaseProject(item.project_url, activeProjectUrl)) continue;
         const payload = {
           local_id: item.id,
           offer_date: item.offer_date,
@@ -288,8 +290,8 @@ export class OffersSyncService {
           remoteIds.add(Number(rem.id));
 
           const existing = await db.select<OfferRecord[]>(
-            `SELECT * FROM offers WHERE supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL) LIMIT 1`,
-            [rem.id, rem.local_id || null]
+            `SELECT * FROM offers WHERE (supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL)) AND project_url = $3 LIMIT 1`,
+            [rem.id, rem.local_id || null, activeProjectUrl]
           );
 
           const isArchivedNum = rem.is_archived ? 1 : 0;
@@ -300,11 +302,11 @@ export class OffersSyncService {
             const newId = rem.local_id || crypto.randomUUID();
             await db.execute(
               `INSERT INTO offers (
-                id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status
-              ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'synced'
+                id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status, project_url
+              ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'synced', $14
               WHERE NOT EXISTS (
                 SELECT 1 FROM pending_cloud_operations
-                WHERE scope = 'offers' AND (record_id = $1 OR json_extract(payload, '$.remoteId') = $2)
+                WHERE scope = 'offers' AND project_url = $14 AND (record_id = $1 OR json_extract(payload, '$.remoteId') = $2)
               ) ON CONFLICT(id) DO NOTHING`,
               [
                 newId,
@@ -320,6 +322,7 @@ export class OffersSyncService {
                 rem.updated_by || "Operatore",
                 rem.created_at || nowIso,
                 rem.updated_at || nowIso,
+                activeProjectUrl,
               ]
             );
             pulled++;
@@ -336,7 +339,8 @@ export class OffersSyncService {
                 is_archived = $8,
                 created_by = $9,
                 updated_by = $10,
-                updated_at = $11
+                updated_at = $11,
+                project_url = $14
                WHERE id = $12 AND sync_status = 'synced' AND updated_at = $13`,
               [
                 rem.id,
@@ -351,6 +355,7 @@ export class OffersSyncService {
                 rem.updated_by || "Operatore",
                 rem.updated_at || nowIso,
                 existing[0].id, existing[0].updated_at,
+                activeProjectUrl,
               ]
             );
             updated++;
@@ -361,7 +366,8 @@ export class OffersSyncService {
         const total = pullRes.headers.get("content-range")?.match(/\/(\d+)$/)?.[1];
         if (total !== undefined && Number(total) === remoteList.length && remoteIds.size === remoteList.length) {
           const localSynced = await db.select<{ id: string; supabase_id: number | null }[]>(
-            `SELECT id, supabase_id FROM offers WHERE supabase_id IS NOT NULL AND sync_status = 'synced'`
+            `SELECT id, supabase_id FROM offers WHERE supabase_id IS NOT NULL AND sync_status = 'synced' AND project_url = $1`,
+            [activeProjectUrl]
           );
           for (const loc of localSynced) {
             if (loc.supabase_id !== null && !remoteIds.has(Number(loc.supabase_id))) {

@@ -805,6 +805,9 @@ export class OrderSupabaseService {
     try {
       const db = await getDatabase();
       const now = new Date().toISOString();
+      const activeProjectUrl =
+        getLastKnownSupabaseProjectUrl() ??
+        normalizeSupabaseProjectUrl((await this.getCredentials())?.projectUrl);
       const fetchedSupabaseIds = new Set<string>();
 
       for (const item of orders) {
@@ -822,8 +825,8 @@ export class OrderSupabaseService {
           `INSERT INTO orders (
             id, supabase_id, order_date, supplier_name, article_code, description,
             quantity, price, ordered_date, notes, user_name, is_archived, is_deleted,
-            highlights, created_at, updated_at, sync_status
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'synced')
+            highlights, created_at, updated_at, sync_status, project_url
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'synced', $17)
           ON CONFLICT(id) DO UPDATE SET
             supabase_id = excluded.supabase_id,
             order_date = excluded.order_date,
@@ -839,7 +842,8 @@ export class OrderSupabaseService {
             is_deleted = excluded.is_deleted,
             highlights = excluded.highlights,
             updated_at = excluded.updated_at,
-            sync_status = 'synced'
+            sync_status = 'synced',
+            project_url = excluded.project_url
           WHERE orders.sync_status <> 'pending' AND julianday(excluded.updated_at) >= julianday(orders.updated_at)`,
           [
             localId,
@@ -858,12 +862,13 @@ export class OrderSupabaseService {
             JSON.stringify(parseHighlights(item.highlights)),
             item.created_at || now,
             item.updated_at || now,
+            activeProjectUrl,
           ]
         );
       }
 
       // Rimuove dalla cache di questa vista eventuali ordini synced eliminati o spostati da altri PC
-      if (viewMode) {
+      if (viewMode && activeProjectUrl) {
         const viewWhere =
           viewMode === "archiviati"
             ? "is_archived = 1 AND is_deleted = 0"
@@ -871,7 +876,8 @@ export class OrderSupabaseService {
             ? "is_deleted = 1"
             : "is_archived = 0 AND is_deleted = 0";
         const localInView = await db.select<{ id: string; supabase_id: string | null }[]>(
-          `SELECT id, supabase_id FROM orders WHERE ${viewWhere} AND sync_status = 'synced'`
+          `SELECT id, supabase_id FROM orders WHERE ${viewWhere} AND sync_status = 'synced' AND project_url = $1`,
+          [activeProjectUrl]
         );
         for (const row of localInView) {
           if (this.mutationGeneration !== generation) return;

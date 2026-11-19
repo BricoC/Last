@@ -74,7 +74,7 @@ describe("Sincronizzazione fatture elettroniche", () => {
     };
     parse.mockReturnValue([parsed]);
     select.mockImplementation(async (sql: string) => {
-      if (sql.includes("cloud_upload_pending = 1 ORDER BY")) return [{ ...parsed.invoice, id: 7 }];
+      if (sql.includes("cloud_upload_pending = 1 ORDER BY")) return [{ ...parsed.invoice, id: 7, project_url: "https://example.test" }];
       if (sql.startsWith("SELECT * FROM supplier_invoice_items")) return parsed.items;
       return [];
     });

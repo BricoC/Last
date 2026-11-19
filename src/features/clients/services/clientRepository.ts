@@ -1,4 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
+import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { Client, ClientPhone, CreateClientInput } from "../models/client";
 import { rankClientsBySearch, normalizeClientCanonicalKey } from "../utils/clientSearchUtils";
 import { deduplicateDestinations } from "../utils/destinationUtils";
@@ -31,6 +32,7 @@ export class ClientRepository {
     const destinationsJson = JSON.stringify(input.destinations || []);
     const priceListsJson = JSON.stringify(input.price_lists || []);
 
+    const projectUrl = getLastKnownSupabaseProjectUrl();
     if (input.id) {
       await db.execute(
         `UPDATE clients SET
@@ -60,7 +62,8 @@ export class ClientRepository {
           is_active = $20,
           updated_at = $21,
           updated_by = $22,
-          sync_status = 'pending'
+          sync_status = 'pending',
+          project_url = $24
         WHERE id = $23 AND deleted_at IS NULL`,
         [
           input.code || null,
@@ -86,6 +89,7 @@ export class ClientRepository {
           now,
           "system",
           id,
+          projectUrl,
         ]
       );
     } else {
@@ -95,9 +99,9 @@ export class ClientRepository {
           vat_number, fiscal_code, sdi_code, pec, email, payment_method,
           destination_name, destination_address, destination_city,
           destinations_json, price_lists_json, phones_json, notes, is_active,
-          created_at, updated_at, updated_by, sync_status
+          created_at, updated_at, updated_by, sync_status, project_url
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $22, $23, 'pending'
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $22, $23, 'pending', $24
         )`,
         [
           id,
@@ -123,6 +127,7 @@ export class ClientRepository {
           input.is_active === false ? 0 : 1,
           now,
           "system",
+          projectUrl,
         ]
       );
     }
@@ -205,10 +210,11 @@ export class ClientRepository {
   public async softDeleteClient(id: string): Promise<void> {
     const db = await getDatabase();
     const now = new Date().toISOString();
+    const projectUrl = getLastKnownSupabaseProjectUrl();
     await db.execute(
-      `UPDATE clients SET deleted_at = $1, updated_at = $1, updated_by = $2, sync_status = 'pending'
-       WHERE id = $3 AND deleted_at IS NULL`,
-      [now, "system", id]
+      `UPDATE clients SET deleted_at = $1, updated_at = $1, updated_by = $2, sync_status = 'pending', project_url = COALESCE($3, project_url)
+       WHERE id = $4 AND deleted_at IS NULL`,
+      [now, "system", projectUrl, id]
     );
   }
 

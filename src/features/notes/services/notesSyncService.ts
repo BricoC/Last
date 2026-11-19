@@ -1,6 +1,7 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import { matchesActiveSupabaseProject } from "@/shared/services/supabaseConfigCache";
 import type { NoteRecord } from "../types/note";
 
 interface SupabaseConfig {
@@ -121,13 +122,14 @@ export class NotesSyncService {
         }
       }
 
-      // 1. PUSH: Invia le note con sync_status = 'pending' verso Supabase
-      const pendings = await db.select<NoteRecord[]>(
+      // 1. PUSH: Invia le note con sync_status = 'pending' verso Supabase (solo per il progetto attivo)
+      const pendings = await db.select<Array<NoteRecord & { project_url?: string | null }>>(
         `SELECT * FROM notes WHERE sync_status = 'pending'
            AND NOT EXISTS (SELECT 1 FROM note_deletions WHERE note_deletions.id = notes.id)`
       );
 
       for (const item of pendings) {
+        if (!matchesActiveSupabaseProject(item.project_url, activeProjectUrl)) continue;
         const payload = {
           local_id: item.id,
           title: item.title,
@@ -155,7 +157,10 @@ export class NotesSyncService {
           });
 
           if (res.ok) {
-            await db.execute(`UPDATE notes SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2`, [item.id, item.updated_at]);
+            await db.execute(
+              `UPDATE notes SET sync_status = 'synced', project_url = $3 WHERE id = $1 AND updated_at = $2`,
+              [item.id, item.updated_at, activeProjectUrl]
+            );
             pushed++;
           } else {
             const errBody = (await res.json().catch(() => ({}))) as { message?: string; hint?: string };
@@ -178,8 +183,8 @@ export class NotesSyncService {
             const data = await res.json().catch(() => []);
             const remoteId = Array.isArray(data) && data[0]?.id ? Number(data[0].id) : null;
             await db.execute(
-              `UPDATE notes SET supabase_id = $1, sync_status = 'synced' WHERE id = $2 AND updated_at = $3`,
-              [remoteId, item.id, item.updated_at]
+              `UPDATE notes SET supabase_id = $1, sync_status = 'synced', project_url = $4 WHERE id = $2 AND updated_at = $3`,
+              [remoteId, item.id, item.updated_at, activeProjectUrl]
             );
             pushed++;
           } else {
@@ -257,19 +262,22 @@ export class NotesSyncService {
       const remoteList = Array.from(remoteById.values());
 
       if (pullOk) {
+        const activeProjectDeletions = pendingDeletions.filter((entry) =>
+          matchesActiveSupabaseProject(entry.project_url, activeProjectUrl)
+        );
         {
           for (const rem of remoteList) {
-            if (pendingDeletions.some((entry) => entry.id === rem.local_id || entry.supabase_id === rem.id)) continue;
+            if (activeProjectDeletions.some((entry) => entry.id === rem.local_id || entry.supabase_id === rem.id)) continue;
             const trashed = await db.select<{ id: string }[]>(
-              "SELECT id FROM note_deletions WHERE id = $1 OR supabase_id = $2 " +
-              "UNION ALL SELECT id FROM notes_trash WHERE id = $1 OR supabase_id = $2 LIMIT 1",
-              [rem.local_id ?? null, rem.id]
+              "SELECT id FROM note_deletions WHERE (id = $1 OR supabase_id = $2) AND project_url = $3 " +
+              "UNION ALL SELECT id FROM notes_trash WHERE (id = $1 OR supabase_id = $2) AND project_url = $3 LIMIT 1",
+              [rem.local_id ?? null, rem.id, activeProjectUrl]
             );
             if (trashed.length) continue;
 
             const existing = await db.select<{ id: string; sync_status: string; updated_at: string }[]>(
-              `SELECT id, sync_status, updated_at FROM notes WHERE supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL) LIMIT 1`,
-              [rem.id, rem.local_id || null]
+              `SELECT id, sync_status, updated_at FROM notes WHERE (supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL)) AND project_url = $3 LIMIT 1`,
+              [rem.id, rem.local_id || null, activeProjectUrl]
             );
 
             const isPinnedNum = rem.is_pinned ? 1 : 0;
@@ -280,10 +288,10 @@ export class NotesSyncService {
               const newId = rem.local_id || crypto.randomUUID();
               await db.execute(
                 `INSERT INTO notes (
-                  id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color, created_by, updated_by, created_at, updated_at, sync_status
-                ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'synced'
-                  WHERE NOT EXISTS (SELECT 1 FROM note_deletions WHERE id = $1 OR supabase_id = $2)
-                    AND NOT EXISTS (SELECT 1 FROM notes_trash WHERE id = $1 OR supabase_id = $2)
+                  id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color, created_by, updated_by, created_at, updated_at, sync_status, project_url
+                ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'synced', $13
+                  WHERE NOT EXISTS (SELECT 1 FROM note_deletions WHERE (id = $1 OR supabase_id = $2) AND project_url = $13)
+                    AND NOT EXISTS (SELECT 1 FROM notes_trash WHERE (id = $1 OR supabase_id = $2) AND project_url = $13)
                   ON CONFLICT(id) DO NOTHING`,
                 [
                   newId,
@@ -298,6 +306,7 @@ export class NotesSyncService {
                   rem.updated_by || "Operatore",
                   rem.created_at || nowIso,
                   rem.updated_at || nowIso,
+                  activeProjectUrl,
                 ]
               );
               pulled++;

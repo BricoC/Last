@@ -7,6 +7,7 @@ import type { Quote } from "../models/quote";
 import { formatQuoteCode } from "../models/quoteDraft";
 import {
   createCachedSupabaseConfigLoader,
+  matchesActiveSupabaseProject,
   normalizeSupabaseProjectUrl,
   type CachedSupabaseConfig,
 } from "@/shared/services/supabaseConfigCache";
@@ -374,13 +375,14 @@ export class QuoteSyncService {
         initialCreds?.projectUrl ?? null,
       );
       const db = await getDatabase();
-      const archived = await db.select<Array<{ id: string; deleted_at: string; in_trash: number }>>(
-        `SELECT id, deleted_at, EXISTS(SELECT 1 FROM quotes_trash WHERE id = quotes.id) AS in_trash
+      const archived = await db.select<Array<{ id: string; deleted_at: string; in_trash: number; project_url?: string | null }>>(
+        `SELECT id, deleted_at, project_url, EXISTS(SELECT 1 FROM quotes_trash WHERE id = quotes.id) AS in_trash
           FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NOT NULL AND NOT EXISTS (
             SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = quotes.id
           )`,
       );
       for (const row of archived) {
+        if (!matchesActiveSupabaseProject(row.project_url, initialCreds?.projectUrl)) continue;
         const quote = await quoteRepository.getArchivedQuoteForSync(row.id);
         if (quote?.deleted_at !== row.deleted_at) continue;
         const confirmed = row.in_trash
@@ -391,12 +393,13 @@ export class QuoteSyncService {
           [row.id, row.deleted_at],
         );
       }
-      const pending = await db.select<Array<{ id: string }>>(
-        `SELECT id FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND NOT EXISTS (
+      const pending = await db.select<Array<{ id: string; project_url?: string | null }>>(
+        `SELECT id, project_url FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND NOT EXISTS (
           SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = quotes.id
         ) ORDER BY updated_at`
       );
-      for (const { id } of pending) {
+      for (const { id, project_url } of pending) {
+        if (!matchesActiveSupabaseProject(project_url, initialCreds?.projectUrl)) continue;
         const quote = await quoteRepository.getQuoteById(id, false);
         if (quote) await this.pushQuote(quote);
       }

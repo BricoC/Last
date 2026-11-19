@@ -8,7 +8,7 @@ function queueNoteDeletion(id: string, deletedAt: string): SqliteWrite {
   const projectUrl = getLastKnownSupabaseProjectUrl();
   return {
     sql: `INSERT INTO note_deletions (id, supabase_id, deleted_at, project_url)
-          SELECT id, supabase_id, $2, $3 FROM notes WHERE id = $1
+          SELECT id, supabase_id, $2, COALESCE(project_url, $3) FROM notes WHERE id = $1
           ON CONFLICT(id) DO UPDATE SET supabase_id = excluded.supabase_id, deleted_at = excluded.deleted_at, project_url = excluded.project_url`,
     params: [id, deletedAt, projectUrl],
   };
@@ -50,11 +50,13 @@ export class NotesRepository {
     const createdBy = params?.created_by || "Operatore";
     const color = params?.color || "default";
 
+    const projectUrl = getLastKnownSupabaseProjectUrl();
+
     await db.execute(
       `INSERT INTO notes (
-        id, title, content_html, content_text, is_pinned, is_archived, color, created_by, updated_by, created_at, updated_at, sync_status
-      ) VALUES ($1, $2, '', '', 0, 0, $3, $4, $4, $5, $5, 'pending')`,
-      [id, title, color, createdBy, nowIso]
+        id, title, content_html, content_text, is_pinned, is_archived, color, created_by, updated_by, created_at, updated_at, sync_status, project_url
+      ) VALUES ($1, $2, '', '', 0, 0, $3, $4, $4, $5, $5, 'pending', $6)`,
+      [id, title, color, createdBy, nowIso, projectUrl]
     );
 
     return {
@@ -97,9 +99,10 @@ export class NotesRepository {
         color = $4,
         updated_by = $5,
         updated_at = $6,
-        sync_status = 'pending'
-      WHERE id = $7`,
-      [params.title, params.content_html, params.content_text, color, updatedBy, nowIso, params.id]
+        sync_status = 'pending',
+        project_url = COALESCE(project_url, $7)
+      WHERE id = $8`,
+      [params.title, params.content_html, params.content_text, color, updatedBy, nowIso, getLastKnownSupabaseProjectUrl(), params.id]
     );
   }
 
@@ -137,10 +140,10 @@ export class NotesRepository {
       {
         sql: `INSERT INTO notes_trash (
           id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
-          created_by, updated_by, created_at, updated_at, deleted_at, deleted_by
+          created_by, updated_by, created_at, updated_at, deleted_at, deleted_by, project_url
         ) SELECT id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
-          created_by, updated_by, created_at, updated_at, $2, $3 FROM notes WHERE id = $1`,
-        params: [id, now, deletedBy || "Operatore"],
+          created_by, updated_by, created_at, updated_at, $2, $3, COALESCE(project_url, $4) FROM notes WHERE id = $1`,
+        params: [id, now, deletedBy || "Operatore", getLastKnownSupabaseProjectUrl()],
       },
       queueNoteDeletion(id, now),
       { sql: "DELETE FROM notes WHERE id = $1", params: [id] },
@@ -193,10 +196,10 @@ export class NotesRepository {
       {
         sql: `INSERT INTO notes (
           id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
-          created_by, updated_by, created_at, updated_at, sync_status
+          created_by, updated_by, created_at, updated_at, sync_status, project_url
         ) SELECT id, NULL, title, content_html, content_text, is_pinned, is_archived, color,
-          created_by, updated_by, created_at, $2, 'pending' FROM notes_trash WHERE id = $1`,
-        params: [id, nowIso],
+          created_by, updated_by, created_at, $2, 'pending', COALESCE(project_url, $3) FROM notes_trash WHERE id = $1`,
+        params: [id, nowIso, getLastKnownSupabaseProjectUrl()],
         expectedRows: 1,
       },
       { sql: "DELETE FROM notes_trash WHERE id = $1", params: [id] },

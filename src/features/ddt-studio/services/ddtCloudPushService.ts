@@ -3,6 +3,10 @@ import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import {
+  matchesActiveSupabaseProject,
+  normalizeSupabaseProjectUrl,
+} from "@/shared/services/supabaseConfigCache";
+import {
   CloudHeader,
   CloudLine,
   HEADER_FIELDS,
@@ -62,6 +66,7 @@ interface LocalDdtRow {
   updated_at: string;
   deleted_at: string | null;
   sync_status: string;
+  project_url?: string | null;
 }
 
 interface LocalDdtItemRow {
@@ -769,8 +774,9 @@ class DdtCloudPushService {
       };
     }
 
-    await db.execute(`UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`, [
+    await db.execute(`UPDATE ddt_documents SET sync_status = 'synced', project_url = $2 WHERE id = $1`, [
       currentDoc.id,
+      normalizeSupabaseProjectUrl(creds.projectUrl),
     ]);
     await db.execute(`UPDATE ddt_items SET sync_status = 'synced' WHERE ddt_id = $1`, [
       currentDoc.id,
@@ -958,6 +964,9 @@ class DdtCloudPushService {
       );
 
       for (const doc of pendingDocs) {
+        if (!matchesActiveSupabaseProject(doc.project_url, creds.projectUrl)) {
+          continue;
+        }
         if (doc.deleted_at) {
           const ok = await this.deleteRemoteDdt(doc.id);
           if (ok) deleted++;

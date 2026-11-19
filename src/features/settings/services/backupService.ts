@@ -199,10 +199,26 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
   {
     id: "settings",
     label: "Impostazioni e Configurazioni",
-    description: "Dati aziendali, email banca/commercialista, utenti di accesso, preferenze e coda sync.",
-    tables: ["company_settings", "email_settings", "app_preferences", "app_users", "pending_cloud_operations"],
+    description: "Dati aziendali, email banca/commercialista, utenti di accesso e preferenze.",
+    tables: ["company_settings", "email_settings", "app_preferences", "app_users"],
   },
 ];
+
+const CATEGORY_PENDING_SCOPES: Record<string, string[]> = {
+  price_lists: ["price_lists"],
+  offers: ["offers"],
+  quotes: ["quotes"],
+};
+
+function getPendingScopesForCategories(categoryIds: string[]): string[] {
+  const scopes = new Set<string>();
+  for (const id of categoryIds) {
+    for (const scope of CATEGORY_PENDING_SCOPES[id] ?? []) {
+      scopes.add(scope);
+    }
+  }
+  return Array.from(scopes);
+}
 
 export interface BackupPackage {
   app: "Last";
@@ -602,6 +618,17 @@ export async function executeModularBackup(
       tableCounts[table] = rows?.length || 0;
     }
 
+    const pendingScopes = getPendingScopesForCategories(selectedCategoryIds);
+    if (pendingScopes.length > 0) {
+      const placeholders = pendingScopes.map((_, i) => `$${i + 1}`).join(", ");
+      const opRows = await db.select<any[]>(
+        `SELECT * FROM pending_cloud_operations WHERE scope IN (${placeholders})`,
+        pendingScopes
+      );
+      exportedData.pending_cloud_operations = opRows || [];
+      tableCounts.pending_cloud_operations = opRows?.length || 0;
+    }
+
     const isTotal = selectedCategoryIds.length === BACKUP_CATEGORIES.length;
     const pkg: BackupPackage = {
       app: "Last",
@@ -725,11 +752,25 @@ export async function restoreModularBackup(
       BACKUP_CATEGORIES.filter((category) => categoriesToRestore.includes(category.id))
         .flatMap((category) => category.tables)
     );
+    const pendingScopes = getPendingScopesForCategories(categoriesToRestore);
+    if (pendingScopes.length > 0 && Object.prototype.hasOwnProperty.call(pkg.tables, "pending_cloud_operations")) {
+      selectedTables.add("pending_cloud_operations");
+    }
     const writes: SqliteWrite[] = [];
     for (const table of selectedTables) {
       if (!Object.prototype.hasOwnProperty.call(pkg.tables, table)) continue;
-      const rows = pkg.tables[table];
-      if (!Array.isArray(rows)) throw new Error("Tabella backup non valida: " + table);
+      const rawRows = pkg.tables[table];
+      if (!Array.isArray(rawRows)) throw new Error("Tabella backup non valida: " + table);
+      const rows =
+        table === "pending_cloud_operations"
+          ? rawRows.filter(
+              (r) =>
+                r &&
+                typeof r === "object" &&
+                !Array.isArray(r) &&
+                pendingScopes.includes(String((r as Record<string, unknown>).scope ?? ""))
+            )
+          : rawRows;
 
       const tableInfo = await db.select<{ name: string; pk: number }[]>('PRAGMA table_info("' + table + '")');
       if (tableInfo.length === 0) {
@@ -738,7 +779,15 @@ export async function restoreModularBackup(
       }
 
       if (mode === "replace") {
-        writes.push({ sql: 'DELETE FROM "' + table + '"', params: [] });
+        if (table === "pending_cloud_operations") {
+          const placeholders = pendingScopes.map((_, i) => `$${i + 1}`).join(", ");
+          writes.push({
+            sql: `DELETE FROM "pending_cloud_operations" WHERE scope IN (${placeholders})`,
+            params: pendingScopes,
+          });
+        } else {
+          writes.push({ sql: 'DELETE FROM "' + table + '"', params: [] });
+        }
       }
       const columns = tableInfo.map((column) => column.name);
       const primaryKey = tableInfo.filter((column) => column.pk > 0)
