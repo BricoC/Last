@@ -806,12 +806,20 @@ class DdtCloudPushService {
     if (!creds) return { success: false, error: "Configurazione Supabase non disponibile" };
 
     const db = await getDatabase();
+    const docs = await db.select<LocalDdtRow[]>(
+      `SELECT * FROM ddt_documents WHERE id = $1 LIMIT 1`,
+      [docId]
+    );
+    if (!docs[0]) return { success: false, error: "DDT non trovato" };
+    if (!matchesActiveSupabaseProject(docs[0].project_url, creds.projectUrl)) {
+      return {
+        success: false,
+        docNumber: docs[0].doc_number,
+        error: "DDT privo di progetto Supabase verificabile o appartenente a un altro progetto",
+      };
+    }
+
     if (resolution === "keep-local") {
-      const docs = await db.select<LocalDdtRow[]>(
-        `SELECT * FROM ddt_documents WHERE id = $1 LIMIT 1`,
-        [docId]
-      );
-      if (!docs[0]) return { success: false, error: "DDT non trovato" };
       const res = await this.upsertSingleDdt(creds, docs[0], false, true);
       if (res.success && typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("ddt-data-updated"));

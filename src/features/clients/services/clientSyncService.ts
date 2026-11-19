@@ -123,7 +123,7 @@ export class ClientSyncService {
           "SELECT project_url FROM clients WHERE id = $1 LIMIT 1",
           [localClientId]
         );
-        if (localRow[0]?.project_url && !matchesActiveSupabaseProject(localRow[0].project_url, creds.projectUrl)) {
+        if (!matchesActiveSupabaseProject(localRow[0]?.project_url, creds.projectUrl)) {
           return false;
         }
       }

@@ -62,8 +62,7 @@ export class ClientRepository {
           is_active = $20,
           updated_at = $21,
           updated_by = $22,
-          sync_status = 'pending',
-          project_url = COALESCE(project_url, $24)
+          sync_status = 'pending'
         WHERE id = $23 AND deleted_at IS NULL`,
         [
           input.code || null,
@@ -89,7 +88,6 @@ export class ClientRepository {
           now,
           "system",
           id,
-          projectUrl,
         ]
       );
     } else {
@@ -210,11 +208,10 @@ export class ClientRepository {
   public async softDeleteClient(id: string): Promise<void> {
     const db = await getDatabase();
     const now = new Date().toISOString();
-    const projectUrl = getLastKnownSupabaseProjectUrl();
     await db.execute(
-      `UPDATE clients SET deleted_at = $1, updated_at = $1, updated_by = $2, sync_status = 'pending', project_url = COALESCE(project_url, $3)
-       WHERE id = $4 AND deleted_at IS NULL`,
-      [now, "system", projectUrl, id]
+      `UPDATE clients SET deleted_at = $1, updated_at = $1, updated_by = $2, sync_status = 'pending'
+       WHERE id = $3 AND deleted_at IS NULL`,
+      [now, "system", id]
     );
   }
 

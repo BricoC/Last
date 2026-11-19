@@ -153,10 +153,9 @@ export class OffersRepository {
         is_urgent = $6,
         updated_by = $7,
         updated_at = $8,
-        sync_status = 'pending',
-        project_url = COALESCE(project_url, $9)
-       WHERE id = $10`,
-      [offer_date, requester, contact, items_text, status, is_urgent, updated_by, nowIso, getLastKnownSupabaseProjectUrl(), id]
+        sync_status = 'pending'
+       WHERE id = $9`,
+      [offer_date, requester, contact, items_text, status, is_urgent, updated_by, nowIso, id]
     );
 
     // Notifica la UI e sincronizza immediatamente

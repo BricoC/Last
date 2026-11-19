@@ -295,9 +295,19 @@ export class QuoteRepository {
         { ...remote, deleted_at: deletedAt, updated_at: deletedAt, deleted_by: "system" },
         projectUrl
       ),
-      { sql: `DELETE FROM quotes_trash WHERE id NOT IN (
-          SELECT id FROM quotes_trash ORDER BY deleted_at DESC, id DESC LIMIT 5
-        )`, params: [] },
+      projectUrl
+        ? {
+            sql: `DELETE FROM quotes_trash WHERE project_url = $1 AND id NOT IN (
+              SELECT id FROM quotes_trash WHERE project_url = $1 ORDER BY deleted_at DESC, id DESC LIMIT 5
+            )`,
+            params: [projectUrl],
+          }
+        : {
+            sql: `DELETE FROM quotes_trash WHERE project_url IS NULL AND id NOT IN (
+              SELECT id FROM quotes_trash WHERE project_url IS NULL ORDER BY deleted_at DESC, id DESC LIMIT 5
+            )`,
+            params: [],
+          },
     ]);
     await QuoteSyncService.retryPendingChanges();
   }
