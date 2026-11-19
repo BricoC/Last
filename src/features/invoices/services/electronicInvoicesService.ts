@@ -226,6 +226,7 @@ export class ElectronicInvoicesService {
             notes = excluded.notes,
             project_url = excluded.project_url
           WHERE supplier_invoices.cloud_upload_pending = 0
+            AND (supplier_invoices.project_url IS NULL OR supplier_invoices.project_url = excluded.project_url)
             AND (supplier_invoices.cloud_uploaded_at IS NULL
               OR julianday(supplier_invoices.cloud_uploaded_at) < julianday($16));`,
           params: [
@@ -259,15 +260,20 @@ export class ElectronicInvoicesService {
     const pageSize = 1000;
     let totalRighe = 0;
 
+    const activeSyncProjectUrl = normalizeSupabaseProjectUrl(projectUrl);
     writes.push({
       sql: `DELETE FROM supplier_invoice_items AS item
         WHERE NOT EXISTS (
           SELECT 1 FROM supplier_invoices AS invoice
           WHERE invoice.supplier_name = item.supplier_name AND invoice.doc_number = item.doc_number
             AND invoice.doc_date = item.doc_date
-            AND (invoice.cloud_upload_pending = 1 OR julianday(invoice.cloud_uploaded_at) >= julianday($1))
+            AND (
+              invoice.cloud_upload_pending = 1
+              OR julianday(invoice.cloud_uploaded_at) >= julianday($1)
+              OR (invoice.project_url IS NOT NULL AND invoice.project_url <> $2)
+            )
         )`,
-      params: [startedAt],
+      params: [startedAt, activeSyncProjectUrl],
     });
 
     while (true) {
@@ -296,7 +302,11 @@ export class ElectronicInvoicesService {
           WHERE NOT EXISTS (
             SELECT 1 FROM supplier_invoices
             WHERE supplier_name = $1 AND doc_number = $2 AND doc_date = $3
-              AND (cloud_upload_pending = 1 OR julianday(cloud_uploaded_at) >= julianday($17))
+              AND (
+                cloud_upload_pending = 1
+                OR julianday(cloud_uploaded_at) >= julianday($17)
+                OR (project_url IS NOT NULL AND project_url <> $18)
+              )
           );`,
           params: [
             r.fornitore || "",
@@ -318,6 +328,7 @@ export class ElectronicInvoicesService {
               ? Number(r.aliquota_iva)
               : 22,
             startedAt,
+            activeSyncProjectUrl,
           ]
         });
       }

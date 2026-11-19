@@ -8,7 +8,9 @@ function queueNoteDeletion(id: string, deletedAt: string): SqliteWrite {
   const projectUrl = getLastKnownSupabaseProjectUrl();
   return {
     sql: `INSERT INTO note_deletions (id, supabase_id, deleted_at, project_url)
-          SELECT id, supabase_id, $2, COALESCE(project_url, $3) FROM notes WHERE id = $1
+          SELECT id, supabase_id, $2,
+            CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $3 ELSE NULL END
+          FROM notes WHERE id = $1
           ON CONFLICT(id) DO UPDATE SET supabase_id = excluded.supabase_id, deleted_at = excluded.deleted_at, project_url = excluded.project_url`,
     params: [id, deletedAt, projectUrl],
   };
@@ -100,7 +102,7 @@ export class NotesRepository {
         updated_by = $5,
         updated_at = $6,
         sync_status = 'pending',
-        project_url = COALESCE(project_url, $7)
+        project_url = CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $7 ELSE NULL END
       WHERE id = $8`,
       [params.title, params.content_html, params.content_text, color, updatedBy, nowIso, getLastKnownSupabaseProjectUrl(), params.id]
     );
@@ -142,7 +144,9 @@ export class NotesRepository {
           id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
           created_by, updated_by, created_at, updated_at, deleted_at, deleted_by, project_url
         ) SELECT id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
-          created_by, updated_by, created_at, updated_at, $2, $3, COALESCE(project_url, $4) FROM notes WHERE id = $1`,
+          created_by, updated_by, created_at, updated_at, $2, $3,
+          CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $4 ELSE NULL END
+        FROM notes WHERE id = $1`,
         params: [id, now, deletedBy || "Operatore", getLastKnownSupabaseProjectUrl()],
       },
       queueNoteDeletion(id, now),

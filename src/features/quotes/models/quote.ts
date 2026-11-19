@@ -43,6 +43,7 @@ export interface Quote extends BaseEntity {
   internal_notes: string | null;
   customer_notes: string | null;
   converted_ddt_id: string | null;
+  project_url?: string | null;
   totals: QuoteTotals;
   items: QuoteItem[];
 }
@@ -137,4 +138,5 @@ export interface TrashQuoteRow {
   data_json: string;
   deleted_at: string;
   deleted_by?: string;
+  project_url?: string | null;
 }

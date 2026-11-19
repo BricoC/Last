@@ -761,7 +761,7 @@ export async function restoreModularBackup(
       if (!Object.prototype.hasOwnProperty.call(pkg.tables, table)) continue;
       const rawRows = pkg.tables[table];
       if (!Array.isArray(rawRows)) throw new Error("Tabella backup non valida: " + table);
-      const rows =
+      let rows =
         table === "pending_cloud_operations"
           ? rawRows.filter(
               (r) =>
@@ -771,6 +771,30 @@ export async function restoreModularBackup(
                 pendingScopes.includes(String((r as Record<string, unknown>).scope ?? ""))
             )
           : rawRows;
+      if (table === "pending_cloud_operations" && mode === "merge" && rows.length > 0) {
+        const placeholders = pendingScopes.map((_, i) => `$${i + 1}`).join(", ");
+        const existingOps = await db.select<
+          Array<{ scope: string; record_id: string; action: string; payload: string; project_url: string | null }>
+        >(
+          `SELECT scope, record_id, action, payload, project_url FROM "pending_cloud_operations" WHERE scope IN (${placeholders})`,
+          pendingScopes
+        );
+        const opKey = (o: Record<string, unknown>) =>
+          JSON.stringify([
+            String(o.scope ?? ""),
+            String(o.record_id ?? ""),
+            String(o.action ?? ""),
+            String(o.payload ?? ""),
+            o.project_url ?? null,
+          ]);
+        const existingKeys = new Set(existingOps.map((o) => opKey(o)));
+        rows = rows.filter((r) => {
+          const key = opKey(r as Record<string, unknown>);
+          if (existingKeys.has(key)) return false;
+          existingKeys.add(key);
+          return true;
+        });
+      }
 
       const tableInfo = await db.select<{ name: string; pk: number }[]>('PRAGMA table_info("' + table + '")');
       if (tableInfo.length === 0) {

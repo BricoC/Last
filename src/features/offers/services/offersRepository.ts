@@ -265,13 +265,17 @@ export class OffersRepository {
     const nowIso = new Date().toISOString();
     const user = deletedBy || "Operatore";
 
+    const offerProjectUrl =
+      (offer as OfferRecord & { project_url?: string | null }).project_url ?? getLastKnownSupabaseProjectUrl();
+
     // 1. Inserisci o aggiorna nel cestino
     const writes: SqliteWrite[] = [{ sql: `INSERT INTO offers_trash (
-        id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, deleted_at, deleted_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, deleted_at, deleted_by, project_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       ON CONFLICT(id) DO UPDATE SET
         deleted_at = excluded.deleted_at,
-        deleted_by = excluded.deleted_by`,
+        deleted_by = excluded.deleted_by,
+        project_url = COALESCE(offers_trash.project_url, excluded.project_url)`,
       params: [
         offer.id,
         offer.supabase_id ?? null,
@@ -288,6 +292,7 @@ export class OffersRepository {
         offer.updated_at,
         nowIso,
         user,
+        offerProjectUrl,
       ],
     }];
 
@@ -299,7 +304,7 @@ export class OffersRepository {
         id,
         "delete",
         { remoteId: offer.supabase_id ?? null },
-        (offer as OfferRecord & { project_url?: string | null }).project_url ?? getLastKnownSupabaseProjectUrl()
+        offerProjectUrl
       ),
     );
 
@@ -350,8 +355,9 @@ export class OffersRepository {
     );
     if (!rows || rows.length === 0) return null;
 
-    const item = rows[0];
+    const item = rows[0] as (typeof rows)[number] & { project_url?: string | null };
     const nowIso = new Date().toISOString();
+    const originProjectUrl = item.project_url ?? getLastKnownSupabaseProjectUrl();
 
     // 1. Reinserisci nella tabella attiva con sync_status = 'pending'
     await applyLocalDatabaseBatch([{ sql: `INSERT INTO offers (
@@ -382,7 +388,7 @@ export class OffersRepository {
         item.updated_by,
         item.created_at,
         nowIso,
-        getLastKnownSupabaseProjectUrl(),
+        originProjectUrl,
       ],
     },
 

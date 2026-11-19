@@ -34,6 +34,7 @@ export interface Client extends BaseEntity {
   phones: ClientPhone[];
   notes?: string;
   is_active: boolean;
+  project_url?: string | null;
 }
 
 export interface CreateClientInput {

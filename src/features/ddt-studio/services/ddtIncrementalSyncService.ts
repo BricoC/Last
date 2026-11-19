@@ -560,8 +560,8 @@ class DdtIncrementalSyncService {
 
       // 2b. Controllo e recupero di sicurezza: se esistono DDT recenti senza righe in SQLite, scarica SOLO i numeri mancanti
       const minRecoveryYear = options.includePreviousYear ? currentYear - 1 : currentYear;
-      const missingLinesRaw = await db.select<{ id: string; year: number; doc_number: number }[]>(
-        `SELECT id, year, doc_number 
+      const missingLinesRaw = await db.select<{ id: string; year: number; doc_number: number; project_url?: string | null }[]>(
+        `SELECT id, year, doc_number, project_url 
          FROM ddt_documents 
          WHERE deleted_at IS NULL 
            AND doc_number IS NOT NULL 
@@ -569,7 +569,12 @@ class DdtIncrementalSyncService {
            AND id NOT IN (SELECT DISTINCT ddt_id FROM ddt_items WHERE ddt_id IS NOT NULL)`,
         [minRecoveryYear]
       );
-      const missingLinesDocs = missingLinesRaw.filter((d) => !this.verifiedEmptyDdtIds.has(d.id));
+      const activeProjectNorm = projectUrl.trim().replace(/\/+$/, "").toLowerCase();
+      const missingLinesDocs = missingLinesRaw.filter((d) => {
+        if (this.verifiedEmptyDdtIds.has(d.id)) return false;
+        const docProj = d.project_url?.trim().replace(/\/+$/, "").toLowerCase();
+        return !docProj || docProj === activeProjectNorm;
+      });
 
       if (missingLinesDocs.length > 0) {
         console.log(`[Sync Incrementale] Rilevati ${missingLinesDocs.length} DDT senza righe: avvio recupero mirato da Supabase...`);

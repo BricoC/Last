@@ -56,7 +56,7 @@ describe("Sincronizzazione fatture elettroniche", () => {
       validateReferencesAfterWrite: false,
       writes: [
         { sql: expect.stringContaining("INSERT INTO supplier_invoices"), params: expect.any(Array) },
-        { sql: expect.stringContaining("invoice.cloud_upload_pending = 1"), params: [expect.any(String)] },
+        { sql: expect.stringContaining("invoice.cloud_upload_pending = 1"), params: [expect.any(String), "https://example.test"] },
         { sql: expect.stringContaining("INSERT INTO supplier_invoice_items"), params: expect.arrayContaining([0]) },
       ],
     });

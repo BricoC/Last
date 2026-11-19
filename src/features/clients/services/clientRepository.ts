@@ -212,7 +212,7 @@ export class ClientRepository {
     const now = new Date().toISOString();
     const projectUrl = getLastKnownSupabaseProjectUrl();
     await db.execute(
-      `UPDATE clients SET deleted_at = $1, updated_at = $1, updated_by = $2, sync_status = 'pending', project_url = COALESCE($3, project_url)
+      `UPDATE clients SET deleted_at = $1, updated_at = $1, updated_by = $2, sync_status = 'pending', project_url = COALESCE(project_url, $3)
        WHERE id = $4 AND deleted_at IS NULL`,
       [now, "system", projectUrl, id]
     );
@@ -518,6 +518,7 @@ export class ClientRepository {
       updated_by: row.updated_by,
       deleted_at: row.deleted_at,
       sync_status: row.sync_status,
+      project_url: row.project_url ?? null,
     };
   }
 }
@@ -549,6 +550,7 @@ interface ClientRow {
   updated_by: string;
   deleted_at: string | null;
   sync_status: "synced" | "pending";
+  project_url?: string | null;
 }
 
 function isClientPhone(value: unknown): value is ClientPhone {

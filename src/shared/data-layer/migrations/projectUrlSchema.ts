@@ -18,3 +18,8 @@ export async function migrateSyncedEntitiesProjectUrlV37(db: MigrationDatabase):
     await db.addColumnIfMissing(table, "project_url", "TEXT");
   }
 }
+
+export async function migrateTrashTablesProjectUrlV38(db: MigrationDatabase): Promise<void> {
+  await db.addColumnIfMissing("offers_trash", "project_url", "TEXT");
+  await db.addColumnIfMissing("quotes_trash", "project_url", "TEXT");
+}

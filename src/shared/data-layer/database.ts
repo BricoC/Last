@@ -31,7 +31,10 @@ import {
   migrateNoteDeletionsV32,
   migrateNoteDeletionsProjectUrlV36,
 } from "./migrations/noteDeletionsSchema";
-import { migrateSyncedEntitiesProjectUrlV37 } from "./migrations/projectUrlSchema";
+import {
+  migrateSyncedEntitiesProjectUrlV37,
+  migrateTrashTablesProjectUrlV38,
+} from "./migrations/projectUrlSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -510,6 +513,11 @@ const MIGRATIONS: Migration[] = [
     version: 37,
     name: "add_project_url_to_synced_entities",
     up: migrateSyncedEntitiesProjectUrlV37,
+  },
+  {
+    version: 38,
+    name: "add_project_url_to_trash_tables",
+    up: migrateTrashTablesProjectUrlV38,
   },
 ];
 

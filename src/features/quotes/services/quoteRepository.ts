@@ -271,27 +271,29 @@ export class QuoteRepository {
     if (!quote) return;
     const deletedAt = new Date().toISOString();
     const remote = QuoteSyncService.mapQuoteToSupabase(quote);
+    const projectUrl = quote.project_url ?? getLastKnownSupabaseProjectUrl();
     await applyLocalDatabaseBatch([
       { sql: `UPDATE quotes SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending', project_url = COALESCE(project_url, $4)
         WHERE id = $2 AND deleted_at IS NULL AND updated_at = $3`,
-        params: [deletedAt, id, quote.updated_at, getLastKnownSupabaseProjectUrl()], expectedRows: 1 },
+        params: [deletedAt, id, quote.updated_at, projectUrl], expectedRows: 1 },
       { sql: `UPDATE quote_items SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending'
         WHERE quote_id = $2 AND deleted_at IS NULL`, params: [deletedAt, id] },
       { sql: `INSERT INTO quotes_trash (id, quote_number, numero, year, quote_date, client_name, subject,
-          total_document_subunits, data_json, deleted_at, deleted_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'system')
+          total_document_subunits, data_json, deleted_at, deleted_by, project_url)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'system',$11)
         ON CONFLICT(id) DO UPDATE SET quote_number = excluded.quote_number, numero = excluded.numero,
           year = excluded.year, quote_date = excluded.quote_date, client_name = excluded.client_name,
           subject = excluded.subject, total_document_subunits = excluded.total_document_subunits,
-          data_json = excluded.data_json, deleted_at = excluded.deleted_at, deleted_by = excluded.deleted_by`,
+          data_json = excluded.data_json, deleted_at = excluded.deleted_at, deleted_by = excluded.deleted_by,
+          project_url = COALESCE(quotes_trash.project_url, excluded.project_url)`,
         params: [id, quote.quote_number, remote.numero, quote.year, quote.quote_date, quote.client_name,
-          quote.subject, quote.totals.total.toSubunits(), JSON.stringify(remote), deletedAt] },
+          quote.subject, quote.totals.total.toSubunits(), JSON.stringify(remote), deletedAt, projectUrl] },
       pendingCloudWrite(
         "quotes",
         id,
         "trash",
         { ...remote, deleted_at: deletedAt, updated_at: deletedAt, deleted_by: "system" },
-        (quote as typeof quote & { project_url?: string | null }).project_url ?? getLastKnownSupabaseProjectUrl()
+        projectUrl
       ),
       { sql: `DELETE FROM quotes_trash WHERE id NOT IN (
           SELECT id FROM quotes_trash ORDER BY deleted_at DESC, id DESC LIMIT 5
@@ -342,21 +344,25 @@ export class QuoteRepository {
     const [trash] = await db.select<TrashQuoteRow[]>("SELECT * FROM quotes_trash WHERE id = $1", [id]);
     if (!trash) return null;
     const now = new Date().toISOString();
-    const [local] = await db.select<Array<{ id: string }>>("SELECT id FROM quotes WHERE id = $1", [id]);
+    const [local] = await db.select<Array<{ id: string; project_url?: string | null }>>("SELECT id, project_url FROM quotes WHERE id = $1", [id]);
+    const originProjectUrl = local?.project_url ?? trash.project_url ?? getLastKnownSupabaseProjectUrl();
     const finish = [
       { sql: "DELETE FROM quotes_trash WHERE id = $1 AND deleted_at = $2", params: [id, trash.deleted_at], expectedRows: 1 },
-      pendingCloudWrite("quotes", id, "restore", null),
+      pendingCloudWrite("quotes", id, "restore", null, originProjectUrl),
     ];
     if (local) {
       await applyLocalDatabaseBatch([
         { sql: "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending', project_url = COALESCE(project_url, $3) WHERE id = $2",
-          params: [now, id, getLastKnownSupabaseProjectUrl()], expectedRows: 1 },
+          params: [now, id, originProjectUrl], expectedRows: 1 },
         { sql: "UPDATE quote_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE quote_id = $2",
           params: [now, id] },
         ...finish,
       ]);
     } else {
       await QuoteSyncService.restoreTrashSnapshot(trash, now, finish);
+      if (originProjectUrl) {
+        await db.execute("UPDATE quotes SET project_url = COALESCE(project_url, $1) WHERE id = $2", [originProjectUrl, id]);
+      }
     }
     const restored = await this.getQuoteById(id, false);
     await QuoteSyncService.retryPendingChanges();
@@ -364,10 +370,19 @@ export class QuoteRepository {
   }
 
   public async deleteTrashPermanently(id: string): Promise<void> {
-    await getDatabase();
+    const db = await getDatabase();
+    const [trash] = await db.select<Array<{ project_url?: string | null }>>(
+      "SELECT project_url FROM quotes_trash WHERE id = $1 LIMIT 1",
+      [id]
+    );
+    const [local] = await db.select<Array<{ project_url?: string | null }>>(
+      "SELECT project_url FROM quotes WHERE id = $1 LIMIT 1",
+      [id]
+    );
+    const originProjectUrl = trash?.project_url ?? local?.project_url ?? getLastKnownSupabaseProjectUrl();
     await applyLocalDatabaseBatch([
       { sql: "DELETE FROM quotes_trash WHERE id = $1", params: [id] },
-      pendingCloudWrite("quotes", id, "cleanup", null),
+      pendingCloudWrite("quotes", id, "cleanup", null, originProjectUrl),
     ]);
     await QuoteSyncService.retryPendingChanges();
   }
@@ -418,6 +433,7 @@ export class QuoteRepository {
       updated_by: row.updated_by,
       deleted_at: row.deleted_at,
       sync_status: row.sync_status,
+      project_url: row.project_url ?? null,
     };
   }
 
@@ -471,6 +487,7 @@ interface QuoteRow {
   total_document_subunits: number; total_cost_subunits: number; total_profit_subunits: number;
   created_at: string; updated_at: string; updated_by: string; deleted_at: string | null;
   sync_status: "synced" | "pending";
+  project_url?: string | null;
 }
 
 interface QuoteItemRow {
