@@ -530,7 +530,7 @@ export class ClientSyncService {
     try {
       const creds = await this.getCredentials();
       const clientProjectUrl = (client as Client & { project_url?: string | null }).project_url;
-      if (clientProjectUrl && !matchesActiveSupabaseProject(clientProjectUrl, creds.projectUrl)) {
+      if (!matchesActiveSupabaseProject(clientProjectUrl, creds.projectUrl)) {
         return false;
       }
       const localita = [client.city, client.province].filter(Boolean).join(" - ");

@@ -271,11 +271,11 @@ export class QuoteRepository {
     if (!quote) return;
     const deletedAt = new Date().toISOString();
     const remote = QuoteSyncService.mapQuoteToSupabase(quote);
-    const projectUrl = quote.project_url ?? getLastKnownSupabaseProjectUrl();
+    const projectUrl = quote.project_url ?? null;
     await applyLocalDatabaseBatch([
-      { sql: `UPDATE quotes SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending', project_url = COALESCE(project_url, $4)
+      { sql: `UPDATE quotes SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending'
         WHERE id = $2 AND deleted_at IS NULL AND updated_at = $3`,
-        params: [deletedAt, id, quote.updated_at, projectUrl], expectedRows: 1 },
+        params: [deletedAt, id, quote.updated_at], expectedRows: 1 },
       { sql: `UPDATE quote_items SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending'
         WHERE quote_id = $2 AND deleted_at IS NULL`, params: [deletedAt, id] },
       { sql: `INSERT INTO quotes_trash (id, quote_number, numero, year, quote_date, client_name, subject,
@@ -355,15 +355,15 @@ export class QuoteRepository {
     if (!trash) return null;
     const now = new Date().toISOString();
     const [local] = await db.select<Array<{ id: string; project_url?: string | null }>>("SELECT id, project_url FROM quotes WHERE id = $1", [id]);
-    const originProjectUrl = local?.project_url ?? trash.project_url ?? getLastKnownSupabaseProjectUrl();
+    const originProjectUrl = local?.project_url ?? trash.project_url ?? null;
     const finish = [
       { sql: "DELETE FROM quotes_trash WHERE id = $1 AND deleted_at = $2", params: [id, trash.deleted_at], expectedRows: 1 },
       pendingCloudWrite("quotes", id, "restore", null, originProjectUrl),
     ];
     if (local) {
       await applyLocalDatabaseBatch([
-        { sql: "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending', project_url = COALESCE(project_url, $3) WHERE id = $2",
-          params: [now, id, originProjectUrl], expectedRows: 1 },
+        { sql: "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE id = $2",
+          params: [now, id], expectedRows: 1 },
         { sql: "UPDATE quote_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE quote_id = $2",
           params: [now, id] },
         ...finish,
@@ -389,7 +389,7 @@ export class QuoteRepository {
       "SELECT project_url FROM quotes WHERE id = $1 LIMIT 1",
       [id]
     );
-    const originProjectUrl = trash?.project_url ?? local?.project_url ?? getLastKnownSupabaseProjectUrl();
+    const originProjectUrl = trash?.project_url ?? local?.project_url ?? null;
     await applyLocalDatabaseBatch([
       { sql: "DELETE FROM quotes_trash WHERE id = $1", params: [id] },
       pendingCloudWrite("quotes", id, "cleanup", null, originProjectUrl),
