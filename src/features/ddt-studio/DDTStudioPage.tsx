@@ -1049,7 +1049,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       insertedIdx = targetIdx;
 
       const price = money(article.unit_price || 0);
-      const purchasePrice = money(article.purchase_price || 0);
+      const purchasePrice = money(0);
       const q = String(article.quantity || "1").trim() || "1";
 
       let effectivePrice = price;

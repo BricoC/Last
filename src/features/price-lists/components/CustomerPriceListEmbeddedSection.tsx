@@ -776,8 +776,8 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
       description: item.descrizione,
       unit: "NR.",
       unit_price: item.prezzo_fattura || 0,
-      purchase_price: item.acquisto_eur || item.prezzo_acquisto || 0,
-      vat_rate: 22,
+      purchase_price: 0,
+      vat_rate: undefined,
     });
   };
 

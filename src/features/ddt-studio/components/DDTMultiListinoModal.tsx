@@ -1045,7 +1045,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                                 unit: row.unit || "NR.",
                                 quantity: "1",
                                 unit_price: priceVal,
-                                purchase_price: acqVal,
+                                purchase_price: 0,
                                 vat_rate: priceVal > 0 && row.vatRate && row.vatRate > 0 ? row.vatRate : undefined,
                               });
                             }}
