@@ -265,8 +265,9 @@ export class OffersRepository {
     const nowIso = new Date().toISOString();
     const user = deletedBy || "Operatore";
 
+    const rawOfferProjectUrl = (offer as OfferRecord & { project_url?: string | null }).project_url ?? null;
     const offerProjectUrl =
-      (offer as OfferRecord & { project_url?: string | null }).project_url ?? getLastKnownSupabaseProjectUrl();
+      rawOfferProjectUrl ?? (offer.supabase_id == null ? getLastKnownSupabaseProjectUrl() : null);
 
     // 1. Inserisci o aggiorna nel cestino
     const writes: SqliteWrite[] = [{ sql: `INSERT INTO offers_trash (

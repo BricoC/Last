@@ -1,6 +1,7 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
+import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 
 interface LocalDdtKey {
   id: string;
@@ -41,6 +42,7 @@ export interface LocalImportHeader {
   packagesCount: string | null; weightKg: string | null; carrier: string | null; internalNotes: string | null;
   totalTaxableSubunits: number; totalVatSubunits: number; totalDocumentSubunits: number;
   createdAt: string; updatedAt: string;
+  projectUrl?: string | null;
 }
 
 export interface LocalImportLine {
@@ -178,9 +180,10 @@ export async function importAllReadableSupabaseDdts(projectUrl: string, anonKey:
       byNumber.set(key, [...(byNumber.get(key) ?? []), header]);
     }
   });
+  const importProjectUrl = normalizeSupabaseProjectUrl(normalizedUrl);
   const importedHeaders = headers.filter((header) => Boolean(header.id)
     && Number.isFinite(Number(header.anno)) && Number.isFinite(Number(header.numero)) && Boolean(header.data))
-    .map(mapHeaderForLocal);
+    .map((h) => ({ ...mapHeaderForLocal(h), projectUrl: importProjectUrl }));
   const rowSequences = new Map<string, number>();
   const mappedLines = lines.map((line) => {
     let header = line.ddt_id ? byId.get(line.ddt_id) : undefined;

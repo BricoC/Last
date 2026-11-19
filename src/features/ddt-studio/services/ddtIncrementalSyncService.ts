@@ -573,7 +573,7 @@ class DdtIncrementalSyncService {
       const missingLinesDocs = missingLinesRaw.filter((d) => {
         if (this.verifiedEmptyDdtIds.has(d.id)) return false;
         const docProj = d.project_url?.trim().replace(/\/+$/, "").toLowerCase();
-        return !docProj || docProj === activeProjectNorm;
+        return Boolean(docProj && docProj === activeProjectNorm);
       });
 
       if (missingLinesDocs.length > 0) {
@@ -693,9 +693,10 @@ class DdtIncrementalSyncService {
         }
       });
 
+      const syncProjectUrl = projectUrl.trim().replace(/\/+$/, "").toLowerCase() || null;
       const importedHeaders = newHeaders
         .filter((h) => Boolean(h.id) && Number.isFinite(Number(h.anno)) && Number.isFinite(Number(h.numero)) && Boolean(h.data))
-        .map(mapHeaderForLocal);
+        .map((h) => ({ ...mapHeaderForLocal(h), projectUrl: syncProjectUrl }));
 
       const rowSequences = new Map<string, number>();
       const mappedLines = newLines.map((line) => {

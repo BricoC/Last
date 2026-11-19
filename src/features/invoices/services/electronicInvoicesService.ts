@@ -226,7 +226,7 @@ export class ElectronicInvoicesService {
             notes = excluded.notes,
             project_url = excluded.project_url
           WHERE supplier_invoices.cloud_upload_pending = 0
-            AND (supplier_invoices.project_url IS NULL OR supplier_invoices.project_url = excluded.project_url)
+            AND supplier_invoices.project_url = excluded.project_url
             AND (supplier_invoices.cloud_uploaded_at IS NULL
               OR julianday(supplier_invoices.cloud_uploaded_at) < julianday($16));`,
           params: [
@@ -270,7 +270,8 @@ export class ElectronicInvoicesService {
             AND (
               invoice.cloud_upload_pending = 1
               OR julianday(invoice.cloud_uploaded_at) >= julianday($1)
-              OR (invoice.project_url IS NOT NULL AND invoice.project_url <> $2)
+              OR invoice.project_url IS NULL
+              OR invoice.project_url <> $2
             )
         )`,
       params: [startedAt, activeSyncProjectUrl],

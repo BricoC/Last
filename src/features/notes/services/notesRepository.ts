@@ -202,10 +202,13 @@ export class NotesRepository {
           id, supabase_id, title, content_html, content_text, is_pinned, is_archived, color,
           created_by, updated_by, created_at, updated_at, sync_status, project_url
         ) SELECT id, NULL, title, content_html, content_text, is_pinned, is_archived, color,
-          created_by, updated_by, created_at, $2, 'pending', COALESCE(project_url, $3) FROM notes_trash WHERE id = $1`,
+          created_by, updated_by, created_at, $2, 'pending',
+          CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $3 ELSE NULL END
+          FROM notes_trash WHERE id = $1`,
         params: [id, nowIso, getLastKnownSupabaseProjectUrl()],
         expectedRows: 1,
       },
+      { sql: "DELETE FROM note_deletions WHERE id = $1", params: [id] },
       { sql: "DELETE FROM notes_trash WHERE id = $1", params: [id] },
     ]);
     void notesSyncService.sync();

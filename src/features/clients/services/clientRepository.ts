@@ -370,20 +370,24 @@ export class ClientRepository {
         priceLists.add(pl);
       }
 
-      // Riassegna tutti i DDT del duplicato al cliente principale
+      const mergeProjectUrl = target.project_url ?? dup.project_url ?? null;
+
+      // Riassegna tutti i DDT del duplicato al cliente principale (solo dello stesso progetto)
       await db.execute(
         `UPDATE ddt_documents 
          SET client_name = $1, client_id = $2, sync_status = 'pending', updated_at = $3
-         WHERE LOWER(TRIM(client_name)) = LOWER(TRIM($4)) OR client_id = $5`,
-        [target.business_name, target.id, now, dup.business_name, dup.id]
+         WHERE (LOWER(TRIM(client_name)) = LOWER(TRIM($4)) OR client_id = $5)
+           AND (($6 IS NULL AND project_url IS NULL) OR project_url = $6)`,
+        [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl]
       );
 
-      // Riassegna eventuali preventivi del duplicato al cliente principale
+      // Riassegna eventuali preventivi del duplicato al cliente principale (solo dello stesso progetto)
       await db.execute(
         `UPDATE quotes
          SET client_name = $1, client_id = $2, sync_status = 'pending', updated_at = $3
-         WHERE LOWER(TRIM(client_name)) = LOWER(TRIM($4)) OR client_id = $5`,
-        [target.business_name, target.id, now, dup.business_name, dup.id]
+         WHERE (LOWER(TRIM(client_name)) = LOWER(TRIM($4)) OR client_id = $5)
+           AND (($6 IS NULL AND project_url IS NULL) OR project_url = $6)`,
+        [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl]
       );
 
       // Soft delete del record duplicato

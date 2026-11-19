@@ -192,12 +192,25 @@ function buildQuoteItemWrites(
   return writes;
 }
 
-async function applyRemoteQuote(r: Record<string, any>, restoreWrites?: SqliteWrite[]): Promise<boolean> {
+async function applyRemoteQuote(
+  r: Record<string, any>,
+  restoreWrites?: SqliteWrite[],
+  projectUrl?: string | null,
+): Promise<boolean> {
   if (!r?.id) return false;
   const db = await getDatabase();
-  const [local] = await db.select<{ updated_at: string; sync_status: string }[]>(
-    "SELECT updated_at, sync_status FROM quotes WHERE id = $1", [r.id]
+  const [local] = await db.select<{ updated_at: string; sync_status: string; project_url?: string | null }[]>(
+    "SELECT updated_at, sync_status, project_url FROM quotes WHERE id = $1", [r.id]
   );
+  const normalizedProjectUrl = normalizeSupabaseProjectUrl(projectUrl);
+  if (
+    !restoreWrites &&
+    local?.project_url &&
+    normalizedProjectUrl &&
+    !matchesActiveSupabaseProject(local.project_url, normalizedProjectUrl)
+  ) {
+    return false;
+  }
   const remoteTimestamp = r.updated_at || r.created_at || null;
   const remoteTime = Date.parse(remoteTimestamp ?? "");
   const localTime = Date.parse(local?.updated_at ?? "");
@@ -223,7 +236,7 @@ async function applyRemoteQuote(r: Record<string, any>, restoreWrites?: SqliteWr
           delivery_terms, default_supplier, internal_notes, customer_notes,
           total_taxable_subunits, total_vat_subunits, total_document_subunits,
           total_cost_subunits, total_profit_subunits,
-          created_at, updated_at, updated_by, deleted_at, converted_ddt_id, sync_status
+          created_at, updated_at, updated_by, deleted_at, converted_ddt_id, sync_status, project_url
         ) VALUES (
           $1, $2, $3, $4, $5,
           $6, $7, $8, $9, $10,
@@ -233,7 +246,7 @@ async function applyRemoteQuote(r: Record<string, any>, restoreWrites?: SqliteWr
           $25, $26, $27, $28,
           $29, $30, $31,
           $32, $33,
-          $34, $35, $36, $37, $39, 'synced'
+          $34, $35, $36, $37, $39, 'synced', $40
         )
         ON CONFLICT(id) DO UPDATE SET
           quote_number = excluded.quote_number,
@@ -272,8 +285,10 @@ async function applyRemoteQuote(r: Record<string, any>, restoreWrites?: SqliteWr
           updated_by = excluded.updated_by,
           deleted_at = excluded.deleted_at,
           converted_ddt_id = COALESCE(excluded.converted_ddt_id, quotes.converted_ddt_id),
-          sync_status = 'synced'
+          sync_status = 'synced',
+          project_url = COALESCE(quotes.project_url, excluded.project_url)
         WHERE COALESCE(quotes.sync_status, '') <> 'pending'
+          AND (quotes.project_url IS NULL OR excluded.project_url IS NULL OR quotes.project_url = excluded.project_url)
           AND (julianday(quotes.updated_at) IS NULL OR julianday($38) >= julianday(quotes.updated_at))`,
     expectedRows: 1,
     params: [
@@ -316,6 +331,7 @@ async function applyRemoteQuote(r: Record<string, any>, restoreWrites?: SqliteWr
           r.deleted_at || null,
           remoteTimestamp,
           dataJson.converted_ddt_id || null,
+          normalizedProjectUrl,
         ],
   };
 
@@ -333,10 +349,14 @@ export class QuoteSyncService {
       cliente: trash.client_name, oggetto: trash.subject, totale_documento: Number(trash.total_document_subunits) / 100000,
       data_json: saved,
     };
-    const restored = await applyRemoteQuote({ ...row, id: trash.id, updated_at: now, deleted_at: null }, [
-      { sql: "UPDATE quotes SET sync_status = 'pending' WHERE id = $1", params: [trash.id] },
-      ...finish,
-    ]);
+    const restored = await applyRemoteQuote(
+      { ...row, id: trash.id, updated_at: now, deleted_at: null },
+      [
+        { sql: "UPDATE quotes SET sync_status = 'pending' WHERE id = $1", params: [trash.id] },
+        ...finish,
+      ],
+      trash.project_url ?? null,
+    );
     if (!restored) throw new Error("Lo stato del preventivo è cambiato durante il ripristino.");
   }
 
@@ -574,7 +594,7 @@ export class QuoteSyncService {
       if (!Array.isArray(rows)) throw new Error("Risposta preventivi non valida");
       if (!rows.length) return imported;
       for (const row of rows) {
-        if (await applyRemoteQuote(row)) imported++;
+        if (await applyRemoteQuote(row, undefined, creds.projectUrl)) imported++;
       }
       offset += rows.length;
     }
@@ -591,7 +611,7 @@ export class QuoteSyncService {
       });
       if (!response.ok) return false;
       const rows = await response.json();
-      return Array.isArray(rows) && rows.length === 1 && await applyRemoteQuote(rows[0]);
+      return Array.isArray(rows) && rows.length === 1 && await applyRemoteQuote(rows[0], undefined, creds.projectUrl);
     } catch (error) {
       console.warn("[QuoteSyncService] Errore pullQuoteById:", error);
       return false;
@@ -703,13 +723,14 @@ export class QuoteSyncService {
       if (!Array.isArray(remoteItems) || remoteItems.length === 0) return 0;
 
       const db = await getDatabase();
+      const trashProjectUrl = normalizeSupabaseProjectUrl(creds.projectUrl);
       for (const item of remoteItems) {
         await db.execute(
           `INSERT INTO quotes_trash (
             id, quote_number, numero, year, quote_date,
             client_name, subject, total_document_subunits, data_json,
-            deleted_at, deleted_by
-          ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11 WHERE NOT EXISTS (
+            deleted_at, deleted_by, project_url
+          ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 WHERE NOT EXISTS (
             SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = $1
           ) AND NOT EXISTS (SELECT 1 FROM quotes WHERE id = $1 AND deleted_at IS NULL)
           ON CONFLICT(id) DO UPDATE SET
@@ -722,7 +743,8 @@ export class QuoteSyncService {
             total_document_subunits = excluded.total_document_subunits,
             data_json = excluded.data_json,
             deleted_at = excluded.deleted_at,
-            deleted_by = excluded.deleted_by`,
+            deleted_by = excluded.deleted_by,
+            project_url = COALESCE(quotes_trash.project_url, excluded.project_url)`,
           [
             item.id,
             item.quote_number != null ? Number(item.quote_number) : null,
@@ -735,6 +757,7 @@ export class QuoteSyncService {
             JSON.stringify(item),
             item.deleted_at || new Date().toISOString(),
             item.deleted_by || "system",
+            trashProjectUrl,
           ]
         );
       }

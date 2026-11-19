@@ -55,6 +55,8 @@ struct DdtImportHeader {
     total_document_subunits: i64,
     created_at: String,
     updated_at: String,
+    #[serde(default)]
+    project_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -177,9 +179,9 @@ async fn import_transaction(
               destination_address, destination_city, transport_reason, payment_method, order_reference,
               account_or_balance, operator, goods_appearance, carriage_terms, packages_count, weight_kg,
               carrier, internal_notes, total_taxable_subunits, total_vat_subunits, total_document_subunits,
-              created_at, updated_at, updated_by, sync_status
+              created_at, updated_at, updated_by, sync_status, project_url
             ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,'supabase-read-only-import','synced'
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,'supabase-read-only-import','synced',$33
             )"
         )
         .bind(&header.id).bind(header.doc_number).bind(header.year).bind(&header.series).bind(&header.doc_date)
@@ -190,7 +192,7 @@ async fn import_transaction(
         .bind(&header.account_or_balance).bind(&header.operator).bind(&header.goods_appearance).bind(&header.carriage_terms)
         .bind(&header.packages_count).bind(&header.weight_kg).bind(&header.carrier).bind(&header.internal_notes)
         .bind(header.total_taxable_subunits).bind(header.total_vat_subunits).bind(header.total_document_subunits)
-        .bind(&header.created_at).bind(&header.updated_at)
+        .bind(&header.created_at).bind(&header.updated_at).bind(&header.project_url)
         .execute(&mut *connection).await.map_err(|error| format!("Importazione testata DDT {}/{} fallita: {error}", header.year, header.doc_number))?;
     }
 

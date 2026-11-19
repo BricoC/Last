@@ -536,7 +536,12 @@ export class DdtRepository {
     const projectUrl = getLastKnownSupabaseProjectUrl();
     if (projectUrl) {
       await db.execute(
-        "UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2",
+        `UPDATE ddt_documents
+         SET project_url = CASE
+           WHEN project_url IS NOT NULL THEN project_url
+           WHEN doc_number IS NULL OR status = 'bozza' THEN $1
+           ELSE NULL END
+         WHERE id = $2`,
         [projectUrl, id]
       );
     }
@@ -885,14 +890,36 @@ export class DdtRepository {
       items: itemPayloads,
     };
 
-    await invoke("save_ddt_transaction", { payload });
     const activeProjectUrl = getLastKnownSupabaseProjectUrl();
+    let isBrandNewDoc = false;
     if (activeProjectUrl) {
       const db = await getDatabase();
-      await db.execute("UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
-        activeProjectUrl,
-        docId,
-      ]);
+      const existingDocRows = await db.select<{ id: string; project_url?: string | null }[]>(
+        "SELECT id, project_url FROM ddt_documents WHERE id = $1 LIMIT 1",
+        [docId]
+      );
+      isBrandNewDoc = existingDocRows.length === 0;
+    }
+
+    await invoke("save_ddt_transaction", { payload });
+    if (activeProjectUrl) {
+      const db = await getDatabase();
+      if (isBrandNewDoc || isNewEmission) {
+        await db.execute(
+          "UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2",
+          [activeProjectUrl, docId]
+        );
+      } else {
+        await db.execute(
+          `UPDATE ddt_documents
+           SET project_url = CASE
+             WHEN project_url IS NOT NULL THEN project_url
+             WHEN doc_number IS NULL OR status = 'bozza' THEN $1
+             ELSE NULL END
+           WHERE id = $2`,
+          [activeProjectUrl, docId]
+        );
+      }
     }
 
     // Se è un DDT confermato/emesso, sincronizza subito su Supabase (con riallineamento numero su collisione in prima emissione)

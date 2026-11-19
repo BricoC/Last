@@ -10,6 +10,7 @@ pub(crate) async fn create_ddt_schema(db: &mut SqliteConnection) {
     }
     sqlx::raw_sql(
         "ALTER TABLE ddt_documents ADD COLUMN series TEXT NOT NULL DEFAULT '';
+         ALTER TABLE ddt_documents ADD COLUMN project_url TEXT;
          ALTER TABLE ddt_items ADD COLUMN row_kind TEXT NOT NULL DEFAULT 'item';
          ALTER TABLE ddt_items ADD COLUMN deleted_at TEXT;
          ALTER TABLE ddt_items ADD COLUMN updated_by TEXT NOT NULL DEFAULT 'system';
