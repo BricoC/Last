@@ -1,5 +1,6 @@
 import { getSupabaseSessionEmail, subscribeSupabaseSession } from "@/shared/services/supabaseSession";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import DOMPurify from "dompurify";
 import { createPortal } from "react-dom";
 import {
   StickyNote,
@@ -205,7 +206,7 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
       setTitle(activeNote.title || "");
       if (editorRef.current) {
         isInternalChangeRef.current = true;
-        editorRef.current.innerHTML = activeNote.content_html || "";
+        editorRef.current.innerHTML = DOMPurify.sanitize(activeNote.content_html || "");
         isInternalChangeRef.current = false;
       }
       setSaveStatus("saved");
@@ -1073,7 +1074,7 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
             <div
               className="note-print-content"
               dangerouslySetInnerHTML={{
-                __html: editorRef.current?.innerHTML || activeNote?.content_html || "",
+                __html: DOMPurify.sanitize(editorRef.current?.innerHTML || activeNote?.content_html || ""),
               }}
             />
           </div>,

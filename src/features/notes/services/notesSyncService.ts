@@ -91,11 +91,16 @@ export class NotesSyncService {
     try {
       const db = await getDatabase();
 
-      const pendingDeletions = await db.select<PendingDeletion[]>(
-        "SELECT id, supabase_id, deleted_at FROM note_deletions ORDER BY deleted_at, id"
+      const pendingDeletions = await db.select<Array<PendingDeletion & { project_url?: string | null }>>(
+        "SELECT id, supabase_id, deleted_at, project_url FROM note_deletions ORDER BY deleted_at, id"
       );
+      const activeProjectUrl = creds.projectUrl.trim().replace(/\/+$/, "").toLowerCase();
       let deletionError: string | undefined;
       for (const deletion of pendingDeletions) {
+        const opProjectUrl = deletion.project_url?.trim().replace(/\/+$/, "").toLowerCase() || null;
+        if (!opProjectUrl || opProjectUrl !== activeProjectUrl) {
+          continue;
+        }
         try {
           const url = new URL("/rest/v1/note", creds.projectUrl);
           if (deletion.supabase_id != null) {
@@ -184,31 +189,48 @@ export class NotesSyncService {
         }
       }
 
-      // 2. PULL: Scarica le note remote da Supabase
-      const pullUrl = new URL("/rest/v1/note?select=*&order=updated_at.desc&limit=1000", creds.projectUrl);
-      const pullRes = await supabaseFetch(pullUrl.toString(), {
-        headers: {
-          apikey: creds.anonKey,
-        },
-      });
+      // 2. PULL: Scarica tutte le note remote da Supabase (paginazione da 1000)
+      type RemoteNoteRow = {
+        id: number;
+        local_id?: string;
+        title: string;
+        content_html: string;
+        content_text: string;
+        is_pinned?: boolean | number;
+        is_archived?: boolean | number;
+        color?: string;
+        created_by?: string;
+        updated_by?: string;
+        created_at?: string;
+        updated_at?: string;
+      };
+      const PAGE_SIZE = 1000;
+      const remoteList: RemoteNoteRow[] = [];
+      let pullOk = false;
+      let pullErrorStatus: number | null = null;
+      for (let offset = 0; ; offset += PAGE_SIZE) {
+        const pullUrl = new URL(
+          `/rest/v1/note?select=*&order=updated_at.desc&limit=${PAGE_SIZE}&offset=${offset}`,
+          creds.projectUrl
+        );
+        const pullRes = await supabaseFetch(pullUrl.toString(), {
+          headers: {
+            apikey: creds.anonKey,
+          },
+        });
+        if (!pullRes.ok) {
+          pullErrorStatus = pullRes.status;
+          break;
+        }
+        pullOk = true;
+        const page = (await pullRes.json()) as RemoteNoteRow[];
+        if (!Array.isArray(page) || page.length === 0) break;
+        remoteList.push(...page);
+        if (page.length < PAGE_SIZE) break;
+      }
 
-      if (pullRes.ok) {
-        const remoteList = (await pullRes.json()) as Array<{
-          id: number;
-          local_id?: string;
-          title: string;
-          content_html: string;
-          content_text: string;
-          is_pinned?: boolean | number;
-          is_archived?: boolean | number;
-          color?: string;
-          created_by?: string;
-          updated_by?: string;
-          created_at?: string;
-          updated_at?: string;
-        }>;
-
-        if (Array.isArray(remoteList)) {
+      if (pullOk) {
+        {
           for (const rem of remoteList) {
             if (pendingDeletions.some((entry) => entry.id === rem.local_id || entry.supabase_id === rem.id)) continue;
             const trashed = await db.select<{ id: string }[]>(
@@ -285,7 +307,7 @@ export class NotesSyncService {
         }
       }
 
-      if (!pullRes.ok) throw new Error(`Download note: HTTP ${pullRes.status}`);
+      if (pullErrorStatus !== null) throw new Error(`Download note: HTTP ${pullErrorStatus}`);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("notes-data-updated"));
       if (deletionError) throw new Error(deletionError);
       this.lastSyncTime = new Date();

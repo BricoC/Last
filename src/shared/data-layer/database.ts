@@ -27,7 +27,10 @@ import { migrateTrashSchemaV25 } from "./migrations/trashSchema";
 import { migrateQuoteFavoritesSchemaV26 } from "./migrations/quoteFavoritesSchema";
 import { migrateSupplierPriceListsSchemaV27 } from "./migrations/supplierPriceListsSchema";
 import { migratePendingCloudWritesV31 } from "./migrations/pendingCloudWritesSchema";
-import { migrateNoteDeletionsV32 } from "./migrations/noteDeletionsSchema";
+import {
+  migrateNoteDeletionsV32,
+  migrateNoteDeletionsProjectUrlV36,
+} from "./migrations/noteDeletionsSchema";
 
 const DB_FILENAME = "sqlite:LastData.db";
 
@@ -496,6 +499,11 @@ const MIGRATIONS: Migration[] = [
     version: 35,
     name: "add_project_url_to_pending_cloud_operations",
     up: migratePendingCloudOperationsProjectUrlV35,
+  },
+  {
+    version: 36,
+    name: "add_project_url_to_note_deletions",
+    up: migrateNoteDeletionsProjectUrlV36,
   },
 ];
 

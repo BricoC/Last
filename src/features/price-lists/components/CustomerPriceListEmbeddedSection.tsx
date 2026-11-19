@@ -267,8 +267,8 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
     } else if (currentClientName && currentClientName.trim()) {
       // Nessun filtro digitato manualmente: mostra automaticamente il listino associato al cliente del DDT
       result = result.filter((item) => {
-        if (currentClientPls && currentClientPls.has(item.cliente.toUpperCase())) {
-          return true;
+        if (currentClientPls && currentClientPls.size > 0) {
+          return currentClientPls.has(item.cliente.toUpperCase());
         }
         return isClientMatching(currentClientName, item.cliente);
       });

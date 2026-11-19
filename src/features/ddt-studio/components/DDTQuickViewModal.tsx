@@ -852,7 +852,12 @@ export const DDTQuickViewModal: React.FC<DDTQuickViewModalProps> = ({
 
                         {/* IVA */}
                         <td className="px-2 py-2 text-center text-[var(--muted-foreground)]">
-                          {it.vat_rate !== undefined && it.vat_rate !== null ? `${it.vat_rate}%` : "22%"}
+                          {it.vat_rate !== undefined &&
+                          it.vat_rate !== null &&
+                          String(it.vat_rate).trim() !== "" &&
+                          Number(it.vat_rate) !== 0
+                            ? `${it.vat_rate}%`
+                            : "—"}
                         </td>
 
                         {/* Costo Acquisto */}

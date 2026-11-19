@@ -61,7 +61,7 @@ describe("NotesSyncService", () => {
     mockSelect
       // 0. trashedWithRemote
       .mockResolvedValueOnce([
-        { id: "trash-1", supabase_id: 77, deleted_at: "2026-11-18T10:00:00Z" },
+        { id: "trash-1", supabase_id: 77, deleted_at: "2026-11-18T10:00:00Z", project_url: "https://example.supabase.co" },
       ])
       // 1. pending notes
       .mockResolvedValueOnce([
@@ -125,7 +125,7 @@ describe("NotesSyncService", () => {
 
   it("ignora anche una copia cloud più recente quando la cancellazione fallisce", async () => {
     mockSelect
-      .mockResolvedValueOnce([{ id: "trash-1", supabase_id: 77, deleted_at: "2026-01-01" }])
+      .mockResolvedValueOnce([{ id: "trash-1", supabase_id: 77, deleted_at: "2026-01-01", project_url: "https://example.supabase.co" }])
       .mockResolvedValueOnce([]);
     globalThis.fetch = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(null, { status: 503 }))

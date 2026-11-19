@@ -42,7 +42,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
       }
     } else if (colId === "vat_rate" || colId === "iva_pct") {
       const vStr = String(props.value).trim();
-      startValue = vStr === "" || vStr === "null" || vStr === "undefined" ? "" : vStr;
+      startValue = vStr === "" || vStr === "null" || vStr === "undefined" || vStr === "0" ? "" : vStr;
     } else if (colId === "quantity" || colId === "quantita") {
       startValue = String(props.value).trim();
     } else if (colId === "ric_pct") {
@@ -83,7 +83,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
   const lastTypedLengthRef = useRef(startValue.length);
 
   const isNumericCol = [
-      "discount_pct", "sconto_pct", "unit_price", "prezzo", "purchase_price", "prezzo_acquisto", "base_unit_price", "markup_pct", "vat_rate", "iva_pct", "ric_pct"
+      "quantity", "quantita", "discount_pct", "sconto_pct", "unit_price", "prezzo", "purchase_price", "prezzo_acquisto", "base_unit_price", "markup_pct", "vat_rate", "iva_pct", "ric_pct"
   ].includes(colId || "");
 
   const candidates = useMemo(() => {

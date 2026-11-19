@@ -701,7 +701,10 @@ export async function getMonthlyFullDdtDocuments(
       unit_price: MonetaryValue.fromSubunits(row.unit_price_subunits || 0),
       discount_pct: isNote ? "" : String(row.discount_pct ?? "0"),
       net_amount: MonetaryValue.fromSubunits(row.net_amount_subunits || 0),
-      vat_rate: isNote ? "" : (row.vat_rate !== null && row.vat_rate !== undefined ? String(row.vat_rate) : "22"),
+      vat_rate:
+        isNote || row.vat_rate === null || row.vat_rate === undefined || Number(row.vat_rate) === 0
+          ? ""
+          : String(row.vat_rate),
       vat_amount: MonetaryValue.fromSubunits(row.vat_amount_subunits || 0),
       purchase_price: MonetaryValue.fromSubunits(row.purchase_price_subunits || 0),
     };

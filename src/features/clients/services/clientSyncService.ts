@@ -107,7 +107,7 @@ export class ClientSyncService {
       }
       if (!deletable.length) {
         if (localClientId) await db.execute(
-          "UPDATE clients SET sync_status = 'synced', pending_previous_name = NULL WHERE id = $1 AND deleted_at IS NOT NULL",
+          "DELETE FROM clients WHERE id = $1 AND deleted_at IS NOT NULL",
           [localClientId],
         );
         return true;
@@ -145,10 +145,10 @@ export class ClientSyncService {
       }
 
       if (localClientId) {
-        await db.execute("UPDATE clients SET sync_status = 'synced', pending_previous_name = NULL WHERE id = $1 AND deleted_at IS NOT NULL", [localClientId]);
+        await db.execute("DELETE FROM clients WHERE id = $1 AND deleted_at IS NOT NULL", [localClientId]);
       } else {
         await db.execute(
-          "UPDATE clients SET sync_status = 'synced' WHERE deleted_at IS NOT NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($1))",
+          "DELETE FROM clients WHERE deleted_at IS NOT NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($1))",
           [trimmed]
         );
       }
@@ -477,10 +477,8 @@ export class ClientSyncService {
             !remoteNamesLower.has(existing.business_name.trim().toLowerCase())
           ) {
             await db.execute(
-              `UPDATE clients
-               SET deleted_at = $1, updated_at = $1, updated_by = 'supabase_sync_delete', sync_status = 'synced'
-               WHERE id = $2 AND deleted_at IS NULL AND sync_status = 'synced'`,
-              [now, existing.id]
+              `DELETE FROM clients WHERE id = $1 AND deleted_at IS NULL AND sync_status = 'synced'`,
+              [existing.id]
             );
           }
         }

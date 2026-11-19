@@ -1059,7 +1059,15 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         effectivePrice = price.times(1 + markupNum / 100);
       }
       const disc = globalDiscount.trim();
-      const vat = article.vat_rate !== undefined && article.vat_rate !== null && String(article.vat_rate).trim() !== "" ? article.vat_rate : "";
+      const rawVat = article.vat_rate;
+      const vat =
+        isPositivePrice(effectivePrice) &&
+        rawVat !== undefined &&
+        rawVat !== null &&
+        String(rawVat).trim() !== "" &&
+        Number(rawVat) !== 0
+          ? rawVat
+          : "";
       const { netAmount, vatAmount } = calculateRowAmounts(q, effectivePrice, disc, vat);
 
       // Unità di misura ereditata dall'articolo/storico (es. MT., KG., NR., CF.)

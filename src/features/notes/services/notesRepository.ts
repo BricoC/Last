@@ -2,13 +2,15 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import type { NoteRecord, TrashNoteRow } from "../types/note";
 import { notesSyncService } from "./notesSyncService";
+import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 
 function queueNoteDeletion(id: string, deletedAt: string): SqliteWrite {
+  const projectUrl = getLastKnownSupabaseProjectUrl();
   return {
-    sql: `INSERT INTO note_deletions (id, supabase_id, deleted_at)
-          SELECT id, supabase_id, $2 FROM notes WHERE id = $1
-          ON CONFLICT(id) DO UPDATE SET supabase_id = excluded.supabase_id, deleted_at = excluded.deleted_at`,
-    params: [id, deletedAt],
+    sql: `INSERT INTO note_deletions (id, supabase_id, deleted_at, project_url)
+          SELECT id, supabase_id, $2, $3 FROM notes WHERE id = $1
+          ON CONFLICT(id) DO UPDATE SET supabase_id = excluded.supabase_id, deleted_at = excluded.deleted_at, project_url = excluded.project_url`,
+    params: [id, deletedAt, projectUrl],
   };
 }
 

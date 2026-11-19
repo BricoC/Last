@@ -138,7 +138,7 @@ export class SupplierPriceListService {
 
     // Recupera file già indicizzati nel DB SQLite
     const existingDbFiles = await db.select<SupplierPriceListFile[]>(
-      "SELECT id, filename, file_size FROM supplier_price_list_files"
+      "SELECT id, filename, file_size, last_modified_ms FROM supplier_price_list_files"
     );
     const existingMap = new Map(existingDbFiles.map((x) => [x.filename, x]));
 

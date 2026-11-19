@@ -90,6 +90,10 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
   ({ ddt, items, isPrintOnly = false }, ref) => {
     const pages = paginateDdtRows(items);
     const totals = calculateDdtTotals(items);
+    const hasDocumentPrices =
+      items.some((it) => isPositivePrice(it.unit_price) || isPositivePrice(it.net_amount)) ||
+      totals.totale_imponibile.toSubunits() > 0 ||
+      totals.totale_documento.toSubunits() > 0;
 
     const [companySettings, setCompanySettings] = useState<CompanySettings | null>(() =>
       getCachedCompanySettings()
@@ -942,7 +946,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             paddingTop: DDT_CONFIG.footer.paddingTopValori,
                           }}
                         >
-                          {totals.totale_imponibile.formatIT(false)} €
+                          {hasDocumentPrices ? `${totals.totale_imponibile.formatIT(false)} €` : ""}
                         </div>
                       </td>
 
@@ -968,7 +972,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             paddingTop: DDT_CONFIG.footer.paddingTopValori,
                           }}
                         >
-                          {totals.totale_iva.formatIT(false)} €
+                          {hasDocumentPrices ? `${totals.totale_iva.formatIT(false)} €` : ""}
                         </div>
                       </td>
 
@@ -993,7 +997,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             paddingTop: DDT_CONFIG.footer.paddingTopValori,
                           }}
                         >
-                          {totals.totale_documento.formatIT(false)} €
+                          {hasDocumentPrices ? `${totals.totale_documento.formatIT(false)} €` : ""}
                         </div>
                       </td>
                     </tr>

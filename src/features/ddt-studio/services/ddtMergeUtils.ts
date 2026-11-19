@@ -133,10 +133,12 @@ function formatForConflict(value: unknown, key: string): string {
 function recomputeItemAmounts(item: DdtItemSnapshot): DdtItemSnapshot {
   const isNote =
     item.row_kind === "note" ||
-    (Boolean(item.description.trim()) &&
+    (item.row_kind !== "item" &&
+      Boolean(item.description.trim()) &&
       item.unit_price_subunits === 0 &&
       item.purchase_price_subunits === 0 &&
       (!item.code || !item.code.trim()) &&
+      (!item.unit || !String(item.unit).trim()) &&
       ((parseDdtQuantity(item.quantity) ?? 0) <= 0));
 
   if (isNote) {

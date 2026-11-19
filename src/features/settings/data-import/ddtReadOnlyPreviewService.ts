@@ -133,9 +133,12 @@ export function mapHeaderForLocal(header: CloudHeader): LocalImportHeader {
 export function mapLineForLocal(line: CloudLine, cloudHeaderId: string | null, fallbackRowIndex: number): LocalImportLine {
   const price = validAmount(line.prezzo);
   const amount = validAmount(line.importo);
-  const quantity = line.quantita === null ? "" : String(line.quantita);
+  const quantity = line.quantita === null || line.quantita === undefined ? "" : String(line.quantita);
+  const hasUnit = Boolean(line.um && String(line.um).trim());
+  const parsedQty = Number(quantity.trim().replace(",", "."));
+  const hasQuantity = Boolean(quantity.trim()) && (Number.isNaN(parsedQty) ? true : parsedQty > 0);
   const isNote = Boolean(line.descrizione?.trim()) && price === 0 && amount === 0
-    && validAmount(line.prezzo_acquisto) === 0;
+    && validAmount(line.prezzo_acquisto) === 0 && !hasUnit && !hasQuantity;
   const createdAt = new Date().toISOString();
   const vatRate = isNote ? 0 : validAmount(line.iva_pct);
   const netAmountSubunits = isNote ? 0 : subunits(line.importo);

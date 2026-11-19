@@ -199,8 +199,8 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
   {
     id: "settings",
     label: "Impostazioni e Configurazioni",
-    description: "Dati aziendali, email banca/commercialista, utenti di accesso e preferenze.",
-    tables: ["company_settings", "email_settings", "app_preferences", "app_users"],
+    description: "Dati aziendali, email banca/commercialista, utenti di accesso, preferenze e coda sync.",
+    tables: ["company_settings", "email_settings", "app_preferences", "app_users", "pending_cloud_operations"],
   },
 ];
 

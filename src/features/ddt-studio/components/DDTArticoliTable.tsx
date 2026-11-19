@@ -22,8 +22,9 @@ export function isTextOnlyRow(item?: Partial<DdtItem> | null): boolean {
   const hasPrice = isPositivePrice(item.unit_price);
   const hasCost = isPositivePrice(item.purchase_price);
   const hasCode = Boolean(item.code && String(item.code).trim().length > 0);
+  const hasUnit = Boolean(item.unit && String(item.unit).trim().length > 0);
   const hasQta = (parseDdtQuantity(item.quantity) ?? 0) > 0;
-  return hasDesc && !hasPrice && !hasCost && !hasCode && !hasQta;
+  return hasDesc && !hasPrice && !hasCost && !hasCode && !hasUnit && !hasQta;
 }
 
 export interface DDTArticoliTableProps {
@@ -190,7 +191,13 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         updatedData.purchase_price = money(0);
         updatedData.net_amount = money(0);
         updatedData.vat_amount = money(0);
-      } else if (colId !== "description" && (isPositivePrice(updatedData.unit_price) || isPositivePrice(updatedData.purchase_price) || (updatedData.quantity && updatedData.quantity !== ""))) {
+      } else if (
+        colId !== "description" &&
+        (isPositivePrice(updatedData.unit_price) ||
+          isPositivePrice(updatedData.purchase_price) ||
+          (updatedData.quantity && updatedData.quantity !== "") ||
+          (updatedData.unit && String(updatedData.unit).trim() !== ""))
+      ) {
         updatedData.row_kind = "item";
       }
 
@@ -363,7 +370,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
               base_price: money(0),
               discount_pct: "",
               net_amount: money(0),
-              vat_rate: 22,
+              vat_rate: "",
               vat_amount: money(0),
               purchase_price: money(0),
             });
@@ -377,6 +384,9 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
 
             const colId = editableColsOrder[targetColIdx];
             const val = cellRaw.trim();
+            if (colId !== "description" && val !== "" && targetRow.row_kind === "note") {
+              targetRow.row_kind = "item";
+            }
 
             if (colId === "unit") {
               targetRow.unit = val.toUpperCase();
@@ -966,7 +976,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         },
         valueFormatter: (p: any) => {
           if (isTextOnlyRow(p.data)) return "";
-          if (p.value !== "" && p.value !== null && p.value !== undefined) {
+          if (p.value !== "" && p.value !== null && p.value !== undefined && Number(p.value) !== 0) {
             return `${p.value}%`;
           }
           return "";

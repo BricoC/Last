@@ -711,7 +711,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
         },
         valueFormatter: (p: any) => {
           if (isTextOnlyRow(p.data)) return "";
-          if (p.value !== "" && p.value !== null && p.value !== undefined) {
+          if (p.value !== "" && p.value !== null && p.value !== undefined && Number(p.value) !== 0) {
             return `${p.value}%`;
           }
           return "";
@@ -1046,7 +1046,7 @@ export const DDTMultiListinoModal: React.FC<DDTMultiListinoModalProps> = ({
                                 quantity: "1",
                                 unit_price: priceVal,
                                 purchase_price: acqVal,
-                                vat_rate: row.vatRate ?? 22,
+                                vat_rate: priceVal > 0 && row.vatRate && row.vatRate > 0 ? row.vatRate : undefined,
                               });
                             }}
                             className="hover:bg-emerald-600/15 cursor-pointer transition-colors group"

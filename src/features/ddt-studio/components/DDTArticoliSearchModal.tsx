@@ -356,16 +356,18 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
 
       if (sourceTab === "generale") {
         const item = selected as ListinoGeneraleRow;
+        const unitPrice = prezziIvaEnabled ? (item.prezzo_fattura || 0) : 0;
+        const vatPct =
+          item.perc_iva !== null && item.perc_iva !== undefined
+            ? Math.round(item.perc_iva * 100)
+            : 0;
         setPendingInsert({
           code: item.codice_articolo || undefined,
           description: item.descrizione,
           unit: item.um || "NR.",
-          unit_price: prezziIvaEnabled ? (item.prezzo_fattura || 0) : 0,
+          unit_price: unitPrice,
           purchase_price: item.prezzo_acquisto || 0,
-          vat_rate:
-            prezziIvaEnabled && item.perc_iva !== null && item.perc_iva !== undefined
-              ? Math.round(item.perc_iva * 100)
-              : undefined,
+          vat_rate: prezziIvaEnabled && unitPrice > 0 && vatPct > 0 ? vatPct : undefined,
         });
       } else {
         const item = selected as ListinoClienteRow;
@@ -382,13 +384,17 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
     } else {
       const hist = visibleHistoryItems[selectedHistIdx];
       if (!hist) return;
+      const unitPrice = prezziIvaEnabled ? hist.unitPriceSubunits / 100000 : 0;
       setPendingInsert({
         code: hist.code || undefined,
         description: hist.description,
         unit: hist.unit || "NR.",
-        unit_price: prezziIvaEnabled ? hist.unitPriceSubunits / 100000 : 0,
+        unit_price: unitPrice,
         purchase_price: hist.purchasePriceSubunits ? hist.purchasePriceSubunits / 100000 : 0,
-        vat_rate: prezziIvaEnabled ? hist.vatRate ?? undefined : undefined,
+        vat_rate:
+          prezziIvaEnabled && unitPrice > 0 && hist.vatRate && hist.vatRate > 0
+            ? hist.vatRate
+            : undefined,
       });
       setInsertQuantity(hist.quantity || "1");
     }

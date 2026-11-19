@@ -787,10 +787,12 @@ export class DdtRepository {
     );
     const itemPayloads = validItems.map((it, index) => {
       const isNote = it.row_kind === "note" || (
+        it.row_kind !== "item" &&
         Boolean(it.description?.trim()) &&
         !isPositivePrice(it.unit_price) &&
         (!it.purchase_price || !isPositivePrice(it.purchase_price)) &&
         (!it.code || !it.code.trim()) &&
+        (!it.unit || !String(it.unit).trim()) &&
         !parseDdtQuantity(it.quantity)
       );
       const p = isNote ? money(0) : safeMoney(it.unit_price);
@@ -970,7 +972,10 @@ export class DdtRepository {
       unit_price: MonetaryValue.fromSubunits(row.unit_price_subunits || 0),
       discount_pct: isNote ? "" : String(row.discount_pct ?? "0"),
       net_amount: MonetaryValue.fromSubunits(row.net_amount_subunits || 0),
-      vat_rate: isNote ? "" : row.vat_rate !== null && row.vat_rate !== undefined ? row.vat_rate : "",
+      vat_rate:
+        isNote || row.vat_rate === null || row.vat_rate === undefined || Number(row.vat_rate) === 0
+          ? ""
+          : row.vat_rate,
       vat_amount: MonetaryValue.fromSubunits(row.vat_amount_subunits || 0),
       purchase_price: row.purchase_price_subunits
         ? MonetaryValue.fromSubunits(row.purchase_price_subunits)
