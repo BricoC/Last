@@ -11,7 +11,7 @@ import { clientRepository } from "@/features/clients/services/clientRepository";
 import { money, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
 import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
-import { calculateRowAmounts, calculateDdtTotals } from "./utils/ddtCalculations";
+import { calculateRowAmounts, calculateDdtTotals, OPERATORI, normalizeOperator } from "./utils/ddtCalculations";
 
 import { DDTStudioHeader } from "./components/DDTStudioHeader";
 import { DDTStudioSidebar } from "./components/DDTStudioSidebar";
@@ -251,6 +251,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   const [isPrintCopiesModalOpen, setIsPrintCopiesModalOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [isTheOneOperatorModalOpen, setIsTheOneOperatorModalOpen] = useState(false);
   const [closePrompt, setClosePrompt] = useState<((choice: DdtCloseChoice) => void) | null>(null);
   const savedSignature = React.useRef<string | null>(null);
   const printPortalRef = React.useRef<HTMLDivElement>(null);
@@ -828,22 +829,12 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   };
 
   // The One: Salva DDT con numero progressivo e stampa immediatamente 3 copie
-  const handleTheOne = async () => {
-    if (isSaving || isPrinting) return;
-    if (ddt.status === "confermato" && ddt.doc_number !== null) {
-      showToast("Questo DDT è già stato emesso e salvato con numero definitivo.");
-      return;
-    }
-    if (!ddt.client_name?.trim()) {
-      showToast("Attenzione: Inserisci il nome del cliente prima di salvare il DDT!");
-      return;
-    }
-
+  const executeTheOne = async (targetDdt: Partial<DdtDocument>) => {
     setIsSaving(true);
     showToast("The One: Salvataggio DDT con numero progressivo...");
     try {
       // 1. Salva con numero progressivo
-      const saved = await ddtRepository.emitDdt(ddt, items);
+      const saved = await ddtRepository.emitDdt(targetDdt, items);
       const syncedItems = buildPaddedDdtItems(saved.id, saved.items || []);
       setDdt(saved);
       setItems(syncedItems);
@@ -851,9 +842,10 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       savedSignature.current = signature(saved, syncedItems, globalDiscount, globalMarkup);
       await loadRecentDdts();
 
-      // Auto-salvataggio cliente in anagrafica
+      // Auto-salvataggio cliente in anagrafica senza duplicazione
       if (saved.client_name?.trim()) {
-        void clientRepository.createOrUpdateClient({
+        void clientRepository.upsertClientFromDocument({
+          id: saved.client_id || targetDdt.client_id,
           business_name: saved.client_name.trim(),
           address: saved.client_address || undefined,
           city: saved.client_city || undefined,
@@ -865,6 +857,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
           destination_address: saved.destination_address || undefined,
           destination_city: saved.destination_city || undefined,
           phones: saved.client_phones || [],
+        }).then((upserted) => {
+          setDdt((prev) => (prev.id === saved.id && !prev.client_id ? { ...prev, client_id: upserted.id } : prev));
         }).catch((e) => console.warn("Auto-salvataggio cliente The One:", e));
       }
 
@@ -885,6 +879,23 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       setIsSaving(false);
       setIsPrinting(false);
     }
+  };
+
+  const handleTheOne = async () => {
+    if (isSaving || isPrinting) return;
+    if (ddt.status === "confermato" && ddt.doc_number !== null) {
+      showToast("Questo DDT è già stato emesso e salvato con numero definitivo.");
+      return;
+    }
+    if (!ddt.client_name?.trim()) {
+      showToast("Attenzione: Inserisci il nome del cliente prima di salvare il DDT!");
+      return;
+    }
+    if (!normalizeOperator(ddt.operator)) {
+      setIsTheOneOperatorModalOpen(true);
+      return;
+    }
+    await executeTheOne(ddt);
   };
 
   useEffect(() => registerWindowCloseGuard(windowId, async () => {
@@ -1354,6 +1365,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         isSaving={isSaving}
         isExportingPdf={isExportingPdf}
         isPrinting={isPrinting}
+        isDirty={isDirty}
       />
 
       {/* Corpo Principale: Sidebar Riducibile / Espandibile + Area Lavoro */}
@@ -1589,6 +1601,51 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                 className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold disabled:opacity-50"
               >
                 Mantieni modifiche di questo PC
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale rapida selezione Operatore prima di eseguire The One */}
+      {isTheOneOperatorModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setIsTheOneOperatorModalOpen(false);
+          }}
+        >
+          <div className="w-full max-w-sm rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-2xl space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-white">Seleziona Operatore (The One)</h3>
+              <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                Scegli l&apos;operatore prima di emettere e stampare il DDT:
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {OPERATORI.map((op) => (
+                <button
+                  key={op}
+                  type="button"
+                  onClick={() => {
+                    const nextDdt = { ...ddt, operator: op };
+                    setDdt(nextDdt);
+                    setIsTheOneOperatorModalOpen(false);
+                    void executeTheOne(nextDdt);
+                  }}
+                  className="px-3 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                >
+                  {op}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsTheOneOperatorModalOpen(false)}
+                className="px-3 py-1.5 rounded border border-[var(--border)] text-xs text-[var(--muted-foreground)] hover:text-white"
+              >
+                Annulla
               </button>
             </div>
           </div>

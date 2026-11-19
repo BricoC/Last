@@ -5,8 +5,22 @@ import { toDateIT } from "../utils/ddtCalculations";
 import { cn } from "@/shared/utils/cn";
 
 type ArchiveTab = "ddt" | "drafts";
+export type MarginFilter = "all" | "with_margins" | "without_margins";
 
 const SIDEBAR_BATCH_SIZE = 150;
+
+export function isReturnDdt(transportReason?: string | null): boolean {
+  return (transportReason ?? "").toLowerCase().includes("reso");
+}
+
+export function matchesMarginFilter(
+  doc: Pick<DdtArchiveEntry, "has_complete_margins" | "transport_reason">,
+  marginFilter: MarginFilter
+): boolean {
+  if (marginFilter === "all") return true;
+  if (isReturnDdt(doc.transport_reason)) return false;
+  return marginFilter === "with_margins" ? doc.has_complete_margins : !doc.has_complete_margins;
+}
 
 export interface DDTStudioSidebarProps {
   sidebarOpen: boolean;
@@ -41,7 +55,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   isLoading = false,
   availableYears: propAvailableYears = [],
 }) => {
-  const [marginFilter, setMarginFilter] = useState<"all" | "with_margins" | "without_margins">("all");
+  const [marginFilter, setMarginFilter] = useState<MarginFilter>("all");
   const [archiveTab, setArchiveTab] = useState<ArchiveTab>("ddt");
   const [pendingDelete, setPendingDelete] = useState<DdtArchiveEntry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -83,9 +97,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   const drafts = ddtList.filter((doc) => doc.status === "bozza" || doc.doc_number === null);
   const issuedDdts = ddtList.filter((doc) => doc.status !== "bozza" && doc.doc_number !== null);
   const tabDocuments = archiveTab === "drafts" ? drafts : issuedDdts;
-  const filteredDdtList = tabDocuments.filter((doc) =>
-    marginFilter === "all" || (marginFilter === "with_margins" ? doc.has_complete_margins : !doc.has_complete_margins)
-  );
+  const filteredDdtList = tabDocuments.filter((doc) => matchesMarginFilter(doc, marginFilter));
 
   // Resetta il conteggio visibile quando cambiano filtri o ricerca
   useEffect(() => {
@@ -141,7 +153,8 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
         <div onScroll={handleScroll} className="flex-1 overflow-y-auto no-scrollbar py-1.5 space-y-1 w-full px-1 flex flex-col items-center">
           {displayedDdtList.map((doc) => {
             const isSelected = currentDdtId === doc.id || loadingDdtId === doc.id;
-            const isConfirmed = doc.has_complete_margins;
+            const isReturn = isReturnDdt(doc.transport_reason);
+            const isConfirmed = !isReturn && doc.has_complete_margins;
             const numberLabel = doc.doc_number === null
               ? "Bozza"
               : `${doc.series ? `${doc.series}/` : ""}${doc.doc_number}`;
@@ -151,10 +164,14 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
                 key={doc.id}
                 type="button"
                 onClick={() => onSelectDdt(doc.id)}
-                title={`DDT ${numberLabel} - ${doc.client_name}`}
+                title={`DDT ${numberLabel} - ${doc.client_name}${isReturn ? " (Reso)" : ""}`}
                 className={cn(
                   "w-10 h-6 rounded flex items-center justify-center text-[10.5px] font-mono font-bold transition-all cursor-pointer active:scale-95",
-                  isConfirmed
+                  isReturn
+                    ? isSelected
+                      ? "bg-purple-300 text-slate-950 shadow-md ring-2 ring-purple-300"
+                      : "bg-purple-500/20 border border-purple-400/60 text-purple-200 hover:bg-purple-500/35 hover:text-white"
+                    : isConfirmed
                     ? isSelected
                       ? "bg-[var(--archive-margin-text)] text-slate-950 shadow-md ring-2 ring-[var(--archive-margin-border)]"
                       : "bg-[var(--archive-margin-background)] border border-[var(--archive-margin-border)] text-[var(--archive-margin-text)] hover:bg-[var(--archive-margin-hover)] hover:text-white"
@@ -307,7 +324,11 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
               ? "Bozza"
               : `${doc.series ? `${doc.series}/` : ""}${doc.doc_number}`;
 
-            const marginColor = doc.has_complete_margins
+            const isReturn = isReturnDdt(doc.transport_reason);
+            const hasGreenMargins = !isReturn && doc.has_complete_margins;
+            const marginColor = isReturn
+              ? "border-purple-400/60 bg-purple-500/20 hover:bg-purple-500/30"
+              : hasGreenMargins
               ? "border-[var(--archive-margin-border)] bg-[var(--archive-margin-background)] hover:bg-[var(--archive-margin-hover)]"
               : "border-[var(--border)] bg-[var(--background)]/50 hover:bg-[var(--background)]";
             return (
@@ -322,7 +343,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
                     onSelectDdt(doc.id);
                   }
                 }}
-                title={`DDT ${numberLabel} · ${doc.client_name} · ${toDateIT(doc.doc_date)}`}
+                title={`DDT ${numberLabel} · ${doc.client_name} · ${toDateIT(doc.doc_date)}${isReturn ? " · Reso" : ""}`}
                 className={cn(
                   "group mx-1 my-1 flex h-11 items-center gap-1.5 rounded-md border px-2.5 transition-all cursor-pointer select-none",
                   "active:scale-[0.985] active:brightness-95",
@@ -331,13 +352,29 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
                 )}
               >
                 <div className="flex min-w-0 flex-1 items-center gap-2 pointer-events-none">
-                  <span className={cn("shrink-0 font-mono text-[11px] font-black", doc.has_complete_margins ? "text-[var(--archive-margin-text)]" : isDraft ? "text-amber-400" : "text-[var(--primary)]")}>
+                  <span className={cn(
+                    "shrink-0 font-mono text-[11px] font-black",
+                    isReturn
+                      ? "text-purple-200"
+                      : hasGreenMargins
+                      ? "text-[var(--archive-margin-text)]"
+                      : isDraft
+                      ? "text-amber-400"
+                      : "text-[var(--primary)]"
+                  )}>
                     {isDraft ? "BOZ" : numberLabel}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase text-[var(--foreground)]">
                     {doc.client_name || "Cliente non specificato"}
                   </span>
-                  <span className={cn("shrink-0 font-mono text-[10px]", doc.has_complete_margins ? "text-[var(--archive-margin-muted)]" : "text-[var(--muted-foreground)]")}>
+                  <span className={cn(
+                    "shrink-0 font-mono text-[10px]",
+                    isReturn
+                      ? "text-purple-200/80"
+                      : hasGreenMargins
+                      ? "text-[var(--archive-margin-muted)]"
+                      : "text-[var(--muted-foreground)]"
+                  )}>
                     {toDateIT(doc.doc_date)}
                   </span>
                 </div>
@@ -358,7 +395,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
                     aria-label={`Elimina DDT ${numberLabel}`}
                     className={cn(
                       "shrink-0 rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)] cursor-pointer",
-                      doc.has_complete_margins && "text-[var(--archive-margin-text)]"
+                      isReturn ? "text-purple-200" : hasGreenMargins && "text-[var(--archive-margin-text)]"
                     )}
                   >
                     <Trash2 className="h-3.5 w-3.5" />

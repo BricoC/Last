@@ -39,6 +39,7 @@ export interface DDTStudioHeaderProps {
   isSaving?: boolean;
   isExportingPdf?: boolean;
   isPrinting?: boolean;
+  isDirty?: boolean;
 }
 
 export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
@@ -62,6 +63,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   isSaving = false,
   isExportingPdf = false,
   isPrinting = false,
+  isDirty = true,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -222,16 +224,34 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
           </button>
         </div>
 
-        {/* Salva DDT (Verde) */}
-        <button
-          type="button"
-          disabled={isSaving}
-          onClick={onEmitDdt}
-          className="h-7 px-3 rounded text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center space-x-1.5 shadow-sm transition-colors cursor-default"
-        >
-          <Save className="w-3.5 h-3.5" />
-          <span>{isConfirmed ? "Aggiorna DDT" : "Salva DDT"}</span>
-        </button>
+        {/* Salva / Aggiorna DDT */}
+        {(() => {
+          const isUpdateDisabled = isConfirmed && !isDirty;
+          const isButtonDisabled = isSaving || isUpdateDisabled;
+          return (
+            <button
+              type="button"
+              disabled={isButtonDisabled}
+              onClick={onEmitDdt}
+              title={
+                isUpdateDisabled
+                  ? "Nessuna modifica da aggiornare"
+                  : isConfirmed
+                  ? "Aggiorna il DDT con le modifiche correnti"
+                  : "Salva e conferma il DDT con numero progressivo"
+              }
+              className={cn(
+                "h-7 px-3 rounded text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-colors",
+                isUpdateDisabled
+                  ? "bg-emerald-950/20 text-emerald-400/35 border border-emerald-900/30 opacity-50 cursor-not-allowed"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white cursor-default"
+              )}
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{isConfirmed ? "Aggiorna DDT" : "Salva DDT"}</span>
+            </button>
+          );
+        })()}
 
         {/* Salva Draft */}
         <button

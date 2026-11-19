@@ -35,39 +35,39 @@ export const DDT_CONFIG = {
     altezza: "86px",
     spazioTraBox: "8px",
     margineSotto: "8px",
-    paddingTop: "6px",
+    paddingTop: "4px",
     paddingLeft: "10px",
     paddingRight: "10px",
-    fontSizeTitolo: "9.5px",
-    fontSizeNome: "12px",
-    fontSizeIndirizzo: "10px",
-    fontSizeDatiFiscali: "8.5px",
+    fontSizeTitolo: "10px",
+    fontSizeNome: "13.5px",
+    fontSizeIndirizzo: "11px",
+    fontSizeDatiFiscali: "9.5px",
   },
 
   // 3. Riga Commerciale (Causale, OP, Pagamento/Ordine, In Conto/A Saldo)
   commerciale: {
     altezza: "52px",
     margineSotto: "8px",
-    paddingTop: "6px",
-    causaleLabelSize: "9px",
-    causaleValueSize: "12px",
+    paddingTop: "4px",
+    causaleLabelSize: "9.5px",
+    causaleValueSize: "13.5px",
     opWidth: "48px",
-    opLabelSize: "9px",
-    opValueSize: "12.5px",
-    pagamentoLabelSize: "9px",
-    pagamentoValueSize: "10px",
+    opLabelSize: "9.5px",
+    opValueSize: "14px",
+    pagamentoLabelSize: "9.5px",
+    pagamentoValueSize: "11.5px",
     saldoWidth: "115px",
   },
 
   // 4. Tabella Righe Articoli (Corpo della DDT)
   articoli: {
     altezzaHeader: "23px",
-    fontSizeHeader: "8.5px",
-    paddingTopHeader: "6px",
+    fontSizeHeader: "9.5px",
+    paddingTopHeader: "5px",
     altezzaRiga: "26px",
-    fontSizeDescrizione: "9.5px",
-    fontSizePrezzo: "9px",
-    fontSizeScontoIva: "8.5px",
+    fontSizeDescrizione: "11px",
+    fontSizePrezzo: "10.5px",
+    fontSizeScontoIva: "10px",
     paddingTopRiga: "5.5px",
   },
 
@@ -306,7 +306,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                       style={{
                         border: "1px solid #000",
                         paddingTop: DDT_CONFIG.clienti.paddingTop,
-                        paddingBottom: "5px",
+                        paddingBottom: "3px",
                         paddingLeft: DDT_CONFIG.clienti.paddingLeft,
                         paddingRight: DDT_CONFIG.clienti.paddingRight,
                         height: DDT_CONFIG.clienti.altezza,
@@ -364,7 +364,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           style={{
                             border: "1px solid #000",
                             paddingTop: DDT_CONFIG.clienti.paddingTop,
-                            paddingBottom: "5px",
+                            paddingBottom: "3px",
                             paddingLeft: DDT_CONFIG.clienti.paddingLeft,
                             paddingRight: DDT_CONFIG.clienti.paddingRight,
                             height: DDT_CONFIG.clienti.altezza,
@@ -433,7 +433,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         height: "100%",
                         display: "flex",
                         flexDirection: "column",
-                        justifyContent: "flex-start",
+                        justifyContent: "center",
                         borderRight: "1px solid #000",
                         boxSizing: "border-box",
                       }}
@@ -473,7 +473,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         flexShrink: 0,
                         display: "flex",
                         flexDirection: "column",
-                        justifyContent: "flex-start",
+                        justifyContent: "center",
                         alignItems: "center",
                         textAlign: "center",
                         borderRight: "1px solid #000",
@@ -514,7 +514,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         height: "100%",
                         display: "flex",
                         flexDirection: "column",
-                        justifyContent: "flex-start",
+                        justifyContent: "center",
                         borderRight: "1px solid #000",
                         boxSizing: "border-box",
                       }}
@@ -728,6 +728,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         style={{
                           height: DDT_CONFIG.articoli.altezzaRiga,
                           fontWeight: "normal",
+                          borderBottom: i < p.rows.length - 1 ? "1px solid #e4e4e7" : undefined,
                         }}
                       >
                         <td
@@ -760,7 +761,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         <td
                           style={{
                             borderRight: "1px solid black",
-                            textAlign: "left",
+                            textAlign: "center",
                             verticalAlign: "middle",
                             paddingLeft: "8px",
                             paddingRight: "8px",
