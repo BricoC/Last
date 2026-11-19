@@ -902,24 +902,12 @@ export class DdtRepository {
     }
 
     await invoke("save_ddt_transaction", { payload });
-    if (activeProjectUrl) {
+    if (activeProjectUrl && isBrandNewDoc) {
       const db = await getDatabase();
-      if (isBrandNewDoc || isNewEmission) {
-        await db.execute(
-          "UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2",
-          [activeProjectUrl, docId]
-        );
-      } else {
-        await db.execute(
-          `UPDATE ddt_documents
-           SET project_url = CASE
-             WHEN project_url IS NOT NULL THEN project_url
-             WHEN doc_number IS NULL OR status = 'bozza' THEN $1
-             ELSE NULL END
-           WHERE id = $2`,
-          [activeProjectUrl, docId]
-        );
-      }
+      await db.execute(
+        "UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2",
+        [activeProjectUrl, docId]
+      );
     }
 
     // Se è un DDT confermato/emesso, sincronizza subito su Supabase (con riallineamento numero su collisione in prima emissione)

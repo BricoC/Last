@@ -669,9 +669,10 @@ export class ClientSyncService {
       [activeProjectUrl]
     );
 
-    // Recupera l'elenco dei clienti già salvati (esatti e canonici) per evitare ricreazione di duplicati (es. CAMM vs C.A.M.M.)
+    // Recupera l'elenco dei clienti già salvati per il progetto attivo (esatti e canonici) per evitare ricreazione di duplicati (es. CAMM vs C.A.M.M.)
     const existingRows = await db.select<{ id: string; business_name: string; address: string | null }[]>(
-      "SELECT id, business_name, address FROM clients WHERE deleted_at IS NULL ORDER BY CASE WHEN address IS NOT NULL AND TRIM(address) <> '' THEN 0 ELSE 1 END, LENGTH(business_name) DESC"
+      "SELECT id, business_name, address FROM clients WHERE deleted_at IS NULL AND project_url = $1 ORDER BY CASE WHEN address IS NOT NULL AND TRIM(address) <> '' THEN 0 ELSE 1 END, LENGTH(business_name) DESC",
+      [activeProjectUrl]
     );
     const existingSet = new Set<string>();
     const existingCanonicalMap = new Map<string, { id: string; business_name: string }>();
@@ -685,7 +686,8 @@ export class ClientSyncService {
     }
 
     const softDeletedRows = await db.select<{ business_name: string }[]>(
-      "SELECT business_name FROM clients WHERE deleted_at IS NOT NULL"
+      "SELECT business_name FROM clients WHERE deleted_at IS NOT NULL AND project_url = $1",
+      [activeProjectUrl]
     );
     const softDeletedSet = new Set(
       softDeletedRows.map((r) => r.business_name.toUpperCase().trim()).filter(Boolean)

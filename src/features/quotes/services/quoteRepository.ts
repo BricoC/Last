@@ -262,18 +262,21 @@ export class QuoteRepository {
       quotePayload, ddtPayload: conversion.payload,
     });
     const activeProjectUrl = getLastKnownSupabaseProjectUrl();
-    if (activeProjectUrl) {
+    const ddtProjectUrl = existing ? (existing.project_url ?? null) : activeProjectUrl;
+    if (activeProjectUrl || ddtProjectUrl) {
       const db = await getDatabase();
-      if (!existing) {
+      if (!existing && activeProjectUrl) {
         await db.execute("UPDATE quotes SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
           activeProjectUrl,
           quoteId,
         ]);
       }
-      await db.execute("UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
-        activeProjectUrl,
-        conversion.payload.id,
-      ]);
+      if (ddtProjectUrl) {
+        await db.execute("UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
+          ddtProjectUrl,
+          conversion.payload.id,
+        ]);
+      }
     }
     return { quoteId, quoteNumber, ...conversion };
   }
