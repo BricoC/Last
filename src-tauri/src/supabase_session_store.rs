@@ -25,7 +25,7 @@ fn session_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[cfg(target_os = "windows")]
-mod dpapi {
+pub(crate) mod dpapi {
     use std::ffi::c_void;
     use std::ptr::{null, null_mut};
 
@@ -131,7 +131,7 @@ mod dpapi {
 }
 
 #[cfg(not(target_os = "windows"))]
-mod dpapi {
+pub(crate) mod dpapi {
     pub fn protect(_plain: &[u8]) -> Result<Vec<u8>, String> {
         Err("Protezione DPAPI disponibile solo su Windows".into())
     }

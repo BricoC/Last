@@ -9,11 +9,13 @@ import { getDestinationInfo } from "../utils/destinationCleaner";
 export interface DDTClienteCardProps {
   ddt: Partial<DdtDocument>;
   setDdt: React.Dispatch<React.SetStateAction<Partial<DdtDocument>>>;
+  onSilentEnrichDdt?: (updater: (prev: Partial<DdtDocument>) => Partial<DdtDocument>) => void;
 }
 
 export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
   ddt,
   setDdt,
+  onSilentEnrichDdt,
 }) => {
   const [clientSearch, setClientSearch] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -87,7 +89,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
       clientRepository.getClientById(ddt.client_id).then((c) => {
         if (!active || !c) return;
         setSelectedClient(c);
-        setDdt((prev) => {
+        (onSilentEnrichDdt ?? setDdt)((prev) => {
           const needsAddress = !prev.client_address && c.address;
           const needsCity = !prev.client_city && c.city;
           const needsVat = !prev.client_vat && c.vat_number;
@@ -117,39 +119,40 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
     } else if (ddt.client_name?.trim()) {
       clientRepository.getClients(ddt.client_name).then((res) => {
         if (!active || res.length === 0) return;
-        const exact =
-          res.find((item) => item.business_name.trim().toUpperCase() === ddt.client_name?.trim().toUpperCase()) ||
-          res[0];
+        const normalizedTarget = ddt.client_name?.trim().toUpperCase();
+        const exact = res.find((item) => item.business_name.trim().toUpperCase() === normalizedTarget);
 
-        if (exact) {
-          setSelectedClient(exact);
-          setDdt((prev) => {
-            const needsAddress = !prev.client_address && exact.address;
-            const needsCity = !prev.client_city && exact.city;
-            const needsVat = !prev.client_vat && exact.vat_number;
-            const needsSdi = !prev.client_sdi && exact.sdi_code;
-            const needsClientId = !prev.client_id;
-
-            const matchingDestInCity = exact.destinations?.find(
-              (d) => d.citta && d.citta.trim().toUpperCase() === (prev.destination_city || "").trim().toUpperCase()
-            );
-
-            if (needsAddress || needsCity || needsVat || needsSdi || needsClientId || matchingDestInCity) {
-              return {
-                ...prev,
-                client_id: prev.client_id || exact.id,
-                client_address: prev.client_address || exact.address || "",
-                client_city: prev.client_city || [exact.city, exact.province].filter(Boolean).join(" (") + (exact.province ? ")" : ""),
-                client_vat: prev.client_vat || exact.vat_number || "",
-                client_fiscal_code: prev.client_fiscal_code || exact.fiscal_code || "",
-                client_sdi: prev.client_sdi || exact.sdi_code || "",
-                destination_address: matchingDestInCity ? matchingDestInCity.citta : prev.destination_address,
-                destination_city: matchingDestInCity ? "" : prev.destination_city,
-              };
-            }
-            return prev;
-          });
+        if (!exact) {
+          setSelectedClient(null);
+          return;
         }
+        setSelectedClient(exact);
+        (onSilentEnrichDdt ?? setDdt)((prev) => {
+          const needsAddress = !prev.client_address && exact.address;
+          const needsCity = !prev.client_city && exact.city;
+          const needsVat = !prev.client_vat && exact.vat_number;
+          const needsSdi = !prev.client_sdi && exact.sdi_code;
+          const needsClientId = !prev.client_id;
+
+          const matchingDestInCity = exact.destinations?.find(
+            (d) => d.citta && d.citta.trim().toUpperCase() === (prev.destination_city || "").trim().toUpperCase()
+          );
+
+          if (needsAddress || needsCity || needsVat || needsSdi || needsClientId || matchingDestInCity) {
+            return {
+              ...prev,
+              client_id: prev.client_id || exact.id,
+              client_address: prev.client_address || exact.address || "",
+              client_city: prev.client_city || [exact.city, exact.province].filter(Boolean).join(" (") + (exact.province ? ")" : ""),
+              client_vat: prev.client_vat || exact.vat_number || "",
+              client_fiscal_code: prev.client_fiscal_code || exact.fiscal_code || "",
+              client_sdi: prev.client_sdi || exact.sdi_code || "",
+              destination_address: matchingDestInCity ? matchingDestInCity.citta : prev.destination_address,
+              destination_city: matchingDestInCity ? "" : prev.destination_city,
+            };
+          }
+          return prev;
+        });
       });
     } else {
       setSelectedClient(null);

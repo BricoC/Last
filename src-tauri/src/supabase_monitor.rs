@@ -3,7 +3,8 @@ use std::{fs, path::PathBuf, sync::Mutex, time::Duration};
 use tauri::{AppHandle, Manager};
 
 static MGMT_LOCK: Mutex<()> = Mutex::new(());
-const MGMT_CONFIG_FILE: &str = "supabase.management.local.json";
+const MGMT_CONFIG_FILE: &str = "supabase.management.local.bin";
+const LEGACY_MGMT_CONFIG_FILE: &str = "supabase.management.local.json";
 const SUPABASE_CONFIG_FILE: &str = "supabase.local.json";
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -57,6 +58,13 @@ fn mgmt_config_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|_| "Cartella dati Last non disponibile".into())
 }
 
+fn legacy_mgmt_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join(LEGACY_MGMT_CONFIG_FILE))
+        .map_err(|_| "Cartella dati Last non disponibile".into())
+}
+
 fn supabase_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -66,15 +74,26 @@ fn supabase_config_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn read_mgmt_config(app: &AppHandle) -> Result<SupabaseManagementConfig, String> {
     let path = mgmt_config_path(app)?;
-    let file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(SupabaseManagementConfig::default())
+    match fs::read(&path) {
+        Ok(bytes) => {
+            let plain = crate::supabase_session_store::dpapi::unprotect(&bytes)?;
+            serde_json::from_slice(&plain)
+                .map_err(|_| "Configurazione token Management non valida".to_string())
         }
-        Err(_) => return Err("Impossibile leggere la configurazione token Management".into()),
-    };
-    serde_json::from_reader(file)
-        .map_err(|_| "Configurazione token Management non valida".to_string())
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let legacy_path = legacy_mgmt_config_path(app)?;
+            let file = match fs::File::open(&legacy_path) {
+                Ok(file) => file,
+                Err(legacy_err) if legacy_err.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(SupabaseManagementConfig::default());
+                }
+                Err(_) => return Err("Impossibile leggere la configurazione token Management".into()),
+            };
+            serde_json::from_reader(file)
+                .map_err(|_| "Configurazione token Management non valida".to_string())
+        }
+        Err(_) => Err("Impossibile leggere la configurazione token Management".into()),
+    }
 }
 
 fn extract_project_ref(project_url: &str) -> Result<String, String> {
@@ -164,11 +183,15 @@ pub fn save_supabase_management_config(
     let path = mgmt_config_path(&app)?;
     let dir = path.parent().ok_or("Cartella configurazione non valida")?;
     fs::create_dir_all(dir).map_err(|_| "Impossibile creare la cartella configurazione")?;
-    let bytes = serde_json::to_vec_pretty(&normalized)
+    let bytes = serde_json::to_vec(&normalized)
         .map_err(|_| "Impossibile serializzare la configurazione")?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, bytes).map_err(|_| "Impossibile scrivere il file token")?;
+    let encrypted = crate::supabase_session_store::dpapi::protect(&bytes)?;
+    let tmp = path.with_extension("bin.tmp");
+    fs::write(&tmp, encrypted).map_err(|_| "Impossibile scrivere il file token")?;
     fs::rename(&tmp, &path).map_err(|_| "Impossibile aggiornare il file token")?;
+    if let Ok(legacy_path) = legacy_mgmt_config_path(&app) {
+        let _ = fs::remove_file(legacy_path);
+    }
 
     Ok(ManagementConfigStatus {
         has_token: !normalized.access_token.is_empty(),

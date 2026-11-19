@@ -932,6 +932,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     try {
       await ddtRepository.deleteDdt(ddt.id);
       savedSignature.current = currentSignature;
+      isDirtyRef.current = false;
       handleNewDdt();
       await loadRecentDdts();
       await refreshTrashCount();
@@ -946,6 +947,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       await ddtRepository.deleteDdt(id);
       if (ddt.id === id) {
         savedSignature.current = currentSignature;
+        isDirtyRef.current = false;
         handleNewDdt();
       }
       await loadRecentDdts();
@@ -1403,6 +1405,18 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                 <DDTClienteCard
                   ddt={ddt}
                   setDdt={setDdt}
+                  onSilentEnrichDdt={(updater) => {
+                    setDdt((prev) => {
+                      const updated = updater(prev);
+                      if (
+                        updated !== prev &&
+                        savedSignature.current === signature(prev, items, globalDiscount, globalMarkup)
+                      ) {
+                        savedSignature.current = signature(updated, items, globalDiscount, globalMarkup);
+                      }
+                      return updated;
+                    });
+                  }}
                 />
               </div>
 

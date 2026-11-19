@@ -764,8 +764,14 @@ export class DdtRepository {
         if (docNumber === null) {
           docNumber = await this.getNextDocNumberWithCloud(year);
         } else {
-          const cloudTaken = await ddtCloudPushService.isNumberTakenOnCloud(year, docNumber, docId);
-          if (cloudTaken) {
+          const db = await getDatabase();
+          const localTakenRows = await db.select<{ id: string }[]>(
+            `SELECT id FROM ddt_documents WHERE year = $1 AND doc_number = $2 AND deleted_at IS NULL AND id <> $3 LIMIT 1`,
+            [year, docNumber, docId]
+          );
+          const localTaken = localTakenRows.length > 0;
+          const cloudTaken = localTaken ? true : await ddtCloudPushService.isNumberTakenOnCloud(year, docNumber, docId);
+          if (localTaken || cloudTaken) {
             docNumber = await this.getNextDocNumberWithCloud(year);
           }
         }

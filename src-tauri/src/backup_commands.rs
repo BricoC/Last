@@ -272,14 +272,19 @@ pub async fn restore_database_file(app: AppHandle, source_file_path: String) -> 
         None => None,
     };
     let result = replace_active_database(&db_path, &stage).await;
-    if let (Err(error), Some(options)) = (&result, previous_options) {
+    if let Some(options) = previous_options {
         match sqlx::SqlitePool::connect_with((*options).clone()).await {
             Ok(pool) => {
                 instances.insert(DATABASE_KEY.into(), DbPool::Sqlite(pool));
             }
             Err(reopen_error) => {
+                if let Err(error) = &result {
+                    return Err(format!(
+                        "{error}. Riapertura del database originale fallita: {reopen_error}"
+                    ));
+                }
                 return Err(format!(
-                    "{error}. Riapertura del database originale fallita: {reopen_error}"
+                    "Ripristino completato, ma riapertura del database fallita: {reopen_error}"
                 ));
             }
         }

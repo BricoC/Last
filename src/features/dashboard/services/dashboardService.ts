@@ -244,7 +244,7 @@ export class DashboardService {
        ORDER BY year ASC, month ASC`
     );
 
-    // 2b. Costi e Margini mensili per anno
+    // 2b. Costi e Margini mensili per anno (esclusi i DDT con causale Reso: nessun margine di vendita)
     const costRows = await db.select<{
       year: number;
       month: number;
@@ -262,6 +262,7 @@ export class DashboardService {
          AND i.deleted_at IS NULL
          AND d.status <> 'bozza'
          AND d.doc_number IS NOT NULL
+         AND LOWER(COALESCE(d.transport_reason, '')) NOT LIKE '%reso%'
        GROUP BY d.year, month`
     );
 
@@ -291,7 +292,8 @@ export class DashboardService {
         const turnover = (Number(row.turnover_subunits) || 0) / 100000;
         const costEntry = costMap.get(`${yr}-${m}`);
         const cost = costEntry ? costEntry.cost : 0;
-        const margin = turnover > 0 && cost > 0 ? turnover - cost : 0;
+        const marginTurnover = costEntry ? costEntry.net : 0;
+        const margin = marginTurnover > 0 && cost > 0 ? marginTurnover - cost : 0;
 
         monthlyByYear[yr][m - 1] = {
           month: m,
@@ -434,23 +436,34 @@ export class DashboardService {
     const currentMonthTurnover = currentYearMonths[currentMonth - 1]?.turnover || 0;
     const prevYearSameMonthTurnover = prevYearMonths[currentMonth - 1]?.turnover || 0;
     const currentMonthCost = currentYearMonths[currentMonth - 1]?.cost || 0;
+    const currentMonthMarginTurnover = costMap.get(`${currentYear}-${currentMonth}`)?.net || 0;
+    const currentMonthMargin = currentMonthMarginTurnover > 0 && currentMonthCost > 0
+      ? currentMonthMarginTurnover - currentMonthCost
+      : 0;
     const currentMonthMarginPercent =
-      currentMonthTurnover > 0 && currentMonthCost > 0
-        ? ((currentMonthTurnover - currentMonthCost) / currentMonthTurnover) * 100
+      currentMonthMarginTurnover > 0 && currentMonthCost > 0
+        ? (currentMonthMargin / currentMonthMarginTurnover) * 100
         : null;
 
     const totalCurrentCost = currentYearMonths.reduce((acc, m) => acc + m.cost, 0);
+    const totalCurrentMarginTurnover = currentYearMonths.reduce(
+      (acc, m) => acc + (costMap.get(`${currentYear}-${m.month}`)?.net || 0),
+      0
+    );
+    const totalCurrentMargin = totalCurrentMarginTurnover > 0 && totalCurrentCost > 0
+      ? totalCurrentMarginTurnover - totalCurrentCost
+      : 0;
     const averageMarginPercent =
-      currentYearTurnover > 0 && totalCurrentCost > 0
-        ? ((currentYearTurnover - totalCurrentCost) / currentYearTurnover) * 100
+      totalCurrentMarginTurnover > 0 && totalCurrentCost > 0
+        ? (totalCurrentMargin / totalCurrentMarginTurnover) * 100
         : null;
     const averageMarkupPercent =
-      currentYearTurnover > 0 && totalCurrentCost > 0
-        ? ((currentYearTurnover - totalCurrentCost) / totalCurrentCost) * 100
+      totalCurrentMarginTurnover > 0 && totalCurrentCost > 0
+        ? (totalCurrentMargin / totalCurrentCost) * 100
         : null;
     const currentMonthMarkupPercent =
-      currentMonthTurnover > 0 && currentMonthCost > 0
-        ? ((currentMonthTurnover - currentMonthCost) / currentMonthCost) * 100
+      currentMonthMarginTurnover > 0 && currentMonthCost > 0
+        ? (currentMonthMargin / currentMonthCost) * 100
         : null;
 
     // 8. Calcolo metriche YTD e MTD (Year-To-Date e Month-To-Date fino alla data odierna gg/mm per ciascun anno)
@@ -484,13 +497,15 @@ export class DashboardService {
       [currentMonth, currentDay]
     );
 
-    // Query 2: Costi YTD (dal 1 Gennaio al giorno odierno)
+    // Query 2: Costi YTD (dal 1 Gennaio al giorno odierno, esclusi i Resi)
     const ytdCostRows = await db.select<{
       year: number;
       cost_subunits: number;
+      net_subunits: number;
     }[]>(
       `SELECT 
          d.year,
+         SUM(i.net_amount_subunits) AS net_subunits,
          SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
@@ -499,6 +514,7 @@ export class DashboardService {
          AND d.status <> 'bozza'
          AND d.doc_number IS NOT NULL
          AND d.year IS NOT NULL
+         AND LOWER(COALESCE(d.transport_reason, '')) NOT LIKE '%reso%'
          AND (
            CAST(strftime('%m', d.doc_date) AS INTEGER) < $1
            OR (
@@ -532,13 +548,15 @@ export class DashboardService {
       [currentMonth, currentDay]
     );
 
-    // Query 4: Costi MTD (mese corrente dal giorno 1 al giorno odierno)
+    // Query 4: Costi MTD (mese corrente dal giorno 1 al giorno odierno, esclusi i Resi)
     const mtdCostRows = await db.select<{
       year: number;
       cost_subunits: number;
+      net_subunits: number;
     }[]>(
       `SELECT 
          d.year,
+         SUM(i.net_amount_subunits) AS net_subunits,
          SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
@@ -547,6 +565,7 @@ export class DashboardService {
          AND d.status <> 'bozza'
          AND d.doc_number IS NOT NULL
          AND d.year IS NOT NULL
+         AND LOWER(COALESCE(d.transport_reason, '')) NOT LIKE '%reso%'
          AND CAST(strftime('%m', d.doc_date) AS INTEGER) = $1
          AND CAST(strftime('%d', d.doc_date) AS INTEGER) <= $2
        GROUP BY d.year`,
@@ -573,19 +592,27 @@ export class DashboardService {
     const ytdDataMap = new Map<number, { turnover: number; ddtCount: number; cost: number; margin: number; marginPercent: number | null; markupPercent: number | null }>();
     const mtdDataMap = new Map<number, { turnover: number; ddtCount: number; cost: number; margin: number; marginPercent: number | null; markupPercent: number | null }>();
 
-    const ytdCostMap = new Map<number, number>();
-    ytdCostRows.forEach((r) => ytdCostMap.set(Number(r.year), (Number(r.cost_subunits) || 0) / 100000));
+    const ytdCostMap = new Map<number, { cost: number; net: number }>();
+    ytdCostRows.forEach((r) => ytdCostMap.set(Number(r.year), {
+      cost: (Number(r.cost_subunits) || 0) / 100000,
+      net: (Number(r.net_subunits) || 0) / 100000,
+    }));
 
-    const mtdCostMap = new Map<number, number>();
-    mtdCostRows.forEach((r) => mtdCostMap.set(Number(r.year), (Number(r.cost_subunits) || 0) / 100000));
+    const mtdCostMap = new Map<number, { cost: number; net: number }>();
+    mtdCostRows.forEach((r) => mtdCostMap.set(Number(r.year), {
+      cost: (Number(r.cost_subunits) || 0) / 100000,
+      net: (Number(r.net_subunits) || 0) / 100000,
+    }));
 
     ytdRows.forEach((r) => {
       const yr = Number(r.year);
       const turnover = (Number(r.turnover_subunits) || 0) / 100000;
       const ddtCount = Number(r.ddt_count) || 0;
-      const cost = ytdCostMap.get(yr) || 0;
-      const margin = turnover - cost;
-      const marginPercent = turnover > 0 && cost > 0 ? (margin / turnover) * 100 : null;
+      const costEntry = ytdCostMap.get(yr);
+      const cost = costEntry?.cost || 0;
+      const marginTurnover = costEntry?.net || 0;
+      const margin = marginTurnover - cost;
+      const marginPercent = marginTurnover > 0 && cost > 0 ? (margin / marginTurnover) * 100 : null;
       const markupPercent = cost > 0 ? (margin / cost) * 100 : null;
       ytdDataMap.set(yr, { turnover, ddtCount, cost, margin, marginPercent, markupPercent });
     });
@@ -594,9 +621,11 @@ export class DashboardService {
       const yr = Number(r.year);
       const turnover = (Number(r.turnover_subunits) || 0) / 100000;
       const ddtCount = Number(r.ddt_count) || 0;
-      const cost = mtdCostMap.get(yr) || 0;
-      const margin = turnover - cost;
-      const marginPercent = turnover > 0 && cost > 0 ? (margin / turnover) * 100 : null;
+      const costEntry = mtdCostMap.get(yr);
+      const cost = costEntry?.cost || 0;
+      const marginTurnover = costEntry?.net || 0;
+      const margin = marginTurnover - cost;
+      const marginPercent = marginTurnover > 0 && cost > 0 ? (margin / marginTurnover) * 100 : null;
       const markupPercent = cost > 0 ? (margin / cost) * 100 : null;
       mtdDataMap.set(yr, { turnover, ddtCount, cost, margin, marginPercent, markupPercent });
     });
@@ -964,10 +993,11 @@ export class DashboardService {
       });
     });
 
-    // 3. Query costi per l'anno principale selezionato
-    const costRows = await db.select<{ month: number; cost_subunits: number }[]>(
+    // 3. Query costi per l'anno principale selezionato (esclusi i Resi)
+    const costRows = await db.select<{ month: number; cost_subunits: number; net_subunits: number }[]>(
       `SELECT 
          CAST(strftime('%m', d.doc_date) AS INTEGER) AS month,
+         SUM(i.net_amount_subunits) AS net_subunits,
          SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
@@ -976,14 +1006,18 @@ export class DashboardService {
          AND d.status <> 'bozza'
          AND d.doc_number IS NOT NULL
          AND d.year = $1
+         AND LOWER(COALESCE(d.transport_reason, '')) NOT LIKE '%reso%'
        GROUP BY month
        ORDER BY month ASC`,
       [year]
     );
 
-    const costMap = new Map<number, number>();
+    const costMap = new Map<number, { cost: number; net: number }>();
     costRows.forEach((r) => {
-      costMap.set(Number(r.month), (Number(r.cost_subunits) || 0) / 100000);
+      costMap.set(Number(r.month), {
+        cost: (Number(r.cost_subunits) || 0) / 100000,
+        net: (Number(r.net_subunits) || 0) / 100000,
+      });
     });
 
     // 4. Costruzione dei 12 mesi con confronto verso tutti gli anni disponibili
@@ -996,9 +1030,11 @@ export class DashboardService {
         ddtCount: 0,
       };
       const turnover = cur.fullTurnover;
-      const cost = costMap.get(monthNum) || 0;
-      const margin = turnover > 0 && cost > 0 ? turnover - cost : 0;
-      const marginPercent = turnover > 0 && cost > 0 ? (margin / turnover) * 100 : 0;
+      const costEntry = costMap.get(monthNum);
+      const cost = costEntry?.cost || 0;
+      const marginTurnover = costEntry?.net || 0;
+      const margin = marginTurnover > 0 && cost > 0 ? marginTurnover - cost : 0;
+      const marginPercent = marginTurnover > 0 && cost > 0 ? (margin / marginTurnover) * 100 : 0;
       const markupPercent = cost > 0 ? (margin / cost) * 100 : 0;
       const averageTicket = cur.ddtCount > 0 ? turnover / cur.ddtCount : 0;
 
@@ -1077,8 +1113,9 @@ export class DashboardService {
 
     const totalTurnover = months.reduce((acc, m) => acc + m.turnover, 0);
     const totalCost = months.reduce((acc, m) => acc + m.cost, 0);
-    const totalMargin = totalTurnover > 0 && totalCost > 0 ? totalTurnover - totalCost : 0;
-    const averageMarginPercent = totalTurnover > 0 && totalCost > 0 ? (totalMargin / totalTurnover) * 100 : 0;
+    const totalMarginTurnover = months.reduce((acc, m) => acc + (costMap.get(m.month)?.net || 0), 0);
+    const totalMargin = totalMarginTurnover > 0 && totalCost > 0 ? totalMarginTurnover - totalCost : 0;
+    const averageMarginPercent = totalMarginTurnover > 0 && totalCost > 0 ? (totalMargin / totalMarginTurnover) * 100 : 0;
     const averageMarkupPercent = totalCost > 0 ? (totalMargin / totalCost) * 100 : 0;
     const totalDdtCount = months.reduce((acc, m) => acc + m.ddtCount, 0);
 

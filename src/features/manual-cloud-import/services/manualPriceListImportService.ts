@@ -3,6 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch } from "@/shared/data-layer/localDatabaseBatch";
 import { parseItalianNumber } from "@/shared/utils/numberUtils";
 import { deterministicUuid } from "@/shared/utils/deterministicUuid";
 
@@ -1162,9 +1163,13 @@ export async function backupLocalSqliteTable(table: string = "listini_clienti"):
 }
 
 export async function restoreLocalSqliteTable(table: string = "listini_clienti"): Promise<void> {
-  const db = await getDatabase();
-  await db.execute(`DELETE FROM ${table};`);
-  await db.execute(`INSERT INTO ${table} SELECT * FROM ${table}_migration_safety_backup;`);
+  if (!/^[a-zA-Z0-9_]+$/.test(table)) {
+    throw new Error(`Nome tabella non valido: ${table}`);
+  }
+  await applyLocalDatabaseBatch([
+    { sql: `DELETE FROM ${table}`, params: [] },
+    { sql: `INSERT INTO ${table} SELECT * FROM ${table}_migration_safety_backup`, params: [] },
+  ]);
 }
 
 export async function downloadSupabaseSnapshot(
