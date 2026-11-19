@@ -140,7 +140,7 @@ export function mapLineForLocal(line: CloudLine, cloudHeaderId: string | null, f
   const isNote = Boolean(line.descrizione?.trim()) && price === 0 && amount === 0
     && validAmount(line.prezzo_acquisto) === 0 && !hasUnit && !hasQuantity;
   const createdAt = new Date().toISOString();
-  const vatRate = isNote ? 0 : validAmount(line.iva_pct);
+  const vatRate = isNote || (price === 0 && amount === 0) ? 0 : validAmount(line.iva_pct);
   const netAmountSubunits = isNote ? 0 : subunits(line.importo);
   return {
     id: line.id, cloudHeaderId, rowIndex: Number(line.riga_nr ?? fallbackRowIndex),

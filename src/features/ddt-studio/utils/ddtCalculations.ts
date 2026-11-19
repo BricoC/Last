@@ -198,7 +198,11 @@ export function calculateDdtTotals(items: Partial<DdtItem>[]): DdtTotals {
   let totalCost = money(0);
 
   for (const item of items) {
-    if (!item.description?.trim() && !isPositivePrice(item.unit_price)) {
+    if (
+      !item.description?.trim() &&
+      !isPositivePrice(item.unit_price) &&
+      !isPositivePrice(item.purchase_price)
+    ) {
       continue;
     }
 

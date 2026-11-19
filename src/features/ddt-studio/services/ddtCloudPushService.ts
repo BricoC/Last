@@ -43,6 +43,7 @@ interface LocalDdtRow {
   client_sdi: string | null;
   client_phones_json: string | null;
   destination_name: string | null;
+  destination_address?: string | null;
   destination_city: string | null;
   transport_reason: string | null;
   payment_method: string | null;
@@ -191,6 +192,21 @@ export function buildSupabaseDdtPayloads(doc: LocalDdtRow, items: LocalDdtItemRo
   const profit = round5(taxable - roundedCost);
   const markup = roundedCost > 0 ? round5(profit / roundedCost) : 0;
 
+  const rawDestName = (doc.destination_name || "").trim();
+  const rawDestAddr = (doc.destination_address || "").trim();
+  const rawDestCity = (doc.destination_city || "").trim();
+  const clientName = (doc.client_name || "").trim();
+  const isDestNameMissingOrClient = !rawDestName || rawDestName.toUpperCase() === clientName.toUpperCase();
+  const isDestNameSameAsAddr = Boolean(rawDestAddr && rawDestName.toUpperCase() === rawDestAddr.toUpperCase());
+  const cloudDestinazione = rawDestAddr
+    ? isDestNameMissingOrClient || isDestNameSameAsAddr
+      ? rawDestAddr
+      : rawDestCity
+      ? rawDestName
+      : `${rawDestName} - ${rawDestAddr}`
+    : rawDestName;
+  const cloudCittaDest = rawDestCity;
+
   const headerPayload = {
     id: doc.id,
     numero: doc.doc_number,
@@ -200,8 +216,8 @@ export function buildSupabaseDdtPayloads(doc: LocalDdtRow, items: LocalDdtItemRo
     indirizzo: doc.client_address || "",
     citta: doc.client_city || "",
     pagamento: doc.payment_method || "",
-    destinazione: doc.destination_name || "",
-    citta_dest: doc.destination_city || "",
+    destinazione: cloudDestinazione,
+    citta_dest: cloudCittaDest,
     nr_vs_ordine: doc.order_reference || "",
     causale: doc.transport_reason || "Vendita",
     porto: doc.carriage_terms || "",
@@ -706,17 +722,33 @@ class DdtCloudPushService {
       const delRemovedUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
       delRemovedUrl.searchParams.set("ddt_id", `eq.${currentDoc.id}`);
       delRemovedUrl.searchParams.set("id", `not.in.(${linePayloads.map((l) => l.id).join(",")})`);
-      await fetchWithTimeout(delRemovedUrl.toString(), {
+      const delRemovedRes = await fetchWithTimeout(delRemovedUrl.toString(), {
         method: "DELETE",
         headers: { apikey: creds.anonKey },
-      }).catch(() => {});
+      });
+      if (!delRemovedRes.ok) {
+        const errBody = (await delRemovedRes.json().catch(() => ({}))) as { message?: string };
+        return {
+          success: false,
+          docNumber: currentDoc.doc_number,
+          error: `Errore pulizia righe rimosse DDT: ${errBody?.message || delRemovedRes.statusText || delRemovedRes.status}`,
+        };
+      }
     } else {
       const delAllUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
       delAllUrl.searchParams.set("ddt_id", `eq.${currentDoc.id}`);
-      await fetchWithTimeout(delAllUrl.toString(), {
+      const delAllRes = await fetchWithTimeout(delAllUrl.toString(), {
         method: "DELETE",
         headers: { apikey: creds.anonKey },
-      }).catch(() => {});
+      });
+      if (!delAllRes.ok) {
+        const errBody = (await delAllRes.json().catch(() => ({}))) as { message?: string };
+        return {
+          success: false,
+          docNumber: currentDoc.doc_number,
+          error: `Errore pulizia righe DDT: ${errBody?.message || delAllRes.statusText || delAllRes.status}`,
+        };
+      }
     }
 
     // Pulisce eventuali righe orfane con stesso anno/numero e ddt_id NULL
@@ -724,10 +756,18 @@ class DdtCloudPushService {
     delOrphanUrl.searchParams.set("anno", `eq.${currentDoc.year}`);
     delOrphanUrl.searchParams.set("numero_ddt", `eq.${currentDoc.doc_number}`);
     delOrphanUrl.searchParams.set("ddt_id", "is.null");
-    await fetchWithTimeout(delOrphanUrl.toString(), {
+    const delOrphanRes = await fetchWithTimeout(delOrphanUrl.toString(), {
       method: "DELETE",
       headers: { apikey: creds.anonKey },
-    }).catch(() => {});
+    });
+    if (!delOrphanRes.ok) {
+      const errBody = (await delOrphanRes.json().catch(() => ({}))) as { message?: string };
+      return {
+        success: false,
+        docNumber: currentDoc.doc_number,
+        error: `Errore pulizia righe orfane DDT: ${errBody?.message || delOrphanRes.statusText || delOrphanRes.status}`,
+      };
+    }
 
     await db.execute(`UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`, [
       currentDoc.id,

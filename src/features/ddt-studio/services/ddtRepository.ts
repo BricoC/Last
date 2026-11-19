@@ -783,7 +783,13 @@ export class DdtRepository {
 
     const totals = calculateDdtTotals(items);
     const validItems = items.filter(
-      (it) => it.description?.trim().length || isPositivePrice(it.unit_price)
+      (it) =>
+        Boolean(it.description?.trim().length) ||
+        isPositivePrice(it.unit_price) ||
+        Boolean(it.purchase_price && isPositivePrice(it.purchase_price)) ||
+        Boolean(it.code?.trim()) ||
+        Boolean(it.unit?.trim()) ||
+        Boolean(it.quantity !== undefined && it.quantity !== null && String(it.quantity).trim() !== "")
     );
     const itemPayloads = validItems.map((it, index) => {
       const isNote = it.row_kind === "note" || (

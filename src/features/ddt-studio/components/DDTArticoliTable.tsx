@@ -362,7 +362,6 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
               deleted_at: null,
               sync_status: "pending",
               row_index: newItems.length + 1,
-              row_kind: "item",
               unit: "",
               quantity: "",
               description: "",
@@ -426,6 +425,27 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
               }
             }
           });
+
+          if (isTextOnlyRow(targetRow)) {
+            targetRow.row_kind = "note";
+            targetRow.unit = "";
+            targetRow.quantity = "";
+            targetRow.vat_rate = "";
+            targetRow.discount_pct = "";
+            targetRow.unit_price = money(0);
+            targetRow.base_price = money(0);
+            targetRow.purchase_price = money(0);
+            targetRow.net_amount = money(0);
+            targetRow.vat_amount = money(0);
+          } else if (
+            isPositivePrice(targetRow.unit_price) ||
+            isPositivePrice(targetRow.purchase_price) ||
+            Boolean(targetRow.quantity && String(targetRow.quantity).trim() !== "") ||
+            Boolean(targetRow.unit && String(targetRow.unit).trim() !== "") ||
+            Boolean(targetRow.code && String(targetRow.code).trim() !== "")
+          ) {
+            targetRow.row_kind = "item";
+          }
 
           // Ricalcolo importi riga
           const { netAmount, vatAmount } = calculateRowAmounts(

@@ -205,29 +205,56 @@ export class NotesSyncService {
         updated_at?: string;
       };
       const PAGE_SIZE = 1000;
-      const remoteList: RemoteNoteRow[] = [];
-      let pullOk = false;
+      const remoteById = new Map<number, RemoteNoteRow>();
+      let pullOk = true;
       let pullErrorStatus: number | null = null;
-      for (let offset = 0; ; offset += PAGE_SIZE) {
+      let cursor: { updated_at: string | null; id: number } | null = null;
+      for (;;) {
         const pullUrl = new URL(
-          `/rest/v1/note?select=*&order=updated_at.desc&limit=${PAGE_SIZE}&offset=${offset}`,
+          `/rest/v1/note?select=*&order=updated_at.desc,id.desc&limit=${PAGE_SIZE}`,
           creds.projectUrl
         );
+        if (cursor) {
+          if (cursor.updated_at) {
+            pullUrl.searchParams.set(
+              "or",
+              `(updated_at.lt.${cursor.updated_at},and(updated_at.eq.${cursor.updated_at},id.lt.${cursor.id}))`
+            );
+          } else {
+            pullUrl.searchParams.set(
+              "or",
+              `(and(updated_at.is.null,id.lt.${cursor.id}),updated_at.not.is.null)`
+            );
+          }
+        }
         const pullRes = await supabaseFetch(pullUrl.toString(), {
           headers: {
             apikey: creds.anonKey,
+            Prefer: "count=exact",
           },
         });
         if (!pullRes.ok) {
+          pullOk = false;
           pullErrorStatus = pullRes.status;
           break;
         }
-        pullOk = true;
         const page = (await pullRes.json()) as RemoteNoteRow[];
         if (!Array.isArray(page) || page.length === 0) break;
-        remoteList.push(...page);
-        if (page.length < PAGE_SIZE) break;
+        for (const row of page) {
+          if (typeof row?.id === "number") remoteById.set(row.id, row);
+        }
+        const last = page[page.length - 1];
+        if (typeof last?.id !== "number") break;
+        cursor = { updated_at: last.updated_at ?? null, id: last.id };
+        const totalMatch = pullRes.headers.get("content-range")?.match(/\/(\d+)$/);
+        if (totalMatch) {
+          const total = Number(totalMatch[1]);
+          if (page.length >= total) break;
+        } else if (page.length < PAGE_SIZE) {
+          break;
+        }
       }
+      const remoteList = Array.from(remoteById.values());
 
       if (pullOk) {
         {
