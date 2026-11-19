@@ -356,9 +356,10 @@ export class OffersRepository {
     );
     if (!rows || rows.length === 0) return null;
 
-    const item = rows[0] as (typeof rows)[number] & { project_url?: string | null };
+    const item = rows[0] as (typeof rows)[number] & { project_url?: string | null; supabase_id?: number | null };
     const nowIso = new Date().toISOString();
-    const originProjectUrl = item.project_url ?? getLastKnownSupabaseProjectUrl();
+    const originProjectUrl =
+      item.project_url ?? (item.supabase_id == null ? getLastKnownSupabaseProjectUrl() : null);
 
     // 1. Reinserisci nella tabella attiva con sync_status = 'pending'
     await applyLocalDatabaseBatch([{ sql: `INSERT INTO offers (

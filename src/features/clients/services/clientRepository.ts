@@ -334,6 +334,7 @@ export class ClientRepository {
       if (dupId === canonicalId) continue;
       const dup = await this.getClientById(dupId);
       if (!dup) continue;
+      if ((target.project_url ?? null) !== (dup.project_url ?? null)) continue;
 
       // Completa i campi anagrafici se mancanti nel principale
       if (!address && dup.address) address = dup.address;

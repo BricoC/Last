@@ -306,7 +306,8 @@ export class ElectronicInvoicesService {
               AND (
                 cloud_upload_pending = 1
                 OR julianday(cloud_uploaded_at) >= julianday($17)
-                OR (project_url IS NOT NULL AND project_url <> $18)
+                OR project_url IS NULL
+                OR project_url <> $18
               )
           );`,
           params: [

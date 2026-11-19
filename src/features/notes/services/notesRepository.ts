@@ -101,10 +101,9 @@ export class NotesRepository {
         color = $4,
         updated_by = $5,
         updated_at = $6,
-        sync_status = 'pending',
-        project_url = CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $7 ELSE NULL END
-      WHERE id = $8`,
-      [params.title, params.content_html, params.content_text, color, updatedBy, nowIso, getLastKnownSupabaseProjectUrl(), params.id]
+        sync_status = 'pending'
+      WHERE id = $7`,
+      [params.title, params.content_html, params.content_text, color, updatedBy, nowIso, params.id]
     );
   }
 

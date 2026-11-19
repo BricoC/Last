@@ -852,7 +852,7 @@ class DdtCloudPushService {
         );
         docProjectUrl = localRow[0]?.project_url ?? null;
       }
-      if (docProjectUrl && !matchesActiveSupabaseProject(docProjectUrl, creds.projectUrl)) {
+      if (!matchesActiveSupabaseProject(docProjectUrl, creds.projectUrl)) {
         return false;
       }
       const linesUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
@@ -898,8 +898,8 @@ class DdtCloudPushService {
       if (docs.length === 0) return { success: false, error: "DDT non trovato" };
 
       const doc = docs[0];
-      if (doc.project_url && !matchesActiveSupabaseProject(doc.project_url, creds.projectUrl)) {
-        return { success: false, docNumber: doc.doc_number, error: "DDT appartenente a un altro progetto Supabase" };
+      if (!matchesActiveSupabaseProject(doc.project_url, creds.projectUrl)) {
+        return { success: false, docNumber: doc.doc_number, error: "DDT privo di progetto Supabase verificabile o appartenente a un altro progetto" };
       }
       if (doc.deleted_at) {
         if (doc.doc_number !== null && doc.status !== "bozza") {

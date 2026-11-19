@@ -744,7 +744,8 @@ export class QuoteSyncService {
             data_json = excluded.data_json,
             deleted_at = excluded.deleted_at,
             deleted_by = excluded.deleted_by,
-            project_url = COALESCE(quotes_trash.project_url, excluded.project_url)`,
+            project_url = COALESCE(quotes_trash.project_url, excluded.project_url)
+          WHERE quotes_trash.project_url IS NULL OR quotes_trash.project_url = excluded.project_url`,
           [
             item.id,
             item.quote_number != null ? Number(item.quote_number) : null,
@@ -762,15 +763,19 @@ export class QuoteSyncService {
         );
       }
 
-      // Prune locale a max 5
-      await db.execute(`
-        DELETE FROM quotes_trash
-        WHERE id NOT IN (
-          SELECT id FROM quotes_trash
-          ORDER BY deleted_at DESC
-          LIMIT 5
-        )
-      `);
+      // Prune locale a max 5 (isolato per progetto)
+      if (trashProjectUrl) {
+        await db.execute(
+          `DELETE FROM quotes_trash
+           WHERE project_url = $1 AND id NOT IN (
+             SELECT id FROM quotes_trash
+             WHERE project_url = $1
+             ORDER BY deleted_at DESC
+             LIMIT 5
+           )`,
+          [trashProjectUrl]
+        );
+      }
 
       return remoteItems.length;
     } catch (err) {
