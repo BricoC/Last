@@ -56,12 +56,7 @@ export const isClientMatching = (clientSearchName: string, rowClientName: string
   const rTokens = rClean.split(/\s+/).filter((t) => t.length > 2 && !GENERIC_CLIENT_WORDS.has(t));
 
   if (cTokens.length > 0 && rTokens.length > 0) {
-    const primaryToken = cTokens[0];
-    const matchPrimary = rTokens.some(
-      (rt) => rt === primaryToken || (primaryToken.length >= 4 && rt.startsWith(primaryToken))
-    );
-    if (matchPrimary) return true;
-
+    if (cTokens.length === 1 && rTokens.length === 1 && cTokens[0] === rTokens[0]) return true;
     if (cTokens.length >= 2 && cTokens.every((ct) => rTokens.includes(ct))) return true;
     if (rTokens.length >= 2 && rTokens.every((rt) => cTokens.includes(rt))) return true;
   }
@@ -85,11 +80,7 @@ export const resolveClientPriceLists = async (clientName: string): Promise<strin
     const clientRows = await db.select<Array<{ price_lists_json: string | null }>>(
       `SELECT price_lists_json FROM clients 
        WHERE deleted_at IS NULL AND price_lists_json IS NOT NULL AND price_lists_json != '[]'
-         AND (
-           LOWER(TRIM(business_name)) = LOWER($1)
-           OR LOWER($1) LIKE '%' || LOWER(TRIM(business_name)) || '%'
-           OR LOWER(TRIM(business_name)) LIKE '%' || LOWER($1) || '%'
-         )
+         AND LOWER(TRIM(business_name)) = LOWER($1)
        LIMIT 1`,
       [clean]
     );
@@ -111,10 +102,13 @@ export const resolveClientPriceLists = async (clientName: string): Promise<strin
       `SELECT DISTINCT cliente FROM listini_clienti 
        WHERE cliente NOT LIKE 'LIST_000%' AND cliente != 'LIST_'`
     );
-    const matched = listiniRows
-      .map((r) => r.cliente)
-      .filter((plName) => isClientMatching(clean, plName));
+    const allNames = listiniRows.map((r) => r.cliente);
+    const exactMatches = allNames.filter((plName) => cleanClientStr(plName) === clean);
+    if (exactMatches.length > 0) {
+      return exactMatches;
+    }
 
+    const matched = allNames.filter((plName) => isClientMatching(clean, plName));
     if (matched.length > 0) {
       return matched;
     }

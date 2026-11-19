@@ -11,7 +11,7 @@ export function buildQuoteDdtConversion(input: QuoteDraftInput, ddtId: string) {
   const totals = calculateQuoteTotals(calculations);
   const items: DdtItem[] = activeItems.map((item, index) => {
     const calculated = calculations[index];
-    const hasLineDiscount = Boolean(item.discount_pct && item.discount_pct > 0);
+    const hasLineDiscount = !item.forced_unit_price && Boolean(item.discount_pct && item.discount_pct > 0);
     const hasGlobalDiscount = Boolean(input.global_discount_pct && input.global_discount_pct !== 0);
     const ddtUnitPrice = hasLineDiscount && !hasGlobalDiscount
       ? calculated.base_unit_price

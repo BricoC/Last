@@ -5,7 +5,11 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import type { Quote } from "../models/quote";
 import { formatQuoteCode } from "../models/quoteDraft";
-import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
+import {
+  createCachedSupabaseConfigLoader,
+  normalizeSupabaseProjectUrl,
+  type CachedSupabaseConfig,
+} from "@/shared/services/supabaseConfigCache";
 import { money } from "@/shared/domain/monetaryValue";
 import { parseItalianNumber } from "@/shared/utils/numberUtils";
 
@@ -341,23 +345,34 @@ export class QuoteSyncService {
     if (this.pendingRetry) return this.pendingRetry;
     this.pendingRetry = (async () => {
       const { quoteRepository } = await import("./quoteRepository");
-      await flushPendingCloudOperations("quotes", async ({ record_id, action, payload }) => {
-        if (action === "trash") {
-          const row = JSON.parse(payload);
-          if (!await this.pushTrashRow(row)) throw new Error("Spostamento preventivo nel cestino non confermato");
-          const db = await getDatabase();
-          await db.execute("UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND deleted_at = $2",
-            [record_id, row.deleted_at]);
-        } else if (action === "restore") {
-          const quote = await quoteRepository.getQuoteById(record_id, false);
-          if (!quote) return;
-          if (!await this.pushQuote(quote) || !await this.deleteTrashFromSupabase(record_id)) {
-            throw new Error("Ripristino preventivo non confermato");
+      const initialCreds = await getSupabaseCredentials();
+      await flushPendingCloudOperations(
+        "quotes",
+        async ({ record_id, action, payload, project_url }) => {
+          const creds = initialCreds ?? (await getSupabaseCredentials());
+          const expectedProject = normalizeSupabaseProjectUrl(project_url);
+          const actualProject = normalizeSupabaseProjectUrl(creds?.projectUrl);
+          if (!creds || !expectedProject || !actualProject || expectedProject !== actualProject) {
+            throw new Error("Il progetto Supabase attivo è cambiato durante l'invio dell'operazione preventivo.");
           }
-        } else if (action === "cleanup" && !await this.deleteTrashFromSupabase(record_id)) {
-          throw new Error("Rimozione dal cestino preventivi non confermata");
-        }
-      });
+          if (action === "trash") {
+            const row = JSON.parse(payload);
+            if (!await this.pushTrashRow(row, creds)) throw new Error("Spostamento preventivo nel cestino non confermato");
+            const db = await getDatabase();
+            await db.execute("UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND deleted_at = $2",
+              [record_id, row.deleted_at]);
+          } else if (action === "restore") {
+            const quote = await quoteRepository.getQuoteById(record_id, false);
+            if (!quote) return;
+            if (!await this.pushQuote(quote, creds) || !await this.deleteTrashFromSupabase(record_id, creds)) {
+              throw new Error("Ripristino preventivo non confermato");
+            }
+          } else if (action === "cleanup" && !await this.deleteTrashFromSupabase(record_id, creds)) {
+            throw new Error("Rimozione dal cestino preventivi non confermata");
+          }
+        },
+        initialCreds?.projectUrl ?? null,
+      );
       const db = await getDatabase();
       const archived = await db.select<Array<{ id: string; deleted_at: string; in_trash: number }>>(
         `SELECT id, deleted_at, EXISTS(SELECT 1 FROM quotes_trash WHERE id = quotes.id) AS in_trash
@@ -473,9 +488,9 @@ export class QuoteSyncService {
   /**
    * Invia un preventivo direttamente a Supabase Cloud (UPSERT)
    */
-  public static async pushQuote(quote: Quote): Promise<boolean> {
+  public static async pushQuote(quote: Quote, overrideCreds?: CachedSupabaseConfig): Promise<boolean> {
     try {
-      const creds = await getSupabaseCredentials();
+      const creds = overrideCreds ?? (await getSupabaseCredentials());
       if (!creds) return false;
 
       const row = this.mapQuoteToSupabase(quote);
@@ -584,9 +599,9 @@ export class QuoteSyncService {
    * Sposta un preventivo nel Cestino di Supabase Cloud (tabella preventivi_cestino)
    * e assicura il limite FIFO di massimo 5 elementi.
    */
-  private static async pushTrashRow(trashRow: Record<string, unknown>): Promise<boolean> {
+  private static async pushTrashRow(trashRow: Record<string, unknown>, overrideCreds?: CachedSupabaseConfig): Promise<boolean> {
     try {
-      const creds = await getSupabaseCredentials();
+      const creds = overrideCreds ?? (await getSupabaseCredentials());
       if (!creds) return false;
 
       // 1. Inserisci o aggiorna nel cestino remoto
@@ -646,9 +661,9 @@ export class QuoteSyncService {
   /**
    * Rimuove un preventivo dal cestino remoto di Supabase
    */
-  public static async deleteTrashFromSupabase(id: string): Promise<boolean> {
+  public static async deleteTrashFromSupabase(id: string, overrideCreds?: CachedSupabaseConfig): Promise<boolean> {
     try {
-      const creds = await getSupabaseCredentials();
+      const creds = overrideCreds ?? (await getSupabaseCredentials());
       if (!creds) return false;
 
       const url = `${creds.projectUrl}/rest/v1/preventivi_cestino?id=eq.${encodeURIComponent(id)}`;

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuoteSyncService } from "../quoteSyncService";
+import { invalidateSupabaseConfigCache, setLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 
 vi.mock("@/shared/services/supabaseSession", () => ({
   supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
@@ -17,6 +18,7 @@ const remote = { id: "preventivo-1", updated_at: date, data_json: { items: [] } 
 describe("Pull preventivi", () => {
   const fetch = vi.fn<typeof globalThis.fetch>();
   beforeEach(() => {
+    setLastKnownSupabaseProjectUrl("https://example.test");
     invoke.mockReset().mockImplementation(async (command) => command === "load_supabase_config"
       ? { config: { projectUrl: "https://example.test", anonKey: "test" } } : undefined);
     select.mockReset().mockResolvedValue([]);
@@ -51,7 +53,7 @@ describe("Pull preventivi", () => {
 
   it("conserva il preventivo attivo se Supabase rifiuta la scrittura nel cestino", async () => {
     select.mockResolvedValueOnce([{
-      sequence: 1, record_id: remote.id, action: "trash", payload: JSON.stringify(remote),
+      sequence: 1, record_id: remote.id, action: "trash", payload: JSON.stringify(remote), project_url: "https://example.test",
     }]);
     fetch.mockResolvedValueOnce(new Response(null, { status: 503 }));
 
@@ -72,5 +74,19 @@ describe("Pull preventivi", () => {
     const request = invoke.mock.calls.find(([command]) => command === "apply_local_database_batch")?.[1];
     const items = request?.writes.filter((write: { sql: string }) => write.sql.includes("INSERT INTO quote_items"));
     expect(items?.map((write: { params: unknown[] }) => write.params[22])).toEqual([2_200_000, 0]);
+  });
+
+  it("non invia al progetto B un'operazione del cestino preventivi accodata per il progetto A", async () => {
+    invoke.mockImplementation(async (command) => command === "load_supabase_config"
+      ? { config: { projectUrl: "https://proj-b.supabase.co", anonKey: "key-b" } } : undefined);
+    invalidateSupabaseConfigCache();
+    setLastKnownSupabaseProjectUrl("https://proj-b.supabase.co");
+    select.mockResolvedValueOnce([{
+      sequence: 1, record_id: remote.id, action: "trash", payload: JSON.stringify(remote), project_url: "https://proj-a.supabase.co",
+    }]).mockResolvedValueOnce([]);
+
+    await QuoteSyncService.retryPendingChanges();
+
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

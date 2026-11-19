@@ -933,7 +933,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       await ddtRepository.deleteDdt(ddt.id);
       savedSignature.current = currentSignature;
       isDirtyRef.current = false;
-      handleNewDdt();
+      await handleNewDdt();
       await loadRecentDdts();
       await refreshTrashCount();
       showToast("DDT spostato nel Cestino");
@@ -948,7 +948,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       if (ddt.id === id) {
         savedSignature.current = currentSignature;
         isDirtyRef.current = false;
-        handleNewDdt();
+        await handleNewDdt();
       }
       await loadRecentDdts();
       await refreshTrashCount();

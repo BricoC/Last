@@ -7,7 +7,11 @@ export type QuoteDraftItem = Omit<QuoteItemInput, "purchase_price" | "base_unit_
   forced_unit_price: string;
 };
 
-export type QuoteDraft = Omit<QuoteDraftInput, "items" | "status"> & { status?: QuoteStatus; items: QuoteDraftItem[] };
+export type QuoteDraft = Omit<QuoteDraftInput, "items" | "status"> & {
+  status?: QuoteStatus;
+  converted_ddt_id?: string | null;
+  items: QuoteDraftItem[];
+};
 
 export function createEmptyQuoteDraft(): QuoteDraft {
   const now = new Date();
@@ -58,6 +62,7 @@ export function quoteToDraft(quote: Quote): QuoteDraft {
     year: quote.year,
     quote_date: quote.quote_date,
     status: quote.status,
+    converted_ddt_id: quote.converted_ddt_id ?? null,
     client_id: quote.client_id,
     client_name: quote.client_name,
     client_address: quote.client_address,
@@ -99,7 +104,7 @@ export function toQuoteInput(draft: QuoteDraft): QuoteDraftInput {
         quantity: String(item.quantity ?? "").trim() || "1",
         purchase_price: money(item.purchase_price),
         base_unit_price: baseMoney,
-        forced_unit_price: item.discount_pct ? null : (item.forced_unit_price ? money(item.forced_unit_price) : null),
+        forced_unit_price: item.forced_unit_price ? money(item.forced_unit_price) : null,
       };
     }),
   };

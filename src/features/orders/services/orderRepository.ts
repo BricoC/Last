@@ -2,6 +2,15 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { OrderItem, Supplier, OrderAuditLog, OrderViewMode } from "../types/order";
 import { TODAY } from "../utils/constants";
 
+function safeJsonParse<T>(raw: unknown, fallback: T): T {
+  if (!raw || typeof raw !== "string") return (raw as T) ?? fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * Converte qualsiasi rappresentazione (oggetto, stringa JSON, stringa doppiamente serializzata)
  * in un oggetto valido Record<string, boolean>, escludendo indici numerici spurii.
@@ -680,8 +689,8 @@ class OrderRepository {
       operation_type: r.operation_type as 'INSERT' | 'UPDATE' | 'DELETE',
       operation_date: r.operation_date,
       user_name: r.user_name || 'Operatore',
-      old_data: r.old_data ? JSON.parse(r.old_data) : null,
-      new_data: r.new_data ? JSON.parse(r.new_data) : null,
+      old_data: safeJsonParse(r.old_data, null),
+      new_data: safeJsonParse(r.new_data, null),
       summary: r.summary || '',
       created_at: r.created_at,
     }));
@@ -753,7 +762,7 @@ class OrderRepository {
       user_name: r.user_name || '',
       is_archived: r.is_archived === 1,
       is_deleted: r.is_deleted === 1,
-      highlights: r.highlights ? JSON.parse(r.highlights) : {},
+      highlights: parseHighlights(r.highlights),
       created_at: r.created_at,
       updated_at: r.updated_at,
     }));
@@ -765,8 +774,8 @@ class OrderRepository {
       operation_type: r.operation_type,
       operation_date: r.operation_date,
       user_name: r.user_name,
-      old_data: r.old_data ? JSON.parse(r.old_data) : null,
-      new_data: r.new_data ? JSON.parse(r.new_data) : null,
+      old_data: safeJsonParse(r.old_data, null),
+      new_data: safeJsonParse(r.new_data, null),
       summary: r.summary,
       created_at: r.created_at,
     }));

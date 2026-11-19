@@ -6,9 +6,14 @@ export async function migratePendingCloudOperationsV34(db: MigrationDatabase): P
     scope TEXT NOT NULL,
     record_id TEXT NOT NULL,
     action TEXT NOT NULL,
-    payload TEXT NOT NULL
+    payload TEXT NOT NULL,
+    project_url TEXT
   )`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_pending_cloud_operations_scope
     ON pending_cloud_operations(scope, record_id, sequence)`);
   await db.addColumnIfMissing("clients", "pending_previous_name", "TEXT");
+}
+
+export async function migratePendingCloudOperationsProjectUrlV35(db: MigrationDatabase): Promise<void> {
+  await db.addColumnIfMissing("pending_cloud_operations", "project_url", "TEXT");
 }

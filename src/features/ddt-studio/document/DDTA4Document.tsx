@@ -713,7 +713,15 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                     const hasPrice = isPositivePrice(r.unit_price);
                     const hasDiscount = Boolean(r.discount_pct && formatCascadeDiscountDisplay(r.discount_pct));
                     const hasNet = isPositivePrice(r.net_amount);
-                    const isNoteRow = r.row_kind === "note" || (!hasPrice && !hasNet && Boolean(r.description?.trim()) && !r.code?.trim());
+                    const isNoteRow =
+                      r.row_kind === "note" ||
+                      (r.row_kind !== "item" &&
+                        !hasPrice &&
+                        !hasNet &&
+                        Boolean(r.description?.trim()) &&
+                        !r.code?.trim() &&
+                        !parseDdtQuantity(r.quantity) &&
+                        (!r.unit || !String(r.unit).trim()));
                     const hasVat = !isNoteRow && r.vat_rate !== undefined && r.vat_rate !== null && String(r.vat_rate).trim() !== "" && String(r.vat_rate) !== "0";
                     const hasContent = Boolean(
                       (r.description && r.description.trim().length > 0) ||

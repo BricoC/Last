@@ -140,11 +140,14 @@ export function buildSupabaseDdtPayloads(doc: LocalDdtRow, items: LocalDdtItemRo
   const linePayloads = activeItems.map((it) => {
     const isNote =
       it.row_kind === "note" ||
-      (Boolean(it.description?.trim()) &&
+      (it.row_kind !== "item" &&
+        Boolean(it.description?.trim()) &&
         (it.unit_price_subunits ?? 0) === 0 &&
         (it.net_amount_subunits ?? 0) === 0 &&
         (it.purchase_price_subunits ?? 0) === 0 &&
-        (!it.code || !String(it.code).trim()));
+        (!it.code || !String(it.code).trim()) &&
+        !parseDdtQuantity(it.quantity) &&
+        (!it.unit || !String(it.unit).trim()));
 
     const qty = isNote ? 0 : parseDdtQuantity(it.quantity) ?? (it.quantity?.trim() ? 0 : 1);
     const unitPrice = isNote ? 0 : (it.unit_price_subunits || 0) / 100000;

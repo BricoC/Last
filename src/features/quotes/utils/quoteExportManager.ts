@@ -59,7 +59,7 @@ export async function exportQuotePdf(draft: QuoteDraft): Promise<string> {
       link.href = url;
       link.download = filename;
       link.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
   }
   return filename;

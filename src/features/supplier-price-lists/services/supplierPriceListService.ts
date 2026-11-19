@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as XLSX from "xlsx";
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { parseItalianNumber } from "@/shared/utils/numberUtils";
 import type {
   SupplierPriceListItem,
@@ -12,6 +13,7 @@ export interface FileItemInfo {
   filename: string;
   path: string;
   size_bytes: number;
+  last_modified_ms?: number;
 }
 
 export interface SyncProgressCallback {
@@ -160,8 +162,15 @@ export class SupplierPriceListService {
       const file = validFiles[i];
       const existing = existingMap.get(file.filename);
 
-      // Se non forzato e il file ha la stessa dimensione in byte, saltiamo la rilettura pesante
-      if (!force && existing && existing.file_size === file.size_bytes) {
+      // Se non forzato e il file ha la stessa dimensione in byte e stessa data modifica, saltiamo la rilettura pesante
+      if (
+        !force &&
+        existing &&
+        existing.file_size === file.size_bytes &&
+        (file.last_modified_ms == null ||
+          file.last_modified_ms === 0 ||
+          existing.last_modified_ms === file.last_modified_ms)
+      ) {
         skippedFiles++;
         continue;
       }
@@ -197,7 +206,6 @@ export class SupplierPriceListService {
    * ed inserisce gli articoli a blocchi in SQLite.
    */
   private static async parseAndSaveExcelFile(file: FileItemInfo): Promise<number> {
-    const db = await getDatabase();
     const base64Str = await invoke<string>("read_single_excel_file_base64", {
       filePath: file.path,
     });
@@ -414,30 +422,6 @@ export class SupplierPriceListService {
     const { supplier, listDate } = this.extractSupplierAndDate(file.filename);
     const fileId = crypto.randomUUID();
 
-    // Elimina record precedenti del file (in caso di re-import o aggiornamento)
-    await db.execute(
-      "DELETE FROM supplier_price_list_items WHERE file_id IN (SELECT id FROM supplier_price_list_files WHERE filename = $1)",
-      [file.filename]
-    );
-    await db.execute("DELETE FROM supplier_price_list_files WHERE filename = $1", [file.filename]);
-
-    await db.execute(
-      `INSERT INTO supplier_price_list_files (
-        id, filename, file_path, supplier_name, file_date, file_size, last_modified_ms, total_items, imported_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        fileId,
-        file.filename,
-        file.path,
-        supplier,
-        listDate,
-        file.size_bytes,
-        Date.now(),
-        0,
-        new Date().toISOString(),
-      ]
-    );
-
     interface PreparedItem {
       id: string;
       file_id: string;
@@ -533,7 +517,34 @@ export class SupplierPriceListService {
 
     if (items.length === 0) return 0;
 
-    // Inserimento a blocchi in SQLite (14 colonne per record, inclusi price, net_price ed extra_code)
+    // Prepara tutte le scritture e applica sostituzione atomica in transazione SQLite
+    const writes: SqliteWrite[] = [
+      {
+        sql: "DELETE FROM supplier_price_list_items WHERE file_id IN (SELECT id FROM supplier_price_list_files WHERE filename = $1)",
+        params: [file.filename],
+      },
+      {
+        sql: "DELETE FROM supplier_price_list_files WHERE filename = $1",
+        params: [file.filename],
+      },
+      {
+        sql: `INSERT INTO supplier_price_list_files (
+          id, filename, file_path, supplier_name, file_date, file_size, last_modified_ms, total_items, imported_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        params: [
+          fileId,
+          file.filename,
+          file.path,
+          supplier,
+          listDate,
+          file.size_bytes,
+          file.last_modified_ms && file.last_modified_ms > 0 ? file.last_modified_ms : Date.now(),
+          items.length,
+          nowIso,
+        ],
+      },
+    ];
+
     const CHUNK_SIZE = 300;
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
       const chunk = items.slice(i, i + CHUNK_SIZE);
@@ -563,19 +574,15 @@ export class SupplierPriceListService {
         );
       });
 
-      await db.execute(
-        `INSERT INTO supplier_price_list_items (
+      writes.push({
+        sql: `INSERT INTO supplier_price_list_items (
           id, file_id, supplier_name, code, description, price, net_price, unit, barcode, list_date, brand, notes, extra_code, created_at
         ) VALUES ${valuePlaceholders.join(", ")}`,
-        params
-      );
+        params,
+      });
     }
 
-    // Aggiorna totale elementi nel file
-    await db.execute(
-      "UPDATE supplier_price_list_files SET total_items = $1 WHERE id = $2",
-      [items.length, fileId]
-    );
+    await applyLocalDatabaseBatch(writes);
 
     return items.length;
   }

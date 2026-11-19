@@ -44,7 +44,10 @@ export function createSupabaseRealtimeSubscription(
   }
 
   function onOnline() {
-    if (!active && !reconnecting) reconnect();
+    const channelState = (active?.channel as { state?: string } | undefined)?.state;
+    const isStaleOrClosed =
+      !active || channelState === "closed" || channelState === "errored";
+    if (isStaleOrClosed && !reconnecting) reconnect();
   }
 
   return () => {

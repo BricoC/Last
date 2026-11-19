@@ -2,6 +2,7 @@ import { createSupabaseRealtimeSubscription } from "@/shared/services/supabaseRe
 import { flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
 import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSession";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
+import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import type { OfferRecord } from "../types/offer";
@@ -97,13 +98,22 @@ export class OffersSyncService {
   }
 
   private flushDeletions(creds: SupabaseConfig): Promise<number> {
-    return flushPendingCloudOperations("offers", async ({ record_id, payload }) => {
-      const { remoteId } = JSON.parse(payload) as { remoteId: number | null };
-      const target = new URL("/rest/v1/offerte", creds.projectUrl);
-      target.searchParams.set(remoteId ? "id" : "local_id", `eq.${remoteId ?? record_id}`);
-      const response = await supabaseFetch(target, { method: "DELETE", headers: { apikey: creds.anonKey } });
-      if (!response.ok) throw new Error(`Eliminazione offerta: HTTP ${response.status}`);
-    });
+    return flushPendingCloudOperations(
+      "offers",
+      async ({ record_id, payload, project_url }) => {
+        const expectedProject = normalizeSupabaseProjectUrl(project_url);
+        const actualProject = normalizeSupabaseProjectUrl(creds.projectUrl);
+        if (!expectedProject || !actualProject || expectedProject !== actualProject) {
+          throw new Error("Il progetto Supabase attivo è cambiato durante l'eliminazione dell'offerta.");
+        }
+        const { remoteId } = JSON.parse(payload) as { remoteId: number | null };
+        const target = new URL("/rest/v1/offerte", creds.projectUrl);
+        target.searchParams.set(remoteId ? "id" : "local_id", `eq.${remoteId ?? record_id}`);
+        const response = await supabaseFetch(target, { method: "DELETE", headers: { apikey: creds.anonKey } });
+        if (!response.ok) throw new Error(`Eliminazione offerta: HTTP ${response.status}`);
+      },
+      creds.projectUrl,
+    );
   }
 
   public readonly subscribeRealtime = createSupabaseRealtimeSubscription(

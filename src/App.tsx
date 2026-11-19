@@ -78,6 +78,8 @@ export function App() {
   const {
     currentUser,
     users,
+    loadError,
+    loadUsers,
     pendingPasswordSwitch,
     cancelPasswordSwitch,
     confirmPasswordSwitch,
@@ -302,6 +304,30 @@ export function App() {
 
       {/* 3. Area Desktop MDI con supporto Finestre Flottanti, Ridimensionabili e Massimizzabili */}
       <DesktopWorkspace renderContent={renderWindowContent} />
+
+      {/* Blocco esplicito se la lettura utenti SQLite fallisce (nessun fallback ad Admin) */}
+      {loadError && !currentUser && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-red-500/40 bg-[var(--card)] p-6 text-[var(--foreground)] shadow-2xl">
+            <h2 className="text-base font-bold text-red-400">Errore lettura utenti locali</h2>
+            <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+              Impossibile verificare i profili locali dal database. L&apos;accesso resta bloccato per sicurezza.
+            </p>
+            <p className="mt-2 rounded bg-[var(--background)] p-2 font-mono text-[11px] text-red-300">
+              {loadError}
+            </p>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => void loadUsers()}
+                className="rounded bg-[var(--primary)] px-4 py-1.5 text-xs font-semibold text-[var(--primary-foreground)] cursor-pointer"
+              >
+                Riprova
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modale / Schermata Password Utente (Sblocco all'avvio / F5 e Cambio Utente) */}
       <UserPasswordModal

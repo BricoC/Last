@@ -1,5 +1,6 @@
 import { flushPendingCloudOperations, type PendingCloudOperation } from "@/shared/data-layer/pendingCloudOperations";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
+import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
@@ -581,6 +582,11 @@ export class PriceListSyncService {
 
   private async applyTrashOperation(scope: PriceListScope, operation: PendingCloudOperation): Promise<void> {
     const creds = await getSupabaseCredentials();
+    const expectedProject = normalizeSupabaseProjectUrl(operation.project_url);
+    const actualProject = normalizeSupabaseProjectUrl(creds.projectUrl);
+    if (!expectedProject || !actualProject || expectedProject !== actualProject) {
+      throw new Error("Il progetto Supabase attivo è cambiato durante l'invio dell'operazione in coda.");
+    }
     const trashTable = `${scope}_cestino`;
     const url = (table: string) => new URL(`/rest/v1/${table}`, creds.projectUrl);
     const send = async (target: URL, method: string, payload?: unknown) => {

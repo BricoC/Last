@@ -79,7 +79,7 @@ export function resolveDestinazioneDisplay(ddt: {
 
     const nome = isDestNameSameAsAddr || isDestNameSameAsClientOrEmpty ? clientName : rawDestName;
     const indirizzo = rawDestAddr;
-    const citta = rawDestCity || (rawDestAddr.toUpperCase() === clientAddr.toUpperCase() ? clientCity : "");
+    const citta = rawDestCity;
     return { nome, indirizzo, citta };
   }
 

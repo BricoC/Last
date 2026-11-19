@@ -673,13 +673,16 @@ export async function getMonthlyFullDdtDocuments(
 
   const itemsByDocId = new Map<string, DdtItem[]>();
   for (const row of itemRows) {
-    const isNote = row.row_kind === "note" || (
-      Boolean(row.description?.trim()) &&
-      (row.unit_price_subunits ?? 0) === 0 &&
-      (row.net_amount_subunits ?? 0) === 0 &&
-      (!row.purchase_price_subunits || row.purchase_price_subunits === 0) &&
-      (!row.code || !String(row.code).trim())
-    );
+    const isNote =
+      row.row_kind === "note" ||
+      (row.row_kind !== "item" &&
+        Boolean(row.description?.trim()) &&
+        (row.unit_price_subunits ?? 0) === 0 &&
+        (row.net_amount_subunits ?? 0) === 0 &&
+        (!row.purchase_price_subunits || row.purchase_price_subunits === 0) &&
+        (!row.code || !String(row.code).trim()) &&
+        !parseDdtQuantity(row.quantity) &&
+        (!row.unit || !String(row.unit).trim()));
     const it: DdtItem = {
       id: row.id,
       created_at: row.created_at,

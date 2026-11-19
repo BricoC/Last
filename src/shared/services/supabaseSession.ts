@@ -78,8 +78,11 @@ function verifyApproval(connection: Connection, token: string): Promise<void> {
       signal: AbortSignal.timeout(8_000),
     }).then((response) => {
       if (!response.ok) {
-        if ((response.status === 401 || response.status === 403) && connected === connection) {
-          disconnectSupabase();
+        if (response.status === 401 || response.status === 403) {
+          if (connected === connection) disconnectSupabase();
+          void invoke("clear_supabase_station_session").catch((err) => {
+            console.warn("[supabaseSession] Impossibile cancellare la sessione locale revocata:", err);
+          });
         }
         throw new Error(response.status === 404
           ? "Il progetto Supabase richiede la migrazione di sicurezza Last."

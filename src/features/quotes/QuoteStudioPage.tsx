@@ -187,7 +187,13 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     setSaving(true); setMessage("");
     try {
       const converted = await quoteRepository.convertToDdt(toQuoteInput(draft));
-      const nextDraft = { ...draft, id: converted.quoteId, status: "confermato" as const };
+      const nextDraft = {
+        ...draft,
+        id: converted.quoteId,
+        quote_number: converted.quoteNumber ?? draft.quote_number,
+        converted_ddt_id: converted.ddt.id ?? draft.converted_ddt_id,
+        status: "confermato" as const,
+      };
       setDraft(nextDraft);
       savedSignature.current = signature(nextDraft);
       await refreshQuotes();

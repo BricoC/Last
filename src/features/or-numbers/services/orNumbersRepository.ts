@@ -1,6 +1,7 @@
 import { pendingCloudWrite, flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { getDatabase } from "@/shared/data-layer/database";
+import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { OrRow, isActualOrderReference } from "../types/orNumbers";
 import { cleanDestinationName } from "@/features/ddt-studio/utils/destinationCleaner";
 import { invoke } from "@tauri-apps/api/core";
@@ -93,9 +94,14 @@ export class OrNumbersRepository {
   }
 
   public static retryPendingLogs(): Promise<number> {
-    return flushPendingCloudOperations("or_logs", async ({ payload }) => {
+    return flushPendingCloudOperations("or_logs", async ({ payload, project_url }) => {
       const status = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config");
       if (!status.config?.projectUrl || !status.config.anonKey) throw new Error("Supabase non configurato");
+      const expectedProject = normalizeSupabaseProjectUrl(project_url);
+      const actualProject = normalizeSupabaseProjectUrl(status.config.projectUrl);
+      if (!expectedProject || !actualProject || expectedProject !== actualProject) {
+        throw new Error("Il progetto Supabase attivo è cambiato durante l'invio del log OR.");
+      }
       const response = await supabaseFetch(new URL("/rest/v1/ddt_logs", status.config.projectUrl), {
         method: "POST",
         headers: {

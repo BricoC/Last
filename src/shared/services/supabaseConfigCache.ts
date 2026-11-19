@@ -10,11 +10,28 @@ interface ConfigStatus {
 }
 
 let generation = 0;
+let lastKnownProjectUrl: string | null = null;
+
+export function normalizeSupabaseProjectUrl(url?: string | null): string | null {
+  const normalized = url?.trim().replace(/\/+$/, "").toLowerCase();
+  return normalized || null;
+}
+
+export function getLastKnownSupabaseProjectUrl(): string | null {
+  return lastKnownProjectUrl;
+}
+
+export function setLastKnownSupabaseProjectUrl(url: string | null): void {
+  lastKnownProjectUrl = normalizeSupabaseProjectUrl(url);
+}
+
+export function invalidateSupabaseConfigCache(): void {
+  generation++;
+  lastKnownProjectUrl = null;
+}
 
 if (typeof window !== "undefined") {
-  window.addEventListener("supabase-config-updated", () => {
-    generation++;
-  });
+  window.addEventListener("supabase-config-updated", invalidateSupabaseConfigCache);
 }
 
 /**
@@ -48,6 +65,7 @@ export function createCachedSupabaseConfigLoader(logScope: string) {
           projectUrl: status.config.projectUrl.replace(/\/$/, ""),
           anonKey: status.config.anonKey.trim(),
         };
+        setLastKnownSupabaseProjectUrl(config.projectUrl);
         cached = { generation: currentGeneration, config };
         return config;
       }

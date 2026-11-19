@@ -115,6 +115,7 @@ pub struct ExcelFileInfo {
     pub filename: String,
     pub path: String,
     pub size_bytes: u64,
+    pub last_modified_ms: u64,
 }
 
 #[tauri::command]
@@ -168,11 +169,18 @@ fn list_files_in_folder(
                 if filename.starts_with("~$") {
                     continue;
                 }
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let metadata = entry.metadata().ok();
+                let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                let last_modified_ms = metadata
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+                    .unwrap_or(0);
                 results.push(ExcelFileInfo {
                     filename,
                     path: file_path.to_string_lossy().to_string(),
                     size_bytes: size,
+                    last_modified_ms,
                 });
             }
         }

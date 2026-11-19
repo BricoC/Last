@@ -115,6 +115,8 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
           }
           return prev;
         });
+      }).catch((err) => {
+        console.warn("[DDTClienteCard] Errore arricchimento cliente per ID:", err);
       });
     } else if (ddt.client_name?.trim()) {
       clientRepository.getClients(ddt.client_name).then((res) => {
@@ -153,6 +155,8 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
           }
           return prev;
         });
+      }).catch((err) => {
+        console.warn("[DDTClienteCard] Errore arricchimento cliente per nome:", err);
       });
     } else {
       setSelectedClient(null);

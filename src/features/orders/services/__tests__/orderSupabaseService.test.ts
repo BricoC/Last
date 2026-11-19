@@ -13,6 +13,7 @@ vi.mock("@/shared/data-layer/database", () => ({
 
 import { OrderSupabaseService } from "../orderSupabaseService";
 import type { OrderItem } from "../../types/order";
+import { setLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 
 const queueKey = "last_order_offline_queue";
 const draft = { id: "ord_draft_test", description: "Primo ordine" } as OrderItem;
@@ -23,6 +24,7 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
   const originalWindow = globalThis.window;
 
   beforeEach(() => {
+    setLastKnownSupabaseProjectUrl("https://example.test");
     Object.defineProperty(globalThis, "navigator", {
       value: { onLine: true },
       configurable: true,
@@ -100,6 +102,7 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
           remoteId: remote,
           payload: { descrizione: "TEST" },
           timestamp: "2026-11-18T10:00:00Z",
+          projectUrl: "https://example.test",
         },
         {
           id: "q2",
@@ -107,6 +110,7 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
           action: "update",
           payload: { descrizione: "TEST MODIFICATO" },
           timestamp: "2026-11-18T10:01:00Z",
+          projectUrl: "https://example.test",
         },
       ])
     );
@@ -171,7 +175,7 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
     const service = new OrderSupabaseService();
     localStorage.setItem(queueKey, JSON.stringify([
       { id: "legacy", targetId: "ord_1760000000000_abc", action: "update",
-        payload: { descrizione: "Riordino" }, timestamp: "2026-01-01T00:00:00Z" },
+        payload: { descrizione: "Riordino" }, timestamp: "2026-01-01T00:00:00Z", projectUrl: "https://example.test" },
     ]));
     const upsert = vi.fn((rows: Array<{ id: string }>) => ({
       select: async () => ({ data: rows, error: null }),

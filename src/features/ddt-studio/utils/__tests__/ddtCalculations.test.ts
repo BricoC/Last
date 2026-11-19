@@ -228,6 +228,20 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
       expect(res.citta).toBe("");
     });
 
+    it("non aggiunge la città della sede legale quando una destinazione multipla ha indirizzo uguale ma destination_city vuoto (es. WEPA ITALIA)", () => {
+      const res = resolveDestinazioneDisplay({
+        client_name: "WEPA ITALIA",
+        client_address: "LOCALITA' SALANETTI",
+        client_city: "LUNATA (LU)",
+        destination_name: "WEPA ITALIA",
+        destination_address: "LOCALITA' SALANETTI",
+        destination_city: "",
+      });
+      expect(res.nome).toBe("WEPA ITALIA");
+      expect(res.indirizzo).toBe("LOCALITA' SALANETTI");
+      expect(res.citta).toBe("");
+    });
+
     it("mostra sede legale del cliente se non vi è alcuna destinazione", () => {
       const res = resolveDestinazioneDisplay({
         client_name: "ACME S.P.A.",

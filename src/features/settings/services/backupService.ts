@@ -597,15 +597,9 @@ export async function executeModularBackup(
     const tableCounts: Record<string, number> = {};
 
     for (const table of tablesToExport) {
-      try {
-        const rows = await db.select<any[]>(`SELECT * FROM ${table}`);
-        exportedData[table] = rows || [];
-        tableCounts[table] = rows?.length || 0;
-      } catch (err) {
-        console.warn(`[backupService] Tabella ${table} non disponibile durante esportazione:`, err);
-        exportedData[table] = [];
-        tableCounts[table] = 0;
-      }
+      const rows = await db.select<any[]>(`SELECT * FROM ${table}`);
+      exportedData[table] = rows || [];
+      tableCounts[table] = rows?.length || 0;
     }
 
     const isTotal = selectedCategoryIds.length === BACKUP_CATEGORIES.length;

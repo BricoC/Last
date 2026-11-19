@@ -250,7 +250,7 @@ export class QuoteRepository {
     await invoke<string>("convert_quote_to_ddt_transaction", {
       quotePayload, ddtPayload: conversion.payload,
     });
-    return { quoteId, ...conversion };
+    return { quoteId, quoteNumber, ...conversion };
   }
 
   /**

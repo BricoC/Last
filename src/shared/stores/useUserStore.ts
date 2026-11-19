@@ -6,6 +6,7 @@ interface UserState {
   users: AppUser[];
   currentUser: AppUser | null;
   isLoading: boolean;
+  loadError: string | null;
   pendingPasswordSwitch: AppUser | null;
   loadUsers: () => Promise<void>;
   requestSwitchUser: (userId: string) => Promise<boolean>;
@@ -41,10 +42,11 @@ export const useUserStore = create<UserState>((set, get) => ({
   users: [],
   currentUser: null,
   isLoading: true,
+  loadError: null,
   pendingPasswordSwitch: null,
 
   loadUsers: async () => {
-    set({ isLoading: true });
+    set({ isLoading: true, loadError: null });
     try {
       const list = await AppUserService.getAllUsers();
       const activeId = AppUserService.getActiveUserId();
@@ -72,6 +74,7 @@ export const useUserStore = create<UserState>((set, get) => ({
           currentUser: active,
           pendingPasswordSwitch: null,
           isLoading: false,
+          loadError: null,
         });
         return;
       }
@@ -84,6 +87,7 @@ export const useUserStore = create<UserState>((set, get) => ({
           currentUser: null,
           pendingPasswordSwitch: active,
           isLoading: false,
+          loadError: null,
         });
       } else {
         set({
@@ -91,11 +95,19 @@ export const useUserStore = create<UserState>((set, get) => ({
           currentUser: active || null,
           pendingPasswordSwitch: null,
           isLoading: false,
+          loadError: null,
         });
       }
     } catch (e) {
       console.error("Errore caricamento utenti:", e);
-      set({ isLoading: false });
+      const msg = e instanceof Error ? e.message : String(e || "Errore lettura utenti dal database");
+      set({
+        users: [],
+        currentUser: null,
+        pendingPasswordSwitch: null,
+        isLoading: false,
+        loadError: msg,
+      });
     }
   },
 

@@ -69,6 +69,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (addToOrderTarget) return;
         e.preventDefault();
         onClose();
         return;
@@ -94,7 +95,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose, selectedCell]);
+  }, [isOpen, onClose, selectedCell, addToOrderTarget]);
 
   // Reset dello stato quando cambia documento o si riapre
   useEffect(() => {

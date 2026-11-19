@@ -259,6 +259,7 @@ export class AppUserService {
       this.initialized = true;
     } catch (e) {
       console.error("Errore inizializzazione tabella app_users:", e);
+      throw e;
     }
   }
 
@@ -317,7 +318,7 @@ export class AppUserService {
       });
     } catch (e) {
       console.error("Errore recupero utenti app_users:", e);
-      return DEFAULT_USERS.map((u) => ({ ...u, created_at: new Date().toISOString() }));
+      throw e;
     }
   }
 

@@ -2,6 +2,11 @@ import { createSupabaseRealtimeSubscription } from "@/shared/services/supabaseRe
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { orderRepository } from "./orderRepository";
 import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSession";
+import {
+  getLastKnownSupabaseProjectUrl,
+  normalizeSupabaseProjectUrl,
+  setLastKnownSupabaseProjectUrl,
+} from "@/shared/services/supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { type SupabaseClient } from "@supabase/supabase-js";
 import { getDatabase } from "@/shared/data-layer/database";
@@ -37,6 +42,7 @@ export interface OfflineQueueItem {
   remoteId?: string;
   payload?: any;
   timestamp: string;
+  projectUrl?: string;
 }
 
 const QUEUE_STORAGE_KEY = "last_order_offline_queue";
@@ -55,6 +61,7 @@ export class OrderSupabaseService {
       if (!status?.config?.projectUrl || !status?.config?.anonKey) {
         return null;
       }
+      setLastKnownSupabaseProjectUrl(status.config.projectUrl);
       return status.config;
     } catch {
       return null;
@@ -598,15 +605,24 @@ export class OrderSupabaseService {
 
   private enqueueOffline(item: OfflineQueueItem): void {
     this.mutationGeneration++;
+    const resolvedProjectUrl = normalizeSupabaseProjectUrl(item.projectUrl ?? getLastKnownSupabaseProjectUrl());
+    const stampedItem: OfflineQueueItem = {
+      ...item,
+      ...(resolvedProjectUrl ? { projectUrl: resolvedProjectUrl } : {}),
+    };
     const queue = this.getOfflineQueue();
-    const last = [...queue].reverse().find((entry) => entry.targetId === item.targetId);
-    if (["insert", "upsert_supplier"].includes(item.action) && last?.action === item.action && last.id !== this.processingItemId
-      && (item.action !== "upsert_supplier" || last.payload.nome === item.payload.nome)) {
-      last.payload = item.payload;
-      last.timestamp = item.timestamp;
-      last.remoteId ??= item.remoteId;
+    const last = [...queue].reverse().find(
+      (entry) =>
+        entry.targetId === stampedItem.targetId &&
+        normalizeSupabaseProjectUrl(entry.projectUrl) === normalizeSupabaseProjectUrl(stampedItem.projectUrl)
+    );
+    if (["insert", "upsert_supplier"].includes(stampedItem.action) && last?.action === stampedItem.action && last.id !== this.processingItemId
+      && (stampedItem.action !== "upsert_supplier" || last.payload.nome === stampedItem.payload.nome)) {
+      last.payload = stampedItem.payload;
+      last.timestamp = stampedItem.timestamp;
+      last.remoteId ??= stampedItem.remoteId;
     } else {
-      queue.push(item);
+      queue.push(stampedItem);
     }
     this.saveOfflineQueue(queue);
   }
@@ -617,8 +633,13 @@ export class OrderSupabaseService {
     if (remoteId) {
       const supplier = item.action.endsWith("supplier");
       (supplier ? this.resolvedSuppliers : this.resolvedDrafts).set(item.targetId, remoteId);
+      const itemProjectUrl = normalizeSupabaseProjectUrl(item.projectUrl);
       for (const entry of queue) {
-        if (entry.targetId !== item.targetId || entry.action.endsWith("supplier") !== supplier) continue;
+        if (
+          entry.targetId !== item.targetId ||
+          entry.action.endsWith("supplier") !== supplier ||
+          normalizeSupabaseProjectUrl(entry.projectUrl) !== itemProjectUrl
+        ) continue;
         entry.targetId = remoteId;
         if (entry.action === "insert") entry.action = "update";
       }
@@ -636,13 +657,31 @@ export class OrderSupabaseService {
 
   private async drainOfflineQueue(initialQueue: OfflineQueueItem[]): Promise<number> {
     let processedCount = 0;
+    let legacyHeld = 0;
     const failedTargets = new Set<string>();
     try {
       const supabase = await this.getClient();
       if (!supabase) return 0;
+      const activeProjectUrl =
+        getLastKnownSupabaseProjectUrl() ??
+        normalizeSupabaseProjectUrl((await this.getCredentials())?.projectUrl);
       for (const initial of initialQueue) {
         const item = this.getOfflineQueue().find((entry) => entry.id === initial.id);
         if (!item || failedTargets.has(item.targetId)) continue;
+        const itemProjectUrl = normalizeSupabaseProjectUrl(item.projectUrl);
+        if (!itemProjectUrl) {
+          legacyHeld++;
+          continue;
+        }
+        if (!activeProjectUrl || itemProjectUrl !== activeProjectUrl) {
+          continue;
+        }
+        const clientUrl = normalizeSupabaseProjectUrl(
+          (supabase as unknown as { supabaseUrl?: string }).supabaseUrl ?? (await this.getCredentials())?.projectUrl
+        );
+        if (clientUrl && clientUrl !== itemProjectUrl) {
+          break;
+        }
         this.processingItemId = item.id;
         try {
           const cleanId = this.cleanId(item.targetId);
@@ -743,6 +782,14 @@ export class OrderSupabaseService {
       }
     } finally {
       this.processingItemId = undefined;
+    }
+    if (legacyHeld > 0) {
+      console.warn(
+        `[OrderSupabaseService] Conservate ${legacyHeld} operazioni ordini legacy prive di progetto di destinazione verificabile.`
+      );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("order-legacy-offline-queue", { detail: { count: legacyHeld } }));
+      }
     }
     if (processedCount > 0) {
       window.dispatchEvent(new CustomEvent("order_offline_queue_synced", { detail: { processedCount } }));

@@ -1,7 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
 import { buildMigrationPlan, type MigrationDatabase } from "./migrationPlan";
-import { migratePendingCloudOperationsV34 } from "./migrations/pendingCloudOperationsSchema";
+import {
+  migratePendingCloudOperationsV34,
+  migratePendingCloudOperationsProjectUrlV35,
+} from "./migrations/pendingCloudOperationsSchema";
 import {
   migrateDdtNumberReuseAfterSoftDeleteV9,
   migrateDdtInformationalRowsV10,
@@ -488,6 +491,11 @@ const MIGRATIONS: Migration[] = [
     version: 34,
     name: "persist_pending_cloud_operations",
     up: migratePendingCloudOperationsV34,
+  },
+  {
+    version: 35,
+    name: "add_project_url_to_pending_cloud_operations",
+    up: migratePendingCloudOperationsProjectUrlV35,
   },
 ];
 

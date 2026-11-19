@@ -52,7 +52,14 @@ export const formatDdtPdfFilename = (ddt: Partial<DdtDocument>) =>
  * Converte un dataUrl Base64 in array di byte (number[]) per IPC Tauri
  */
 export function dataUrlToBytes(dataUrl: string): number[] {
-  const base64 = dataUrl.split(",")[1];
+  const commaIdx = dataUrl.indexOf(",");
+  if (commaIdx === -1) {
+    throw new Error("Formato data URL non valido.");
+  }
+  const base64 = dataUrl.slice(commaIdx + 1).trim();
+  if (!base64) {
+    throw new Error("Contenuto base64 mancante nel data URL.");
+  }
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
@@ -134,9 +141,7 @@ export async function exportDdtImageToDesktop(
   ddt: Partial<DdtDocument>,
   container?: HTMLElement | null
 ): Promise<{ filename: string; path: string }> {
-  if ((document as any).fonts?.ready) {
-    await (document as any).fonts.ready;
-  }
+  await ensureDocumentFontsReady();
 
   const pages = getCapturePageElements(container);
   if (pages.length === 0) {
@@ -256,9 +261,7 @@ export async function executeDdtPrint(
   copies: number = 1,
   container?: HTMLElement | null
 ): Promise<void> {
-  if ((document as any).fonts?.ready) {
-    await (document as any).fonts.ready;
-  }
+  await ensureDocumentFontsReady();
 
   const pages = getCapturePageElements(container);
   if (pages.length === 0) {

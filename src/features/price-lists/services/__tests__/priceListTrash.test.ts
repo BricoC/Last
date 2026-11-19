@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { priceListSyncService } from "../priceListSyncService";
+import { setLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 
 vi.mock("@/shared/services/supabaseSession", () => ({
   supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
@@ -25,12 +26,13 @@ describe("Ripristino cestino listini clienti", () => {
   const fetchMock = vi.fn<typeof fetch>();
 
   beforeEach(() => {
-    let cleanup: { sequence: number; action: string; record_id: string; payload: string } | undefined;
+    setLastKnownSupabaseProjectUrl("https://example.test");
+    let cleanup: { sequence: number; action: string; record_id: string; payload: string; project_url?: string | null } | undefined;
     invoke.mockReset().mockImplementation(async (command, args) => {
       if (command === "load_supabase_config") return config;
       if (args?.writes?.some((write: { sql: string }) => write.sql.includes("INSERT INTO pending_cloud_operations"))) {
         const params = args.writes.find((write: { sql: string }) => write.sql.includes("INSERT INTO pending_cloud_operations")).params;
-        if (params[2] === "cleanup") cleanup = { sequence: 21, action: "cleanup", record_id: params[1], payload: "null" };
+        if (params[2] === "cleanup") cleanup = { sequence: 21, action: "cleanup", record_id: params[1], payload: "null", project_url: params[4] };
       }
     });
     select.mockReset().mockImplementation(async (sql: string) => {
@@ -60,7 +62,7 @@ describe("Ripristino cestino listini clienti", () => {
       writes: [
         { sql: expect.stringContaining("DELETE FROM listini_clienti_cestino"), params: ["cli_12", trash.deleted_at], expectedRows: 1 },
         { sql: expect.stringMatching(/INSERT INTO listini_clienti\s/), params: expect.any(Array) },
-        { sql: expect.stringContaining("INSERT INTO pending_cloud_operations"), params: ["listini_clienti", "cli_12", "cleanup", "null"] },
+        { sql: expect.stringContaining("INSERT INTO pending_cloud_operations"), params: ["listini_clienti", "cli_12", "cleanup", "null", "https://example.test"] },
         { sql: expect.stringContaining("SET sync_confirmed_at"), params: [expect.any(String), "cli_12"] },
       ],
     });
