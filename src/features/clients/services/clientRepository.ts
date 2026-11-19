@@ -177,7 +177,7 @@ export class ClientRepository {
     }
 
     if (!existing) {
-      return this.createOrUpdateClient(input);
+      return this.createOrUpdateClient({ ...input, id: undefined });
     }
 
     const mergedPhones = input.phones && input.phones.length > 0 ? input.phones : existing.phones;
