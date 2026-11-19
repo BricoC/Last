@@ -1,3 +1,5 @@
+import { pendingCloudWrite, flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { getDatabase } from "@/shared/data-layer/database";
 import { OrRow, isActualOrderReference } from "../types/orNumbers";
 import { cleanDestinationName } from "@/features/ddt-studio/utils/destinationCleaner";
@@ -35,24 +37,23 @@ export class OrNumbersRepository {
     try {
       const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
       if (configRes?.config?.projectUrl && configRes?.config?.anonKey) {
-        const url = new URL("/rest/v1/ddt_logs?select=id,status", configRes.config.projectUrl.replace(/\/$/, ""));
-        const res = await fetch(url.toString(), {
-          headers: {
-            apikey: configRes.config.anonKey,
-            Authorization: `Bearer ${configRes.config.anonKey}`,
-          },
-        });
-        if (res.ok) {
-          const remoteLogs = (await res.json()) as Array<{ id: string; status: string }>;
-          if (Array.isArray(remoteLogs) && remoteLogs.length > 0) {
-            const db = await getDatabase();
-            for (const r of remoteLogs) {
-              await db.execute(
-                `INSERT OR REPLACE INTO ddt_logs (id, status, updated_at) VALUES ($1, $2, datetime('now'))`,
-                [r.id, r.status]
-              );
-            }
-          }
+        await this.retryPendingLogs();
+        const url = new URL("/rest/v1/ddt_logs?select=id,status,updated_at&order=id.asc&limit=1000", configRes.config.projectUrl);
+        for (let offset = 0; ; ) {
+          url.searchParams.set("offset", String(offset));
+          const response = await supabaseFetch(url, { headers: { apikey: configRes.config.anonKey } });
+          if (!response.ok) throw new Error(`Lettura log OR: HTTP ${response.status}`);
+          const rows = await response.json();
+          if (!Array.isArray(rows)) throw new Error("Risposta log OR non valida");
+          if (!rows.length) break;
+          await applyLocalDatabaseBatch(rows.map((row) => ({
+            sql: `INSERT INTO ddt_logs (id,status,updated_at) SELECT $1,$2,$3 WHERE NOT EXISTS (
+              SELECT 1 FROM pending_cloud_operations WHERE scope = 'or_logs' AND record_id = $1
+            ) ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
+              WHERE julianday(excluded.updated_at) >= julianday(ddt_logs.updated_at)`,
+            params: [row.id, row.status, row.updated_at || "1970-01-01T00:00:00Z"],
+          })));
+          offset += rows.length;
         }
       }
     } catch (err) {
@@ -76,82 +77,35 @@ export class OrNumbersRepository {
   }
 
   public static async updateLog(key: string, status: string): Promise<void> {
-    await this.ensureLogsTable();
-    try {
-      const db = await getDatabase();
-      await db.execute(
-        `INSERT OR REPLACE INTO ddt_logs (id, status, updated_at) VALUES ($1, $2, datetime('now'))`,
-        [key, status]
-      );
-
-      // Async sync verso Supabase se configurato
-      void this.syncSingleLogToSupabase(key, status);
-    } catch (e) {
-      console.error(`Errore aggiornamento log ${key}:`, e);
-    }
+    return this.updateLogsBatch({ [key]: status });
   }
 
   public static async updateLogsBatch(updates: Record<string, string>): Promise<void> {
     await this.ensureLogsTable();
-    try {
-      const db = await getDatabase();
-      for (const [key, status] of Object.entries(updates)) {
-        await db.execute(
-          `INSERT OR REPLACE INTO ddt_logs (id, status, updated_at) VALUES ($1, $2, datetime('now'))`,
-          [key, status]
-        );
-      }
-
-      // Async batch sync verso Supabase
-      void this.syncLogsBatchToSupabase(updates);
-    } catch (e) {
-      console.error("Errore salvataggio batch ddt_logs:", e);
-    }
+    const timestamp = new Date().toISOString();
+    await applyLocalDatabaseBatch(Object.entries(updates).flatMap(([id, status]) => [
+      { sql: `INSERT INTO ddt_logs (id,status,updated_at) VALUES ($1,$2,$3)
+        ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at`,
+        params: [id, status, timestamp] },
+      pendingCloudWrite("or_logs", id, "upsert", { id, status, updated_at: timestamp }),
+    ]));
+    void this.retryPendingLogs().catch(console.warn);
   }
 
-  private static async syncSingleLogToSupabase(key: string, status: string): Promise<void> {
-    try {
-      const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
-      if (!configRes?.config?.projectUrl || !configRes?.config?.anonKey) return;
-
-      const url = new URL("/rest/v1/ddt_logs", configRes.config.projectUrl.replace(/\/$/, ""));
-      await fetch(url.toString(), {
+  public static retryPendingLogs(): Promise<number> {
+    return flushPendingCloudOperations("or_logs", async ({ payload }) => {
+      const status = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config");
+      if (!status.config?.projectUrl || !status.config.anonKey) throw new Error("Supabase non configurato");
+      const response = await supabaseFetch(new URL("/rest/v1/ddt_logs", status.config.projectUrl), {
         method: "POST",
         headers: {
-          apikey: configRes.config.anonKey,
-          Authorization: `Bearer ${configRes.config.anonKey}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates"
+          apikey: status.config.anonKey, "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates",
         },
-        body: JSON.stringify([{ id: key, status }])
+        body: payload,
       });
-    } catch (err) {
-      console.warn("[OrNumbersRepository] Supabase log sync warning:", err);
-    }
-  }
-
-  private static async syncLogsBatchToSupabase(updates: Record<string, string>): Promise<void> {
-    try {
-      const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
-      if (!configRes?.config?.projectUrl || !configRes?.config?.anonKey) return;
-
-      const records = Object.entries(updates).map(([id, status]) => ({ id, status }));
-      if (records.length === 0) return;
-
-      const url = new URL("/rest/v1/ddt_logs", configRes.config.projectUrl.replace(/\/$/, ""));
-      await fetch(url.toString(), {
-        method: "POST",
-        headers: {
-          apikey: configRes.config.anonKey,
-          Authorization: `Bearer ${configRes.config.anonKey}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates"
-        },
-        body: JSON.stringify(records)
-      });
-    } catch (err) {
-      console.warn("[OrNumbersRepository] Supabase batch log sync warning:", err);
-    }
+      if (!response.ok) throw new Error(`Salvataggio log OR: HTTP ${response.status}`);
+    });
   }
 
   public static async syncOrdersFromSupabase(year: number, month?: number): Promise<void> {
@@ -173,10 +127,9 @@ export class OrNumbersRepository {
       url.searchParams.set("select", "id,numero,anno,nr_vs_ordine");
       url.searchParams.set("limit", "1000");
 
-      const res = await fetch(url.toString(), {
+      const res = await supabaseFetch(url.toString(), {
         headers: {
           apikey: configRes.config.anonKey,
-          Authorization: `Bearer ${configRes.config.anonKey}`,
         },
       });
 
@@ -191,6 +144,7 @@ export class OrNumbersRepository {
                 `UPDATE ddt_documents 
                  SET order_reference = $1 
                  WHERE (id = $2 OR (doc_number = $3 AND year = $4))
+                   AND deleted_at IS NULL AND COALESCE(sync_status, '') <> 'pending'
                    AND (order_reference IS NULL OR TRIM(order_reference) = '' OR TRIM(order_reference) <> $1)`,
                 [ord, d.id, d.numero, d.anno]
               );

@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
@@ -115,7 +116,7 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await supabaseFetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -277,7 +278,7 @@ class DdtCloudPushService {
       const res = await fetchWithTimeout(
         url.toString(),
         {
-          headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+          headers: { apikey: creds.anonKey },
         },
         timeoutMs
       );
@@ -302,7 +303,7 @@ class DdtCloudPushService {
     url.searchParams.set("limit", "1");
 
     const res = await fetchWithTimeout(url.toString(), {
-      headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      headers: { apikey: creds.anonKey },
     });
     if (!res.ok) return null;
     const rows = (await res.json()) as Array<{ id: string; ultima_modifica?: string | null }>;
@@ -344,10 +345,10 @@ class DdtCloudPushService {
 
     const [hRes, lRes] = await Promise.all([
       fetchWithTimeout(hUrl.toString(), {
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+        headers: { apikey: creds.anonKey },
       }),
       fetchWithTimeout(lUrl.toString(), {
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+        headers: { apikey: creds.anonKey },
       }),
     ]);
 
@@ -635,7 +636,6 @@ class DdtCloudPushService {
         method: "POST",
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
           "Content-Type": "application/json",
           Prefer: "return=representation,resolution=merge-duplicates",
         },
@@ -685,7 +685,6 @@ class DdtCloudPushService {
         method: "POST",
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
           "Content-Type": "application/json",
           Prefer: "return=minimal,resolution=merge-duplicates",
         },
@@ -706,14 +705,14 @@ class DdtCloudPushService {
       delRemovedUrl.searchParams.set("id", `not.in.(${linePayloads.map((l) => l.id).join(",")})`);
       await fetchWithTimeout(delRemovedUrl.toString(), {
         method: "DELETE",
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+        headers: { apikey: creds.anonKey },
       }).catch(() => {});
     } else {
       const delAllUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
       delAllUrl.searchParams.set("ddt_id", `eq.${currentDoc.id}`);
       await fetchWithTimeout(delAllUrl.toString(), {
         method: "DELETE",
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+        headers: { apikey: creds.anonKey },
       }).catch(() => {});
     }
 
@@ -724,7 +723,7 @@ class DdtCloudPushService {
     delOrphanUrl.searchParams.set("ddt_id", "is.null");
     await fetchWithTimeout(delOrphanUrl.toString(), {
       method: "DELETE",
-      headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      headers: { apikey: creds.anonKey },
     }).catch(() => {});
 
     await db.execute(`UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`, [
@@ -799,7 +798,7 @@ class DdtCloudPushService {
       linesUrl.searchParams.set("ddt_id", `eq.${id}`);
       const delLinesRes = await fetchWithTimeout(linesUrl.toString(), {
         method: "DELETE",
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+        headers: { apikey: creds.anonKey },
       });
       if (!delLinesRes.ok) return false;
 
@@ -807,7 +806,7 @@ class DdtCloudPushService {
       docUrl.searchParams.set("id", `eq.${id}`);
       const delDocRes = await fetchWithTimeout(docUrl.toString(), {
         method: "DELETE",
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+        headers: { apikey: creds.anonKey },
       });
       if (!delDocRes.ok) return false;
 

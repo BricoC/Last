@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { getDatabase } from "@/shared/data-layer/database";
 import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
 
@@ -58,11 +59,10 @@ export async function pushEmailSettingsToSupabase(input: EmailSettingsInput): Pr
     };
 
     const url = `${creds.projectUrl}/rest/v1/email_settings`;
-    const res = await fetch(url, {
+    const res = await supabaseFetch(url, {
       method: "POST",
       headers: {
         apikey: creds.anonKey,
-        Authorization: `Bearer ${creds.anonKey}`,
         "Content-Type": "application/json",
         Prefer: "resolution=merge-duplicates",
       },
@@ -95,11 +95,10 @@ export async function pullEmailSettingsFromSupabase(requireCloud = false): Promi
     }
 
     const url = `${creds.projectUrl}/rest/v1/email_settings?id=eq.${encodeURIComponent(SETTINGS_ID)}&select=*`;
-    const res = await fetch(url, {
+    const res = await supabaseFetch(url, {
       method: "GET",
       headers: {
         apikey: creds.anonKey,
-        Authorization: `Bearer ${creds.anonKey}`,
       },
     });
 

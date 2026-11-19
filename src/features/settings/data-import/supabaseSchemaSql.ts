@@ -1,3 +1,6 @@
+import SUPABASE_STATION_ACCESS_SQL from "./supabaseStationAccess.sql?raw";
+import SUPABASE_OFFLINE_WRITES_SQL from "./supabaseOfflineWrites.sql?raw";
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 /**
  * Schema SQL completo per inizializzare da zero un nuovo progetto Supabase per Last,
  * più utility leggere per rilevare in modo certo l'assenza di tabelle (senza falsi positivi offline).
@@ -10,6 +13,8 @@ export const FULL_SUPABASE_SCHEMA_SQL = `-- ====================================
 -- Istruzioni: Incolla questo intero script in Supabase -> SQL Editor -> Run
 -- Puoi rieseguirlo senza problemi anche su database già parzialmente configurati.
 -- ============================================================================
+
+BEGIN;
 
 -- 1. DDT E RIGHE
 CREATE TABLE IF NOT EXISTS public.ddt (
@@ -376,27 +381,7 @@ CREATE TABLE IF NOT EXISTS public.offerte (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. UTENTI, IMPOSTAZIONI CLOUD E SCADENZE RI.BA.
-CREATE TABLE IF NOT EXISTS public.app_users (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  station_name TEXT DEFAULT '',
-  can_access_settings BOOLEAN DEFAULT FALSE,
-  can_access_ddt BOOLEAN DEFAULT TRUE,
-  can_access_price_lists BOOLEAN DEFAULT TRUE,
-  can_edit_price_lists BOOLEAN DEFAULT TRUE,
-  can_edit_or_numbers BOOLEAN DEFAULT TRUE,
-  is_admin BOOLEAN DEFAULT FALSE,
-  allowed_pages JSONB DEFAULT '[]'::jsonb,
-  theme_preset TEXT DEFAULT 'grigio',
-  theme_brightness INTEGER DEFAULT 4,
-  password_hash TEXT DEFAULT '',
-  require_password BOOLEAN DEFAULT FALSE,
-  topbar_order JSONB DEFAULT '[]'::jsonb,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
+-- 8. IMPOSTAZIONI CLOUD E SCADENZE RI.BA.
 CREATE TABLE IF NOT EXISTS public.email_settings (
   id TEXT PRIMARY KEY,
   carrara_to TEXT DEFAULT '',
@@ -435,41 +420,9 @@ CREATE TABLE IF NOT EXISTS public.riba_pagamenti (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 9. RLS POLICIES & REALTIME
-DO $$
-DECLARE
-  t TEXT;
-  tables TEXT[] := ARRAY[
-    'ddt', 'ddt_righe', 'ddt_logs', 'clienti',
-    'listino_generale', 'listini_vari', 'listino_generale_cestino',
-    'listini_clienti', 'listini_clienti_cestino',
-    'preventivi', 'preventivi_cestino', 'preventivi_sequenza',
-    'fatture_elettroniche_testate', 'fatture_elettroniche_righe',
-    'fornitori', 'ordini', 'note', 'offerte',
-    'app_users', 'email_settings', 'backup_settings', 'riba_pagamenti'
-  ];
-BEGIN
-  FOREACH t IN ARRAY tables LOOP
-    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY;', t);
-    EXECUTE format('DROP POLICY IF EXISTS "Accesso completo gestionale" ON public.%I;', t);
-    EXECUTE format('CREATE POLICY "Accesso completo gestionale" ON public.%I FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);', t);
-  END LOOP;
-END $$;
-
-DO $$
-DECLARE
-  rt TEXT;
-  rt_tables TEXT[] := ARRAY['ddt', 'ddt_righe', 'offerte', 'ordini', 'clienti'];
-BEGIN
-  FOREACH rt IN ARRAY rt_tables LOOP
-    BEGIN
-      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I;', rt);
-    EXCEPTION WHEN duplicate_object THEN
-      NULL;
-    END;
-  END LOOP;
-END $$;
-`;
+-- 9. RLS e canali Realtime privati
+` + SUPABASE_OFFLINE_WRITES_SQL.replace(/^(?:BEGIN|COMMIT);\r?$/gm, "")
+  + SUPABASE_STATION_ACCESS_SQL.replace(/^BEGIN;\r?$/m, "");
 
 export type SchemaCheckStatus = "ok" | "missing_tables" | "offline" | "unconfigured";
 
@@ -531,11 +484,10 @@ export async function checkSupabaseSchemaInitialized(
       const timer = setTimeout(() => controller.abort(), 5000);
       try {
         const url = `${cleanUrl}/rest/v1/${table}?select=id&limit=0`;
-        const res = await fetch(url, {
+        const res = await supabaseFetch(url, {
           method: "GET",
           headers: {
             apikey: cleanKey,
-            Authorization: `Bearer ${cleanKey}`,
           },
           signal: controller.signal,
         });
@@ -543,6 +495,8 @@ export async function checkSupabaseSchemaInitialized(
           const text = await res.text().catch(() => "");
           if (isSupabaseMissingTableResponse(res.status, text)) {
             missingTables.push(table);
+          } else {
+            hadNetworkFailure = true;
           }
         }
       } catch {

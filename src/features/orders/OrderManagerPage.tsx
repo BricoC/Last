@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { SUPABASE_SESSION_UPDATED, getSupabaseSessionEmail, subscribeSupabaseSession } from "@/shared/services/supabaseSession";
+import React, { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { Supplier } from "./types/order";
 import { orderSupabaseService } from "./services/orderSupabaseService";
 import { ORDER_GRID_CSS } from "./utils/constants";
@@ -31,8 +32,10 @@ export const OrderManagerPage: React.FC<OrderManagerPageProps> = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [targetOrderId, setTargetOrderId] = useState<string | null>(null);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const sessionEmail = useSyncExternalStore(subscribeSupabaseSession, getSupabaseSessionEmail);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [queueCount, setQueueCount] = useState<number>(() => orderSupabaseService.getOfflineQueue().length);
+  const isCloudOnline = isOnline && Boolean(sessionEmail);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const isSearchActive = globalSearchQuery.trim().length > 0;
@@ -50,14 +53,11 @@ export const OrderManagerPage: React.FC<OrderManagerPageProps> = () => {
   // Avvio Realtime WebSocket e monitoraggio connessione / coda offline
   useEffect(() => {
     void loadSuppliers();
-    void orderSupabaseService.startRealtime();
+    const unsubscribeRealtime = orderSupabaseService.subscribeRealtime();
 
     const updateOnlineStatus = () => {
       const online = navigator.onLine;
       setIsOnline(online);
-      if (online) {
-        void orderSupabaseService.processOfflineQueue();
-      }
       setQueueCount(orderSupabaseService.getOfflineQueue().length);
     };
 
@@ -66,9 +66,14 @@ export const OrderManagerPage: React.FC<OrderManagerPageProps> = () => {
       void loadSuppliers();
     };
 
+    const onSessionUpdated = () => {
+      void loadSuppliers();
+    };
+    window.addEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
     window.addEventListener("online", updateOnlineStatus);
     window.addEventListener("offline", updateOnlineStatus);
     window.addEventListener("order_offline_queue_synced", handleQueueSynced);
+    window.addEventListener("supabase_update_fornitori", handleQueueSynced);
 
     // Controlla la coda ogni 10 secondi
     const interval = setInterval(() => {
@@ -76,10 +81,12 @@ export const OrderManagerPage: React.FC<OrderManagerPageProps> = () => {
     }, 10000);
 
     return () => {
-      orderSupabaseService.stopRealtime();
+      unsubscribeRealtime();
+      window.removeEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
       window.removeEventListener("online", updateOnlineStatus);
       window.removeEventListener("offline", updateOnlineStatus);
       window.removeEventListener("order_offline_queue_synced", handleQueueSynced);
+      window.removeEventListener("supabase_update_fornitori", handleQueueSynced);
       clearInterval(interval);
     };
   }, [loadSuppliers]);
@@ -160,13 +167,13 @@ export const OrderManagerPage: React.FC<OrderManagerPageProps> = () => {
 
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full font-medium ${
-              isOnline
+              isCloudOnline
                 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                 : "bg-red-500/10 text-red-400 border border-red-500/20"
             }`}
           >
-            {isOnline ? <Cloud className="w-3 h-3 text-emerald-400" /> : <CloudOff className="w-3 h-3 text-red-400" />}
-            <span>{isOnline ? "Cloud Online" : "Modalità Offline"}</span>
+            {isCloudOnline ? <Cloud className="w-3 h-3 text-emerald-400" /> : <CloudOff className="w-3 h-3 text-red-400" />}
+            <span>{isCloudOnline ? "Cloud Online" : isOnline ? "Cloud disconnesso" : "Modalità Offline"}</span>
           </div>
 
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] font-medium">

@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
@@ -40,12 +41,55 @@ impl SupabaseConfig {
         if self.anon_key.len() > 4096 || self.anon_key.chars().any(char::is_control) {
             return Err("Chiave API non valida".into());
         }
-        if self.anon_key.starts_with("sb_secret_")
-            || self.anon_key.to_ascii_lowercase().contains("service_role")
-        {
-            return Err("Usa solo la chiave anon/pubblica; le chiavi secret e service_role non sono accettate".into());
+        if !self.anon_key.is_empty() && !is_public_api_key(&self.anon_key) {
+            return Err("Usa la chiave Supabase publishable oppure una chiave JWT anon.".into());
         }
         Ok(())
+    }
+}
+
+fn is_public_api_key(key: &str) -> bool {
+    if let Some(value) = key.strip_prefix("sb_publishable_") {
+        return !value.is_empty()
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte));
+    }
+
+    let mut segments = key.split('.');
+    let (Some(header), Some(payload), Some(signature), None) =
+        (segments.next(), segments.next(), segments.next(), segments.next())
+    else {
+        return false;
+    };
+    if header.is_empty() || signature.is_empty() {
+        return false;
+    }
+    // L'API convalida la firma. Qui escludiamo chiavi legacy con un ruolo privilegiato.
+    URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| value["role"].as_str().map(|role| role == "anon"))
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_api_config_accepts_only_public_key_types() {
+        let jwt = |role: &str| {
+            let payload = serde_json::json!({ "role": role }).to_string();
+            format!("header.{}.signature", URL_SAFE_NO_PAD.encode(payload))
+        };
+        assert!(is_public_api_key("sb_publishable_example"));
+        assert!(is_public_api_key(&jwt("anon")));
+        assert!(!is_public_api_key("sb_secret_example"));
+        assert!(!is_public_api_key(&jwt("service_role")));
+        assert!(!is_public_api_key(&jwt("authenticated")));
+        assert!(!is_public_api_key("header.invalid.signature"));
     }
 }
 

@@ -8,8 +8,12 @@ export interface SqliteWrite {
 
 export async function applyLocalDatabaseBatch(
   writes: SqliteWrite[],
-  validateReferencesAfterWrite = false
+  referenceTables?: string[],
 ): Promise<void> {
   if (writes.length === 0) return;
-  await invoke("apply_local_database_batch", { writes, validateReferencesAfterWrite });
+  await invoke("apply_local_database_batch", {
+    writes,
+    validateReferencesAfterWrite: referenceTables !== undefined,
+    ...(referenceTables === undefined ? {} : { referenceTables }),
+  });
 }

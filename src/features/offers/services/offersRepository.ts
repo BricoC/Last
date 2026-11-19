@@ -1,3 +1,5 @@
+import { pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { getDatabase } from "@/shared/data-layer/database";
 import type { OfferRecord, OfferStatus, TrashOfferRow } from "../types/offer";
 import { offersSyncService } from "./offersSyncService";
@@ -262,14 +264,13 @@ export class OffersRepository {
     const user = deletedBy || "Operatore";
 
     // 1. Inserisci o aggiorna nel cestino
-    await db.execute(
-      `INSERT INTO offers_trash (
+    const writes: SqliteWrite[] = [{ sql: `INSERT INTO offers_trash (
         id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, deleted_at, deleted_by
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       ON CONFLICT(id) DO UPDATE SET
         deleted_at = excluded.deleted_at,
         deleted_by = excluded.deleted_by`,
-      [
+      params: [
         offer.id,
         offer.supabase_id ?? null,
         offer.offer_date,
@@ -285,28 +286,28 @@ export class OffersRepository {
         offer.updated_at,
         nowIso,
         user,
-      ]
-    );
+      ],
+    }];
 
     // 2. Rimuovi dalla tabella principale
-    await db.execute(`DELETE FROM offers WHERE id = $1`, [id]);
+    writes.push(
+      { sql: "DELETE FROM offers WHERE id = $1 AND updated_at = $2", params: [id, offer.updated_at], expectedRows: 1 },
+      pendingCloudWrite("offers", id, "delete", { remoteId: offer.supabase_id ?? null }),
+    );
 
     // 3. Tronca il cestino mantenendo rigorosamente le ultime 10 offerte (FIFO)
-    await db.execute(`
+    writes.push({ sql: `
       DELETE FROM offers_trash 
       WHERE id NOT IN (
         SELECT id FROM offers_trash 
         ORDER BY deleted_at DESC 
         LIMIT 10
       );
-    `);
+    `, params: [] });
 
+    await applyLocalDatabaseBatch(writes);
     notifyOffersChanged();
-
-    // 4. Rimuovi da Supabase se presente
-    if (offer.supabase_id) {
-      await offersSyncService.deleteRemoteOffer(offer.supabase_id).catch(() => {});
-    }
+    void offersSyncService.sync().catch(console.warn);
   }
 
   /**
@@ -345,11 +346,11 @@ export class OffersRepository {
     const nowIso = new Date().toISOString();
 
     // 1. Reinserisci nella tabella attiva con sync_status = 'pending'
-    await db.execute(
-      `INSERT INTO offers (
+    await applyLocalDatabaseBatch([{ sql: `INSERT INTO offers (
         id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status
       ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending')
       ON CONFLICT(id) DO UPDATE SET
+        supabase_id = excluded.supabase_id,
         offer_date = excluded.offer_date,
         requester = excluded.requester,
         contact = excluded.contact,
@@ -359,7 +360,7 @@ export class OffersRepository {
         is_archived = excluded.is_archived,
         updated_at = excluded.updated_at,
         sync_status = 'pending'`,
-      [
+      params: [
         item.id,
         item.offer_date,
         item.requester,
@@ -372,11 +373,12 @@ export class OffersRepository {
         item.updated_by,
         item.created_at,
         nowIso,
-      ]
-    );
+      ],
+    },
 
-    // 2. Rimuovi dal cestino
-    await db.execute(`DELETE FROM offers_trash WHERE id = $1`, [id]);
+    { sql: "DELETE FROM offers_trash WHERE id = $1 AND deleted_at = $2",
+      params: [id, item.deleted_at], expectedRows: 1 },
+    ]);
 
     // 3. Notifica la UI e sincronizza su Supabase
     notifyOffersChanged();
@@ -405,17 +407,17 @@ export class OffersRepository {
    */
   public async deleteOffer(id: string): Promise<void> {
     const db = await getDatabase();
-    const existing = await db.select<OfferRecord[]>(`SELECT supabase_id FROM offers WHERE id = $1 LIMIT 1`, [id]);
-    const supabaseId = existing[0]?.supabase_id;
-
-    await db.execute(`DELETE FROM offers WHERE id = $1`, [id]);
-    await db.execute(`DELETE FROM offers_trash WHERE id = $1`, [id]);
-
+    const [existing] = await db.select<OfferRecord[]>(
+      "SELECT supabase_id FROM offers WHERE id = $1 UNION ALL SELECT supabase_id FROM offers_trash WHERE id = $1 LIMIT 1", [id],
+    );
+    if (!existing) return;
+    await applyLocalDatabaseBatch([
+      { sql: "DELETE FROM offers WHERE id = $1", params: [id] },
+      { sql: "DELETE FROM offers_trash WHERE id = $1", params: [id] },
+      pendingCloudWrite("offers", id, "delete", { remoteId: existing.supabase_id ?? null }),
+    ]);
     notifyOffersChanged();
-
-    if (supabaseId) {
-      await offersSyncService.deleteRemoteOffer(supabaseId).catch(() => {});
-    }
+    void offersSyncService.sync().catch(console.warn);
   }
 }
 

@@ -1,5 +1,7 @@
+import { createSupabaseRealtimeSubscription } from "@/shared/services/supabaseRealtimeSubscription";
+import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSession";
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
-import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { getDatabase } from "@/shared/data-layer/database";
 import { clientSyncService } from "@/features/clients/services/clientSyncService";
 import { ddtRepository } from "./ddtRepository";
@@ -53,38 +55,23 @@ class DdtIncrementalSyncService {
   private pendingCheckModified = false;
   private verifiedEmptyDdtIds = new Set<string>();
   private checkedGapKeys = new Set<string>();
-  private realtimeClient: SupabaseClient | null = null;
-  private realtimeClientKey: string | null = null;
-  private realtimeChannel: RealtimeChannel | null = null;
-  private realtimeSubscribers = 0;
-
-  public async startRealtime(): Promise<void> {
-    this.realtimeSubscribers++;
-    if (this.realtimeChannel) return;
-
-    try {
+  public readonly subscribeRealtime = createSupabaseRealtimeSubscription(
+    async () => {
       const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
-      if (!status?.config?.projectUrl || !status?.config?.anonKey || this.realtimeSubscribers <= 0) {
-        return;
-      }
-
-      const projectUrl = status.config.projectUrl.trim().replace(/\/$/, "");
-      const anonKey = status.config.anonKey.trim();
-      const clientKey = `${projectUrl}::${anonKey}`;
-
-      if (!this.realtimeClient || this.realtimeClientKey !== clientKey) {
-        this.realtimeClient = createClient(projectUrl, anonKey);
-        this.realtimeClientKey = clientKey;
-      }
-
-      this.realtimeChannel = this.realtimeClient
-        .channel("realtime_ddt")
+      const config = status?.config;
+      return config?.projectUrl && config.anonKey
+        ? getAuthenticatedSupabaseClient(config.projectUrl, config.anonKey)
+        : null;
+    },
+    (client, isCurrent) => client
+        .channel("last:ddt", { config: { private: true } })
         .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "ddt" },
-          (payload) => {
+          "broadcast",
+          { event: "ddt" },
+          ({ payload }) => {
+            if (!isCurrent() || !payload) return;
             if (payload.eventType === "DELETE" && payload.old && typeof (payload.old as { id?: string }).id === "string") {
-              void this.handleRemoteDelete((payload.old as { id: string }).id);
+              void this.handleRemoteDelete((payload.old as { id: string }).id, isCurrent);
             } else {
               const changedAnno = Number((payload.new as { anno?: number } | null)?.anno || 0);
               const isPrevYear = changedAnno > 0 && changedAnno < new Date().getFullYear();
@@ -95,24 +82,14 @@ class DdtIncrementalSyncService {
             }
           }
         )
-        .subscribe();
-    } catch (err) {
-      console.warn("[Sync Incrementale] Impossibile avviare Supabase Realtime DDT:", err);
-    }
-  }
+        .subscribe(),
+    "[Sync Incrementale] Realtime DDT",
+  );
 
-  public stopRealtime(): void {
-    this.realtimeSubscribers = Math.max(0, this.realtimeSubscribers - 1);
-    if (this.realtimeSubscribers > 0) return;
-    if (this.realtimeChannel && this.realtimeClient) {
-      void this.realtimeClient.removeChannel(this.realtimeChannel);
-      this.realtimeChannel = null;
-    }
-  }
-
-  private async handleRemoteDelete(remoteId: string): Promise<void> {
+  private async handleRemoteDelete(remoteId: string, isCurrent: () => boolean): Promise<void> {
     try {
       const db = await getDatabase();
+      if (!isCurrent()) return;
       const res = await db.execute(
         `DELETE FROM ddt_documents WHERE id = $1 AND sync_status = 'synced'`,
         [remoteId]
@@ -146,8 +123,8 @@ class DdtIncrementalSyncService {
       linesUrl.searchParams.set("limit", String(PAGE_LIMIT));
       linesUrl.searchParams.set("offset", String(offset));
 
-      const linesRes = await fetch(linesUrl.toString(), {
-        headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      const linesRes = await supabaseFetch(linesUrl.toString(), {
+        headers: { apikey: anonKey },
       });
 
       if (!linesRes.ok) throw new Error(`Download righe DDT: HTTP ${linesRes.status}`);
@@ -267,8 +244,8 @@ class DdtIncrementalSyncService {
             gapUrl.searchParams.set("select", HEADER_FIELDS);
             gapUrl.searchParams.set("order", "numero.asc");
 
-            const gapRes = await fetch(gapUrl.toString(), {
-              headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+            const gapRes = await supabaseFetch(gapUrl.toString(), {
+              headers: { apikey: anonKey },
             });
             if (!gapRes.ok) throw new Error(`Download DDT mancanti: HTTP ${gapRes.status}`);
             {
@@ -295,8 +272,8 @@ class DdtIncrementalSyncService {
         headersUrl.searchParams.set("select", HEADER_FIELDS);
         headersUrl.searchParams.set("order", "numero.asc");
 
-        const headersRes = await fetch(headersUrl.toString(), {
-          headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+        const headersRes = await supabaseFetch(headersUrl.toString(), {
+          headers: { apikey: anonKey },
         });
 
         if (headersRes.ok) {
@@ -329,8 +306,8 @@ class DdtIncrementalSyncService {
             checkUrl.searchParams.set("anno", `eq.${year}`);
             checkUrl.searchParams.set("numero", `in.(${numbersToCheck.join(",")})`);
             checkUrl.searchParams.set("select", HEADER_FIELDS);
-            const checkRes = await fetch(checkUrl.toString(), {
-              headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+            const checkRes = await supabaseFetch(checkUrl.toString(), {
+              headers: { apikey: anonKey },
             });
             if (checkRes.ok) {
               const remoteHeaders = (await checkRes.json()) as CloudHeader[];
@@ -354,8 +331,8 @@ class DdtIncrementalSyncService {
                     confLinesUrl.searchParams.set("numero_ddt", `eq.${remoteNum}`);
                     confLinesUrl.searchParams.set("select", LINE_FIELDS);
                     confLinesUrl.searchParams.set("order", "riga_nr.asc");
-                    const confLinesRes = await fetch(confLinesUrl.toString(), {
-                      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+                    const confLinesRes = await supabaseFetch(confLinesUrl.toString(), {
+                      headers: { apikey: anonKey },
                     });
                     if (!confLinesRes.ok) throw new Error(`Download righe DDT in conflitto: HTTP ${confLinesRes.status}`);
                     const confLines = await confLinesRes.json() as CloudLine[];
@@ -431,8 +408,8 @@ class DdtIncrementalSyncService {
           modUrl.searchParams.set("order", "ultima_modifica.desc.nullslast");
           modUrl.searchParams.set("limit", "25");
 
-          const modRes = await fetch(modUrl.toString(), {
-            headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+          const modRes = await supabaseFetch(modUrl.toString(), {
+            headers: { apikey: anonKey },
           });
 
           if (!modRes.ok) throw new Error(`Controllo modifiche DDT: HTTP ${modRes.status}`);

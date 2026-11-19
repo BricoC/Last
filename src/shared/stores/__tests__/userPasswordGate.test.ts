@@ -54,7 +54,6 @@ describe("useUserStore Password Gate", () => {
 
     vi.spyOn(AppUserService, "getAllUsers").mockResolvedValue(mockUsers);
     vi.spyOn(AppUserService, "getActiveUserId").mockReturnValue("admin");
-    vi.spyOn(AppUserService, "syncWithCloud").mockResolvedValue({ pulled: 0, pushed: 0, success: true });
 
     await useUserStore.getState().loadUsers();
 
@@ -184,7 +183,6 @@ describe("useUserStore Password Gate", () => {
 
     vi.spyOn(AppUserService, "getAllUsers").mockResolvedValue([adminUser]);
     vi.spyOn(AppUserService, "getActiveUserId").mockReturnValue("admin");
-    vi.spyOn(AppUserService, "syncWithCloud").mockResolvedValue({ pulled: 0, pushed: 0, success: true });
 
     // Entering Settings calls loadUsers()
     await useUserStore.getState().loadUsers();

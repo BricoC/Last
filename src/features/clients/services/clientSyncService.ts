@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { Client, ClientDestination, ClientPhone } from "../models/client";
@@ -91,50 +92,60 @@ export class ClientSyncService {
 
     try {
       const db = await getDatabase();
-      const activeSameName = await db.select<{ business_name: string }[]>(
-        "SELECT business_name FROM clients WHERE deleted_at IS NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($1))",
-        [trimmed]
-      );
-
-      if (!shouldDeleteRemoteClient(trimmed, activeSameName.map((r) => r.business_name))) {
-        if (localClientId) {
-          await db.execute("UPDATE clients SET sync_status = 'synced' WHERE id = $1 AND deleted_at IS NOT NULL", [localClientId]);
-        }
+      const [deleted] = localClientId ? await db.select<Array<{ pending_previous_name: string | null }>>(
+        "SELECT pending_previous_name FROM clients WHERE id = $1 AND deleted_at IS NOT NULL",
+        [localClientId],
+      ) : [];
+      const aliases = new Set([trimmed, deleted?.pending_previous_name?.trim()].filter((name): name is string => Boolean(name)));
+      const deletable: string[] = [];
+      for (const name of aliases) {
+        const active = await db.select<Array<{ business_name: string }>>(
+          "SELECT business_name FROM clients WHERE deleted_at IS NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($1))",
+          [name],
+        );
+        if (shouldDeleteRemoteClient(name, active.map((client) => client.business_name))) deletable.push(name);
+      }
+      if (!deletable.length) {
+        if (localClientId) await db.execute(
+          "UPDATE clients SET sync_status = 'synced', pending_previous_name = NULL WHERE id = $1 AND deleted_at IS NOT NULL",
+          [localClientId],
+        );
         return true;
       }
 
       const creds = await this.getCredentials();
       const listUrl = new URL("/rest/v1/clienti", creds.projectUrl);
       listUrl.searchParams.set("select", "id,cliente");
+      listUrl.searchParams.set("order", "id.asc");
       listUrl.searchParams.set("limit", "1000");
+      let offset = 0;
+      const matches = new Set<number>();
+      for (;;) {
+        listUrl.searchParams.set("offset", String(offset));
+        const response = await supabaseFetch(listUrl, { headers: { apikey: creds.anonKey } });
+        if (!response.ok) return false;
+        const rows = await response.json();
+        if (!Array.isArray(rows)) return false;
+        if (!rows.length) break;
+        for (const name of deletable) for (const id of findMatchingRemoteClientIds(rows, name)) matches.add(id);
+        offset += rows.length;
+      }
 
-      const listRes = await fetch(listUrl.toString(), {
-        method: "GET",
-        headers: {
-          apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
-        },
-      });
-      if (!listRes.ok) return false;
-
-      const remoteRows = (await listRes.json()) as Array<{ id: number; cliente: string | null }>;
-      const matchingIds = findMatchingRemoteClientIds(remoteRows, trimmed);
-
-      if (matchingIds.length > 0) {
+      const matchingIds = [...matches];
+      for (let index = 0; index < matchingIds.length; index += 200) {
         const delUrl = new URL("/rest/v1/clienti", creds.projectUrl);
-        delUrl.searchParams.set("id", `in.(${matchingIds.join(",")})`);
-        const delRes = await fetch(delUrl.toString(), {
+        delUrl.searchParams.set("id", `in.(${matchingIds.slice(index, index + 200).join(",")})`);
+        const delRes = await supabaseFetch(delUrl.toString(), {
           method: "DELETE",
           headers: {
             apikey: creds.anonKey,
-            Authorization: `Bearer ${creds.anonKey}`,
           },
         });
         if (!delRes.ok) return false;
       }
 
       if (localClientId) {
-        await db.execute("UPDATE clients SET sync_status = 'synced' WHERE id = $1 AND deleted_at IS NOT NULL", [localClientId]);
+        await db.execute("UPDATE clients SET sync_status = 'synced', pending_previous_name = NULL WHERE id = $1 AND deleted_at IS NOT NULL", [localClientId]);
       } else {
         await db.execute(
           "UPDATE clients SET sync_status = 'synced' WHERE deleted_at IS NOT NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($1))",
@@ -171,7 +182,15 @@ export class ClientSyncService {
    * Invia a Supabase Cloud tutti i clienti creati, modificati o eliminati offline.
    * Esegue 0 chiamate HTTP verso Supabase se non ci sono record pending in locale.
    */
-  public async syncPendingClientsToSupabase(): Promise<{ pushed: number; deleted: number }> {
+  private pendingClientSync: Promise<{ pushed: number; deleted: number }> | null = null;
+
+  public syncPendingClientsToSupabase(): Promise<{ pushed: number; deleted: number }> {
+    if (this.pendingClientSync) return this.pendingClientSync;
+    this.pendingClientSync = this.sendPendingClients().finally(() => { this.pendingClientSync = null; });
+    return this.pendingClientSync;
+  }
+
+  private async sendPendingClients(): Promise<{ pushed: number; deleted: number }> {
     let deleted = 0;
     const failures: string[] = [];
     try {
@@ -181,8 +200,8 @@ export class ClientSyncService {
     }
 
     const db = await getDatabase();
-    const pendingRows = await db.select<{ id: string }[]>(
-      "SELECT id FROM clients WHERE deleted_at IS NULL AND sync_status = 'pending'"
+    const pendingRows = await db.select<{ id: string; pending_previous_name: string | null }[]>(
+      "SELECT id, pending_previous_name FROM clients WHERE deleted_at IS NULL AND sync_status = 'pending'"
     );
 
     let pushed = 0;
@@ -191,7 +210,7 @@ export class ClientSyncService {
       const client = await clientRepository.getClientById(row.id);
       if (!client) continue;
       queued++;
-      const ok = await this.pushClientToSupabase(client);
+      const ok = await this.pushClientToSupabase(client, row.pending_previous_name ?? undefined);
       if (ok) pushed++;
     }
 
@@ -229,8 +248,8 @@ export class ClientSyncService {
     const rows: SupabaseClientRow[] = [];
     while (true) {
       url.searchParams.set("offset", String(rows.length));
-      const response = await fetch(url.toString(), {
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      const response = await supabaseFetch(url.toString(), {
+        headers: { apikey: creds.anonKey },
       });
       if (!response.ok) throw new Error(`Errore connessione Supabase clienti: HTTP ${response.status}`);
       const page = await response.json();
@@ -506,10 +525,9 @@ export class ClientSyncService {
       for (const nameToSearch of searchNames) {
         const checkUrl = new URL("/rest/v1/clienti", creds.projectUrl);
         checkUrl.searchParams.set("cliente", `eq.${nameToSearch}`);
-        const checkRes = await fetch(checkUrl.toString(), {
+        const checkRes = await supabaseFetch(checkUrl.toString(), {
           headers: {
             apikey: creds.anonKey,
-            Authorization: `Bearer ${creds.anonKey}`,
           },
         });
         if (!checkRes.ok) throw new Error(`Ricerca cliente: HTTP ${checkRes.status}`);
@@ -525,8 +543,8 @@ export class ClientSyncService {
         const vatUrl = new URL("/rest/v1/clienti", creds.projectUrl);
         vatUrl.searchParams.set("piva", `eq.${client.vat_number.trim()}`);
         vatUrl.searchParams.set("select", "id,cliente");
-        const vatRes = await fetch(vatUrl, {
-          headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+        const vatRes = await supabaseFetch(vatUrl, {
+          headers: { apikey: creds.anonKey },
         });
         if (!vatRes.ok) throw new Error(`Ricerca P.IVA: HTTP ${vatRes.status}`);
         const matches = await vatRes.json();
@@ -534,7 +552,7 @@ export class ClientSyncService {
         if (matches.length === 1) {
           const match = matches[0];
           if (typeof match.id !== "number" ||
-            String(match.cliente ?? "").trim().toLowerCase() !== client.business_name.trim().toLowerCase()) {
+            !searchNames.includes(String(match.cliente ?? "").trim().toUpperCase())) {
             throw new Error("La P.IVA appartiene a una ragione sociale diversa");
           }
           supId = match.id;
@@ -544,22 +562,20 @@ export class ClientSyncService {
       let res: Response;
       if (supId !== null) {
         const patchUrl = new URL(`/rest/v1/clienti?id=eq.${supId}`, creds.projectUrl);
-        res = await fetch(patchUrl.toString(), {
+        res = await supabaseFetch(patchUrl.toString(), {
           method: "PATCH",
           headers: {
             apikey: creds.anonKey,
-            Authorization: `Bearer ${creds.anonKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(payload),
         });
       } else {
         const insertUrl = new URL("/rest/v1/clienti", creds.projectUrl);
-        res = await fetch(insertUrl.toString(), {
+        res = await supabaseFetch(insertUrl.toString(), {
           method: "POST",
           headers: {
             apikey: creds.anonKey,
-            Authorization: `Bearer ${creds.anonKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(payload),
@@ -569,8 +585,11 @@ export class ClientSyncService {
       if (res.ok) {
         const db = await getDatabase();
         await db.execute(
-          "UPDATE clients SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2 AND deleted_at IS NULL",
-          [client.id, client.updated_at]
+          `UPDATE clients SET
+            sync_status = CASE WHEN updated_at = $2 THEN 'synced' ELSE sync_status END,
+            pending_previous_name = CASE WHEN updated_at = $2 THEN NULL ELSE $3 END
+            WHERE id = $1 AND deleted_at IS NULL AND sync_status = 'pending'`,
+          [client.id, client.updated_at, client.business_name]
         );
         return true;
       }

@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import type { NoteRecord } from "../types/note";
@@ -102,9 +103,9 @@ export class NotesSyncService {
           } else {
             url.searchParams.set("local_id", `eq.${deletion.id}`);
           }
-          const response = await fetch(url.toString(), {
+          const response = await supabaseFetch(url.toString(), {
             method: "DELETE",
-            headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+            headers: { apikey: creds.anonKey },
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           await db.execute(
@@ -139,11 +140,10 @@ export class NotesSyncService {
         if (item.supabase_id) {
           // PATCH su riga già esistente su Supabase
           const url = new URL(`/rest/v1/note?id=eq.${item.supabase_id}`, creds.projectUrl);
-          const res = await fetch(url.toString(), {
+          const res = await supabaseFetch(url.toString(), {
             method: "PATCH",
             headers: {
               apikey: creds.anonKey,
-              Authorization: `Bearer ${creds.anonKey}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify(payload),
@@ -159,11 +159,10 @@ export class NotesSyncService {
         } else {
           // POST upsert con on_conflict=local_id per evitare 409 Conflict dopo restore dal cestino
           const url = new URL("/rest/v1/note?on_conflict=local_id", creds.projectUrl);
-          const res = await fetch(url.toString(), {
+          const res = await supabaseFetch(url.toString(), {
             method: "POST",
             headers: {
               apikey: creds.anonKey,
-              Authorization: `Bearer ${creds.anonKey}`,
               "Content-Type": "application/json",
               Prefer: "resolution=merge-duplicates,return=representation",
             },
@@ -187,10 +186,9 @@ export class NotesSyncService {
 
       // 2. PULL: Scarica le note remote da Supabase
       const pullUrl = new URL("/rest/v1/note?select=*&order=updated_at.desc&limit=1000", creds.projectUrl);
-      const pullRes = await fetch(pullUrl.toString(), {
+      const pullRes = await supabaseFetch(pullUrl.toString(), {
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
         },
       });
 

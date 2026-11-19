@@ -10,6 +10,7 @@ import { QuoteSyncService } from "@/features/quotes/services/quoteSyncService";
 import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
 import { electronicInvoicesService } from "@/features/invoices/services/electronicInvoicesService";
 import { AppUserService } from "@/shared/services/appUserService";
+import { requireSupabaseAccess } from "./supabaseSession";
 import {
   loadBackupConfig,
   pullBackupSettingsFromSupabase,
@@ -29,7 +30,7 @@ export interface SetupStatus {
 }
 
 export interface SetupProgress {
-  stage: "ddt" | "price-lists" | "modules" | "users" | "completed" | "error";
+  stage: "ddt" | "price-lists" | "modules" | "settings" | "completed" | "error";
   message: string;
   percent: number;
 }
@@ -120,9 +121,7 @@ export class CloudFullSetupService {
     };
 
     try {
-      // 1. Salva la configurazione nel backend di Rust
-      await invoke("save_supabase_config", { config: { projectUrl: url, anonKey: key } });
-      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("supabase-config-updated"));
+      await requireSupabaseAccess(url, key);
 
       // 2. FASE 1: Download completo DDT di tutti gli anni (2023, 2024, 2025, 2026...) e righe
       onProgress({
@@ -190,15 +189,14 @@ export class CloudFullSetupService {
         step("Fatture", () => electronicInvoicesService.syncFromSupabase()),
       ]);
 
-      // 5. FASE 4: Utenti, Postazioni e Impostazioni Cloud
+      // 5. FASE 4: Impostazioni Cloud
       onProgress({
-        stage: "users",
-        message: "Sincronizzazione utenti, email e configurazione backup...",
+        stage: "settings",
+        message: "Sincronizzazione email e configurazione backup...",
         percent: 94,
       });
 
       await Promise.all([
-        step("Utenti", () => AppUserService.syncWithCloud()),
         step("Impostazioni email", () => pullEmailSettingsFromSupabase(true)),
         step("Impostazioni backup", () => pullBackupSettingsFromSupabase(true)),
       ]);
@@ -219,7 +217,6 @@ export class CloudFullSetupService {
         window.dispatchEvent(new CustomEvent("ddt-data-updated"));
         window.dispatchEvent(new CustomEvent("clients-data-updated"));
         window.dispatchEvent(new CustomEvent("cloud-sync-status-updated"));
-        window.dispatchEvent(new CustomEvent("supabase-config-updated"));
       }
 
       return error ? { success: false, error } : { success: true };

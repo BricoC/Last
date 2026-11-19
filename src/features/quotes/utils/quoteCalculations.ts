@@ -109,17 +109,22 @@ function percentage(numerator: MonetaryValue, denominator: MonetaryValue): numbe
 }
 
 function parseQuantity(raw: string | number): Decimal {
-  const normalized = String(raw).trim().replace(",", ".");
-  let quantity: Decimal;
-  try {
-    quantity = new Decimal(normalized);
-  } catch {
-    throw new TypeError("La quantità deve essere un numero valido.");
-  }
-  if (!quantity.isFinite() || quantity.lte(0)) {
+  const normalized = normalizeDdtQuantity(raw);
+  if (normalized === null) throw new TypeError("La quantità deve essere un numero valido.");
+  const quantity = new Decimal(normalized);
+  if (!quantity.isFinite() || !Number.isFinite(Number(normalized)) || quantity.lte(0)) {
     throw new RangeError("La quantità deve essere maggiore di zero.");
   }
   return quantity;
+}
+
+export function quoteQuantityOrNull(value: string | number | null | undefined): Decimal | null {
+  if (value == null) return null;
+  try {
+    return parseQuantity(value);
+  } catch {
+    return null;
+  }
 }
 
 function assertFinite(label: string, value: number): void {
@@ -131,3 +136,4 @@ function assertVatRate(value: number): asserts value is QuoteVatRate {
     throw new RangeError("L'aliquota IVA deve essere 0, 4, 10 o 22.");
   }
 }
+import { normalizeDdtQuantity } from "@/features/ddt-studio/utils/ddtQuantity";

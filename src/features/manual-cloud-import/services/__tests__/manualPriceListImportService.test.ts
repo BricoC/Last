@@ -1,10 +1,14 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   parseAnyDate, parseCustomerPriceListExcelRow, parseSafeNum, parseExcelPricePercentage,
-  uploadGeneralListsToSupabase, uploadDdtToSupabase,
+  uploadClientPriceListsToSupabase, uploadGeneralListsToSupabase, uploadDdtToSupabase,
   type ParsedDdtHeader, type ParsedDdtRow, type ParsedListinoGeneraleRow,
 } from "../manualPriceListImportService";
 import { FULL_SUPABASE_SCHEMA_SQL } from "@/features/settings/data-import/supabaseSchemaSql";
+
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -74,6 +78,27 @@ describe("Import cloud manuale", () => {
   const project = "https://example.test";
   const incoming = { codice_articolo: "A", descrizione: "Articolo", isVari: false } as ParsedListinoGeneraleRow;
 
+  it("omette i numeri vuoti e unisce le righe duplicate conservando gli zeri espliciti", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(Response.json([{ id: 14, cliente: "LIST_TEST", descrizione: "Articolo" }]))
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(new Response(null, { status: 201 }));
+    vi.stubGlobal("fetch", fetch);
+    const first = parseCustomerPriceListExcelRow({
+      DESCRIZIONE: "Articolo", FATTURA: "  ", ACQUISTO: "10 netto", RICARICO: 0,
+    }, "LIST_TEST", "Test.xls")!;
+    const second = parseCustomerPriceListExcelRow({
+      DESCRIZIONE: "ARTICOLO", FATTURA: "", ACQUISTO: "", RICARICO: "  ",
+    }, "LIST_TEST", "Test.xls")!;
+
+    await expect(uploadClientPriceListsToSupabase([first, second], project, "test"))
+      .resolves.toEqual({ inserted: 0, updated: 1, failed: 0 });
+    const [record] = JSON.parse(String(fetch.mock.calls[2][1]?.body));
+    expect(record).toMatchObject({ id: 14, acquisto_old: "10 netto", ricarico: 0 });
+    expect(record).not.toHaveProperty("prezzo_fattura");
+    expect(record).not.toHaveProperty("prezzo_acquisto");
+  });
+
   it("normalizza percentuali con unità esplicita e conserva le frazioni Excel", () => {
     expect(["22%", "0%", "2%", 4.0].map((value) => parseExcelPricePercentage(value))).toEqual([0.22, 0, 0.02, 4]);
   });
@@ -109,7 +134,7 @@ describe("Import cloud manuale", () => {
 
   it("assegna ID deterministici a testata e righe e usa il padre restituito dal cloud", async () => {
     const header = { anno: 2026, numero: 7, data: "2026-01-01", cliente: "ACME" } as ParsedDdtHeader;
-    const row = { anno: 2026, numero_ddt: 7, riga_nr: 1, descrizione: "Articolo" } as ParsedDdtRow;
+    const row = { anno: 2026, numero_ddt: 7, riga_nr: 1, descrizione: "Articolo", iva_pct: 21.7 } as ParsedDdtRow;
     const fetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
       if (!init?.method) return Response.json([]);
       if (String(url).includes("/ddt?")) return Response.json(JSON.parse(String(init.body)));
@@ -123,7 +148,7 @@ describe("Import cloud manuale", () => {
       .map(([, init]) => JSON.parse(String(init?.body))[0]);
     const [testata, riga] = ids();
     expect(testata.id).toMatch(/^[a-f0-9-]{36}$/);
-    expect(riga).toMatchObject({ id: expect.stringMatching(/^[a-f0-9-]{36}$/), ddt_id: testata.id });
+    expect(riga).toMatchObject({ id: expect.stringMatching(/^[a-f0-9-]{36}$/), ddt_id: testata.id, iva_pct: 22 });
     fetch.mockClear();
     await uploadDdtToSupabase([header], [row], project, "test");
     expect(ids().map(({ id }) => id)).toEqual([testata.id, riga.id]);

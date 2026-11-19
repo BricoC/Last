@@ -1,3 +1,4 @@
+import { formatPriceListInput } from "../utils/priceListInput";
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo, forwardRef, useImperativeHandle } from "react";
 import { Plus, RotateCcw, Save, Loader2 } from "lucide-react";
 import { ListinoGeneraleRow } from "../models/priceList";
@@ -428,6 +429,7 @@ export const GeneralPriceListEmbeddedSection = forwardRef<
     (rowId: string, colId: string, value: string) => {
       setEditingCell(null);
       setInitialEditChar(undefined);
+      if (!canEdit) return;
 
       // 1. Modifica sulla riga di inserimento in cima (newTopRow)
       if (rowId === newTopRow.id) {
@@ -457,7 +459,7 @@ export const GeneralPriceListEmbeddedSection = forwardRef<
 
       // 2. Modifica su riga esistente
       const prevRow = items.find((i) => i.id === rowId);
-      if (!prevRow) return;
+      if (!prevRow || value === formatPriceListInput(prevRow[colId as EditableColKey], colId)) return;
 
       const updatedRow = updateRowWithField(prevRow, colId, value);
       setItems((prev) => prev.map((r) => (r.id === rowId ? updatedRow : r)));
@@ -471,7 +473,7 @@ export const GeneralPriceListEmbeddedSection = forwardRef<
 
       setUndoStack((uPrev) => [...uPrev.slice(-49), { rowId, prevRow }]);
     },
-    [newTopRow, items, updateRowWithField, scheduleSilentAutoSaveIfNeeded]
+    [newTopRow, items, updateRowWithField, scheduleSilentAutoSaveIfNeeded, canEdit]
   );
 
   // Inserimento forzato con pulsante '+' su newTopRow
@@ -499,10 +501,11 @@ export const GeneralPriceListEmbeddedSection = forwardRef<
       const allRows = [newTopRow, ...filteredItems.slice(0, visibleCount)];
       const rowIdx = allRows.findIndex((r) => r.id === rowId);
       const colIdx = EDITABLE_COL_ORDER.indexOf(colId as EditableColKey);
+      const isEditing = editingCell?.rowId === rowId && editingCell.colId === colId;
 
       if (e.key === "Tab") {
         e.preventDefault();
-        commitCellEdit(rowId, colId, currentValStr);
+        if (canEdit && isEditing) commitCellEdit(rowId, colId, currentValStr);
         const nextColIdx = e.shiftKey ? colIdx - 1 : colIdx + 1;
         if (nextColIdx >= 0 && nextColIdx < EDITABLE_COL_ORDER.length) {
           selectCell(rowId, EDITABLE_COL_ORDER[nextColIdx]);
@@ -514,7 +517,7 @@ export const GeneralPriceListEmbeddedSection = forwardRef<
 
       if (e.key === "Enter") {
         e.preventDefault();
-        commitCellEdit(rowId, colId, currentValStr);
+        if (canEdit && isEditing) commitCellEdit(rowId, colId, currentValStr);
         if (rowIdx < allRows.length - 1) {
           selectCell(allRows[rowIdx + 1].id, colId);
         }
@@ -531,7 +534,7 @@ export const GeneralPriceListEmbeddedSection = forwardRef<
         }
       }
     },
-    [newTopRow, filteredItems, visibleCount, commitCellEdit, selectCell, editingCell]
+    [newTopRow, filteredItems, visibleCount, commitCellEdit, selectCell, editingCell, canEdit]
   );
 
   // Annulla ultima modifica
@@ -1181,7 +1184,7 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
 }) => {
   const [localValue, setLocalValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
-  const isCancelledRef = useRef(false);
+  const skipBlurCommitRef = useRef(false);
 
   useEffect(() => {
     if (inputRef.current) {
@@ -1204,7 +1207,7 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
         onBlur={() => {
-          if (isCancelledRef.current) return;
+          if (skipBlurCommitRef.current) return;
           onCommit(rowId, colId, localValue);
         }}
         onKeyDown={(e) => {
@@ -1212,10 +1215,11 @@ const CellInputEditor: React.FC<CellInputEditorProps> = ({
             e.preventDefault();
             e.stopPropagation();
             e.nativeEvent.stopImmediatePropagation();
-            isCancelledRef.current = true;
+            skipBlurCommitRef.current = true;
             onCancel();
             return;
           }
+          if (e.key === "Enter" || e.key === "Tab") skipBlurCommitRef.current = true;
           onKeyDown(e, rowId, colId, localValue);
         }}
         className="w-full h-full px-2.5 py-1 text-xs font-mono bg-blue-900/30 text-[var(--foreground)] border-2 border-blue-500 rounded-none outline-none shadow-inner"
@@ -1268,7 +1272,7 @@ const EditableGeneralCell: React.FC<EditableGeneralCellProps> = memo(
         <CellInputEditor
           rowId={rowId}
           colId={colId}
-          initialValue={initialChar !== undefined ? initialChar : value != null ? String(value) : ""}
+          initialValue={initialChar ?? formatPriceListInput(value, colId)}
           isInitialCharTyped={initialChar !== undefined}
           alignClass={alignClass}
           className={className}
@@ -1286,7 +1290,7 @@ const EditableGeneralCell: React.FC<EditableGeneralCellProps> = memo(
         onDoubleClick={() => {
           if (canEdit) onStartEdit(rowId, colId);
         }}
-        onKeyDown={(e) => onKeyDown(e, rowId, colId, value != null ? String(value) : "")}
+        onKeyDown={(e) => onKeyDown(e, rowId, colId, "")}
         className={`px-2.5 py-1.5 transition-colors relative outline-none cursor-pointer ${alignClass} ${
           isActive
             ? "ring-2 ring-blue-500 ring-inset bg-blue-500/10 font-bold"

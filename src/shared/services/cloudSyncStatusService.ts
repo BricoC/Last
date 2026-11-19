@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { ddtIncrementalSyncService, IncrementalSyncResult } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
@@ -211,7 +212,7 @@ class CloudSyncStatusService {
     // 3. Lettura remota da Supabase
     const projectUrl = cfgStatus.config.projectUrl.trim().replace(/\/$/, "");
     const anonKey = cfgStatus.config.anonKey.trim();
-    const headers = { apikey: anonKey, Authorization: `Bearer ${anonKey}` };
+    const headers = { apikey: anonKey };
 
     let remoteLatestDdt: CloudSyncStatusInfo["remoteLatestDdt"] = null;
     let remoteLatestListino: CloudSyncStatusInfo["remoteLatestListino"] = null;
@@ -221,15 +222,15 @@ class CloudSyncStatusService {
 
     try {
       const [ddtFetch, genFetch, cliFetch] = await Promise.allSettled([
-        fetch(
+        supabaseFetch(
           `${projectUrl}/rest/v1/ddt?select=anno,numero,cliente,data,created_at,ultima_modifica&order=anno.desc,numero.desc&limit=1`,
           { headers }
         ),
-        fetch(
+        supabaseFetch(
           `${projectUrl}/rest/v1/listino_generale?select=codice_articolo,descrizione,updated_at&order=updated_at.desc.nullslast&limit=1`,
           { headers }
         ),
-        fetch(
+        supabaseFetch(
           `${projectUrl}/rest/v1/listini_clienti?select=cliente,codice_articolo,updated_at&order=updated_at.desc.nullslast&limit=1`,
           { headers }
         ),

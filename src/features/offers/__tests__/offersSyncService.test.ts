@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 const { mockInvoke, mockExecute, mockSelect } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
   mockExecute: vi.fn(),
@@ -86,6 +90,7 @@ describe("OffersSyncService", () => {
     mockSelect
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: "local-deleted", supabase_id: 99 }]);
     mockExecute.mockResolvedValue({ rowsAffected: 1 });
 
@@ -104,7 +109,7 @@ describe("OffersSyncService", () => {
             is_archived: false,
           },
         ]),
-        { status: 200 }
+        { status: 200, headers: { "Content-Range": "0-0/1" } }
       )
     ) as typeof fetch;
 
@@ -117,8 +122,8 @@ describe("OffersSyncService", () => {
       expect.arrayContaining(["remote-10", 10, "2026-11-17", "Mario"])
     );
     expect(mockExecute).toHaveBeenCalledWith(
-      `DELETE FROM offers WHERE id = $1`,
-      ["local-deleted"]
+      expect.stringContaining("DELETE FROM offers WHERE id = $1 AND sync_status = 'synced'"),
+      ["local-deleted", 99]
     );
   });
 });

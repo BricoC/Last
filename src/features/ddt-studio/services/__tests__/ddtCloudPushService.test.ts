@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 const { mockInvoke, mockExecute, mockSelect } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
   mockExecute: vi.fn(),

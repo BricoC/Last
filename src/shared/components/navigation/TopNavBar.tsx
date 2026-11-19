@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import { SupabaseStationLogin } from "@/shared/components/SupabaseStationLogin";
+import { SUPABASE_SESSION_UPDATED, getSupabaseSessionEmail, subscribeSupabaseSession } from "@/shared/services/supabaseSession";
+import React, { useEffect, useSyncExternalStore, useRef, useState, useMemo } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
@@ -149,6 +151,8 @@ export const TopNavBar: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [gapWarning, setGapWarning] = useState<string | null>(null);
   const [showGapAlert, setShowGapAlert] = useState(false);
+  const sessionEmail = useSyncExternalStore(subscribeSupabaseSession, getSupabaseSessionEmail);
+  const [showCloudLogin, setShowCloudLogin] = useState(false);
   const [missingCloudTables, setMissingCloudTables] = useState<string[]>([]);
   const [showSchemaAlert, setShowSchemaAlert] = useState(false);
   const [isPopoverHovered, setIsPopoverHovered] = useState(false);
@@ -223,7 +227,15 @@ export const TopNavBar: React.FC = () => {
     void fetchCloudStatus(false);
     const onSyncStatusUpdated = () => void fetchCloudStatus(true);
     window.addEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
-    return () => window.removeEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
+    const onSessionUpdated = () => {
+      setShowCloudLogin(false);
+      onSyncStatusUpdated();
+    };
+    window.addEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
+    return () => {
+      window.removeEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
+      window.removeEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
+    };
   }, []);
 
   useEffect(() => {
@@ -256,10 +268,12 @@ export const TopNavBar: React.FC = () => {
     void checkCloudSchema();
     const onSchemaTrigger = () => void checkCloudSchema();
     window.addEventListener("supabase-config-updated", onSchemaTrigger);
+    window.addEventListener(SUPABASE_SESSION_UPDATED, onSchemaTrigger);
     window.addEventListener("online", onSchemaTrigger);
     return () => {
       active = false;
       window.removeEventListener("supabase-config-updated", onSchemaTrigger);
+      window.removeEventListener(SUPABASE_SESSION_UPDATED, onSchemaTrigger);
       window.removeEventListener("online", onSchemaTrigger);
     };
   }, []);
@@ -675,7 +689,8 @@ export const TopNavBar: React.FC = () => {
         >
           <button
             type="button"
-            onClick={handleManualSync}
+            onClick={sessionEmail ? handleManualSync : () => setShowCloudLogin((open) => !open)}
+            aria-expanded={sessionEmail ? undefined : showCloudLogin}
             disabled={isSyncing}
             className={cn(
               "flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all cursor-pointer",
@@ -707,7 +722,9 @@ export const TopNavBar: React.FC = () => {
               <Cloud className="w-3.5 h-3.5 text-emerald-400" />
             )}
             <span>
-              {isSyncing
+              {!sessionEmail
+                ? "Accedi al Cloud"
+                : isSyncing
                 ? "Sync in corso..."
                 : cloudStatus?.error
                 ? "Cloud: verifica incompleta"
@@ -720,7 +737,12 @@ export const TopNavBar: React.FC = () => {
           </button>
 
           {/* Hover Popover: Dettaglio ultimo scaricamento locale vs effettivo aggiornamento Supabase */}
-          {isPopoverHovered && (
+          {showCloudLogin && !sessionEmail && (
+            <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 shadow-lg">
+              <SupabaseStationLogin />
+            </div>
+          )}
+          {sessionEmail && isPopoverHovered && (
             <CloudSyncHoverPopover
               status={cloudStatus}
               isLoading={isCheckingCloudStatus}

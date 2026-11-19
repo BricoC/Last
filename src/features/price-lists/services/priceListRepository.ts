@@ -1,3 +1,4 @@
+import { pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
 import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import {
@@ -405,7 +406,13 @@ export class PriceListRepository {
           descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
           perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
           perc_iva, note, created_at, updated_at, sync_revision
-        ) VALUES ${valueClauses.join(", ")}
+        ) ${source === "cloud"
+          ? `SELECT * FROM (VALUES ${valueClauses.join(", ")}) AS incoming
+             WHERE NOT EXISTS (
+               SELECT 1 FROM pending_cloud_operations AS pending
+               WHERE pending.scope = 'listino_generale' AND pending.record_id = incoming.column1
+             )`
+          : `VALUES ${valueClauses.join(", ")}`}
         ON CONFLICT(id) DO UPDATE SET
           cat = excluded.cat,
           fornitore = excluded.fornitore,
@@ -451,13 +458,14 @@ export class PriceListRepository {
    */
   async moveToTrash(rows: ListinoGeneraleRow[], deletedBy?: string): Promise<void> {
     if (rows.length === 0) return;
-    const db = await getDatabase();
+    await getDatabase();
+    const writes: SqliteWrite[] = [];
     const now = new Date().toISOString();
     const op = deletedBy || "Operatore";
 
     for (const row of rows) {
-      await db.execute(
-        `INSERT INTO listino_generale_cestino (
+      const trashItem: TrashListinoRow = { ...row, deleted_at: now, deleted_by: op };
+      writes.push({ sql: `INSERT INTO listino_generale_cestino (
           id, deleted_at, deleted_by, source_table, cat, fornitore, codice_articolo, data_ref,
           descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
           perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
@@ -486,7 +494,7 @@ export class PriceListRepository {
           perc_iva = excluded.perc_iva,
           note = excluded.note,
           updated_at = excluded.updated_at;`,
-        [
+        params: [
           row.id,
           now,
           op,
@@ -512,21 +520,25 @@ export class PriceListRepository {
           row.note ?? null,
           row.created_at || now,
           now,
-        ]
-      );
+        ],
+      });
 
-      await db.execute("DELETE FROM listino_generale WHERE id = $1;", [row.id]);
+      writes.push(
+        { sql: "DELETE FROM listino_generale WHERE id = $1", params: [row.id], ...(row.id.startsWith("new_") ? {} : { expectedRows: 1 }) },
+        pendingCloudWrite("listino_generale", row.id, "trash", trashItem),
+      );
     }
 
     // Tronca il cestino alle ultime 50 voci (FIFO: le più vecchie vengono eliminate)
-    await db.execute(`
+    writes.push({ sql: `
       DELETE FROM listino_generale_cestino 
       WHERE id NOT IN (
         SELECT id FROM listino_generale_cestino 
         ORDER BY deleted_at DESC 
         LIMIT 50
       );
-    `);
+    `, params: [] });
+    await applyLocalDatabaseBatch(writes);
   }
 
   /**
@@ -555,15 +567,19 @@ export class PriceListRepository {
    */
   async restoreFromTrash(id: string): Promise<ListinoGeneraleRow | null> {
     const db = await getDatabase();
-    const rows = await db.select<ListinoGeneraleRow[]>(
+    const rows = await db.select<TrashListinoRow[]>(
       "SELECT * FROM listino_generale_cestino WHERE id = $1 LIMIT 1;",
       [id]
     );
     if (rows.length === 0) return null;
 
     const row = rows[0];
-    await this.saveGeneralRows([row]);
-    await db.execute("DELETE FROM listino_generale_cestino WHERE id = $1;", [id]);
+    await applyLocalDatabaseBatch([
+      { sql: "DELETE FROM listino_generale_cestino WHERE id = $1 AND deleted_at = $2",
+        params: [id, row.deleted_at], expectedRows: 1 },
+      ...this.buildGeneralWrites([row], "local"),
+      pendingCloudWrite("listino_generale", id, "restore", row),
+    ]);
 
     return row;
   }
@@ -622,7 +638,13 @@ export class PriceListRepository {
           prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto,
           data_acquisto, acquisto_old, ricarico, data_ref,
           note, note1, note2, created_at, updated_at, sync_revision
-        ) VALUES ${valueClauses.join(", ")}
+        ) ${source === "cloud"
+          ? `SELECT * FROM (VALUES ${valueClauses.join(", ")}) AS incoming
+             WHERE NOT EXISTS (
+               SELECT 1 FROM pending_cloud_operations AS pending
+               WHERE pending.scope = 'listini_clienti' AND pending.record_id = incoming.column1
+             )`
+          : `VALUES ${valueClauses.join(", ")}`}
         ON CONFLICT(id) DO UPDATE SET
           cliente = excluded.cliente,
           fornitore = excluded.fornitore,
@@ -652,7 +674,8 @@ export class PriceListRepository {
    */
   async moveToClientTrash(rows: ListinoClienteRow[], deletedBy?: string): Promise<TrashListinoClienteRow[]> {
     if (rows.length === 0) return [];
-    const db = await getDatabase();
+    await getDatabase();
+    const writes: SqliteWrite[] = [];
     const nowIso = new Date().toISOString();
     const operator = deletedBy || "Operatore";
 
@@ -666,8 +689,7 @@ export class PriceListRepository {
       };
       trashEntries.push(trashItem);
 
-      await db.execute(
-        `INSERT INTO listini_clienti_cestino (
+      writes.push({ sql: `INSERT INTO listini_clienti_cestino (
           id, deleted_at, deleted_by, cliente, fornitore, codice_articolo, descrizione,
           prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto, data_acquisto,
           acquisto_old, ricarico, data_ref, note, note1, note2, created_at, updated_at
@@ -675,7 +697,7 @@ export class PriceListRepository {
         ON CONFLICT(id) DO UPDATE SET
           deleted_at = excluded.deleted_at,
           deleted_by = excluded.deleted_by;`,
-        [
+        params: [
           row.id,
           nowIso,
           operator,
@@ -696,22 +718,26 @@ export class PriceListRepository {
           row.note2 ?? null,
           row.created_at ?? null,
           row.updated_at ?? null,
-        ]
-      );
+        ],
+      });
 
       // Rimuovi dalla tabella attiva
-      await db.execute("DELETE FROM listini_clienti WHERE id = $1;", [row.id]);
+      writes.push(
+        { sql: "DELETE FROM listini_clienti WHERE id = $1", params: [row.id], ...(row.id.startsWith("new_") ? {} : { expectedRows: 1 }) },
+        pendingCloudWrite("listini_clienti", row.id, "trash", trashItem),
+      );
     }
 
     // Tronca il cestino alle ultime 50 voci (FIFO: le più vecchie vengono eliminate)
-    await db.execute(`
+    writes.push({ sql: `
       DELETE FROM listini_clienti_cestino
       WHERE id NOT IN (
         SELECT id FROM listini_clienti_cestino
         ORDER BY deleted_at DESC
         LIMIT 50
       );
-    `);
+    `, params: [] });
+    await applyLocalDatabaseBatch(writes);
 
     return trashEntries;
   }
@@ -762,8 +788,10 @@ export class PriceListRepository {
       },
       ...this.buildClientWrites([row], localOnly ? "local" : "cloud"),
     ];
-    if (!localOnly) {
-      writes.push({
+    if (localOnly) {
+      writes.push(pendingCloudWrite("listini_clienti", id, "restore", row));
+    } else {
+      writes.push(pendingCloudWrite("listini_clienti", id, "cleanup", null), {
         sql: "UPDATE listini_clienti SET sync_confirmed_at = $1 WHERE id = $2",
         params: [new Date().toISOString(), row.id],
       });

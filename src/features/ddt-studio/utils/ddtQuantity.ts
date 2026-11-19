@@ -2,8 +2,8 @@ const decimalQuantity = /^(?:\d+(?:[.,]\d*)?|[.,]\d+)$/;
 const scientificQuantity = /^(?:0|[1-9]\d*)(?:\.\d+)?[eE][+-]?\d+$/;
 
 /** A single separator denotes decimals. Repeated separators must form thousands groups. */
-export function parseDdtQuantity(value: string | number | null | undefined): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+export function normalizeDdtQuantity(value: string | number | null | undefined): string | null {
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : null;
   const signed = value?.trim() ?? "";
   const magnitude = signed.replace(/^[+-]/, "");
   let normalized: string;
@@ -25,7 +25,13 @@ export function parseDdtQuantity(value: string | number | null | undefined): num
     normalized = groups.join("") + (fraction ? `.${fraction}` : "");
   }
 
-  const number = Number(signed.startsWith("-") ? `-${normalized}` : normalized);
+  return signed.startsWith("-") ? `-${normalized}` : normalized;
+}
+
+export function parseDdtQuantity(value: string | number | null | undefined): number | null {
+  const normalized = normalizeDdtQuantity(value);
+  if (normalized === null) return null;
+  const number = Number(normalized);
   return Number.isFinite(number) ? number : null;
 }
 

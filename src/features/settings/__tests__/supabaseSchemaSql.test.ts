@@ -6,6 +6,10 @@ import {
   SCHEMA_CHECK_TABLES,
 } from "../data-import/supabaseSchemaSql";
 
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 describe("supabaseSchemaSql", () => {
   const originalFetch = globalThis.fetch;
 
@@ -88,7 +92,7 @@ describe("supabaseSchemaSql", () => {
 
     globalThis.fetch = vi.fn(async () => new Response("Gateway Timeout", { status: 504 })) as typeof fetch;
     const errRes = await checkSupabaseSchemaInitialized("https://demo.supabase.co", "anon-key");
-    expect(errRes.status).toBe("ok");
+    expect(errRes.status).toBe("offline");
     expect(errRes.missingTables).toEqual([]);
   });
 

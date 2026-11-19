@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
 import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
@@ -94,11 +95,10 @@ export async function fetchRemoteRibaStatus(
     if (!creds) return null;
 
     const url = `${creds.projectUrl}/rest/v1/riba_pagamenti?deadline_key=eq.${encodeURIComponent(deadlineKey)}&select=*`;
-    const res = await fetch(url, {
+    const res = await supabaseFetch(url, {
       method: "GET",
       headers: {
         apikey: creds.anonKey,
-        Authorization: `Bearer ${creds.anonKey}`,
       },
     });
 
@@ -146,11 +146,10 @@ export async function saveRemoteRibaPaid(
     };
 
     const url = `${creds.projectUrl}/rest/v1/riba_pagamenti?on_conflict=deadline_key`;
-    const res = await fetch(url, {
+    const res = await supabaseFetch(url, {
       method: "POST",
       headers: {
         apikey: creds.anonKey,
-        Authorization: `Bearer ${creds.anonKey}`,
         "Content-Type": "application/json",
         Prefer: "resolution=merge-duplicates",
       },

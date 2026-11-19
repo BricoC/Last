@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientSyncService } from "../clientSyncService";
 import type { Client } from "../../models/client";
 
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async () => ({ config: { projectUrl: "https://example.test", anonKey: "test" } }),
 }));

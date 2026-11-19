@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { SupabaseStationLogin } from "@/shared/components/SupabaseStationLogin";
+import { getSupabaseSessionEmail, subscribeSupabaseSession, supabaseFetch } from "@/shared/services/supabaseSession";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Button } from "@/shared/components/ui/button";
 import { Check, CheckCircle2, Copy, Download, LoaderCircle, Search, Server } from "lucide-react";
@@ -40,7 +42,6 @@ const PUBLIC_TABLES = [
   "ordini",
   "note",
   "offerte",
-  "app_users",
   "email_settings",
   "backup_settings",
   "riba_pagamenti",
@@ -49,7 +50,8 @@ const PUBLIC_TABLES = [
 const EMPTY_CONFIG: SupabaseConfig = { projectUrl: "", anonKey: "" };
 
 async function countVisibleRows(projectUrl: string, anonKey: string, table: string): Promise<number> {
-  const response = await fetch(`${projectUrl}/rest/v1/${table}?select=id&limit=1`, {
+  const column = table === "riba_pagamenti" ? "deadline_key" : table === "preventivi_sequenza" ? "anno" : "id";
+  const response = await supabaseFetch(`${projectUrl}/rest/v1/${table}?select=${column}&limit=1`, {
     method: "GET",
     headers: { apikey: anonKey, Prefer: "count=exact" },
   });
@@ -63,6 +65,7 @@ async function countVisibleRows(projectUrl: string, anonKey: string, table: stri
 }
 
 export function SupabaseConnectionFields() {
+  const sessionEmail = useSyncExternalStore(subscribeSupabaseSession, getSupabaseSessionEmail);
   const [config, setConfig] = useState(EMPTY_CONFIG);
   const [status, setStatus] = useState<ConfigStatus | null>(null);
   const [busy, setBusy] = useState(true);
@@ -117,7 +120,7 @@ export function SupabaseConnectionFields() {
     try {
       await navigator.clipboard.writeText(FULL_SUPABASE_SCHEMA_SQL);
       setCopiedSql(true);
-      setMessage("Script SQL completo copiato negli appunti. Incollalo in Supabase -> SQL Editor -> Run.");
+      setMessage("Schema SQL per nuovi progetti copiato. Per un progetto operativo usa la migrazione e il piano di rollout.");
       setTimeout(() => setCopiedSql(false), 3000);
     } catch (cause) {
       setError(`Impossibile copiare lo script SQL: ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -180,12 +183,12 @@ export function SupabaseConnectionFields() {
       } else {
         setError(`Accesso leggibile per ${readable} tabelle su ${PUBLIC_TABLES.length}. Controlla grants e RLS per quelle segnalate.`);
       }
-      window.dispatchEvent(new CustomEvent("supabase-config-updated"));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Verifica Supabase non riuscita."); }
     finally { setChecking(false); }
   };
 
-  const canVerify = Boolean(status && config.projectUrl.trim() && config.anonKey.trim());
+  const canVerify = Boolean(sessionEmail && status?.config?.projectUrl === config.projectUrl.trim().replace(/\/$/, "")
+    && status?.config?.anonKey === config.anonKey.trim());
 
   return (
     <div className="space-y-4">
@@ -195,7 +198,7 @@ export function SupabaseConnectionFields() {
         <div>
           <h2 className="text-sm font-semibold">Connessione API Supabase</h2>
           <p className="text-xs text-[var(--muted-foreground)] mt-1">
-            Bastano URL progetto e chiave API anon/pubblica, gli stessi due parametri già usati da Last.
+            Salva URL e chiave API pubblica, poi accedi con l’account Supabase assegnato alla postazione.
           </p>
         </div>
       </div>
@@ -211,6 +214,10 @@ export function SupabaseConnectionFields() {
         </label>
       </fieldset>
 
+      <fieldset disabled={busy || downloadingAll} className="border-t border-[var(--border)] pt-3">
+        <SupabaseStationLogin />
+      </fieldset>
+
       <div className="flex flex-wrap gap-3">
         <Button type="button" size="sm" disabled={busy || downloadingAll || !status} onClick={save}>Salva sul PC</Button>
         <Button type="button" size="sm" variant="secondary" disabled={busy || checking || downloadingAll || !canVerify} onClick={verify}>
@@ -223,7 +230,7 @@ export function SupabaseConnectionFields() {
           variant="secondary"
           disabled={busy || downloadingAll || !canVerify}
           onClick={() => void downloadAllFromCloud()}
-          title="Scarica tutto lo storico dal Cloud Supabase nel database locale (DDT, listini, clienti, offerte, note, preventivi, ordini, fatture e utenti)"
+          title="Scarica tutto lo storico dal Cloud Supabase nel database locale (DDT, listini, clienti, offerte, note, preventivi, ordini e fatture)"
         >
           {downloadingAll ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
           {downloadingAll ? "Scaricamento in corso..." : "Scarica tutto da Cloud"}

@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { computeTableComparison, type TableComparisonRow } from "./cloudMonitorUtils";
@@ -150,11 +151,10 @@ async function countCloudRows(
 ): Promise<{ count: number | null; error?: string }> {
   try {
     const querySuffix = filterQuery ? `&${filterQuery}` : "";
-    const res = await fetch(`${projectUrl}/rest/v1/${table}?select=id&limit=1${querySuffix}`, {
+    const res = await supabaseFetch(`${projectUrl}/rest/v1/${table}?select=id&limit=1${querySuffix}`, {
       method: "GET",
       headers: {
         apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
         Prefer: "count=exact",
       },
     });

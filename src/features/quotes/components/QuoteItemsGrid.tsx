@@ -496,7 +496,7 @@ function extractQuoteCellValue(rowData: QuoteGridRow, colId: string, globalDisco
   } else if (colId === "discount_pct") {
     return rowData.discount_pct ? String(rowData.discount_pct) : "";
   } else if (colId === "vat_rate") {
-    return rowData.vat_rate ? String(rowData.vat_rate) : "";
+    return String(rowData.vat_rate ?? "");
   } else if (colId === "unit") {
     return rowData.unit || "";
   } else if (colId === "quantity") {
@@ -641,12 +641,8 @@ function calculateEffectivePrice(row: QuoteDraftItem, globalDiscount: number) {
 function calculateAmount(row: QuoteDraftItem, globalDiscount: number) {
   const rawQuantity = String(row.quantity || (rowHasPrice(row) ? "1" : "")).trim();
   if (!rawQuantity) return money(0);
-  const normalizedQuantity = rawQuantity.replace(/\s/g, "").replace(",", ".");
-  // During free typing a quantity can temporarily contain non-numeric text.
-  // Keep the editor responsive and suppress the amount until it is valid.
-  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalizedQuantity)) return money(0);
-  const quantity = Number(normalizedQuantity);
-  if (!Number.isFinite(quantity) || quantity <= 0) return money(0);
+  const quantity = quoteQuantityOrNull(rawQuantity);
+  if (!quantity) return money(0);
   return calculateEffectivePrice(row, globalDiscount).times(quantity);
 }
 
@@ -714,3 +710,4 @@ function getNextEditableCell(params: TabParams, columns: string[], rowCount: num
 function getNextCell(params: NavigateParams) {
   return params.nextCellPosition ?? null;
 }
+import { quoteQuantityOrNull } from "../utils/quoteCalculations";

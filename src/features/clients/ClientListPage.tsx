@@ -137,10 +137,9 @@ export function ClientListPage() {
   };
 
   const saveClient = async (input: CreateClientInput & { id?: string }) => {
-    const oldBusinessName = editing?.business_name;
     const saved = await clientRepository.createOrUpdateClient(input);
     // Sincronizza anche su Supabase Cloud (gestisce correttamente la rinomina senza duplicati)
-    void clientSyncService.pushClientToSupabase(saved, oldBusinessName);
+    void clientSyncService.syncPendingClientsToSupabase().catch(console.warn);
 
     setFormOpen(false);
     setEditing(null);

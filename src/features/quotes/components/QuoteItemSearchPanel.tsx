@@ -194,8 +194,8 @@ export function QuoteItemSearchPanel({
       } else if (occurSortField === "unit") {
         cmp = (a.unit || "").localeCompare(b.unit || "", "it", { sensitivity: "base" });
       } else if (occurSortField === "quantity") {
-        const qA = Number(a.quantity) || 0;
-        const qB = Number(b.quantity) || 0;
+        const qA = quoteQuantityOrNull(a.quantity)?.toNumber() ?? 0;
+        const qB = quoteQuantityOrNull(b.quantity)?.toNumber() ?? 0;
         cmp = qA - qB;
       } else if (occurSortField === "purchase_price") {
         cmp = a.purchase_price.toNumber() - b.purchase_price.toNumber();
@@ -233,7 +233,7 @@ export function QuoteItemSearchPanel({
   // Apertura popup quantità per l'occorrenza storica scelta
   const handleOpenQuantityModal = useCallback((occurrence: QuoteHistoricalItem) => {
     setPendingInsert(occurrence);
-    setInsertQuantity(occurrence.quantity && Number(occurrence.quantity) > 0 ? String(occurrence.quantity) : "1");
+    setInsertQuantity(quoteQuantityOrNull(occurrence.quantity) ? String(occurrence.quantity) : "1");
     setTimeout(() => {
       qtyInputRef.current?.focus();
       qtyInputRef.current?.select();
@@ -922,3 +922,4 @@ export function QuoteItemSearchPanel({
     </div>
   );
 }
+import { quoteQuantityOrNull } from "../utils/quoteCalculations";

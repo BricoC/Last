@@ -1,3 +1,4 @@
+import { SUPABASE_SESSION_UPDATED, getSupabaseSessionEmail, restoreSupabaseSession } from "@/shared/services/supabaseSession";
 import { useEffect } from "react";
 import { TopNavBar } from "@/shared/components/navigation/TopNavBar";
 import { WindowTabBar } from "@/shared/components/navigation/WindowTabBar";
@@ -14,9 +15,15 @@ import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
 import { ElectronicInvoicesPage } from "@/features/invoices/ElectronicInvoicesPage";
 import { OrderManagerPage } from "@/features/orders/OrderManagerPage";
 import { OrNumbersPage } from "@/features/or-numbers/OrNumbersPage";
+import { OrNumbersRepository } from "@/features/or-numbers/services/orNumbersRepository";
 import { OffersPage } from "@/features/offers/OffersPage";
 import { NotesPage } from "@/features/notes/NotesPage";
 import { notesSyncService } from "@/features/notes/services/notesSyncService";
+import { offersSyncService } from "@/features/offers/services/offersSyncService";
+import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
+import { priceListSyncService } from "@/features/price-lists/services/priceListSyncService";
+import { electronicInvoicesService } from "@/features/invoices/services/electronicInvoicesService";
+import { QuoteSyncService } from "@/features/quotes/services/quoteSyncService";
 import { SupplierPriceListPage } from "@/features/supplier-price-lists/SupplierPriceListPage";
 import { ManualCloudImportPage } from "@/features/manual-cloud-import/ManualCloudImportPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
@@ -98,32 +105,63 @@ export function App() {
         });
     };
 
+    const retryPendingCloudWrites = () => {
+      const tasks = [
+        clientSyncService.syncPendingClientsToSupabase(), notesSyncService.retryPendingDeletions(),
+        orderSupabaseService.processOfflineQueue(), offersSyncService.retryPendingChanges(),
+        priceListSyncService.retryPendingChanges(), electronicInvoicesService.retryPendingUploads(),
+        QuoteSyncService.retryPendingChanges(),
+        OrNumbersRepository.retryPendingLogs(),
+      ];
+      for (const task of tasks) void task.catch((error) => console.warn("[App] Operazione cloud in sospeso:", error));
+    };
+
     const runQuickSync = () => {
-      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      if (!getSupabaseSessionEmail() || (typeof navigator !== "undefined" && !navigator.onLine)) return;
       triggerDdtSync(false, false, false);
-      void clientSyncService.syncPendingClientsToSupabase().catch(() => {});
-      void notesSyncService.retryPendingDeletions().catch((error) => console.warn("[App] Eliminazioni note:", error));
+      retryPendingCloudWrites();
     };
     const runStartupSync = () => {
+      if (!getSupabaseSessionEmail()) return;
       triggerDdtSync(true, true, true);
       if (typeof navigator === "undefined" || navigator.onLine) {
-        void clientSyncService.syncPendingClientsToSupabase().catch(() => {});
-        void notesSyncService.retryPendingDeletions().catch((error) => console.warn("[App] Eliminazioni note:", error));
+        retryPendingCloudWrites();
       }
     };
 
     runStartupSync();
-    void ddtIncrementalSyncService.startRealtime();
+    if (!getSupabaseSessionEmail()) {
+      void restoreSupabaseSession();
+    }
+    const unsubscribeRealtime = ddtIncrementalSyncService.subscribeRealtime();
 
+    const onOnline = () => {
+      if (!getSupabaseSessionEmail()) {
+        void restoreSupabaseSession();
+      } else {
+        runQuickSync();
+      }
+    };
+    const onSessionUpdated = () => {
+      runStartupSync();
+    };
+    window.addEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
     const interval = setInterval(runQuickSync, 120_000);
-    window.addEventListener("online", runQuickSync);
+    const ordersRetry = setInterval(() => {
+      if (getSupabaseSessionEmail() && navigator.onLine) {
+        void orderSupabaseService.processOfflineQueue().catch(console.warn);
+      }
+    }, 15_000);
+    window.addEventListener("online", onOnline);
     window.addEventListener("focus", runQuickSync);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener("online", runQuickSync);
+      clearInterval(ordersRetry);
+      window.removeEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
+      window.removeEventListener("online", onOnline);
       window.removeEventListener("focus", runQuickSync);
-      ddtIncrementalSyncService.stopRealtime();
+      unsubscribeRealtime();
     };
   }, []);
 

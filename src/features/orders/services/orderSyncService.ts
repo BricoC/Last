@@ -1,5 +1,7 @@
+import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSession";
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
-import { createClient, SupabaseClient, RealtimeChannel } from "@supabase/supabase-js";
+import { type SupabaseClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { getDatabase } from "@/shared/data-layer/database";
 import { OrderItem } from "../types/order";
 import { parseHighlights } from "./orderRepository";
@@ -15,7 +17,7 @@ interface ConfigStatus {
 }
 
 export class OrderSyncService {
-  private client: SupabaseClient | null = null;
+  private realtimeClient: SupabaseClient | null = null;
   private realtimeChannel: RealtimeChannel | null = null;
   public recentlyPushedRemoteIds = new Set<number>();
   private inFlightLocalIds = new Set<string>();
@@ -34,11 +36,8 @@ export class OrderSyncService {
   }
 
   async getClient(): Promise<SupabaseClient | null> {
-    if (this.client) return this.client;
     const creds = await this.getCredentials();
-    if (!creds) return null;
-    this.client = createClient(creds.projectUrl, creds.anonKey);
-    return this.client;
+    return creds ? getAuthenticatedSupabaseClient(creds.projectUrl, creds.anonKey) : null;
   }
 
   /**
@@ -49,12 +48,14 @@ export class OrderSyncService {
     const supabase = await this.getClient();
     if (!supabase || this.realtimeChannel) return;
 
+    this.realtimeClient = supabase;
     this.realtimeChannel = supabase
-      .channel("realtime_om")
+      .channel("last:order-sync", { config: { private: true } })
       .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "ordini" },
-        async (payload) => {
+        "broadcast",
+        { event: "ordini" },
+        async ({ payload }) => {
+          if (!payload) return;
           await this.handleRemoteOrderChange(payload);
           window.dispatchEvent(
             new CustomEvent("supabase_update_ordini", { detail: payload })
@@ -62,9 +63,10 @@ export class OrderSyncService {
         }
       )
       .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "fornitori" },
-        async (payload) => {
+        "broadcast",
+        { event: "fornitori" },
+        async ({ payload }) => {
+          if (!payload) return;
           await this.syncSuppliersFromSupabase();
           window.dispatchEvent(
             new CustomEvent("supabase_update_fornitori", { detail: payload })
@@ -78,8 +80,8 @@ export class OrderSyncService {
    * Disconnette il canale Realtime quando si lascia la pagina
    */
   stopRealtime(): void {
-    if (this.realtimeChannel && this.client) {
-      void this.client.removeChannel(this.realtimeChannel);
+    if (this.realtimeChannel && this.realtimeClient) {
+      void this.realtimeClient.removeChannel(this.realtimeChannel);
       this.realtimeChannel = null;
     }
   }
@@ -193,10 +195,9 @@ export class OrderSyncService {
       url.searchParams.set("select", "*");
       url.searchParams.set("order", "nome.asc");
 
-      const res = await fetch(url.toString(), {
+      const res = await supabaseFetch(url.toString(), {
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
         },
       });
 
@@ -258,10 +259,9 @@ export class OrderSyncService {
       url.searchParams.set("order", "created_at.desc");
       url.searchParams.set("limit", "2500");
 
-      const res = await fetch(url.toString(), {
+      const res = await supabaseFetch(url.toString(), {
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
         },
       });
 
@@ -364,11 +364,10 @@ export class OrderSyncService {
 
           if (p.supabase_id) {
             const url = new URL(`/rest/v1/ordini?id=eq.${p.supabase_id}`, creds.projectUrl);
-            const res = await fetch(url.toString(), {
+            const res = await supabaseFetch(url.toString(), {
               method: "PATCH",
               headers: {
                 apikey: creds.anonKey,
-                Authorization: `Bearer ${creds.anonKey}`,
                 "Content-Type": "application/json",
               },
               body: JSON.stringify(payload),
@@ -378,11 +377,10 @@ export class OrderSyncService {
             }
           } else {
             const url = new URL("/rest/v1/ordini", creds.projectUrl);
-            const res = await fetch(url.toString(), {
+            const res = await supabaseFetch(url.toString(), {
               method: "POST",
               headers: {
                 apikey: creds.anonKey,
-                Authorization: `Bearer ${creds.anonKey}`,
                 "Content-Type": "application/json",
                 Prefer: "return=representation",
               },

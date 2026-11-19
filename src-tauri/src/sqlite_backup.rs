@@ -17,18 +17,49 @@ pub(crate) fn snapshot_suffix() -> String {
     format!("{time}-{}-{sequence}", std::process::id())
 }
 
-pub(crate) fn has_sidecars(path: &Path) -> Result<bool, String> {
-    for suffix in ["-wal", "-shm", "-journal"] {
+fn sidecar_paths(path: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+    ["-wal", "-shm", "-journal"].into_iter().map(move |suffix| {
         let mut sidecar = OsString::from(path.as_os_str());
         sidecar.push(suffix);
-        if Path::new(&sidecar)
-            .try_exists()
-            .map_err(|error| error.to_string())?
-        {
+        PathBuf::from(sidecar)
+    })
+}
+
+pub(crate) fn has_sidecars(path: &Path) -> Result<bool, String> {
+    for sidecar in sidecar_paths(path) {
+        if sidecar.try_exists().map_err(|error| error.to_string())? {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+async fn database_is_corrupt(path: &Path) -> Result<bool, String> {
+    let options = SqliteConnectOptions::new()
+        .filename(path)
+        .read_only(true)
+        .busy_timeout(Duration::from_secs(30));
+    let check = async {
+        let mut connection = SqliteConnection::connect_with(&options).await?;
+        let result: String = sqlx::query_scalar("PRAGMA quick_check(1)")
+            .fetch_one(&mut connection)
+            .await?;
+        connection.close().await?;
+        Ok::<_, sqlx::Error>(result)
+    }
+    .await;
+
+    match check {
+        Ok(result) => Ok(result != "ok"),
+        // SQLite extended result codes retain the primary code in the low byte.
+        Err(sqlx::Error::Database(error))
+            if error.code().and_then(|code| code.parse::<i32>().ok())
+                .is_some_and(|code| matches!(code & 0xff, 11 | 26)) =>
+        {
+            Ok(true)
+        }
+        Err(error) => Err(format!("Verifica del database attivo fallita: {error}")),
+    }
 }
 
 pub(crate) fn check_different_paths(source: &Path, target: &Path) -> Result<(), String> {
@@ -140,6 +171,62 @@ impl StagedSnapshot {
             .map_err(|error| format!("Impossibile sostituire il file SQLite: {error}"))?;
         Ok(len)
     }
+
+    fn install_with_recovery_archive(&self, target: &Path) -> Result<u64, String> {
+        let archive = target.with_file_name(format!("LastData_pre_restore_recovery_{}", snapshot_suffix()));
+        fs::create_dir(&archive).map_err(|error| format!("Cartella di recupero SQLite: {error}"))?;
+        let mut moved = Vec::new();
+        let result = (|| {
+            if target.try_exists().map_err(|error| error.to_string())? {
+                let archived_db = archive.join(target.file_name().ok_or("Percorso SQLite non valido")?);
+                fs::copy(target, &archived_db)
+                    .and_then(|_| fs::OpenOptions::new().write(true).open(&archived_db)?.sync_all())
+                    .map_err(|error| format!("Copia del database da recuperare fallita: {error}"))?;
+            }
+            for sidecar in sidecar_paths(target) {
+                if sidecar.try_exists().map_err(|error| error.to_string())? {
+                    let saved = archive.join(sidecar.file_name().ok_or("Percorso sidecar non valido")?);
+                    fs::rename(&sidecar, &saved)
+                        .map_err(|error| format!("Archiviazione del sidecar SQLite fallita: {error}"))?;
+                    moved.push((sidecar, saved));
+                }
+            }
+            self.install(target)
+        })();
+        if let Err(error) = result {
+            let failures: Vec<_> = moved.into_iter().rev().filter_map(|(original, saved)| {
+                fs::rename(saved, original).err().map(|error| error.to_string())
+            }).collect();
+            if !failures.is_empty() {
+                return Err(format!("{error}. Ripristino dei sidecar incompleto in {}: {}",
+                    archive.display(), failures.join(", ")));
+            }
+            return Err(error);
+        }
+        result
+    }
+}
+
+pub(crate) async fn replace_active_database(db_path: &Path, stage: &StagedSnapshot) -> Result<u64, String> {
+    if db_path.try_exists().map_err(|error| error.to_string())? {
+        if database_is_corrupt(db_path).await? {
+            return stage.install_with_recovery_archive(db_path);
+        }
+        let safety_path = db_path.with_file_name(format!(
+            "LastData_pre_restore_safety_{}.db",
+            snapshot_suffix()
+        ));
+        let safety = StagedSnapshot::new(&safety_path)?;
+        let mut active = open_database(db_path, false).await?;
+        checkpoint(&mut active).await?;
+        safety.capture(&mut active).await?;
+        active.close().await.map_err(|error| error.to_string())?;
+        safety.validate(false).await?;
+        safety.install(&safety_path)?;
+    } else if has_sidecars(db_path)? {
+        return stage.install_with_recovery_archive(db_path);
+    }
+    stage.install(db_path)
 }
 
 impl Drop for StagedSnapshot {
@@ -153,6 +240,56 @@ impl Drop for StagedSnapshot {
 mod tests {
     use super::*;
     use sqlx::sqlite::SqliteJournalMode;
+
+    #[test]
+    fn healthy_backup_replaces_a_corrupt_database_and_archives_its_sidecar() {
+        tauri::async_runtime::block_on(async {
+            let fixture = StagedSnapshot::new(&std::env::temp_dir().join("last-restore-test.db")).unwrap();
+            let active = fixture.directory.join("active.db");
+            let corrupt = vec![0xa5; 4096];
+            fs::write(&active, &corrupt).unwrap();
+            let sidecar = active.with_file_name("active.db-shm");
+            fs::write(&sidecar, b"old sidecar").unwrap();
+
+            let stage = StagedSnapshot::new(&active).unwrap();
+            let source_options = SqliteConnectOptions::new()
+                .filename(&fixture.path)
+                .create_if_missing(true);
+            let mut source = SqliteConnection::connect_with(&source_options).await.unwrap();
+            sqlx::raw_sql(
+                "CREATE TABLE schema_migrations(version INTEGER);
+                 CREATE TABLE ddt_documents(id TEXT);
+                 CREATE TABLE ddt_items(id TEXT);
+                 INSERT INTO ddt_documents VALUES ('from backup');",
+            )
+            .execute(&mut source)
+            .await
+            .unwrap();
+            stage.capture(&mut source).await.unwrap();
+            stage.validate(true).await.unwrap();
+            replace_active_database(&active, &stage).await.unwrap();
+
+            let mut installed = open_database(&active, true).await.unwrap();
+            let id: String = sqlx::query_scalar("SELECT id FROM ddt_documents")
+                .fetch_one(&mut installed)
+                .await
+                .unwrap();
+            assert_eq!(id, "from backup");
+            installed.close().await.unwrap();
+            assert!(!has_sidecars(&active).unwrap());
+
+            let archive = fs::read_dir(&fixture.directory).unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| path.file_name().unwrap().to_string_lossy().starts_with("LastData_pre_restore_recovery_"))
+                .unwrap();
+            assert_eq!(fs::read(archive.join("active.db")).unwrap(), corrupt);
+            assert_eq!(fs::read(archive.join("active.db-shm")).unwrap(), b"old sidecar");
+            fs::remove_file(archive.join("active.db-shm")).unwrap();
+            fs::remove_file(archive.join("active.db")).unwrap();
+            fs::remove_dir(archive).unwrap();
+            fs::remove_file(active).unwrap();
+        });
+    }
 
     #[test]
     fn restore_snapshot_includes_uncheckpointed_wal_and_replaces_existing_file() {

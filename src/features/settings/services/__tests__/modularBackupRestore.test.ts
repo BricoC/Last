@@ -28,6 +28,7 @@ describe("Ripristino modulare", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledExactlyOnceWith("apply_local_database_batch", {
       validateReferencesAfterWrite: true,
+      referenceTables: ["supplier_invoices", "supplier_invoice_items"],
       writes: [
         { sql: 'DELETE FROM "supplier_invoices"', params: [] },
         { sql: 'DELETE FROM "supplier_invoice_items"', params: [] },

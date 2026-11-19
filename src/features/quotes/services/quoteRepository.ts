@@ -1,3 +1,5 @@
+import { applyLocalDatabaseBatch } from "@/shared/data-layer/localDatabaseBatch";
+import { pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
@@ -11,7 +13,7 @@ import type {
 } from "../models/quote";
 import { buildQuoteDdtConversion } from "./quoteDdtConversion";
 import { buildQuoteSavePayload } from "./quotePayload";
-import { formatQuoteCode, quoteToDraft, toQuoteInput } from "../models/quoteDraft";
+import { quoteToDraft, toQuoteInput } from "../models/quoteDraft";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
 import { QuoteSyncService } from "./quoteSyncService";
 
@@ -60,13 +62,13 @@ export class QuoteRepository {
     return this.saveDraft(toQuoteInput(copied));
   }
 
-  public async getQuoteById(id: string): Promise<Quote | null> {
+  public async getQuoteById(id: string, allowRemote = true): Promise<Quote | null> {
     const db = await getDatabase();
     let quotes = await db.select<QuoteRow[]>(
       "SELECT * FROM quotes WHERE id = $1 AND deleted_at IS NULL",
       [id]
     );
-    if (!quotes[0]) {
+    if (!quotes[0] && allowRemote) {
       try {
         await QuoteSyncService.pullQuoteById(id);
       } catch (err) {
@@ -85,7 +87,7 @@ export class QuoteRepository {
     );
 
     // Se in locale non ci sono righe attive, tenta il recupero immediato da Supabase Cloud
-    if (rows.length === 0) {
+    if (rows.length === 0 && allowRemote) {
       try {
         await QuoteSyncService.pullQuoteById(id);
       } catch (err) {
@@ -98,6 +100,17 @@ export class QuoteRepository {
     }
 
     return this.mapQuote(quotes[0], rows.map(this.mapItem));
+  }
+
+  public async getArchivedQuoteForSync(id: string): Promise<Quote | null> {
+    const db = await getDatabase();
+    const [quote] = await db.select<QuoteRow[]>("SELECT * FROM quotes WHERE id = $1 AND deleted_at IS NOT NULL", [id]);
+    if (!quote) return null;
+    const items = await db.select<QuoteItemRow[]>(
+      "SELECT * FROM quote_items WHERE quote_id = $1 AND deleted_at = $2 ORDER BY row_index",
+      [id, quote.deleted_at],
+    );
+    return this.mapQuote(quote, items.map(this.mapItem));
   }
 
   public async generateUniqueQuoteNumber(year: number): Promise<number> {
@@ -213,7 +226,7 @@ export class QuoteRepository {
     const saved = await this.getQuoteById(quoteId);
     if (!saved) throw new Error("Errore recupero preventivo salvato.");
     try {
-      await QuoteSyncService.pushQuote(saved);
+      await QuoteSyncService.retryPendingChanges();
     } catch (err) {
       console.warn("[QuoteRepository] Sync pushQuote su Supabase non riuscito:", err);
     }
@@ -245,76 +258,31 @@ export class QuoteRepository {
    * Il numero di preventivo rimane consumato e non verrà mai riutilizzato.
    */
   public async softDeleteQuote(id: string): Promise<void> {
-    const fullQuote = await this.getQuoteById(id);
+    const quote = await this.getQuoteById(id);
+    if (!quote) return;
     const deletedAt = new Date().toISOString();
-
-    await invoke("soft_delete_quote_transaction", {
-      id,
-      deletedAt,
-      updatedBy: "system",
-    });
-
-    if (fullQuote) {
-      try {
-        const db = await getDatabase();
-        const code = formatQuoteCode(fullQuote.year, fullQuote.quote_number) ?? "";
-        const dataJson = JSON.stringify(fullQuote);
-
-        // 1. Inserisci o aggiorna nel cestino SQLite locale
-        await db.execute(
-          `INSERT INTO quotes_trash (
-            id, quote_number, numero, year, quote_date,
-            client_name, subject, total_document_subunits,
-            data_json, deleted_at, deleted_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-          ON CONFLICT(id) DO UPDATE SET
-            quote_number = excluded.quote_number,
-            numero = excluded.numero,
-            year = excluded.year,
-            quote_date = excluded.quote_date,
-            client_name = excluded.client_name,
-            subject = excluded.subject,
-            total_document_subunits = excluded.total_document_subunits,
-            data_json = excluded.data_json,
-            deleted_at = excluded.deleted_at,
-            deleted_by = excluded.deleted_by`,
-          [
-            fullQuote.id,
-            fullQuote.quote_number,
-            code,
-            fullQuote.year,
-            fullQuote.quote_date,
-            fullQuote.client_name,
-            fullQuote.subject,
-            fullQuote.totals.total.toSubunits(),
-            dataJson,
-            deletedAt,
-            "system",
-          ]
-        );
-
-        // 2. Prune locale: mantiene rigorosamente fino a un massimo di 5 preventivi
-        await db.execute(`
-          DELETE FROM quotes_trash
-          WHERE id NOT IN (
-            SELECT id FROM quotes_trash
-            ORDER BY deleted_at DESC
-            LIMIT 5
-          )
-        `);
-
-        // 3. Sincronizzazione con Supabase Cloud (tabella preventivi_cestino)
-        await QuoteSyncService.pushTrashQuote(fullQuote, deletedAt, "system");
-      } catch (err) {
-        console.warn("[QuoteRepository] Salvataggio cestino quotes_trash:", err);
-      }
-    } else {
-      try {
-        await QuoteSyncService.deleteQuote(id);
-      } catch (err) {
-        console.warn("[QuoteRepository] Sync deleteQuote su Supabase non riuscito:", err);
-      }
-    }
+    const remote = QuoteSyncService.mapQuoteToSupabase(quote);
+    await applyLocalDatabaseBatch([
+      { sql: `UPDATE quotes SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending'
+        WHERE id = $2 AND deleted_at IS NULL AND updated_at = $3`,
+        params: [deletedAt, id, quote.updated_at], expectedRows: 1 },
+      { sql: `UPDATE quote_items SET deleted_at = $1, updated_at = $1, updated_by = 'system', sync_status = 'pending'
+        WHERE quote_id = $2 AND deleted_at IS NULL`, params: [deletedAt, id] },
+      { sql: `INSERT INTO quotes_trash (id, quote_number, numero, year, quote_date, client_name, subject,
+          total_document_subunits, data_json, deleted_at, deleted_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'system')
+        ON CONFLICT(id) DO UPDATE SET quote_number = excluded.quote_number, numero = excluded.numero,
+          year = excluded.year, quote_date = excluded.quote_date, client_name = excluded.client_name,
+          subject = excluded.subject, total_document_subunits = excluded.total_document_subunits,
+          data_json = excluded.data_json, deleted_at = excluded.deleted_at, deleted_by = excluded.deleted_by`,
+        params: [id, quote.quote_number, remote.numero, quote.year, quote.quote_date, quote.client_name,
+          quote.subject, quote.totals.total.toSubunits(), JSON.stringify(remote), deletedAt] },
+      pendingCloudWrite("quotes", id, "trash", { ...remote, deleted_at: deletedAt, updated_at: deletedAt, deleted_by: "system" }),
+      { sql: `DELETE FROM quotes_trash WHERE id NOT IN (
+          SELECT id FROM quotes_trash ORDER BY deleted_at DESC, id DESC LIMIT 5
+        )`, params: [] },
+    ]);
+    await QuoteSyncService.retryPendingChanges();
   }
 
   /**
@@ -356,68 +324,37 @@ export class QuoteRepository {
    */
   public async restoreQuoteFromTrash(id: string): Promise<Quote | null> {
     const db = await getDatabase();
-
-    // 1. Trova l'elemento nel cestino
-    const trashRows = await db.select<TrashQuoteRow[]>(
-      "SELECT * FROM quotes_trash WHERE id = $1 LIMIT 1",
-      [id]
-    );
-    if (!trashRows[0]) return null;
-
-    const trashItem = trashRows[0];
+    const [trash] = await db.select<TrashQuoteRow[]>("SELECT * FROM quotes_trash WHERE id = $1", [id]);
+    if (!trash) return null;
     const now = new Date().toISOString();
-
-    // 2. Ripristina in SQLite: rimuove deleted_at sia da quotes che da quote_items
-    await db.execute(
-      "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE id = $2",
-      [now, id]
-    );
-    await db.execute(
-      "UPDATE quote_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE quote_id = $2",
-      [now, id]
-    );
-
-    // 3. Rimuovi dal cestino locale
-    await db.execute("DELETE FROM quotes_trash WHERE id = $1", [id]);
-
-    // 4. Rimuovi dal cestino remoto di Supabase
-    void QuoteSyncService.deleteTrashFromSupabase(id);
-
-    // 5. Ricarica il preventivo ripristinato
-    let restored = await this.getQuoteById(id);
-
-    // Se per caso non era presente nella tabella quotes (es. creato altrove), ricrealo dal data_json
-    if (!restored && trashItem.data_json) {
-      try {
-        const parsed = JSON.parse(trashItem.data_json);
-        if (parsed) {
-          const draft = quoteToDraft(parsed);
-          restored = await this.saveDraft(toQuoteInput(draft));
-        }
-      } catch (err) {
-        console.warn("[QuoteRepository] Ripristino da data_json:", err);
-      }
+    const [local] = await db.select<Array<{ id: string }>>("SELECT id FROM quotes WHERE id = $1", [id]);
+    const finish = [
+      { sql: "DELETE FROM quotes_trash WHERE id = $1 AND deleted_at = $2", params: [id, trash.deleted_at], expectedRows: 1 },
+      pendingCloudWrite("quotes", id, "restore", null),
+    ];
+    if (local) {
+      await applyLocalDatabaseBatch([
+        { sql: "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE id = $2",
+          params: [now, id], expectedRows: 1 },
+        { sql: "UPDATE quote_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE quote_id = $2",
+          params: [now, id] },
+        ...finish,
+      ]);
+    } else {
+      await QuoteSyncService.restoreTrashSnapshot(trash, now, finish);
     }
-
-    if (restored) {
-      // 6. Pusha di nuovo il preventivo ripristinato su Supabase
-      try {
-        await QuoteSyncService.pushQuote(restored);
-      } catch (err) {
-        console.warn("[QuoteRepository] Push preventivo ripristinato su Supabase:", err);
-      }
-    }
-
+    const restored = await this.getQuoteById(id, false);
+    await QuoteSyncService.retryPendingChanges();
     return restored;
   }
 
-  /**
-   * Elimina definitivamente un preventivo dal cestino
-   */
   public async deleteTrashPermanently(id: string): Promise<void> {
-    const db = await getDatabase();
-    await db.execute("DELETE FROM quotes_trash WHERE id = $1", [id]);
-    void QuoteSyncService.deleteTrashFromSupabase(id);
+    await getDatabase();
+    await applyLocalDatabaseBatch([
+      { sql: "DELETE FROM quotes_trash WHERE id = $1", params: [id] },
+      pendingCloudWrite("quotes", id, "cleanup", null),
+    ]);
+    await QuoteSyncService.retryPendingChanges();
   }
 
   private mapQuote(row: QuoteRow, items: QuoteItem[]): Quote {

@@ -1,5 +1,5 @@
 use crate::sqlite_backup::{
-    check_different_paths, checkpoint, has_sidecars, open_database, snapshot_suffix, StagedSnapshot,
+    check_different_paths, has_sidecars, open_database, replace_active_database, StagedSnapshot,
 };
 use crate::sqlite_utils::{local_database_path, DATABASE_KEY};
 use serde::{Deserialize, Serialize};
@@ -285,23 +285,6 @@ pub async fn restore_database_file(app: AppHandle, source_file_path: String) -> 
         }
     }
     result
-}
-
-async fn replace_active_database(db_path: &Path, stage: &StagedSnapshot) -> Result<u64, String> {
-    if db_path.try_exists().map_err(|error| error.to_string())? {
-        let safety_path = db_path.with_file_name(format!(
-            "LastData_pre_restore_safety_{}.db",
-            snapshot_suffix()
-        ));
-        let safety = StagedSnapshot::new(&safety_path)?;
-        let mut active = open_database(db_path, false).await?;
-        checkpoint(&mut active).await?;
-        safety.capture(&mut active).await?;
-        active.close().await.map_err(|error| error.to_string())?;
-        safety.validate(false).await?;
-        safety.install(&safety_path)?;
-    }
-    stage.install(db_path)
 }
 
 fn is_managed_backup_file(fname: &str, ext: &str) -> bool {

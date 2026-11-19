@@ -2,14 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { electronicInvoicesService } from "../electronicInvoicesService";
 import type { ParsedInvoiceResult } from "../invoiceXmlParser";
 
-const { invoke, execute, parse } = vi.hoisted(() => ({
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
+const { invoke, execute, parse, select } = vi.hoisted(() => ({
   invoke: vi.fn(),
   execute: vi.fn(),
   parse: vi.fn(),
+  select: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@/shared/data-layer/database", () => ({
-  getDatabase: vi.fn(async () => ({ execute, select: vi.fn(async () => []) })),
+  getDatabase: vi.fn(async () => ({ execute, select })),
 }));
 vi.mock("../invoiceXmlParser", () => ({ parseInvoiceXmlAll: parse }));
 
@@ -20,6 +25,7 @@ describe("Sincronizzazione fatture elettroniche", () => {
 
   beforeEach(() => {
     execute.mockReset();
+    select.mockReset().mockResolvedValue([]);
     invoke.mockReset().mockImplementation(async (command) => command === "load_supabase_config"
       ? { config: { projectUrl: "https://example.test", anonKey: "mock" } }
       : undefined);
@@ -67,11 +73,25 @@ describe("Sincronizzazione fatture elettroniche", () => {
       }],
     };
     parse.mockReturnValue([parsed]);
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 201 }))
-      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    select.mockImplementation(async (sql: string) => {
+      if (sql.includes("cloud_upload_pending = 1 ORDER BY")) return [{ ...parsed.invoice, id: 7 }];
+      if (sql.startsWith("SELECT * FROM supplier_invoice_items")) return parsed.items;
+      return [];
+    });
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     const result = await electronicInvoicesService.importXmlFiles([{ name: "fattura.xml", content: "" }]);
     expect(result).toMatchObject({ importedInvoices: 1, totalLines: 1, cloudSynced: false, cloudError: expect.stringContaining("HTTP 503") });
+    expect(execute).not.toHaveBeenCalled();
+    const [target, init] = fetchMock.mock.calls[0];
+    expect(String(target)).toContain("/rpc/last_replace_supplier_invoice");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      p_header: header, p_lines: [expect.objectContaining({ numero_linea: 1, aliquota_iva: 0 })],
+    });
+    await electronicInvoicesService.retryPendingUploads();
+    expect(fetchMock.mock.calls[1][1]?.body).toBe(init?.body);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("cloud_upload_pending = 0"), [expect.any(String), 7]);
     expect(invoke.mock.calls.filter(([command]) => command === "apply_local_database_batch")).toEqual([
       ["apply_local_database_batch", {
         validateReferencesAfterWrite: false,

@@ -1,5 +1,9 @@
+import { createSupabaseRealtimeSubscription } from "@/shared/services/supabaseRealtimeSubscription";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
+import { orderRepository } from "./orderRepository";
+import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
-import { createClient, SupabaseClient, RealtimeChannel } from "@supabase/supabase-js";
+import { type SupabaseClient } from "@supabase/supabase-js";
 import { getDatabase } from "@/shared/data-layer/database";
 import { deterministicUuid } from "@/shared/utils/deterministicUuid";
 import { OrderItem, Supplier, OrderViewMode } from "../types/order";
@@ -27,6 +31,7 @@ export interface OfflineQueueItem {
     | "restore_archive"
     | "archive"
     | "highlight"
+    | "mark_sent"
     | "upsert_supplier"
     | "delete_supplier";
   remoteId?: string;
@@ -37,13 +42,11 @@ export interface OfflineQueueItem {
 const QUEUE_STORAGE_KEY = "last_order_offline_queue";
 
 export class OrderSupabaseService {
-  private client: SupabaseClient | null = null;
-  private realtimeChannel: RealtimeChannel | null = null;
-  private onlineHandler: (() => void) | null = null;
-  private queueIntervalId: ReturnType<typeof setInterval> | null = null;
   public recentlyPushedRemoteIds = new Set<string>();
-  private isProcessingQueue = false;
+  private queueFlight: Promise<number> | null = null;
   private processingItemId?: string;
+  private mutationGeneration = 0;
+  private readonly resolvedSuppliers = new Map<string, string>();
   private readonly resolvedDrafts = new Map<string, string>();
 
   private async getCredentials(): Promise<SupabaseConfig | null> {
@@ -58,30 +61,25 @@ export class OrderSupabaseService {
     }
   }
 
-  async getClient(requireFreshConfig = false): Promise<SupabaseClient | null> {
-    if (this.client && !requireFreshConfig) return this.client;
+  async getClient(): Promise<SupabaseClient | null> {
     const creds = await this.getCredentials();
-    if (!creds) return null;
-    const client = createClient(creds.projectUrl, creds.anonKey);
-    if (!requireFreshConfig) this.client = client;
-    return client;
+    return creds ? getAuthenticatedSupabaseClient(creds.projectUrl, creds.anonKey) : null;
   }
 
-  /**
-   * Avvia sottoscrizione WebSocket Realtime (identica a noManV1)
-   */
-  async startRealtime(): Promise<void> {
-    const supabase = await this.getClient();
-    if (!supabase || this.realtimeChannel) return;
-
-    this.realtimeChannel = supabase
-      .channel("realtime_om")
+  public readonly subscribeRealtime = createSupabaseRealtimeSubscription(
+    () => this.getClient(),
+    (supabase, isCurrent) => {
+      const channel = supabase
+      .channel("last:orders", { config: { private: true } })
       .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "ordini" },
-        (payload) => {
-          if (payload.eventType === "DELETE" && payload.old && (payload.old as any).id) {
-            void this.deleteFromSqlite([String((payload.old as any).id)]);
+        "broadcast",
+        { event: "ordini" },
+        ({ payload }) => {
+          if (!isCurrent() || !payload) return;
+          const remoteId = String(payload.old?.id ?? payload.new?.id ?? "");
+          if (remoteId && this.hasQueuedOrder(remoteId)) return;
+          if (payload.eventType === "DELETE" && remoteId) {
+            void this.deleteFromSqlite([remoteId], isCurrent);
           }
           window.dispatchEvent(
             new CustomEvent("supabase_update_ordini", { detail: payload })
@@ -89,9 +87,10 @@ export class OrderSupabaseService {
         }
       )
       .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "fornitori" },
-        (payload) => {
+        "broadcast",
+        { event: "fornitori" },
+        ({ payload }) => {
+          if (!isCurrent() || !payload) return;
           window.dispatchEvent(
             new CustomEvent("supabase_update_fornitori", { detail: payload })
           );
@@ -99,55 +98,42 @@ export class OrderSupabaseService {
       )
       .subscribe();
 
-    // Allinea silenziosamente la cache SQLite degli ordini con Supabase
-    void this.reconcileFullOrdersCache();
+      void (this.queueFlight ?? this.processOfflineQueue()).then(() => {
+        if (isCurrent()) return this.reconcileFullOrdersCache();
+      }).catch((error) => console.warn("[OrderSupabaseService] Sync iniziale ordini:", error));
 
-    // Ascolta il ritorno della connessione internet per svuotare la coda offline
-    if (!this.onlineHandler) {
-      this.onlineHandler = () => {
-        void this.processOfflineQueue();
-      };
-      window.addEventListener("online", this.onlineHandler);
-    }
-
-    // Controllo periodico coda ogni 15 secondi
-    if (!this.queueIntervalId) {
-      this.queueIntervalId = setInterval(() => {
-        if (navigator.onLine) {
-          void this.processOfflineQueue();
-        }
-      }, 15000);
-    }
-  }
-
-  stopRealtime(): void {
-    if (this.realtimeChannel && this.client) {
-      void this.client.removeChannel(this.realtimeChannel);
-      this.realtimeChannel = null;
-    }
-    if (this.onlineHandler) {
-      window.removeEventListener("online", this.onlineHandler);
-      this.onlineHandler = null;
-    }
-    if (this.queueIntervalId) {
-      clearInterval(this.queueIntervalId);
-      this.queueIntervalId = null;
-    }
-  }
+      return channel;
+    },
+    "[OrderSupabaseService] Realtime ordini",
+  );
 
   /**
    * Pulisce e risolve un ID, rimuovendo prefissi "ord_" e scartando ID sintetici locali
    */
   public cleanId(id: string | number | null | undefined): string | null {
-    if (!id) return null;
-    let s = String(id).trim();
-    if (s.startsWith("ord_") && !s.startsWith("ord_draft_")) {
-      s = s.slice(4);
-    }
-    if (!s || s.startsWith("ord_draft_") || s.startsWith("draft_") || s.startsWith("new_") || s.startsWith("offline_")) {
-      return null;
-    }
-    return s;
+    const value = String(id ?? "").trim().replace(/^ord_/, "");
+    return /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value) ? value : null;
+  }
+
+  private supplierRemoteId(id: string | number | null | undefined): string | null {
+    const value = String(id ?? "").trim();
+    return /^(?:0|[1-9]\d*)$/.test(value) && BigInt(value) <= 9223372036854775807n ? value : null;
+  }
+
+  private orderTarget(id: string): string {
+    return this.resolvedDrafts.get(id) ?? this.cleanId(id) ?? id;
+  }
+
+  private hasQueuedOrder(id: string) {
+    const target = this.orderTarget(id);
+    return this.getOfflineQueue().some((entry) =>
+      !entry.action.endsWith("supplier") && this.orderTarget(entry.targetId) === target
+    );
+  }
+
+  private hasQueuedSupplier(id: string) {
+    return this.getOfflineQueue().some((entry) => entry.action.endsWith("supplier") &&
+      (this.resolvedSuppliers.get(entry.targetId) ?? entry.targetId) === id);
   }
 
   /**
@@ -155,10 +141,11 @@ export class OrderSupabaseService {
    * Se offline o errore di rete, legge dalla cache SQLite locale.
    */
   async fetchOrders(viewMode: OrderViewMode = "attivi", requireCloud = false): Promise<OrderItem[]> {
-    const supabase = await this.getClient(requireCloud);
+    const supabase = await this.getClient();
     if (supabase && navigator.onLine) {
+      const generation = this.mutationGeneration;
       try {
-        let query = supabase.from("ordini").select("*");
+        let query = supabase.from("ordini").select("*", { count: "exact" });
         if (viewMode === "archiviati") {
           query = query.eq("archiviato", true).eq("eliminato", false).order("created_at", { ascending: false });
         } else if (viewMode === "cestino") {
@@ -170,7 +157,7 @@ export class OrderSupabaseService {
             .order("created_at", { ascending: true });
         }
 
-        const data = await this.readCloudPages(query.order("id"));
+        const data = await this.readCloudPages(query.order("id"), true);
 
         const mapped: OrderItem[] = data.map((r: any) => ({
           id: r.id,
@@ -193,10 +180,12 @@ export class OrderSupabaseService {
         }));
 
         // Salva in background nella cache locale SQLite (senza bloccare)
-        if (requireCloud) await this.cacheOrdersToSqlite(mapped, viewMode, true);
-        else void this.cacheOrdersToSqlite(mapped, viewMode);
-
-        return mapped;
+        await this.cacheOrdersToSqlite(mapped, generation, viewMode, requireCloud);
+        if (!requireCloud && generation !== this.mutationGeneration) return this.loadOrdersFromSqlite(viewMode);
+        if (requireCloud) return mapped;
+        const local = await this.loadOrdersFromSqlite(viewMode);
+        return local.length || mapped.some((order) => this.hasQueuedOrder(order.id))
+          ? local : mapped;
       } catch (err) {
         if (requireCloud) throw err;
         console.warn("[OrderSupabaseService] Errore fetch Supabase, fallback SQLite:", err);
@@ -212,8 +201,9 @@ export class OrderSupabaseService {
    * Carica fornitori direttamente da Supabase Cloud
    */
   async fetchSuppliers(requireCloud = false): Promise<Supplier[]> {
-    const supabase = await this.getClient(requireCloud);
+    const supabase = await this.getClient();
     if (supabase && navigator.onLine) {
+      const generation = this.mutationGeneration;
       try {
         const data = await this.readCloudPages(supabase.from("fornitori").select("*").order("nome").order("id"));
 
@@ -232,9 +222,14 @@ export class OrderSupabaseService {
           sync_status: "synced",
         }));
 
-        if (requireCloud) await this.cacheSuppliersToSqlite(mapped, true);
-        else void this.cacheSuppliersToSqlite(mapped);
-        return mapped;
+        await this.cacheSuppliersToSqlite(mapped, generation, requireCloud);
+        if (!requireCloud && generation !== this.mutationGeneration) return this.loadSuppliersFromSqlite();
+        if (requireCloud) return mapped;
+        const local = await this.loadSuppliersFromSqlite();
+        const pending = local.filter((supplier) => supplier.sync_status === "pending");
+        const pendingNames = new Set(pending.map((supplier) => supplier.name.trim().toUpperCase()));
+        return [...mapped.filter((supplier) => !this.hasQueuedSupplier(supplier.id) &&
+          !pendingNames.has(supplier.name.trim().toUpperCase())), ...pending];
       } catch (err) {
         if (requireCloud) throw err;
         console.warn("[OrderSupabaseService] Errore fetch fornitori Supabase, fallback SQLite:", err);
@@ -245,15 +240,26 @@ export class OrderSupabaseService {
     return this.loadSuppliersFromSqlite();
   }
 
-  private async readCloudPages<T>(query: {
-    range(from: number, to: number): PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
-  }): Promise<T[]> {
+  private async readCloudPages<T extends { id: string | number }>(query: {
+    range(from: number, to: number): PromiseLike<{ data: T[] | null; error: { message: string } | null; count: number | null }>;
+  }, requireCount = false): Promise<T[]> {
     const rows: T[] = [];
+    const ids = new Set<string>();
+    let total: number | undefined;
     for (;;) {
-      const { data, error } = await query.range(rows.length, rows.length + 999);
+      const { data, error, count } = await query.range(rows.length, rows.length + 999);
       if (error || !Array.isArray(data)) throw new Error(error?.message || "Risposta Supabase non valida");
-      if (!data.length) return rows;
+      if (requireCount) {
+        if (count == null || (total != null && count !== total) || rows.length + data.length > count ||
+          (!data.length && rows.length < count)) throw new Error("Download ordini incompleto");
+        total = count;
+      }
+      for (const row of data) {
+        if (row.id == null || ids.has(String(row.id))) throw new Error("Pagina ordini o fornitori incoerente");
+        ids.add(String(row.id));
+      }
       rows.push(...data);
+      if (!data.length || rows.length === total) return rows;
     }
   }
 
@@ -271,7 +277,7 @@ export class OrderSupabaseService {
     const inserting = !resolvedId && (isDraft || !cleanId);
     const localId = cleanId || order.id || "ord_offline_" + crypto.randomUUID();
     const remoteId = inserting ? await deterministicUuid(`last:order:${localId}`) : undefined;
-    const queued = this.getOfflineQueue().some((item) => item.targetId === localId);
+    const queued = this.hasQueuedOrder(localId);
 
     const remotePayload = {
       data: autoDate,
@@ -297,9 +303,11 @@ export class OrderSupabaseService {
           this.recentlyPushedRemoteIds.add(cleanId);
           setTimeout(() => this.recentlyPushedRemoteIds.delete(cleanId), 30000);
 
-          const { error } = await supabase.from("ordini").update(remotePayload).eq("id", cleanId);
+          const { data, error } = await supabase.from("ordini").update(remotePayload).eq("id", cleanId).select("id");
           if (error) throw error;
+          if (data?.length !== 1) throw new Error("Modifica ordine non confermata da Supabase");
 
+          this.mutationGeneration++;
           const updatedItem: OrderItem = {
             ...order,
             id: cleanId,
@@ -308,7 +316,7 @@ export class OrderSupabaseService {
             updated_at: nowIso,
             sync_status: "synced",
           };
-          void this.cacheSingleOrderToSqlite(updatedItem);
+          await this.cacheSingleOrderToSqlite(updatedItem);
           return { success: true, data: updatedItem };
         } else {
           // Insert nuova riga
@@ -320,6 +328,7 @@ export class OrderSupabaseService {
             this.recentlyPushedRemoteIds.add(newId);
             setTimeout(() => this.recentlyPushedRemoteIds.delete(newId), 30000);
 
+            this.mutationGeneration++;
             const insertedItem: OrderItem = {
               ...order,
               id: newId,
@@ -330,7 +339,7 @@ export class OrderSupabaseService {
               isNew: false,
               sync_status: "synced",
             };
-            void this.cacheSingleOrderToSqlite(insertedItem, order.id);
+            await this.cacheSingleOrderToSqlite(insertedItem, order.id);
             return { success: true, data: insertedItem };
           }
         }
@@ -357,237 +366,66 @@ export class OrderSupabaseService {
       timestamp: nowIso,
     });
 
-    void this.cacheSingleOrderToSqlite(offlineItem);
+    await this.cacheSingleOrderToSqlite(offlineItem);
     return { success: true, data: offlineItem };
   }
 
-  /**
-   * Sposta ordini nel cestino
-   */
   async moveToTrash(items: Array<OrderItem | string>): Promise<boolean> {
-    const ids = items.map((it) => (typeof it === "string" ? it : String(it.supabase_id || it.id)));
-    const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
-    const nowIso = new Date().toISOString();
-
-    const supabase = await this.getClient();
-    if (supabase && cleanIds.length > 0 && navigator.onLine) {
-      try {
-        for (const id of cleanIds) {
-          this.recentlyPushedRemoteIds.add(id);
-          setTimeout(() => this.recentlyPushedRemoteIds.delete(id), 30000);
-        }
-        const { error } = await supabase
-          .from("ordini")
-          .update({ eliminato: true, ultima_modifica: nowIso })
-          .in("id", cleanIds);
-        if (!error) {
-          void this.updateSqliteFlag(cleanIds, "is_deleted", 1);
-          return true;
-        }
-      } catch (err) {
-        console.warn("[OrderSupabaseService] Errore moveToTrash Supabase:", err);
-      }
-    }
-
-    // Offline Queue
-    for (const id of ids) {
-      this.enqueueOffline({
-        id: "q_trash_" + Date.now() + "_" + id,
-        targetId: id,
-        action: "soft_delete",
-        timestamp: nowIso,
-      });
-    }
-    void this.updateSqliteFlag(ids, "is_deleted", 1);
-    return true;
+    return this.changeOrders(items, "soft_delete");
   }
 
-  /**
-   * Ripristina ordini dal cestino
-   */
   async restoreFromTrash(items: Array<OrderItem | string>): Promise<boolean> {
-    const ids = items.map((it) => (typeof it === "string" ? it : String(it.supabase_id || it.id)));
-    const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
-    const nowIso = new Date().toISOString();
-
-    const supabase = await this.getClient();
-    if (supabase && cleanIds.length > 0 && navigator.onLine) {
-      try {
-        for (const id of cleanIds) {
-          this.recentlyPushedRemoteIds.add(id);
-          setTimeout(() => this.recentlyPushedRemoteIds.delete(id), 30000);
-        }
-        const { error } = await supabase
-          .from("ordini")
-          .update({ eliminato: false, ultima_modifica: nowIso })
-          .in("id", cleanIds);
-        if (!error) {
-          void this.updateSqliteFlag(cleanIds, "is_deleted", 0);
-          return true;
-        }
-      } catch (err) {
-        console.warn("[OrderSupabaseService] Errore restoreFromTrash Supabase:", err);
-      }
-    }
-
-    for (const id of ids) {
-      this.enqueueOffline({
-        id: "q_rtrash_" + Date.now() + "_" + id,
-        targetId: id,
-        action: "restore_trash",
-        timestamp: nowIso,
-      });
-    }
-    void this.updateSqliteFlag(ids, "is_deleted", 0);
-    return true;
+    return this.changeOrders(items, "restore_trash");
   }
 
-  /**
-   * Ripristina ordini dall'archivio
-   */
   async restoreFromArchive(items: Array<OrderItem | string>): Promise<boolean> {
-    const ids = items.map((it) => (typeof it === "string" ? it : String(it.supabase_id || it.id)));
-    const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
-    const nowIso = new Date().toISOString();
-
-    const supabase = await this.getClient();
-    if (supabase && cleanIds.length > 0 && navigator.onLine) {
-      try {
-        for (const id of cleanIds) {
-          this.recentlyPushedRemoteIds.add(id);
-          setTimeout(() => this.recentlyPushedRemoteIds.delete(id), 30000);
-        }
-        const { error } = await supabase
-          .from("ordini")
-          .update({ archiviato: false, ultima_modifica: nowIso })
-          .in("id", cleanIds);
-        if (!error) {
-          void this.updateSqliteFlag(cleanIds, "is_archived", 0);
-          return true;
-        }
-      } catch (err) {
-        console.warn("[OrderSupabaseService] Errore restoreFromArchive Supabase:", err);
-      }
-    }
-
-    for (const id of ids) {
-      this.enqueueOffline({
-        id: "q_rarch_" + Date.now() + "_" + id,
-        targetId: id,
-        action: "restore_archive",
-        timestamp: nowIso,
-      });
-    }
-    void this.updateSqliteFlag(ids, "is_archived", 0);
-    return true;
+    return this.changeOrders(items, "restore_archive");
   }
 
-  /**
-   * Eliminazione definitiva (Cestino)
-   */
   async permanentDelete(items: Array<OrderItem | string>): Promise<boolean> {
-    const ids = items.map((it) => (typeof it === "string" ? it : String(it.supabase_id || it.id)));
-    const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
-    const nowIso = new Date().toISOString();
-
-    const supabase = await this.getClient();
-    if (supabase && cleanIds.length > 0 && navigator.onLine) {
-      try {
-        for (const id of cleanIds) {
-          this.recentlyPushedRemoteIds.add(id);
-          setTimeout(() => this.recentlyPushedRemoteIds.delete(id), 30000);
-        }
-        const { error } = await supabase.from("ordini").delete().in("id", cleanIds);
-        if (!error) {
-          void this.deleteFromSqlite(cleanIds);
-          return true;
-        }
-      } catch (err) {
-        console.warn("[OrderSupabaseService] Errore permanentDelete Supabase:", err);
-      }
-    }
-
-    for (const id of ids) {
-      this.enqueueOffline({
-        id: "q_pdel_" + Date.now() + "_" + id,
-        targetId: id,
-        action: "permanent_delete",
-        timestamp: nowIso,
-      });
-    }
-    void this.deleteFromSqlite(ids);
-    return true;
+    return this.changeOrders(items, "permanent_delete");
   }
 
-  /**
-   * Archivia gli ordini indicati
-   */
   async archiveOrders(ids: string[]): Promise<boolean> {
-    const cleanIds = ids.map((id) => this.cleanId(id)).filter(Boolean) as string[];
-    const nowIso = new Date().toISOString();
-
-    const supabase = await this.getClient();
-    if (supabase && cleanIds.length > 0 && navigator.onLine) {
-      try {
-        for (const id of cleanIds) {
-          this.recentlyPushedRemoteIds.add(id);
-          setTimeout(() => this.recentlyPushedRemoteIds.delete(id), 30000);
-        }
-        const { error } = await supabase
-          .from("ordini")
-          .update({ archiviato: true, ultima_modifica: nowIso })
-          .in("id", cleanIds);
-        if (!error) {
-          void this.updateSqliteFlag(cleanIds, "is_archived", 1);
-          return true;
-        }
-      } catch (err) {
-        console.warn("[OrderSupabaseService] Errore archiveOrders Supabase:", err);
-      }
-    }
-
-    for (const id of ids) {
-      this.enqueueOffline({
-        id: "q_arch_" + Date.now() + "_" + id,
-        targetId: id,
-        action: "archive",
-        timestamp: nowIso,
-      });
-    }
-    void this.updateSqliteFlag(ids, "is_archived", 1);
-    return true;
+    return this.changeOrders(ids, "archive");
   }
 
-  /**
-   * Aggiorna evidenziazione cella
-   */
   async updateCellHighlight(id: string, newHighlights: Record<string, boolean>): Promise<boolean> {
-    const cleanId = this.cleanId(id);
-    const nowIso = new Date().toISOString();
+    return this.changeOrders([id], "highlight", newHighlights);
+  }
 
-    const supabase = await this.getClient();
-    if (supabase && cleanId && navigator.onLine) {
-      try {
-        this.recentlyPushedRemoteIds.add(cleanId);
-        setTimeout(() => this.recentlyPushedRemoteIds.delete(cleanId), 30000);
-
-        const { error } = await supabase
-          .from("ordini")
-          .update({ evidenze: newHighlights, ultima_modifica: nowIso })
-          .eq("id", cleanId);
-        if (!error) return true;
-      } catch (err) {
-        console.warn("[OrderSupabaseService] Errore highlight Supabase:", err);
+  private async changeOrders(
+    items: Array<OrderItem | string>,
+    action: "soft_delete" | "restore_trash" | "restore_archive" | "permanent_delete" | "archive" | "highlight" | "mark_sent",
+    payload?: Record<string, boolean> | string,
+  ): Promise<boolean> {
+    const db = await getDatabase();
+    const timestamp = new Date().toISOString();
+    const targets = new Set(items.map((item) => this.orderTarget(
+      typeof item === "string" ? item : String(item.supabase_id || item.id)
+    )));
+    const changes = {
+      soft_delete: ["is_deleted", 1], restore_trash: ["is_deleted", 0],
+      restore_archive: ["is_archived", 0], archive: ["is_archived", 1],
+      highlight: ["highlights", JSON.stringify(payload ?? {})],
+      mark_sent: ["ordered_date", payload],
+    } as const;
+    for (const targetId of targets) {
+      const hasRemoteOrInsert = this.cleanId(targetId) !== null || this.hasQueuedOrder(targetId);
+      if (hasRemoteOrInsert) this.enqueueOffline({ id: crypto.randomUUID(), targetId, action, payload, timestamp });
+      const storedId = targetId.startsWith("ord_") ? targetId : `ord_${targetId}`;
+      if (action === "permanent_delete") {
+        await db.execute("DELETE FROM orders WHERE id IN ($1,$2) OR supabase_id = $1", [targetId, storedId]);
+      } else {
+        const [column, value] = changes[action];
+        await db.execute(
+          `UPDATE orders SET ${column} = $1, updated_at = $2, sync_status = 'pending'
+           WHERE id IN ($3,$4) OR supabase_id = $3`,
+          [value, timestamp, targetId, storedId],
+        );
       }
     }
-
-    this.enqueueOffline({
-      id: "q_hl_" + Date.now() + "_" + id,
-      targetId: id,
-      action: "highlight",
-      payload: newHighlights,
-      timestamp: nowIso,
-    });
+    if (targets.size) await this.processOfflineQueue();
     return true;
   }
 
@@ -610,7 +448,7 @@ export class OrderSupabaseService {
     const created: OrderItem[] = [];
     for (const it of items) {
       const order: OrderItem = {
-        id: "ord_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
+        id: "ord_draft_" + crypto.randomUUID(),
         order_date: today,
         supplier_name: it.supplier_name,
         article_code: it.article_code,
@@ -625,7 +463,7 @@ export class OrderSupabaseService {
         created_at: nowIso,
         updated_at: nowIso,
       };
-      const res = await this.saveOrder(order);
+      const res = await this.saveOrder(order, true);
       if (res.data) {
         created.push(res.data);
       } else {
@@ -638,33 +476,18 @@ export class OrderSupabaseService {
   /**
    * Imposta data ordine su Supabase e SQLite per tutti gli articoli di un fornitore (invio email)
    */
-  async markSupplierOrdersAsSent(supplierName: string): Promise<boolean> {
-    const today = TODAY();
-    const nowIso = new Date().toISOString();
-    const cleanSupplier = supplierName.trim();
-
-    const supabase = await this.getClient();
-    if (supabase && navigator.onLine) {
-      try {
-        await supabase
-          .from("ordini")
-          .update({ ordinato: today, ultima_modifica: nowIso })
-          .ilike("fornitore", cleanSupplier)
-          .eq("archiviato", false)
-          .eq("eliminato", false);
-      } catch (err) {
-        console.warn("[OrderSupabaseService] Errore markSupplierOrdersAsSent Supabase:", err);
-      }
-    }
-
-    try {
-      const db = await getDatabase();
-      await db.execute(
-        `UPDATE orders SET ordered_date = $1, updated_at = $2 WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($3)) AND is_archived = 0 AND is_deleted = 0`,
-        [today, nowIso, cleanSupplier]
-      );
-    } catch {}
-
+  async markSupplierOrdersAsSent(supplierName: string, currentUser = "Operatore"): Promise<boolean> {
+    const db = await getDatabase();
+    const orders = await db.select<Array<{ id: string; supabase_id: string | null }>>(
+      `SELECT id, supabase_id FROM orders
+       WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_archived = 0 AND is_deleted = 0`,
+      [supplierName],
+    );
+    const date = TODAY();
+    await this.changeOrders(orders.map((order) => order.supabase_id || order.id), "mark_sent", date);
+    await orderRepository.recordAuditLog("orders", "UPDATE", currentUser, null,
+      { supplier: supplierName, ordered_date: date, count: orders.length },
+      `Inviato ordine email a ${supplierName} (${orders.length} articoli)`);
     return true;
   }
 
@@ -676,12 +499,14 @@ export class OrderSupabaseService {
     _currentUser: string = "Operatore"
   ): Promise<Supplier> {
     const nowIso = new Date().toISOString();
-    const cleanId = this.cleanId(supplier.supabase_id) || this.cleanId(supplier.id);
-    const supabase = await this.getClient();
+    const cleanId = this.resolvedSuppliers.get(supplier.id) ?? this.supplierRemoteId(supplier.supabase_id)
+      ?? this.supplierRemoteId(supplier.id);
+    const targetId = cleanId ?? supplier.id;
+    const supabase = this.hasQueuedSupplier(targetId) ? null : await this.getClient();
 
     const toSave: Supplier = {
       id: supplier.id,
-      supabase_id: supplier.supabase_id,
+      supabase_id: cleanId ?? undefined,
       name: (supplier.name || "").trim(),
       representative: supplier.representative || "",
       email: supplier.email || "",
@@ -691,7 +516,7 @@ export class OrderSupabaseService {
       notes: supplier.notes || "",
       created_at: supplier.created_at || nowIso,
       updated_at: nowIso,
-      sync_status: "synced",
+      sync_status: "pending",
     };
 
     const payload = {
@@ -706,67 +531,51 @@ export class OrderSupabaseService {
 
     if (supabase && navigator.onLine) {
       try {
-        if (cleanId) {
-          await supabase.from("fornitori").update(payload).eq("id", cleanId);
-        } else {
-          const { data } = await supabase.from("fornitori").insert([payload]).select();
-          if (data && data[0]) {
-            toSave.id = String(data[0].id);
-            toSave.supabase_id = data[0].id;
-          }
-        }
+        const remoteId = await this.writeSupplier(supabase, payload, cleanId);
+        this.mutationGeneration++;
+        this.resolvedSuppliers.set(supplier.id, remoteId);
+        toSave.id = remoteId;
+        toSave.supabase_id = remoteId;
+        toSave.sync_status = "synced";
       } catch (err) {
         console.warn("[OrderSupabaseService] Errore upsertSupplier Supabase:", err);
-        this.enqueueOffline({
-          id: "q_sups_" + Date.now() + "_" + toSave.id,
-          targetId: toSave.id,
-          action: "upsert_supplier",
-          payload,
-          timestamp: nowIso,
-        });
       }
-    } else {
+    }
+    if (toSave.sync_status === "pending") {
       this.enqueueOffline({
-        id: "q_sups_" + Date.now() + "_" + toSave.id,
-        targetId: toSave.id,
-        action: "upsert_supplier",
-        payload,
-        timestamp: nowIso,
+        id: crypto.randomUUID(), targetId, action: "upsert_supplier", payload, timestamp: nowIso,
       });
     }
-
-    void this.cacheSingleSupplierToSqlite(toSave);
+    await this.cacheSingleSupplierToSqlite(toSave, supplier.id);
     return toSave;
   }
 
-  /**
-   * Elimina un fornitore da Supabase e SQLite
-   */
+  private async writeSupplier(supabase: SupabaseClient, payload: Record<string, unknown>, remoteId: string | null) {
+    const table = supabase.from("fornitori");
+    const request = remoteId
+      ? table.update(payload).eq("id", remoteId)
+      : table.upsert([payload], { onConflict: "nome" });
+    const { data, error } = await request.select("id");
+    if (error) throw error;
+    const confirmedId = this.supplierRemoteId(data?.[0]?.id);
+    if (!confirmedId) throw new Error("Fornitore non confermato da Supabase");
+    return confirmedId;
+  }
+
   async deleteSupplier(id: string): Promise<boolean> {
-    const cleanId = this.cleanId(id);
-    const nowIso = new Date().toISOString();
-    const supabase = await this.getClient();
-    if (supabase && cleanId && navigator.onLine) {
-      try {
-        await supabase.from("fornitori").delete().eq("id", cleanId);
-      } catch (err) {
-        console.warn("[OrderSupabaseService] Errore deleteSupplier Supabase:", err);
-        this.enqueueOffline({
-          id: "q_sdel_" + Date.now() + "_" + id,
-          targetId: id,
-          action: "delete_supplier",
-          timestamp: nowIso,
-        });
-      }
-    } else {
-      this.enqueueOffline({
-        id: "q_sdel_" + Date.now() + "_" + id,
-        targetId: id,
-        action: "delete_supplier",
-        timestamp: nowIso,
-      });
+    const db = await getDatabase();
+    const [local] = await db.select<Array<{ supabase_id: string | null }>>(
+      "SELECT supabase_id FROM suppliers WHERE id = $1 OR supabase_id = $1 LIMIT 1", [id],
+    );
+    const remoteId = this.resolvedSuppliers.get(id) ?? this.supplierRemoteId(local?.supabase_id)
+      ?? this.supplierRemoteId(id);
+    const targetId = remoteId ?? id;
+    if (remoteId || this.hasQueuedSupplier(targetId)) {
+      this.enqueueOffline({ id: crypto.randomUUID(), targetId, action: "delete_supplier", timestamp: new Date().toISOString() });
     }
-    void this.deleteSupplierFromSqlite(id);
+    await this.deleteSupplierFromSqlite(targetId);
+    if (id !== targetId) await this.deleteSupplierFromSqlite(id);
+    await this.processOfflineQueue();
     return true;
   }
 
@@ -788,9 +597,11 @@ export class OrderSupabaseService {
   }
 
   private enqueueOffline(item: OfflineQueueItem): void {
+    this.mutationGeneration++;
     const queue = this.getOfflineQueue();
     const last = [...queue].reverse().find((entry) => entry.targetId === item.targetId);
-    if (item.action === "insert" && last?.action === "insert" && last.id !== this.processingItemId) {
+    if (["insert", "upsert_supplier"].includes(item.action) && last?.action === item.action && last.id !== this.processingItemId
+      && (item.action !== "upsert_supplier" || last.payload.nome === item.payload.nome)) {
       last.payload = item.payload;
       last.timestamp = item.timestamp;
       last.remoteId ??= item.remoteId;
@@ -801,11 +612,13 @@ export class OrderSupabaseService {
   }
 
   private acknowledgeOfflineItem(item: OfflineQueueItem, remoteId?: string): void {
+    this.mutationGeneration++;
     const queue = this.getOfflineQueue().filter((entry) => entry.id !== item.id);
     if (remoteId) {
-      this.resolvedDrafts.set(item.targetId, remoteId);
+      const supplier = item.action.endsWith("supplier");
+      (supplier ? this.resolvedSuppliers : this.resolvedDrafts).set(item.targetId, remoteId);
       for (const entry of queue) {
-        if (entry.targetId !== item.targetId || entry.action.includes("supplier")) continue;
+        if (entry.targetId !== item.targetId || entry.action.endsWith("supplier") !== supplier) continue;
         entry.targetId = remoteId;
         if (entry.action === "insert") entry.action = "update";
       }
@@ -814,11 +627,14 @@ export class OrderSupabaseService {
   }
 
   async processOfflineQueue(): Promise<number> {
-    if (this.isProcessingQueue || !navigator.onLine) return 0;
+    if (this.queueFlight || !navigator.onLine) return 0;
     const initialQueue = this.getOfflineQueue();
     if (initialQueue.length === 0) return 0;
+    this.queueFlight = this.drainOfflineQueue(initialQueue).finally(() => { this.queueFlight = null; });
+    return this.queueFlight;
+  }
 
-    this.isProcessingQueue = true;
+  private async drainOfflineQueue(initialQueue: OfflineQueueItem[]): Promise<number> {
     let processedCount = 0;
     const failedTargets = new Set<string>();
     try {
@@ -830,7 +646,14 @@ export class OrderSupabaseService {
         this.processingItemId = item.id;
         try {
           const cleanId = this.cleanId(item.targetId);
-          if (item.action === "insert" && item.payload) {
+          const db = await getDatabase();
+          const hasLaterOperation = () => this.getOfflineQueue().some((entry) =>
+            entry.id !== item.id && entry.action.endsWith("supplier") === item.action.endsWith("supplier") &&
+            (entry.targetId === item.targetId || (cleanId && this.cleanId(entry.targetId) === cleanId))
+          );
+          // Old clients queued synthetic reorder IDs as updates.
+          const legacyReorder = item.action === "update" && !cleanId && /^ord_\d+_\w+$/.test(item.targetId);
+          if ((item.action === "insert" || legacyReorder) && item.payload) {
             if (!item.remoteId) {
               item.remoteId = await deterministicUuid(`last:order:${item.targetId}`);
               this.saveOfflineQueue(this.getOfflineQueue().map((entry) => entry.id === item.id ? item : entry));
@@ -839,10 +662,21 @@ export class OrderSupabaseService {
               .upsert([{ ...item.payload, id: item.remoteId }], { onConflict: "id" }).select();
             if (error) throw error;
             const remote = data?.[0];
-            if (!remote?.id) throw new Error("Ordine non confermato da Supabase");
-            const remoteId = String(remote.id);
-            this.acknowledgeOfflineItem(item, remoteId);
-            processedCount++;
+            const remoteId = this.cleanId(remote?.id);
+            if (!remoteId || remoteId !== item.remoteId) throw new Error("Ordine non confermato da Supabase");
+            if (hasLaterOperation()) {
+              const localId = `ord_${remoteId}`;
+              await applyLocalDatabaseBatch([
+                { sql: `DELETE FROM orders WHERE id = $1 AND sync_status = 'synced'
+                  AND EXISTS (SELECT 1 FROM orders WHERE id IN ($2,$3) AND id <> $1)`,
+                  params: [localId, item.targetId, `ord_${item.targetId}`] },
+                { sql: "UPDATE orders SET id = $1, supabase_id = $2 WHERE id IN ($3,$4)",
+                  params: [localId, remoteId, item.targetId, `ord_${item.targetId}`] },
+              ]);
+              this.acknowledgeOfflineItem(item, remoteId);
+              processedCount++;
+              continue;
+            }
             const now = new Date().toISOString();
             await this.cacheSingleOrderToSqlite({
               id: remoteId, supabase_id: remoteId, order_date: remote.data || "",
@@ -855,30 +689,51 @@ export class OrderSupabaseService {
               created_at: remote.created_at || now, updated_at: remote.ultima_modifica || now,
               sync_status: "synced",
             }, item.targetId);
+            this.acknowledgeOfflineItem(item, remoteId);
+            processedCount++;
             continue;
           }
 
-          const now = new Date().toISOString();
-          const flags = {
-            soft_delete: { eliminato: true }, restore_trash: { eliminato: false },
-            restore_archive: { archiviato: false }, archive: { archiviato: true },
-            highlight: { evidenze: item.payload },
-          };
-          let result: { error: unknown };
           if (item.action === "upsert_supplier" && item.payload) {
-            const suppliers = supabase.from("fornitori");
-            result = cleanId ? await suppliers.update(item.payload).eq("id", cleanId) : await suppliers.insert([item.payload]);
-          } else if (cleanId && (item.action === "permanent_delete" || item.action === "delete_supplier")) {
-            result = await supabase.from(item.action === "delete_supplier" ? "fornitori" : "ordini").delete().eq("id", cleanId);
-          } else if (cleanId && item.action === "update" && item.payload) {
-            result = await supabase.from("ordini").update(item.payload).eq("id", cleanId);
-          } else if (cleanId && item.action in flags) {
-            result = await supabase.from("ordini")
-              .update({ ...flags[item.action as keyof typeof flags], ultima_modifica: now }).eq("id", cleanId);
-          } else {
+            const remoteId = await this.writeSupplier(supabase, item.payload, this.supplierRemoteId(item.targetId));
+            await db.execute(
+              `UPDATE suppliers SET supabase_id = $1,
+                sync_status = CASE WHEN $2 AND updated_at <= $3 THEN 'synced' ELSE sync_status END
+                WHERE id IN ($4,$5) OR supabase_id = $4`,
+              [remoteId, hasLaterOperation() ? 0 : 1, item.timestamp, item.targetId, `sup_${item.targetId}`],
+            );
+            this.acknowledgeOfflineItem(item, remoteId);
+            processedCount++;
             continue;
           }
-          if (result.error) throw result.error;
+
+          if (item.action === "delete_supplier" || item.action === "permanent_delete") {
+            const id = item.action === "delete_supplier" ? this.supplierRemoteId(item.targetId) : cleanId;
+            // A standalone legacy delete for a synthetic ID only affected the local row.
+            if (id) {
+              const { error } = await supabase.from(item.action === "delete_supplier" ? "fornitori" : "ordini")
+                .delete().eq("id", id);
+              if (error) throw error;
+            }
+          } else {
+            const flags = {
+              soft_delete: { eliminato: true }, restore_trash: { eliminato: false },
+              restore_archive: { archiviato: false }, archive: { archiviato: true },
+              highlight: { evidenze: item.payload }, mark_sent: { ordinato: item.payload },
+            };
+            const payload = item.action === "update" ? item.payload : flags[item.action as keyof typeof flags];
+            if (!payload || !cleanId) continue;
+            const { data, error } = await supabase.from("ordini")
+              .update({ ...payload, ultima_modifica: item.timestamp }).eq("id", cleanId).select("id");
+            if (error) throw error;
+            if (data?.length !== 1) throw new Error("Modifica ordine non confermata da Supabase");
+            if (!hasLaterOperation()) {
+              await db.execute(
+                "UPDATE orders SET sync_status = 'synced' WHERE supabase_id = $1 AND updated_at <= $2",
+                [cleanId, item.timestamp],
+              );
+            }
+          }
           this.acknowledgeOfflineItem(item);
           processedCount++;
         } catch (error) {
@@ -888,7 +743,6 @@ export class OrderSupabaseService {
       }
     } finally {
       this.processingItemId = undefined;
-      this.isProcessingQueue = false;
     }
     if (processedCount > 0) {
       window.dispatchEvent(new CustomEvent("order_offline_queue_synced", { detail: { processedCount } }));
@@ -900,20 +754,23 @@ export class OrderSupabaseService {
   // CACHE SQLITE LOCALE (PER MODALITÀ OFFLINE)
   // ==========================================
 
-  private async cacheOrdersToSqlite(orders: OrderItem[], viewMode?: OrderViewMode, strict = false): Promise<void> {
+  private async cacheOrdersToSqlite(orders: OrderItem[], generation: number, viewMode?: OrderViewMode, strict = false): Promise<void> {
     try {
       const db = await getDatabase();
       const now = new Date().toISOString();
       const fetchedSupabaseIds = new Set<string>();
 
       for (const item of orders) {
+        if (this.mutationGeneration !== generation) return;
         const localId = "ord_" + item.id;
         fetchedSupabaseIds.add(String(item.id));
+        if (this.hasQueuedOrder(String(item.id))) continue;
         // Rimuove eventuali vecchie righe draft/duplicate collegate allo stesso supabase_id
         await db.execute(
-          `DELETE FROM orders WHERE supabase_id = $1 AND id <> $2`,
+          `DELETE FROM orders WHERE supabase_id = $1 AND id <> $2 AND sync_status = 'synced'`,
           [String(item.id), localId]
         );
+        if (this.mutationGeneration !== generation) return;
         await db.execute(
           `INSERT INTO orders (
             id, supabase_id, order_date, supplier_name, article_code, description,
@@ -935,7 +792,8 @@ export class OrderSupabaseService {
             is_deleted = excluded.is_deleted,
             highlights = excluded.highlights,
             updated_at = excluded.updated_at,
-            sync_status = 'synced'`,
+            sync_status = 'synced'
+          WHERE orders.sync_status <> 'pending' AND julianday(excluded.updated_at) >= julianday(orders.updated_at)`,
           [
             localId,
             item.id,
@@ -959,7 +817,6 @@ export class OrderSupabaseService {
 
       // Rimuove dalla cache di questa vista eventuali ordini synced eliminati o spostati da altri PC
       if (viewMode) {
-        const queuedIds = new Set(this.getOfflineQueue().map((q) => this.cleanId(q.targetId) || q.targetId));
         const viewWhere =
           viewMode === "archiviati"
             ? "is_archived = 1 AND is_deleted = 0"
@@ -970,9 +827,10 @@ export class OrderSupabaseService {
           `SELECT id, supabase_id FROM orders WHERE ${viewWhere} AND sync_status = 'synced'`
         );
         for (const row of localInView) {
+          if (this.mutationGeneration !== generation) return;
           const supId = row.supabase_id ? String(row.supabase_id) : "";
-          if (supId && !fetchedSupabaseIds.has(supId) && !queuedIds.has(supId) && !queuedIds.has(row.id)) {
-            await db.execute(`DELETE FROM orders WHERE id = $1`, [row.id]);
+          if (supId && !fetchedSupabaseIds.has(supId) && !this.hasQueuedOrder(supId) && !this.hasQueuedOrder(row.id)) {
+            await db.execute(`DELETE FROM orders WHERE id = $1 AND sync_status = 'synced'`, [row.id]);
           }
         }
       }
@@ -990,22 +848,9 @@ export class OrderSupabaseService {
     const supabase = await this.getClient();
     if (!supabase || !navigator.onLine) return;
 
+    const generation = this.mutationGeneration;
     try {
-      const allRemote: any[] = [];
-      const PAGE = 1000;
-      let from = 0;
-
-      while (true) {
-        const { data, error } = await supabase
-          .from("ordini")
-          .select("*")
-          .order("created_at", { ascending: true })
-          .range(from, from + PAGE - 1);
-        if (error || !Array.isArray(data)) return;
-        allRemote.push(...data);
-        if (data.length < PAGE) break;
-        from += PAGE;
-      }
+      const allRemote = await this.readCloudPages(supabase.from("ordini").select("*", { count: "exact" }).order("id"), true);
 
       const mapped: OrderItem[] = allRemote.map((r: any) => ({
         id: r.id,
@@ -1027,18 +872,18 @@ export class OrderSupabaseService {
         sync_status: "synced",
       }));
 
-      await this.cacheOrdersToSqlite(mapped);
+      await this.cacheOrdersToSqlite(mapped, generation);
 
       const db = await getDatabase();
-      const queuedIds = new Set(this.getOfflineQueue().map((q) => this.cleanId(q.targetId) || q.targetId));
       const remoteIds = new Set(mapped.map((m) => String(m.id)));
       const localAll = await db.select<{ id: string; supabase_id: string | null; sync_status: string }[]>(
         `SELECT id, supabase_id, sync_status FROM orders`
       );
       for (const row of localAll) {
+        if (this.mutationGeneration !== generation) return;
         const supId = row.supabase_id ? String(row.supabase_id) : "";
-        if (row.sync_status === "synced" && (!supId || !remoteIds.has(supId)) && !queuedIds.has(row.id)) {
-          await db.execute(`DELETE FROM orders WHERE id = $1`, [row.id]);
+        if (row.sync_status === "synced" && (!supId || !remoteIds.has(supId)) && !this.hasQueuedOrder(row.id) && !this.hasQueuedOrder(supId)) {
+          await db.execute(`DELETE FROM orders WHERE id = $1 AND sync_status = 'synced'`, [row.id]);
         }
       }
     } catch (err) {
@@ -1047,71 +892,71 @@ export class OrderSupabaseService {
   }
 
   private async cacheSingleOrderToSqlite(item: OrderItem, previousLocalId?: string): Promise<void> {
-    try {
-      const db = await getDatabase();
-      const cleanSup = item.supabase_id ? String(item.supabase_id) : null;
-      const localId = cleanSup ? `ord_${cleanSup}` : (item.id.startsWith("ord_") ? item.id : "ord_" + item.id);
-      const now = new Date().toISOString();
+    await getDatabase();
+    const writes: SqliteWrite[] = [];
+    const cleanSup = item.supabase_id ? String(item.supabase_id) : null;
+    const localId = cleanSup ? `ord_${cleanSup}` : (item.id.startsWith("ord_") ? item.id : "ord_" + item.id);
+    const now = new Date().toISOString();
 
-      if (cleanSup) {
-        await db.execute(
-          `DELETE FROM orders WHERE (supabase_id = $1 OR id = $2) AND id <> $3`,
-          [cleanSup, previousLocalId || "", localId]
-        );
-      } else if (previousLocalId && previousLocalId !== localId) {
-        await db.execute(`DELETE FROM orders WHERE id = $1`, [previousLocalId]);
-      }
+    if (cleanSup) {
+      writes.push({ sql: `DELETE FROM orders WHERE (supabase_id = $1 OR id = $2) AND id <> $3`,
+        params: [cleanSup, previousLocalId || "", localId],
+      });
+    } else if (previousLocalId && previousLocalId !== localId) {
+      writes.push({ sql: "DELETE FROM orders WHERE id = $1", params: [previousLocalId] });
+    }
 
-      await db.execute(
-        `INSERT INTO orders (
-          id, supabase_id, order_date, supplier_name, article_code, description,
-          quantity, price, ordered_date, notes, user_name, is_archived, is_deleted,
-          highlights, created_at, updated_at, sync_status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-        ON CONFLICT(id) DO UPDATE SET
-          supabase_id = excluded.supabase_id,
-          order_date = excluded.order_date,
-          supplier_name = excluded.supplier_name,
-          article_code = excluded.article_code,
-          description = excluded.description,
-          quantity = excluded.quantity,
-          price = excluded.price,
-          ordered_date = excluded.ordered_date,
-          notes = excluded.notes,
-          user_name = excluded.user_name,
-          is_archived = excluded.is_archived,
-          is_deleted = excluded.is_deleted,
-          highlights = excluded.highlights,
-          updated_at = excluded.updated_at,
-          sync_status = excluded.sync_status`,
-        [
-          localId,
-          item.supabase_id ? String(item.supabase_id) : null,
-          item.order_date || "",
-          item.supplier_name || "",
-          item.article_code || "",
-          (item.description || "").toUpperCase(),
-          String(item.quantity || ""),
-          String(item.price || ""),
-          item.ordered_date || null,
-          item.notes || "",
-          item.user_name || "",
-          item.is_archived ? 1 : 0,
-          item.is_deleted ? 1 : 0,
-          JSON.stringify(parseHighlights(item.highlights)),
-          item.created_at || now,
-          item.updated_at || now,
-          item.sync_status || "synced",
-        ]
-      );
-    } catch {}
+    writes.push({ sql: `INSERT INTO orders (
+        id, supabase_id, order_date, supplier_name, article_code, description,
+        quantity, price, ordered_date, notes, user_name, is_archived, is_deleted,
+        highlights, created_at, updated_at, sync_status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ON CONFLICT(id) DO UPDATE SET
+        supabase_id = excluded.supabase_id,
+        order_date = excluded.order_date,
+        supplier_name = excluded.supplier_name,
+        article_code = excluded.article_code,
+        description = excluded.description,
+        quantity = excluded.quantity,
+        price = excluded.price,
+        ordered_date = excluded.ordered_date,
+        notes = excluded.notes,
+        user_name = excluded.user_name,
+        is_archived = excluded.is_archived,
+        is_deleted = excluded.is_deleted,
+        highlights = excluded.highlights,
+        updated_at = excluded.updated_at,
+        sync_status = excluded.sync_status`,
+      params: [
+        localId,
+        item.supabase_id ? String(item.supabase_id) : null,
+        item.order_date || "",
+        item.supplier_name || "",
+        item.article_code || "",
+        (item.description || "").toUpperCase(),
+        String(item.quantity || ""),
+        String(item.price || ""),
+        item.ordered_date || null,
+        item.notes || "",
+        item.user_name || "",
+        item.is_archived ? 1 : 0,
+        item.is_deleted ? 1 : 0,
+        JSON.stringify(parseHighlights(item.highlights)),
+        item.created_at || now,
+        item.updated_at || now,
+        item.sync_status || "synced",
+      ],
+    });
+    await applyLocalDatabaseBatch(writes);
   }
 
-  private async cacheSuppliersToSqlite(suppliers: Supplier[], strict = false): Promise<void> {
+  private async cacheSuppliersToSqlite(suppliers: Supplier[], generation: number, strict = false): Promise<void> {
     try {
       const db = await getDatabase();
       const now = new Date().toISOString();
       for (const item of suppliers) {
+        if (this.mutationGeneration !== generation) return;
+        if (this.hasQueuedSupplier(item.id)) continue;
         await db.execute(
           `INSERT INTO suppliers (
             id, supabase_id, name, representative, email, phone, address, vat_number, notes, created_at, updated_at, sync_status
@@ -1125,7 +970,8 @@ export class OrderSupabaseService {
             vat_number = excluded.vat_number,
             notes = excluded.notes,
             updated_at = excluded.updated_at,
-            sync_status = 'synced'`,
+            sync_status = 'synced'
+          WHERE suppliers.sync_status <> 'pending'`,
           [
             "sup_" + item.id,
             item.id,
@@ -1146,53 +992,29 @@ export class OrderSupabaseService {
     }
   }
 
-  private async cacheSingleSupplierToSqlite(item: Supplier): Promise<void> {
-    try {
-      const db = await getDatabase();
-      const now = new Date().toISOString();
-      await db.execute(
-        `INSERT INTO suppliers (
-          id, supabase_id, name, representative, email, phone, address, vat_number, notes, created_at, updated_at, sync_status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'synced')
-        ON CONFLICT(name) DO UPDATE SET
-          supabase_id = excluded.supabase_id,
-          representative = excluded.representative,
-          email = excluded.email,
-          phone = excluded.phone,
-          address = excluded.address,
-          vat_number = excluded.vat_number,
-          notes = excluded.notes,
-          updated_at = excluded.updated_at,
-          sync_status = 'synced'`,
-        [
-          item.id.startsWith("sup_") ? item.id : "sup_" + item.id,
-          item.supabase_id || item.id,
-          (item.name || "").trim(),
-          item.representative || "",
-          item.email || "",
-          item.phone || "",
-          item.address || "",
-          item.vat_number || "",
-          item.notes || "",
-          item.created_at || now,
-          item.updated_at || now,
-        ]
-      );
-    } catch {}
+  private async cacheSingleSupplierToSqlite(item: Supplier, localId: string): Promise<void> {
+    const db = await getDatabase();
+    const params = [
+      localId.startsWith("sup_") ? localId : `sup_${localId}`,
+      item.supabase_id ?? null, item.name, item.representative ?? "", item.email ?? "",
+      item.phone ?? "", item.address ?? "", item.vat_number ?? "", item.notes ?? "",
+      item.created_at, item.updated_at, item.sync_status,
+    ];
+    const assign = `supabase_id = excluded.supabase_id, name = excluded.name,
+      representative = excluded.representative, email = excluded.email, phone = excluded.phone,
+      address = excluded.address, vat_number = excluded.vat_number, notes = excluded.notes,
+      updated_at = excluded.updated_at, sync_status = excluded.sync_status`;
+    await db.execute(`INSERT INTO suppliers (
+      id, supabase_id, name, representative, email, phone, address, vat_number, notes, created_at, updated_at, sync_status
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    ON CONFLICT(id) DO UPDATE SET ${assign}
+    ON CONFLICT(name) DO UPDATE SET ${assign}`, params);
   }
 
   private async deleteSupplierFromSqlite(id: string): Promise<void> {
-    try {
-      const db = await getDatabase();
-      const clean = this.cleanId(id);
-      const searchIds = [id, "sup_" + id];
-      if (clean) searchIds.push(clean, "sup_" + clean);
-      const placeholders = searchIds.map((_, i) => `$${i + 1}`).join(",");
-      await db.execute(
-        `DELETE FROM suppliers WHERE id IN (${placeholders}) OR supabase_id IN (${placeholders})`,
-        searchIds
-      );
-    } catch {}
+    const db = await getDatabase();
+    await db.execute("DELETE FROM suppliers WHERE id IN ($1,$2) OR supabase_id = $1",
+      [id, id.startsWith("sup_") ? id : `sup_${id}`]);
   }
 
   private async loadOrdersFromSqlite(viewMode: OrderViewMode): Promise<OrderItem[]> {
@@ -1298,26 +1120,11 @@ export class OrderSupabaseService {
     }
   }
 
-  private async updateSqliteFlag(ids: string[], flagCol: "is_deleted" | "is_archived", val: 0 | 1): Promise<void> {
+  private async deleteFromSqlite(ids: string[], isCurrent: () => boolean): Promise<void> {
     try {
       const db = await getDatabase();
       for (const id of ids) {
-        const clean = this.cleanId(id);
-        const searchIds = [id, "ord_" + id];
-        if (clean) searchIds.push(clean, "ord_" + clean);
-        const placeholders = searchIds.map((_, i) => `$${i + 2}`).join(",");
-        await db.execute(
-          `UPDATE orders SET ${flagCol} = $1, updated_at = datetime('now') WHERE id IN (${placeholders}) OR supabase_id IN (${placeholders})`,
-          [val, ...searchIds]
-        );
-      }
-    } catch {}
-  }
-
-  private async deleteFromSqlite(ids: string[]): Promise<void> {
-    try {
-      const db = await getDatabase();
-      for (const id of ids) {
+        if (!isCurrent() || this.hasQueuedOrder(id)) return;
         const clean = this.cleanId(id);
         const searchIds = [id, "ord_" + id];
         if (clean) searchIds.push(clean, "ord_" + clean);

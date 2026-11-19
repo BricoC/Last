@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
 import { buildMigrationPlan, type MigrationDatabase } from "./migrationPlan";
+import { migratePendingCloudOperationsV34 } from "./migrations/pendingCloudOperationsSchema";
 import {
   migrateDdtNumberReuseAfterSoftDeleteV9,
   migrateDdtInformationalRowsV10,
@@ -482,6 +483,11 @@ const MIGRATIONS: Migration[] = [
       await migrateSupplierPriceListsSchemaV27(db);
       await db.addColumnIfMissing("company_settings", "sdi_code", "TEXT NOT NULL DEFAULT 'M5UXCR1'");
     },
+  },
+  {
+    version: 34,
+    name: "persist_pending_cloud_operations",
+    up: migratePendingCloudOperationsV34,
   },
 ];
 

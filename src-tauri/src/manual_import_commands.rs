@@ -13,13 +13,13 @@ pub struct ClientPriceListSyncRow {
     pub cliente: String,
     pub descrizione: String,
     #[serde(default)]
-    pub prezzo_fattura: f64,
+    pub prezzo_fattura: Option<f64>,
     #[serde(default)]
-    pub prezzo_acquisto: f64,
+    pub prezzo_acquisto: Option<f64>,
     #[serde(default)]
     pub acquisto_old: String,
     #[serde(default)]
-    pub ricarico: f64,
+    pub ricarico: Option<f64>,
     #[serde(default)]
     pub note: Option<String>,
     #[serde(default)]
@@ -132,17 +132,17 @@ async fn sync_rows(
 
             if let Some(ids) = existing_by_key.get(&key) {
                 for id in ids {
-                    sqlx::query(
+                    let result = sqlx::query(
                         "UPDATE listini_clienti SET
-                            prezzo_fattura = $1,
-                            prezzo_acquisto = $2,
+                            prezzo_fattura = COALESCE($1, prezzo_fattura),
+                            prezzo_acquisto = COALESCE($2, prezzo_acquisto),
                             acquisto_old = COALESCE($3, acquisto_old),
-                            ricarico = $4,
+                            ricarico = COALESCE($4, ricarico),
                             note = $5,
                             note1 = $6,
                             note2 = $7,
                             updated_at = $8
-                         WHERE id = $9",
+                         WHERE id = $9 AND sync_revision IS NULL",
                     )
                     .bind(r.prezzo_fattura)
                     .bind(r.prezzo_acquisto)
@@ -158,7 +158,7 @@ async fn sync_rows(
                     .map_err(|error| {
                         format!("Errore aggiornamento listino cliente locale: {error}")
                     })?;
-                    updated += 1;
+                    updated += result.rows_affected() as usize;
                 }
             } else {
                 let mut candidate_id = match r.cloud_id {
@@ -232,23 +232,23 @@ mod tests {
                 "CREATE TABLE listini_clienti (
                    id TEXT PRIMARY KEY, cliente TEXT, descrizione TEXT, prezzo_fattura REAL,
                    prezzo_acquisto REAL, acquisto_old TEXT, ricarico REAL, note TEXT, note1 TEXT,
-                   note2 TEXT, created_at TEXT, updated_at TEXT
-                ); INSERT INTO listini_clienti (id, cliente, descrizione, acquisto_old)
-                   VALUES ('cli_1', 'ACME', 'Articolo', '25 netto');",
+                   note2 TEXT, created_at TEXT, updated_at TEXT, sync_revision TEXT
+                ); INSERT INTO listini_clienti (id, cliente, descrizione, acquisto_old, prezzo_acquisto, ricarico)
+                   VALUES ('cli_1', 'ACME', 'Articolo', '25 netto', 25, 18);",
             )
             .execute(&mut db)
             .await
             .unwrap();
             let row = serde_json::from_value(serde_json::json!({
-                "cliente": "ACME", "descrizione": "Articolo", "acquisto_old": "  ", "prezzo_fattura": 40
+                "cliente": "ACME", "descrizione": "Articolo", "acquisto_old": "  ", "prezzo_fattura": 0
             })).unwrap();
             assert_eq!(sync_rows(&mut db, vec![row]).await.unwrap().updated, 1);
-            let values: (String, f64) =
-                sqlx::query_as("SELECT acquisto_old, prezzo_fattura FROM listini_clienti")
+            let values: (String, f64, f64, f64) =
+                sqlx::query_as("SELECT acquisto_old, prezzo_fattura, prezzo_acquisto, ricarico FROM listini_clienti")
                     .fetch_one(&mut db)
                     .await
                     .unwrap();
-            assert_eq!(values, ("25 netto".into(), 40.0));
+            assert_eq!(values, ("25 netto".into(), 0.0, 25.0, 18.0));
         });
     }
 }

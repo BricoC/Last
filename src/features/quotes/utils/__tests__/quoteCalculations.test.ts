@@ -6,6 +6,7 @@ import { buildQuoteSavePayload } from "../../services/quotePayload";
 import { QuoteItemInput } from "../../models/quote";
 import { formatQuoteCode, createEmptyQuoteDraft } from "../../models/quoteDraft";
 import { makeQuotePdfFilename } from "../quoteExportManager";
+import { prepareQuoteForPrint } from "../../document/quotePrintModel";
 
 function item(overrides: Partial<QuoteItemInput> = {}): QuoteItemInput {
   return {
@@ -20,6 +21,19 @@ function item(overrides: Partial<QuoteItemInput> = {}): QuoteItemInput {
 }
 
 describe("quoteCalculations", () => {
+  it.each(["1.250,5", "1,250.5"])("mantiene quantità %s e IVA 0% nel calcolo e nel PDF", (quantity) => {
+    const base = { description: "Materiale", quantity, markup_pct: 0, discount_pct: 0, vat_rate: 0 as const };
+    const saved = calculateQuoteItem({ ...base, purchase_price: money(2) }, 0);
+    const draft = createEmptyQuoteDraft();
+    draft.items = [{ ...draft.items[0], ...base, purchase_price: "2" }];
+    const printed = prepareQuoteForPrint(draft);
+
+    expect(saved.net_amount.toNumber()).toBe(2501);
+    expect(printed.rows[0].item.quantity).toBe(quantity);
+    expect(printed.totals.total.toNumber()).toBe(2501);
+    expect(printed.totals.vat.isZero()).toBe(true);
+  });
+
   it("calcola ricarico, sconti in cascata, imponibile, costo e IVA", () => {
     const row = calculateQuoteItem(item({ quantity: "4" }), 10);
 

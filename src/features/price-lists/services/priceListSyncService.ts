@@ -1,3 +1,5 @@
+import { flushPendingCloudOperations, type PendingCloudOperation } from "@/shared/data-layer/pendingCloudOperations";
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
@@ -38,7 +40,6 @@ async function getSupabaseCredentials(): Promise<SupabaseConfig> {
 function buildAuthHeaders(anonKey: string, extra?: Record<string, string>): Record<string, string> {
   return {
     apikey: anonKey,
-    Authorization: `Bearer ${anonKey}`,
     ...extra,
   };
 }
@@ -132,7 +133,7 @@ async function acknowledgePriceListWrite(
   return newId;
 }
 
-async function fetchAllPages<T>(
+async function fetchAllPages<T extends { id: number | string }>(
   baseUrl: string,
   anonKey: string,
   table: string,
@@ -140,17 +141,18 @@ async function fetchAllPages<T>(
   onProgress?: (loaded: number, total: number) => void
 ): Promise<T[]> {
   const allRows: T[] = [];
+  const ids = new Set<string>();
   let offset = 0;
-  let totalRows = Infinity;
+  let totalRows: number | undefined;
 
-  while (offset < totalRows) {
+  while (totalRows === undefined || offset < totalRows) {
     const pageUrl = new URL(`/rest/v1/${table}`, baseUrl);
     pageUrl.searchParams.set("select", select);
     pageUrl.searchParams.set("order", "id.asc");
     pageUrl.searchParams.set("limit", String(PAGE_SIZE));
     pageUrl.searchParams.set("offset", String(offset));
 
-    const response = await fetch(pageUrl.toString(), {
+    const response = await supabaseFetch(pageUrl.toString(), {
       method: "GET",
       headers: buildAuthHeaders(anonKey, { Prefer: "count=exact" }),
     });
@@ -159,33 +161,28 @@ async function fetchAllPages<T>(
       throw new Error(`Errore fetch Supabase su ${table}: HTTP ${response.status} ${response.statusText}`);
     }
 
-    const rangeHeader = response.headers.get("content-range");
-    if (rangeHeader) {
-      const parts = rangeHeader.split("/");
-      if (parts[1] && parts[1] !== "*") {
-        totalRows = parseInt(parts[1], 10);
-      }
+    const count = response.headers.get("content-range")?.match(/\/(\d+)$/)?.[1];
+    const reportedTotal = count === undefined ? NaN : Number(count);
+    if (!Number.isSafeInteger(reportedTotal) || (totalRows !== undefined && totalRows !== reportedTotal)) {
+      throw new Error(`Conteggio Supabase assente o cambiato durante il download di ${table}`);
     }
+    totalRows = reportedTotal;
 
     const rows: T[] = await response.json();
     if (!Array.isArray(rows)) throw new Error(`Risposta Supabase non valida per ${table}`);
-    if (rows.length === 0) {
-      if (totalRows !== Infinity && offset < totalRows) {
-        throw new Error(`Download incompleto di ${table}: ricevute ${offset} di ${totalRows} righe`);
-      }
-      break;
+    if ((rows.length === 0 && offset < totalRows) || offset + rows.length > totalRows) {
+      throw new Error(`Download incompleto o incoerente di ${table}: ricevute ${offset + rows.length} di ${totalRows} righe`);
+    }
+    for (const row of rows) {
+      const id = String(row?.id ?? "");
+      if (!id || ids.has(id)) throw new Error(`ID mancante o duplicato durante il download di ${table}`);
+      ids.add(id);
     }
 
     allRows.push(...rows);
     offset += rows.length;
 
-    if (onProgress && totalRows !== Infinity) {
-      onProgress(allRows.length, totalRows);
-    }
-
-    if (rows.length < PAGE_SIZE) {
-      break;
-    }
+    onProgress?.(allRows.length, totalRows);
   }
 
   return allRows;
@@ -211,7 +208,7 @@ async function fetchPagesWithFilter<T>(
     pageUrl.searchParams.set("limit", String(PAGE_SIZE));
     pageUrl.searchParams.set("offset", String(offset));
 
-    const response = await fetch(pageUrl.toString(), {
+    const response = await supabaseFetch(pageUrl.toString(), {
       method: "GET",
       headers: buildAuthHeaders(anonKey),
     });
@@ -230,13 +227,64 @@ async function fetchPagesWithFilter<T>(
   return allRows;
 }
 
+function generalPriceListPayload(r: ListinoGeneraleRow, updatedAt: string) {
+  return {
+    cat: r.cat ?? null,
+    fornitore: r.fornitore ?? null,
+    codice_articolo: r.codice_articolo ?? null,
+    data: r.data_ref ?? null,
+    descrizione: r.descrizione,
+    um: r.um ?? "NR.",
+    perc_pub: r.perc_pub ?? null,
+    prezzo_pubblico: r.prezzo_pubblico ?? null,
+    perc_prof: r.perc_prof ?? null,
+    prezzo_profess: r.prezzo_profess ?? null,
+    perc_fatt: r.perc_fatt ?? null,
+    prezzo_fattura: r.prezzo_fattura ?? null,
+    prezzo_acquisto: r.prezzo_acquisto ?? null,
+    aumento: r.aumento ?? null,
+    r1: r.r1 ?? null,
+    maga: r.maga ?? null,
+    r2: r.r2 ?? null,
+    perc_iva: r.perc_iva ?? 0.22,
+    note: r.note ?? null,
+    updated_at: updatedAt,
+  };
+}
+
+type PriceListScope = "listino_generale" | "listini_clienti";
+
+function priceListCloudTarget(scope: PriceListScope, row: ListinoGeneraleRow | ListinoClienteRow) {
+  const table = scope === "listino_generale" && "source_table" in row && row.source_table === "listini_vari"
+    ? "listini_vari" : scope;
+  const remoteId = /^(?:gen_|var_|cli_)?(\d+)$/.exec(row.id)?.[1];
+  if (!remoteId && !row.id.startsWith("new_")) throw new Error("Identificativo del listino non valido");
+  return { table, remoteId };
+}
+
 export class PriceListSyncService {
+  private cloudWrites = new Map<PriceListScope, Promise<unknown>>();
+
+  private serializeWrite<T>(scope: PriceListScope, write: () => Promise<T>): Promise<T> {
+    const previous = this.cloudWrites.get(scope) ?? Promise.resolve();
+    const task = previous.then(write, write).finally(() => {
+      if (this.cloudWrites.get(scope) === task) this.cloudWrites.delete(scope);
+    });
+    this.cloudWrites.set(scope, task);
+    return task;
+  }
   /**
    * Sincronizza i listini da Supabase Cloud e li memorizza nel database SQLite locale.
    * Scarica sia `listino_generale` (8849) che `listini_vari` (914) unificandoli a 9763 voci,
    * e `listini_clienti` (18558 voci).
    */
-  async syncAllFromSupabase(
+  syncAllFromSupabase(onProgress?: (prog: SyncProgress) => void) {
+    return this.serializeWrite("listino_generale", () =>
+      this.serializeWrite("listini_clienti", () => this.downloadAllPriceLists(onProgress)),
+    );
+  }
+
+  private async downloadAllPriceLists(
     onProgress?: (prog: SyncProgress) => void
   ): Promise<{ generalCount: number; clientCount: number }> {
     const startedAt = new Date().toISOString();
@@ -405,7 +453,11 @@ export class PriceListSyncService {
   /**
    * Spinge in background un batch di modifiche o nuovi articoli verso Supabase.
    */
-  async pushGeneralBatchToSupabase(
+  pushGeneralBatchToSupabase(rows: ListinoGeneraleRow[]) {
+    return this.serializeWrite("listino_generale", () => this.pushGeneralRows(rows));
+  }
+
+  private async pushGeneralRows(
     rows: ListinoGeneraleRow[]
   ): Promise<{ success: boolean; updatedCount: number; error?: string }> {
     if (rows.length === 0) return { success: true, updatedCount: 0 };
@@ -423,38 +475,16 @@ export class PriceListSyncService {
           const revision = r.sync_revision;
           const isNew = localId.startsWith("new_");
           const updatedAt = new Date().toISOString();
-          const payload: any = {
-            cat: r.cat ?? null,
-            fornitore: r.fornitore ?? null,
-            codice_articolo: r.codice_articolo ?? null,
-            data: r.data_ref ?? null,
-            descrizione: r.descrizione,
-            um: r.um ?? "NR.",
-            perc_pub: r.perc_pub ?? null,
-            prezzo_pubblico: r.prezzo_pubblico ?? null,
-            perc_prof: r.perc_prof ?? null,
-            prezzo_profess: r.prezzo_profess ?? null,
-            perc_fatt: r.perc_fatt ?? null,
-            prezzo_fattura: r.prezzo_fattura ?? null,
-            prezzo_acquisto: r.prezzo_acquisto ?? null,
-            aumento: r.aumento ?? null,
-            r1: r.r1 ?? null,
-            maga: r.maga ?? null,
-            r2: r.r2 ?? null,
-            perc_iva: r.perc_iva ?? 0.22,
-            note: r.note ?? null,
-            updated_at: updatedAt,
-          };
+          const payload = generalPriceListPayload(r, updatedAt);
 
           if (isNew) {
-            payload.created_at = new Date().toISOString();
-            const res = await fetch(`${creds.projectUrl}/rest/v1/${table}`, {
+            const res = await supabaseFetch(`${creds.projectUrl}/rest/v1/${table}?on_conflict=last_write_key`, {
               method: "POST",
               headers: buildAuthHeaders(creds.anonKey, {
                 "Content-Type": "application/json",
-                Prefer: "return=representation",
+                Prefer: "resolution=merge-duplicates,return=representation",
               }),
-              body: JSON.stringify(payload),
+              body: JSON.stringify({ ...payload, last_write_key: localId, created_at: r.created_at || updatedAt }),
             });
             const prefix = table === "listino_generale" ? "gen_" : "var_";
             r.id = await acknowledgePriceListWrite(res, "listino_generale", localId, prefix, revision, updatedAt);
@@ -463,7 +493,7 @@ export class PriceListSyncService {
             const numId = parseInt(rawIdStr, 10);
             const targetId = isNaN(numId) ? rawIdStr : numId;
 
-            const res = await fetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
+            const res = await supabaseFetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
               method: "PATCH",
               headers: buildAuthHeaders(creds.anonKey, {
                 "Content-Type": "application/json",
@@ -492,92 +522,13 @@ export class PriceListSyncService {
   }
 
   /**
-   * Elimina un lotto di articoli da Supabase in background.
-   */
-  async deleteGeneralBatchFromSupabase(ids: string[]): Promise<void> {
-    if (ids.length === 0) return;
-    try {
-      const creds = await getSupabaseCredentials();
-      for (const id of ids) {
-        if (id.startsWith("new_")) continue;
-        const isGen = id.startsWith("gen_");
-        const table = isGen ? "listino_generale" : "listini_vari";
-        const rawIdStr = id.replace(/^(gen_|var_)/, "");
-        const numId = parseInt(rawIdStr, 10);
-        const targetId = isNaN(numId) ? rawIdStr : numId;
-
-        const res = await fetch(`${creds.projectUrl}/rest/v1/${table}?id=eq.${targetId}`, {
-          method: "DELETE",
-          headers: buildAuthHeaders(creds.anonKey),
-        });
-        if (!res.ok) {
-          console.warn(`[PriceListSyncService] Delete Supabase HTTP ${res.status} su ${table}#${targetId}`);
-        }
-      }
-    } catch (err) {
-      console.warn("[PriceListSyncService] Delete Supabase asincrono non riuscito:", err);
-    }
-  }
-
-  /**
-   * Registra gli elementi spostati nel Cestino anche su Supabase (tabella listino_generale_cestino).
-   */
-  async pushTrashBatchToSupabase(rows: TrashListinoRow[]): Promise<void> {
-    if (rows.length === 0) return;
-    try {
-      const creds = await getSupabaseCredentials();
-      const payload = rows.map((r) => ({
-        id: r.id,
-        deleted_at: r.deleted_at,
-        deleted_by: r.deleted_by || "Operatore",
-        codice_articolo: r.codice_articolo || null,
-        descrizione: r.descrizione || "",
-        fornitore: r.fornitore || null,
-        prezzo_acquisto: r.prezzo_acquisto,
-        prezzo_fattura: r.prezzo_fattura,
-        prezzo_pubblico: r.prezzo_pubblico,
-        perc_iva: r.perc_iva,
-        um: r.um || "NR.",
-      }));
-
-      const res = await fetch(`${creds.projectUrl}/rest/v1/listino_generale_cestino`, {
-        method: "POST",
-        headers: buildAuthHeaders(creds.anonKey, {
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates",
-        }),
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        console.warn(`[PriceListSyncService] Push Cestino Supabase HTTP ${res.status}`);
-      }
-    } catch (err) {
-      console.warn("[PriceListSyncService] Push Cestino Supabase (asincrono / offline):", err);
-    }
-  }
-
-  /**
-   * Rimuove un articolo dal Cestino su Supabase al momento del ripristino.
-   */
-  async deleteTrashFromSupabase(id: string): Promise<void> {
-    try {
-      const creds = await getSupabaseCredentials();
-      const res = await fetch(`${creds.projectUrl}/rest/v1/listino_generale_cestino?id=eq.${id}`, {
-        method: "DELETE",
-        headers: buildAuthHeaders(creds.anonKey),
-      });
-      if (!res.ok) {
-        console.warn(`[PriceListSyncService] Delete Cestino Supabase HTTP ${res.status}`);
-      }
-    } catch (err) {
-      console.warn("[PriceListSyncService] Delete Cestino Supabase:", err);
-    }
-  }
-
-  /**
    * Sincronizza (upsert) un batch di righe di Listini Clienti su Supabase Cloud.
    */
-  async pushClientBatchToSupabase(
+  pushClientBatchToSupabase(rows: ListinoClienteRow[]) {
+    return this.serializeWrite("listini_clienti", () => this.pushClientRows(rows));
+  }
+
+  private async pushClientRows(
     rows: ListinoClienteRow[]
   ): Promise<{ success: boolean; updatedCount: number; error?: string }> {
     if (rows.length === 0) return { success: true, updatedCount: 0 };
@@ -592,13 +543,13 @@ export class PriceListSyncService {
         const payload = clientPriceListPayload(r, updatedAt);
 
         if (isNew) {
-          const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti`, {
+          const res = await supabaseFetch(`${creds.projectUrl}/rest/v1/listini_clienti?on_conflict=last_write_key`, {
             method: "POST",
             headers: buildAuthHeaders(creds.anonKey, {
               "Content-Type": "application/json",
-              Prefer: "return=representation",
+              Prefer: "resolution=merge-duplicates,return=representation",
             }),
-            body: JSON.stringify(payload),
+            body: JSON.stringify({ ...payload, last_write_key: localId, created_at: r.created_at || updatedAt }),
           });
           r.id = await acknowledgePriceListWrite(res, "listini_clienti", localId, "cli_", revision, updatedAt);
         } else {
@@ -606,7 +557,7 @@ export class PriceListSyncService {
           const numId = parseInt(rawIdStr, 10);
           const targetId = isNaN(numId) ? rawIdStr : numId;
 
-          const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
+          const res = await supabaseFetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
             method: "PATCH",
             headers: buildAuthHeaders(creds.anonKey, {
               "Content-Type": "application/json",
@@ -628,40 +579,37 @@ export class PriceListSyncService {
     }
   }
 
-  /**
-   * Elimina righe di Listini Clienti da Supabase Cloud.
-   */
-  async deleteClientRowsFromSupabase(ids: string[]): Promise<void> {
-    if (ids.length === 0) return;
-    try {
-      const creds = await getSupabaseCredentials();
-      for (const id of ids) {
-        if (id.startsWith("new_")) continue;
-        const rawIdStr = id.replace(/^cli_/, "");
-        const numId = parseInt(rawIdStr, 10);
-        const targetId = isNaN(numId) ? rawIdStr : numId;
-
-        const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti?id=eq.${targetId}`, {
-          method: "DELETE",
-          headers: buildAuthHeaders(creds.anonKey),
-        });
-        if (!res.ok) {
-          console.warn(`[PriceListSyncService] Delete Clienti Supabase HTTP ${res.status} su #${targetId}`);
-        }
-      }
-    } catch (err) {
-      console.warn("[PriceListSyncService] Delete Clienti Supabase asincrono non riuscito:", err);
-    }
-  }
-
-  /**
-   * Sposta elementi nel Cestino Clienti su Supabase.
-   */
-  async pushClientTrashBatchToSupabase(rows: TrashListinoClienteRow[]): Promise<void> {
-    if (rows.length === 0) return;
-    try {
-      const creds = await getSupabaseCredentials();
-      const payload = rows.map((r) => ({
+  private async applyTrashOperation(scope: PriceListScope, operation: PendingCloudOperation): Promise<void> {
+    const creds = await getSupabaseCredentials();
+    const trashTable = `${scope}_cestino`;
+    const url = (table: string) => new URL(`/rest/v1/${table}`, creds.projectUrl);
+    const send = async (target: URL, method: string, payload?: unknown) => {
+      const response = await supabaseFetch(target, {
+        method,
+        headers: buildAuthHeaders(creds.anonKey, {
+          "Content-Type": "application/json",
+          ...(method === "POST" ? { Prefer: "resolution=merge-duplicates,return=representation" } : {}),
+        }),
+        body: payload === undefined ? undefined : JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`${method} ${target.pathname}: HTTP ${response.status}`);
+      return response;
+    };
+    if (operation.action === "trash") {
+      const r = JSON.parse(operation.payload) as TrashListinoRow & TrashListinoClienteRow;
+      const payload = scope === "listino_generale" ? {
+        id: r.id,
+        deleted_at: r.deleted_at,
+        deleted_by: r.deleted_by || "Operatore",
+        codice_articolo: r.codice_articolo || null,
+        descrizione: r.descrizione || "",
+        fornitore: r.fornitore || null,
+        prezzo_acquisto: r.prezzo_acquisto,
+        prezzo_fattura: r.prezzo_fattura,
+        prezzo_pubblico: r.prezzo_pubblico,
+        perc_iva: r.perc_iva,
+        um: r.um || "NR.",
+      } : {
         id: r.id,
         deleted_at: r.deleted_at,
         deleted_by: r.deleted_by || "Operatore",
@@ -679,61 +627,94 @@ export class PriceListSyncService {
         note: r.note,
         note1: r.note1,
         note2: r.note2,
-      }));
-
-      const res = await fetch(`${creds.projectUrl}/rest/v1/listini_clienti_cestino`, {
-        method: "POST",
-        headers: buildAuthHeaders(creds.anonKey, {
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates",
-        }),
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        console.warn(`[PriceListSyncService] Push Cestino Clienti Supabase HTTP ${res.status}`);
-      }
-    } catch (err) {
-      console.warn("[PriceListSyncService] Push Cestino Clienti Supabase:", err);
+      };
+      await send(url(trashTable), "POST", payload);
+      const { table, remoteId } = priceListCloudTarget(scope, r);
+      const active = url(table);
+      active.searchParams.set(remoteId ? "id" : "last_write_key", `eq.${remoteId ?? r.id}`);
+      await send(active, "DELETE");
+      return;
     }
+    if (operation.action === "restore") {
+      const row = JSON.parse(operation.payload) as ListinoGeneraleRow | ListinoClienteRow;
+      await this.restoreActivePriceListRow(scope, row, creds);
+    } else if (operation.action !== "cleanup") {
+      throw new Error("Operazione cestino non riconosciuta");
+    }
+    const target = url(trashTable);
+    target.searchParams.set("id", `eq.${operation.record_id}`);
+    await send(target, "DELETE");
   }
 
-  /**
-   * Rimuove un elemento dal Cestino Clienti su Supabase al momento del ripristino.
-   */
+  private async restoreActivePriceListRow(
+    scope: PriceListScope, row: ListinoGeneraleRow | ListinoClienteRow, creds: SupabaseConfig,
+  ): Promise<ListinoClienteRow> {
+    const { table, remoteId } = priceListCloudTarget(scope, row);
+    const updatedAt = new Date().toISOString();
+    const payload = scope === "listino_generale"
+      ? generalPriceListPayload(row as ListinoGeneraleRow, updatedAt)
+      : clientPriceListPayload(row as ListinoClienteRow, updatedAt);
+    const url = new URL(`/rest/v1/${table}`, creds.projectUrl);
+    url.searchParams.set("on_conflict", remoteId ? "id" : "last_write_key");
+    const response = await supabaseFetch(url, {
+      method: "POST",
+      headers: buildAuthHeaders(creds.anonKey, {
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=representation",
+      }),
+      body: JSON.stringify({
+        ...payload, ...(remoteId ? { id: remoteId } : { last_write_key: row.id }),
+        created_at: row.created_at || updatedAt,
+      }),
+    });
+    if (!response.ok) throw new Error(`Ripristino listino su Supabase: HTTP ${response.status}`);
+    const confirmed = await response.json();
+    if (!Array.isArray(confirmed) || confirmed.length !== 1 || confirmed[0]?.id == null ||
+        (remoteId && String(confirmed[0].id) !== remoteId)) {
+      throw new Error("Supabase non ha confermato la riga ripristinata.");
+    }
+    return mapSupabaseClientRow(confirmed[0]);
+  }
+
+  flushTrash(scope: PriceListScope) {
+    return this.serializeWrite(scope, () =>
+      flushPendingCloudOperations(scope, (operation) => this.applyTrashOperation(scope, operation)),
+    );
+  }
+
   async restoreClientFromTrash(id: string): Promise<ListinoClienteRow | null> {
     const { priceListRepository } = await import("./priceListRepository");
-    return priceListRepository.restoreFromClientTrash(id, async (row) => {
-      const remoteId = /^(?:cli_)?(\d+)$/.exec(row.id)?.[1];
-      if (!remoteId) throw new Error("Identificativo cloud del listino cliente non valido.");
-
-      const { projectUrl, anonKey } = await getSupabaseCredentials();
-      const updatedAt = new Date().toISOString();
-      const url = new URL("/rest/v1/listini_clienti", projectUrl);
-      url.searchParams.set("on_conflict", "id");
-      const restored = await fetch(url, {
-        method: "POST",
-        headers: buildAuthHeaders(anonKey, {
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=representation",
-        }),
-        body: JSON.stringify({
-          ...clientPriceListPayload(row, updatedAt),
-          id: remoteId,
-          created_at: row.created_at || updatedAt,
-        }),
-      });
-      if (!restored.ok) throw new Error(`Ripristino listino cliente su Supabase: HTTP ${restored.status}`);
-      const confirmed = await restored.json();
-      if (!Array.isArray(confirmed) || confirmed.length !== 1 || String(confirmed[0]?.id) !== remoteId) {
-        throw new Error("Supabase non ha confermato la riga ripristinata.");
-      }
-
-      const trashUrl = new URL("/rest/v1/listini_clienti_cestino", projectUrl);
-      trashUrl.searchParams.set("id", `eq.${id}`);
-      const deleted = await fetch(trashUrl, { method: "DELETE", headers: buildAuthHeaders(anonKey) });
-      if (!deleted.ok) throw new Error(`Rimozione dal cestino cloud: HTTP ${deleted.status}`);
-      return mapSupabaseClientRow(confirmed[0]);
+    const restored = await priceListRepository.restoreFromClientTrash(id, async (row) => {
+      await this.flushTrash("listini_clienti");
+      const db = await getDatabase();
+      const pending = await db.select<unknown[]>(
+        "SELECT 1 FROM pending_cloud_operations WHERE scope = 'listini_clienti' AND record_id = $1 AND action = 'trash'", [id],
+      );
+      if (pending.length) throw new Error("Eliminazione cloud del listino ancora in sospeso.");
+      return this.restoreActivePriceListRow("listini_clienti", row, await getSupabaseCredentials());
     });
+    if (restored) await this.flushTrash("listini_clienti");
+    return restored;
+  }
+
+  private pendingRetry: Promise<void> | null = null;
+
+  retryPendingChanges(): Promise<void> {
+    if (this.pendingRetry) return this.pendingRetry;
+    this.pendingRetry = (async () => {
+      await Promise.all([this.flushTrash("listino_generale"), this.flushTrash("listini_clienti")]);
+      const db = await getDatabase();
+      const pending = (table: PriceListScope) => `SELECT * FROM ${table} AS active
+        WHERE active.sync_revision IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM pending_cloud_operations AS pending
+          WHERE pending.scope = '${table}' AND pending.record_id = active.id
+        ) ORDER BY id`;
+      const general = await db.select<ListinoGeneraleRow[]>(pending("listino_generale"));
+      const clients = await db.select<ListinoClienteRow[]>(pending("listini_clienti"));
+      for (const row of general) await this.pushGeneralBatchToSupabase([row]);
+      for (const row of clients) await this.pushClientBatchToSupabase([row]);
+    })().finally(() => { this.pendingRetry = null; });
+    return this.pendingRetry;
   }
 
   /**
@@ -741,7 +722,11 @@ export class PriceListSyncService {
    * Scarica solo gli articoli modificati da altri PC successivamente all'ultimo sync locale,
    * aggiorna SQLite e restituisce il numero di righe aggiornate.
    */
-  async syncIncrementalGeneralFromSupabase(): Promise<{
+  syncIncrementalGeneralFromSupabase() {
+    return this.serializeWrite("listino_generale", () => this.downloadIncrementalGeneral());
+  }
+
+  private async downloadIncrementalGeneral(): Promise<{
     updatedCount: number;
     updatedRows: ListinoGeneraleRow[];
     error?: string;
@@ -864,7 +849,11 @@ export class PriceListSyncService {
   /**
    * Sincronizzazione incrementale veloce da Supabase Cloud per Listini Clienti.
    */
-  async syncIncrementalClientiFromSupabase(): Promise<{
+  syncIncrementalClientiFromSupabase() {
+    return this.serializeWrite("listini_clienti", () => this.downloadIncrementalClients());
+  }
+
+  private async downloadIncrementalClients(): Promise<{
     updatedCount: number;
     updatedRows: ListinoClienteRow[];
     error?: string;

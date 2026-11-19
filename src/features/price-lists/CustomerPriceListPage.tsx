@@ -1,3 +1,4 @@
+import { parsePriceListNumber } from "./utils/priceListInput";
 import React, {
   useState,
   useEffect,
@@ -512,21 +513,6 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
     ): ListinoClienteRow => {
       const updated = { ...row };
 
-      const parseNumberInput = (v: string | number | null): number | null => {
-        if (v == null) return null;
-        if (typeof v === "number") return isNaN(v) ? null : round5(v);
-        const s = v.trim().replace(/€/g, "").replace(/%/g, "").trim();
-        if (!s) return null;
-        let normalized = s;
-        if (s.includes(",") && s.includes(".")) {
-          normalized = s.replace(/\./g, "").replace(",", ".");
-        } else if (s.includes(",")) {
-          normalized = s.replace(",", ".");
-        }
-        const num = parseFloat(normalized);
-        return isNaN(num) ? null : round5(num);
-      };
-
       const today = getTodayAaaaMmGg();
       // Sempre aggiorna data_ref quando una cella viene modificata
       updated.data_ref = today;
@@ -561,7 +547,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
           break;
 
         case "acquisto_eur": {
-          const acq = parseNumberInput(rawValue);
+          const acq = parsePriceListNumber(rawValue);
           updated.acquisto_eur = acq;
           if (acq != null) {
             updated.data_acquisto = today;
@@ -577,7 +563,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         }
 
         case "perc_acquisto": {
-          const perc = parseNumberInput(rawValue);
+          const perc = parsePriceListNumber(rawValue);
           updated.perc_acquisto = perc;
           if (updated.acquisto_eur != null && updated.acquisto_eur > 0 && perc != null) {
             updated.prezzo_fattura = round5(updated.acquisto_eur * (1 + perc / 100));
@@ -586,7 +572,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         }
 
         case "prezzo_fattura": {
-          const fatt = parseNumberInput(rawValue);
+          const fatt = parsePriceListNumber(rawValue);
           updated.prezzo_fattura = fatt;
           // Ricalcolo % Acquisto lasciando intatto l'acquisto_eur base
           if (
@@ -602,7 +588,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         }
 
         case "ricarico":
-          updated.ricarico = parseNumberInput(rawValue);
+          updated.ricarico = parsePriceListNumber(rawValue);
           break;
 
         default:
@@ -1021,20 +1007,16 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const handleDeleteRow = useCallback(
     async (row: ListinoClienteRow) => {
       try {
+        const operatorName = currentUser?.name || currentUser?.station_name || "Operatore";
+        await priceListRepository.moveToClientTrash([row], operatorName);
         setItems((prev) => prev.filter((r) => r.id !== row.id));
         setDirtyRows((prev) => {
           const next = new Map(prev);
           next.delete(row.id);
           return next;
         });
-
-        if (!row.id.startsWith("new_")) {
-          const operatorName = currentUser?.name || currentUser?.station_name || "Operatore";
-          const trashEntries = await priceListRepository.moveToClientTrash([row], operatorName);
-          setTrashCount((c) => Math.min(50, c + 1));
-          void priceListSyncService.pushClientTrashBatchToSupabase(trashEntries);
-          void priceListSyncService.deleteClientRowsFromSupabase([row.id]);
-        }
+        setTrashCount((c) => Math.min(50, c + 1));
+        void priceListSyncService.flushTrash("listini_clienti").catch(console.warn);
       } catch (err) {
         console.error("Errore cancellazione articolo:", err);
       }

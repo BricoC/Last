@@ -1,5 +1,8 @@
+import { createSupabaseRealtimeSubscription } from "@/shared/services/supabaseRealtimeSubscription";
+import { flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
+import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSession";
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
-import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { getDatabase } from "@/shared/data-layer/database";
 import type { OfferRecord } from "../types/offer";
 
@@ -61,13 +64,6 @@ export class OffersSyncService {
   private activeSyncPromise: Promise<OffersSyncResult> | null = null;
   private pendingResync = false;
 
-  private realtimeClient: SupabaseClient | null = null;
-  private realtimeClientKey: string | null = null;
-  private realtimeChannel: RealtimeChannel | null = null;
-  private realtimeStartPromise: Promise<void> | null = null;
-  private realtimeSubscribers = 0;
-  private recentlyDeletedRemoteIds = new Map<number, number>();
-
   public getStatus() {
     return {
       isSyncing: this.isSyncing,
@@ -91,59 +87,36 @@ export class OffersSyncService {
     return null;
   }
 
-  /**
-   * Avvia la sottoscrizione Realtime su Supabase per ricevere subito le modifiche da altri PC
-   */
-  public async startRealtime(): Promise<void> {
-    this.realtimeSubscribers++;
-    if (this.realtimeChannel) return;
-    if (this.realtimeStartPromise) return this.realtimeStartPromise;
-
-    this.realtimeStartPromise = (async () => {
-      try {
-        const creds = await this.getSupabaseCredentials();
-        if (!creds || this.realtimeSubscribers <= 0 || this.realtimeChannel) return;
-
-        const clientKey = `${creds.projectUrl}::${creds.anonKey}`;
-        if (!this.realtimeClient || this.realtimeClientKey !== clientKey) {
-          this.realtimeClient = createClient(creds.projectUrl, creds.anonKey);
-          this.realtimeClientKey = clientKey;
-        }
-
-        if (this.realtimeSubscribers <= 0 || this.realtimeChannel) return;
-
-        this.realtimeChannel = this.realtimeClient
-          .channel("realtime_offerte")
-          .on(
-            "postgres_changes",
-            { event: "*", schema: "public", table: "offerte" },
-            () => {
-              void this.sync().catch(() => {});
-            }
-          )
-          .subscribe();
-      } catch (err) {
-        console.warn("[OffersSync] Impossibile avviare Supabase Realtime:", err);
-      } finally {
-        this.realtimeStartPromise = null;
-      }
-    })();
-
-    return this.realtimeStartPromise;
+  public async retryPendingChanges(): Promise<void> {
+    const db = await getDatabase();
+    const pending = await db.select<unknown[]>(
+      `SELECT 1 FROM pending_cloud_operations WHERE scope = 'offers'
+       UNION ALL SELECT 1 FROM offers WHERE sync_status = 'pending' LIMIT 1`,
+    );
+    if (pending.length) await this.sync();
   }
 
-  /**
-   * Disconnette il canale Realtime quando nessun componente Offerte è più attivo
-   */
-  public stopRealtime(): void {
-    this.realtimeSubscribers = Math.max(0, this.realtimeSubscribers - 1);
-    if (this.realtimeSubscribers > 0) return;
-
-    if (this.realtimeChannel && this.realtimeClient) {
-      void this.realtimeClient.removeChannel(this.realtimeChannel);
-      this.realtimeChannel = null;
-    }
+  private flushDeletions(creds: SupabaseConfig): Promise<number> {
+    return flushPendingCloudOperations("offers", async ({ record_id, payload }) => {
+      const { remoteId } = JSON.parse(payload) as { remoteId: number | null };
+      const target = new URL("/rest/v1/offerte", creds.projectUrl);
+      target.searchParams.set(remoteId ? "id" : "local_id", `eq.${remoteId ?? record_id}`);
+      const response = await supabaseFetch(target, { method: "DELETE", headers: { apikey: creds.anonKey } });
+      if (!response.ok) throw new Error(`Eliminazione offerta: HTTP ${response.status}`);
+    });
   }
+
+  public readonly subscribeRealtime = createSupabaseRealtimeSubscription(
+    async () => {
+      const config = await this.getSupabaseCredentials();
+      return config ? getAuthenticatedSupabaseClient(config.projectUrl, config.anonKey) : null;
+    },
+    (client, isCurrent) => client.channel("last:offers", { config: { private: true } })
+      .on("broadcast", { event: "offerte" }, () => {
+        if (isCurrent()) void this.sync().catch(console.warn);
+      }).subscribe(),
+    "[OffersSync] Realtime offerte",
+  );
 
   /**
    * Sincronizzazione bidirezionale con coalescing: se una sync è già attiva,
@@ -201,9 +174,13 @@ export class OffersSyncService {
     try {
       const db = await getDatabase();
 
+      await this.flushDeletions(creds);
+
       // 1. PUSH: Invia le offerte con sync_status = 'pending' verso Supabase
       const pendings = await db.select<OfferRecord[]>(
-        `SELECT * FROM offers WHERE sync_status = 'pending'`
+        `SELECT * FROM offers WHERE sync_status = 'pending' AND NOT EXISTS (
+          SELECT 1 FROM pending_cloud_operations WHERE scope = 'offers' AND record_id = offers.id
+        )`
       );
 
       for (const item of pendings) {
@@ -224,18 +201,23 @@ export class OffersSyncService {
 
         if (item.supabase_id) {
           const url = new URL(`/rest/v1/offerte?id=eq.${item.supabase_id}`, creds.projectUrl);
-          const res = await fetch(url.toString(), {
+          const res = await supabaseFetch(url.toString(), {
             method: "PATCH",
             headers: {
               apikey: creds.anonKey,
-              Authorization: `Bearer ${creds.anonKey}`,
               "Content-Type": "application/json",
+              Prefer: "return=representation",
             },
             body: JSON.stringify(payload),
           });
 
           if (res.ok) {
-            await db.execute(`UPDATE offers SET sync_status = 'synced' WHERE id = $1`, [item.id]);
+            const confirmed = await res.json();
+            if (!Array.isArray(confirmed) || confirmed.length !== 1) throw new Error("Offerta non confermata da Supabase");
+            await db.execute(
+              "UPDATE offers SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2",
+              [item.id, item.updated_at],
+            );
             pushed++;
           } else {
             const errBody = (await res.json().catch(() => ({}))) as { message?: string };
@@ -243,11 +225,10 @@ export class OffersSyncService {
           }
         } else {
           const url = new URL("/rest/v1/offerte?on_conflict=local_id", creds.projectUrl);
-          const res = await fetch(url.toString(), {
+          const res = await supabaseFetch(url.toString(), {
             method: "POST",
             headers: {
               apikey: creds.anonKey,
-              Authorization: `Bearer ${creds.anonKey}`,
               "Content-Type": "application/json",
               Prefer: "return=representation,resolution=merge-duplicates",
             },
@@ -257,9 +238,11 @@ export class OffersSyncService {
           if (res.ok) {
             const data = await res.json().catch(() => []);
             const remoteId = Array.isArray(data) && data[0]?.id ? Number(data[0].id) : null;
+            if (!remoteId) throw new Error("Offerta non confermata da Supabase");
             await db.execute(
-              `UPDATE offers SET supabase_id = $1, sync_status = 'synced' WHERE id = $2`,
-              [remoteId, item.id]
+              `UPDATE offers SET supabase_id = $1,
+               sync_status = CASE WHEN updated_at = $3 THEN 'synced' ELSE sync_status END WHERE id = $2`,
+              [remoteId, item.id, item.updated_at],
             );
             pushed++;
           } else {
@@ -274,10 +257,10 @@ export class OffersSyncService {
         `/rest/v1/offerte?select=*&order=id.desc&limit=${REMOTE_PULL_LIMIT}`,
         creds.projectUrl
       );
-      const pullRes = await fetch(pullUrl.toString(), {
+      const pullRes = await supabaseFetch(pullUrl.toString(), {
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
+          Prefer: "count=exact",
         },
       });
 
@@ -289,20 +272,10 @@ export class OffersSyncService {
       const remoteList = (await pullRes.json()) as RemoteOfferRow[];
 
       if (Array.isArray(remoteList)) {
-        const nowMs = Date.now();
-        for (const [delId, ts] of this.recentlyDeletedRemoteIds.entries()) {
-          if (nowMs - ts > 15_000) this.recentlyDeletedRemoteIds.delete(delId);
-        }
-
         const remoteIds = new Set<number>();
 
         for (const rem of remoteList) {
           remoteIds.add(Number(rem.id));
-
-          // Ignora temporaneamente record appena eliminati localmente per evitare race con DELETE
-          if (this.recentlyDeletedRemoteIds.has(Number(rem.id))) {
-            continue;
-          }
 
           const existing = await db.select<OfferRecord[]>(
             `SELECT * FROM offers WHERE supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL) LIMIT 1`,
@@ -318,7 +291,11 @@ export class OffersSyncService {
             await db.execute(
               `INSERT INTO offers (
                 id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'synced')`,
+              ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'synced'
+              WHERE NOT EXISTS (
+                SELECT 1 FROM pending_cloud_operations
+                WHERE scope = 'offers' AND (record_id = $1 OR json_extract(payload, '$.remoteId') = $2)
+              ) ON CONFLICT(id) DO NOTHING`,
               [
                 newId,
                 rem.id,
@@ -350,7 +327,7 @@ export class OffersSyncService {
                 created_by = $9,
                 updated_by = $10,
                 updated_at = $11
-               WHERE id = $12`,
+               WHERE id = $12 AND sync_status = 'synced' AND updated_at = $13`,
               [
                 rem.id,
                 rem.offer_date,
@@ -363,7 +340,7 @@ export class OffersSyncService {
                 rem.created_by || "Operatore",
                 rem.updated_by || "Operatore",
                 rem.updated_at || nowIso,
-                existing[0].id,
+                existing[0].id, existing[0].updated_at,
               ]
             );
             updated++;
@@ -371,13 +348,15 @@ export class OffersSyncService {
         }
 
         // Se abbiamo ricevuto l'elenco completo, rimuovi localmente i record synced eliminati da altri PC
-        if (remoteList.length < REMOTE_PULL_LIMIT) {
+        const total = pullRes.headers.get("content-range")?.match(/\/(\d+)$/)?.[1];
+        if (total !== undefined && Number(total) === remoteList.length && remoteIds.size === remoteList.length) {
           const localSynced = await db.select<{ id: string; supabase_id: number | null }[]>(
             `SELECT id, supabase_id FROM offers WHERE supabase_id IS NOT NULL AND sync_status = 'synced'`
           );
           for (const loc of localSynced) {
             if (loc.supabase_id !== null && !remoteIds.has(Number(loc.supabase_id))) {
-              await db.execute(`DELETE FROM offers WHERE id = $1`, [loc.id]);
+              await db.execute(`DELETE FROM offers WHERE id = $1 AND sync_status = 'synced' AND supabase_id = $2`,
+                [loc.id, loc.supabase_id]);
               deleted++;
             }
           }
@@ -401,28 +380,6 @@ export class OffersSyncService {
     }
   }
 
-  /**
-   * Elimina un'offerta da Supabase se possiede un ID remoto
-   */
-  public async deleteRemoteOffer(supabaseId: number | null | undefined): Promise<void> {
-    if (!supabaseId) return;
-    this.recentlyDeletedRemoteIds.set(Number(supabaseId), Date.now());
-    const creds = await this.getSupabaseCredentials();
-    if (!creds) return;
-
-    try {
-      const url = new URL(`/rest/v1/offerte?id=eq.${supabaseId}`, creds.projectUrl);
-      await fetch(url.toString(), {
-        method: "DELETE",
-        headers: {
-          apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
-        },
-      });
-    } catch (err) {
-      console.warn("[OffersSync] Impossibile eliminare offerta remota da Supabase:", err);
-    }
-  }
 }
 
 export const offersSyncService = new OffersSyncService();

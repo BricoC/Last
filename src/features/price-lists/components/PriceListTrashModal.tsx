@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { Trash2, RotateCcw, X, Loader2, AlertCircle, Check } from "lucide-react";
 import { TrashListinoRow, ListinoGeneraleRow } from "../models/priceList";
 import { priceListRepository } from "../services/priceListRepository";
-import { priceListSyncService } from "../services/priceListSyncService";
 
 interface PriceListTrashModalProps {
   isOpen: boolean;
@@ -66,7 +65,6 @@ export const PriceListTrashModal: React.FC<PriceListTrashModalProps> = ({
         setTrashItems((prev) => prev.filter((item) => item.id !== row.id));
         setFeedback(`"${row.descrizione || row.codice_articolo || 'Articolo'}" ripristinato con successo nel listino!`);
         onItemRestored(restored);
-        void priceListSyncService.deleteTrashFromSupabase(row.id);
         setTimeout(() => setFeedback(null), 4000);
       }
     } catch (err: any) {

@@ -21,6 +21,7 @@ mod supabase_config;
 mod supabase_ddt_import;
 mod supabase_ddt_preview;
 mod supabase_monitor;
+mod supabase_session_store;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -517,6 +518,9 @@ pub fn run() {
             ddt_delete_command::soft_delete_ddt_transaction,
             supabase_config::load_supabase_config,
             supabase_config::save_supabase_config,
+            supabase_session_store::save_supabase_station_session,
+            supabase_session_store::load_supabase_station_session,
+            supabase_session_store::clear_supabase_station_session,
             supabase_monitor::load_supabase_management_config,
             supabase_monitor::save_supabase_management_config,
             supabase_monitor::fetch_supabase_cloud_metrics,

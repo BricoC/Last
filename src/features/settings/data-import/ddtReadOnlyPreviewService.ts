@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
 
@@ -71,7 +72,7 @@ async function readPage<T>(url: URL, table: string, fields: string, anonKey: str
   pageUrl.searchParams.set("order", "id.asc");
   pageUrl.searchParams.set("limit", String(PAGE_SIZE));
   pageUrl.searchParams.set("offset", String(offset));
-  const response = await fetch(pageUrl, {
+  const response = await supabaseFetch(pageUrl, {
     method: "GET",
     headers: { apikey: anonKey, Prefer: "count=exact" },
   });

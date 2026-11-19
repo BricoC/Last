@@ -1,3 +1,4 @@
+import { migratePendingCloudOperationsV34 } from "@/shared/data-layer/migrations/pendingCloudOperationsSchema";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { migrationTestDatabase } from "@/shared/data-layer/__tests__/migrationTestDatabase";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +7,10 @@ import { migrateElectronicInvoicesSchemaV15 } from "@/shared/data-layer/migratio
 import { migratePendingCloudWritesV31 } from "@/shared/data-layer/migrations/pendingCloudWritesSchema";
 import { migratePriceListsSchemaV11 } from "@/shared/data-layer/migrations/priceListSchema";
 import { priceListSyncService } from "../priceListSyncService";
+
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -23,6 +28,8 @@ describe("Sincronizzazione completa listini", () => {
     await migrateCustomerPriceListUpgradeV22(db);
     await migrateElectronicInvoicesSchemaV15(db);
     await migratePendingCloudWritesV31(db);
+    sqlite.exec("CREATE TABLE clients (id TEXT PRIMARY KEY)");
+    await migratePendingCloudOperationsV34(db);
     sqlite.exec(`
       INSERT INTO listino_generale (id, descrizione, sync_revision) VALUES
         ('gen_1', 'Modifica locale', 'pending'),
@@ -86,4 +93,40 @@ describe("Sincronizzazione completa listini", () => {
     ]);
     expect(sqlite.prepare("SELECT id FROM listini_clienti").all()).toEqual([{ id: "cli_4" }]);
   });
+
+  it("continua dopo una pagina corta finché ha scaricato tutte le righe", async () => {
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (!url.pathname.endsWith("/listino_generale")) return fallback(input, init);
+      const offset = Number(url.searchParams.get("offset"));
+      return Response.json([{ id: offset + 1 }], { headers: { "Content-Range": `${offset}-${offset}/3` } });
+    });
+
+    await expect(priceListSyncService.syncAllFromSupabase()).resolves.toMatchObject({ generalCount: 3 });
+    const generalRequests = fetchMock.mock.calls.map(([input]) => new URL(String(input)))
+      .filter((url) => url.pathname.endsWith("/listino_generale"));
+    expect(generalRequests.map((url) => url.searchParams.get("offset"))).toEqual(["0", "1", "2"]);
+    expect(sqlite.prepare("SELECT id FROM listino_generale ORDER BY id").all()).toEqual([
+      { id: "gen_1" }, { id: "gen_2" }, { id: "gen_3" }, { id: "new_local" },
+    ]);
+  });
+
+  it("interrompe una risposta incompleta senza applicare cancellazioni locali", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json([{ id: 1 }], { headers: { "Content-Range": "0-0/3" } }))
+      .mockResolvedValueOnce(Response.json([], { headers: { "Content-Range": "*/3" } }));
+
+    await expect(priceListSyncService.syncAllFromSupabase()).rejects.toThrow("Download incompleto");
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(["load_supabase_config"]);
+    expect(sqlite.prepare("SELECT id FROM listino_generale ORDER BY id").all()).toEqual([
+      { id: "gen_1" }, { id: "gen_3" }, { id: "new_local" },
+    ]);
+  });
+  it("non reimporta una riga cancellata mentre l'operazione cloud è in coda", async () => {
+    sqlite.exec(`INSERT INTO pending_cloud_operations (scope,record_id,action,payload)
+      VALUES ('listino_generale','gen_2','trash','{}')`);
+    await priceListSyncService.syncAllFromSupabase();
+    expect(sqlite.prepare("SELECT id FROM listino_generale WHERE id='gen_2'").get()).toBeUndefined();
+  });
+
 });

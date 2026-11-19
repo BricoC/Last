@@ -35,6 +35,10 @@ export class ClientRepository {
       await db.execute(
         `UPDATE clients SET
           code = $1,
+          pending_previous_name = CASE
+            WHEN LOWER(TRIM(business_name)) <> LOWER(TRIM($2))
+            THEN COALESCE(pending_previous_name, business_name)
+            ELSE pending_previous_name END,
           business_name = $2,
           address = $3,
           city = $4,

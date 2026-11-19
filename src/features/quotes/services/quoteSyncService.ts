@@ -1,10 +1,20 @@
+import { flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
+import type { TrashQuoteRow } from "../models/quote";
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import type { Quote } from "../models/quote";
 import { formatQuoteCode } from "../models/quoteDraft";
 import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
+import { money } from "@/shared/domain/monetaryValue";
+import { parseItalianNumber } from "@/shared/utils/numberUtils";
 
 export const getSupabaseCredentials = createCachedSupabaseConfigLoader("QuoteSyncService");
+
+function cloudVatRate(value: unknown): number {
+  const rate = parseItalianNumber(value);
+  return rate !== null && [0, 4, 10, 22].includes(rate) ? rate : 22;
+}
 
 function parseDataJson(raw: any): Record<string, any> {
   if (!raw) return {};
@@ -43,7 +53,7 @@ function extractAndNormalizeItems(dataJson: Record<string, any>): any[] {
       net_amount_subunits: Number(it.net_amount_subunits) || 0,
       cost_total_subunits: Number(it.cost_total_subunits ?? it.purchase_price_subunits) || 0,
       gross_profit_subunits: Number(it.gross_profit_subunits) || 0,
-      vat_rate: [0, 4, 10, 22].includes(Number(it.vat_rate)) ? Number(it.vat_rate) : 22,
+      vat_rate: cloudVatRate(it.vat_rate),
       vat_amount_subunits: Number(it.vat_amount_subunits) || 0,
       availability: it.availability || null,
       notes: it.notes || null,
@@ -60,8 +70,9 @@ function extractAndNormalizeItems(dataJson: Record<string, any>): any[] {
       const netSubunits = Math.round((Number(riga.importo_netto) || 0) * 100000);
       const costSubunits = Math.round((Number(riga.costo_totale_riga) || 0) * 100000);
       const profitSubunits = Math.round((Number(riga.ricavo_riga) || 0) * 100000);
-      const vatRate = [0, 4, 10, 22].includes(Number(riga.iva)) ? Number(riga.iva) : 22;
-      const vatSubunits = Math.round(Number(riga.importo_iva) || (netSubunits * (vatRate / 100)));
+      const vatRate = cloudVatRate(riga.iva);
+      const vat = parseItalianNumber(riga.importo_iva);
+      const vatSubunits = vat === null ? Math.round(netSubunits * vatRate / 100) : money(vat).toSubunits();
 
       return {
         id: riga.id || crypto.randomUUID(),
@@ -162,7 +173,7 @@ function buildQuoteItemWrites(
         Number(it.net_amount_subunits) || 0,
         Number(it.cost_total_subunits) || 0,
         Number(it.gross_profit_subunits) || 0,
-        [0, 4, 10, 22].includes(Number(it.vat_rate)) ? Number(it.vat_rate) : 22,
+        cloudVatRate(it.vat_rate),
         Number(it.vat_amount_subunits) || 0,
         it.availability || null,
         it.notes || null,
@@ -176,7 +187,7 @@ function buildQuoteItemWrites(
   return writes;
 }
 
-async function applyRemoteQuote(r: Record<string, any>): Promise<boolean> {
+async function applyRemoteQuote(r: Record<string, any>, restoreWrites?: SqliteWrite[]): Promise<boolean> {
   if (!r?.id) return false;
   const db = await getDatabase();
   const [local] = await db.select<{ updated_at: string; sync_status: string }[]>(
@@ -207,7 +218,7 @@ async function applyRemoteQuote(r: Record<string, any>): Promise<boolean> {
           delivery_terms, default_supplier, internal_notes, customer_notes,
           total_taxable_subunits, total_vat_subunits, total_document_subunits,
           total_cost_subunits, total_profit_subunits,
-          created_at, updated_at, updated_by, deleted_at, sync_status
+          created_at, updated_at, updated_by, deleted_at, converted_ddt_id, sync_status
         ) VALUES (
           $1, $2, $3, $4, $5,
           $6, $7, $8, $9, $10,
@@ -217,7 +228,7 @@ async function applyRemoteQuote(r: Record<string, any>): Promise<boolean> {
           $25, $26, $27, $28,
           $29, $30, $31,
           $32, $33,
-          $34, $35, $36, $37, 'synced'
+          $34, $35, $36, $37, $39, 'synced'
         )
         ON CONFLICT(id) DO UPDATE SET
           quote_number = excluded.quote_number,
@@ -255,6 +266,7 @@ async function applyRemoteQuote(r: Record<string, any>): Promise<boolean> {
           updated_at = excluded.updated_at,
           updated_by = excluded.updated_by,
           deleted_at = excluded.deleted_at,
+          converted_ddt_id = COALESCE(excluded.converted_ddt_id, quotes.converted_ddt_id),
           sync_status = 'synced'
         WHERE COALESCE(quotes.sync_status, '') <> 'pending'
           AND (julianday(quotes.updated_at) IS NULL OR julianday($38) >= julianday(quotes.updated_at))`,
@@ -298,16 +310,85 @@ async function applyRemoteQuote(r: Record<string, any>): Promise<boolean> {
           r.updated_by || "supabase",
           r.deleted_at || null,
           remoteTimestamp,
+          dataJson.converted_ddt_id || null,
         ],
   };
 
   const hasItemsSnapshot = Array.isArray(dataJson.items) || Array.isArray(dataJson.righe);
   const writes = hasItemsSnapshot ? buildQuoteItemWrites(r.id, items, createdAt, updatedAt) : [];
-  await applyLocalDatabaseBatch([header, ...writes]);
+  await applyLocalDatabaseBatch([header, ...writes, ...(restoreWrites ?? [])]);
   return true;
 }
 
 export class QuoteSyncService {
+  public static async restoreTrashSnapshot(trash: TrashQuoteRow, now: string, finish: SqliteWrite[]) {
+    const saved = parseDataJson(trash.data_json);
+    const row = "data_json" in saved ? saved : {
+      id: trash.id, quote_number: trash.quote_number, anno: trash.year, data: trash.quote_date,
+      cliente: trash.client_name, oggetto: trash.subject, totale_documento: Number(trash.total_document_subunits) / 100000,
+      data_json: saved,
+    };
+    const restored = await applyRemoteQuote({ ...row, id: trash.id, updated_at: now, deleted_at: null }, [
+      { sql: "UPDATE quotes SET sync_status = 'pending' WHERE id = $1", params: [trash.id] },
+      ...finish,
+    ]);
+    if (!restored) throw new Error("Lo stato del preventivo è cambiato durante il ripristino.");
+  }
+
+  private static pendingRetry: Promise<void> | null = null;
+
+  public static retryPendingChanges(): Promise<void> {
+    if (this.pendingRetry) return this.pendingRetry;
+    this.pendingRetry = (async () => {
+      const { quoteRepository } = await import("./quoteRepository");
+      await flushPendingCloudOperations("quotes", async ({ record_id, action, payload }) => {
+        if (action === "trash") {
+          const row = JSON.parse(payload);
+          if (!await this.pushTrashRow(row)) throw new Error("Spostamento preventivo nel cestino non confermato");
+          const db = await getDatabase();
+          await db.execute("UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND deleted_at = $2",
+            [record_id, row.deleted_at]);
+        } else if (action === "restore") {
+          const quote = await quoteRepository.getQuoteById(record_id, false);
+          if (!quote) return;
+          if (!await this.pushQuote(quote) || !await this.deleteTrashFromSupabase(record_id)) {
+            throw new Error("Ripristino preventivo non confermato");
+          }
+        } else if (action === "cleanup" && !await this.deleteTrashFromSupabase(record_id)) {
+          throw new Error("Rimozione dal cestino preventivi non confermata");
+        }
+      });
+      const db = await getDatabase();
+      const archived = await db.select<Array<{ id: string; deleted_at: string; in_trash: number }>>(
+        `SELECT id, deleted_at, EXISTS(SELECT 1 FROM quotes_trash WHERE id = quotes.id) AS in_trash
+          FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = quotes.id
+          )`,
+      );
+      for (const row of archived) {
+        const quote = await quoteRepository.getArchivedQuoteForSync(row.id);
+        if (quote?.deleted_at !== row.deleted_at) continue;
+        const confirmed = row.in_trash
+          ? await this.pushTrashRow({ ...this.mapQuoteToSupabase(quote), deleted_by: quote.updated_by || "system" })
+          : await this.deleteQuote(row.id);
+        if (confirmed) await db.execute(
+          "UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND deleted_at = $2",
+          [row.id, row.deleted_at],
+        );
+      }
+      const pending = await db.select<Array<{ id: string }>>(
+        `SELECT id FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND NOT EXISTS (
+          SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = quotes.id
+        ) ORDER BY updated_at`
+      );
+      for (const { id } of pending) {
+        const quote = await quoteRepository.getQuoteById(id, false);
+        if (quote) await this.pushQuote(quote);
+      }
+    })().finally(() => { this.pendingRetry = null; });
+    return this.pendingRetry;
+  }
+
   /**
    * Converte un oggetto Quote di Last nel payload per la tabella preventivi su Supabase
    */
@@ -400,11 +481,10 @@ export class QuoteSyncService {
       const row = this.mapQuoteToSupabase(quote);
       const url = `${creds.projectUrl}/rest/v1/preventivi`;
 
-      const res = await fetch(url, {
+      const res = await supabaseFetch(url, {
         method: "POST",
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates",
         },
@@ -436,11 +516,10 @@ export class QuoteSyncService {
       const now = new Date().toISOString();
       const url = `${creds.projectUrl}/rest/v1/preventivi?id=eq.${encodeURIComponent(id)}`;
 
-      const res = await fetch(url, {
+      const res = await supabaseFetch(url, {
         method: "PATCH",
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -466,12 +545,12 @@ export class QuoteSyncService {
     const url = new URL("/rest/v1/preventivi", creds.projectUrl);
     url.searchParams.set("order", "id.asc");
     url.searchParams.set("limit", "500");
-    const headers = { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` };
+    const headers = { apikey: creds.anonKey };
     let imported = 0;
     let offset = 0;
     while (true) {
       url.searchParams.set("offset", String(offset));
-      const response = await fetch(url.toString(), { headers });
+      const response = await supabaseFetch(url.toString(), { headers });
       if (!response.ok) throw new Error(`Download preventivi: HTTP ${response.status}`);
       const rows = await response.json();
       if (!Array.isArray(rows)) throw new Error("Risposta preventivi non valida");
@@ -489,8 +568,8 @@ export class QuoteSyncService {
       if (!creds) return false;
       const url = new URL("/rest/v1/preventivi", creds.projectUrl);
       url.searchParams.set("id", `eq.${id}`);
-      const response = await fetch(url, {
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      const response = await supabaseFetch(url, {
+        headers: { apikey: creds.anonKey },
       });
       if (!response.ok) return false;
       const rows = await response.json();
@@ -505,29 +584,17 @@ export class QuoteSyncService {
    * Sposta un preventivo nel Cestino di Supabase Cloud (tabella preventivi_cestino)
    * e assicura il limite FIFO di massimo 5 elementi.
    */
-  public static async pushTrashQuote(
-    quote: Quote,
-    deletedAt: string = new Date().toISOString(),
-    deletedBy: string = "system"
-  ): Promise<boolean> {
+  private static async pushTrashRow(trashRow: Record<string, unknown>): Promise<boolean> {
     try {
       const creds = await getSupabaseCredentials();
       if (!creds) return false;
 
-      const baseRow = this.mapQuoteToSupabase(quote);
-      const trashRow = {
-        ...baseRow,
-        deleted_at: deletedAt,
-        deleted_by: deletedBy,
-      };
-
       // 1. Inserisci o aggiorna nel cestino remoto
       const postUrl = `${creds.projectUrl}/rest/v1/preventivi_cestino`;
-      const res = await fetch(postUrl, {
+      const res = await supabaseFetch(postUrl, {
         method: "POST",
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates",
         },
@@ -537,18 +604,18 @@ export class QuoteSyncService {
       if (!res.ok) {
         const txt = await res.text();
         console.warn("[QuoteSyncService] Errore push preventivo nel cestino Supabase:", txt);
+        return false;
       }
 
       // 2. Rimuovi dall'elenco preventivi attivi su Supabase
-      await this.deleteQuote(quote.id);
+      if (!await this.deleteQuote(String(trashRow.id))) return false;
 
       // 3. FIFO: Mantieni al massimo 5 elementi nel cestino remoto
       try {
         const listUrl = `${creds.projectUrl}/rest/v1/preventivi_cestino?select=id,deleted_at&order=deleted_at.desc`;
-        const listRes = await fetch(listUrl, {
+        const listRes = await supabaseFetch(listUrl, {
           headers: {
             apikey: creds.anonKey,
-            Authorization: `Bearer ${creds.anonKey}`,
           },
         });
         if (listRes.ok) {
@@ -556,11 +623,10 @@ export class QuoteSyncService {
           if (Array.isArray(allTrash) && allTrash.length > 5) {
             const toPrune = allTrash.slice(5);
             for (const item of toPrune) {
-              await fetch(`${creds.projectUrl}/rest/v1/preventivi_cestino?id=eq.${encodeURIComponent(item.id)}`, {
+              await supabaseFetch(`${creds.projectUrl}/rest/v1/preventivi_cestino?id=eq.${encodeURIComponent(item.id)}`, {
                 method: "DELETE",
                 headers: {
                   apikey: creds.anonKey,
-                  Authorization: `Bearer ${creds.anonKey}`,
                 },
               });
             }
@@ -586,11 +652,10 @@ export class QuoteSyncService {
       if (!creds) return false;
 
       const url = `${creds.projectUrl}/rest/v1/preventivi_cestino?id=eq.${encodeURIComponent(id)}`;
-      const res = await fetch(url, {
+      const res = await supabaseFetch(url, {
         method: "DELETE",
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
         },
       });
       return res.ok;
@@ -609,10 +674,9 @@ export class QuoteSyncService {
       if (!creds) return 0;
 
       const url = `${creds.projectUrl}/rest/v1/preventivi_cestino?order=deleted_at.desc&limit=5`;
-      const res = await fetch(url, {
+      const res = await supabaseFetch(url, {
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
         },
       });
 
@@ -627,7 +691,9 @@ export class QuoteSyncService {
             id, quote_number, numero, year, quote_date,
             client_name, subject, total_document_subunits, data_json,
             deleted_at, deleted_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11 WHERE NOT EXISTS (
+            SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = $1
+          ) AND NOT EXISTS (SELECT 1 FROM quotes WHERE id = $1 AND deleted_at IS NULL)
           ON CONFLICT(id) DO UPDATE SET
             quote_number = excluded.quote_number,
             numero = excluded.numero,
@@ -648,7 +714,7 @@ export class QuoteSyncService {
             item.cliente || "",
             item.oggetto || "",
             Math.round((Number(item.totale_documento) || 0) * 100000),
-            typeof item.data_json === "string" ? item.data_json : JSON.stringify(item.data_json || {}),
+            JSON.stringify(item),
             item.deleted_at || new Date().toISOString(),
             item.deleted_by || "system",
           ]
@@ -684,8 +750,8 @@ export class QuoteSyncService {
 
       // 1. Controlla la tabella sequenze
       const seqUrl = `${creds.projectUrl}/rest/v1/preventivi_sequenza?anno=eq.${year}&select=ultimo_numero`;
-      const seqRes = await fetch(seqUrl, {
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      const seqRes = await supabaseFetch(seqUrl, {
+        headers: { apikey: creds.anonKey },
       });
       if (seqRes.ok) {
         const rows = await seqRes.json();
@@ -696,8 +762,8 @@ export class QuoteSyncService {
 
       // 2. Controlla max quote_number in preventivi attivi
       const prevUrl = `${creds.projectUrl}/rest/v1/preventivi?anno=eq.${year}&select=quote_number&order=quote_number.desc&limit=1`;
-      const prevRes = await fetch(prevUrl, {
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      const prevRes = await supabaseFetch(prevUrl, {
+        headers: { apikey: creds.anonKey },
       });
       if (prevRes.ok) {
         const rows = await prevRes.json();
@@ -708,8 +774,8 @@ export class QuoteSyncService {
 
       // 3. Controlla max quote_number in preventivi_cestino
       const cestUrl = `${creds.projectUrl}/rest/v1/preventivi_cestino?anno=eq.${year}&select=quote_number&order=quote_number.desc&limit=1`;
-      const cestRes = await fetch(cestUrl, {
-        headers: { apikey: creds.anonKey, Authorization: `Bearer ${creds.anonKey}` },
+      const cestRes = await supabaseFetch(cestUrl, {
+        headers: { apikey: creds.anonKey },
       });
       if (cestRes.ok) {
         const rows = await cestRes.json();
@@ -733,11 +799,10 @@ export class QuoteSyncService {
       if (!creds) return;
 
       const url = `${creds.projectUrl}/rest/v1/preventivi_sequenza`;
-      await fetch(url, {
+      await supabaseFetch(url, {
         method: "POST",
         headers: {
           apikey: creds.anonKey,
-          Authorization: `Bearer ${creds.anonKey}`,
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates",
         },

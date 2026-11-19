@@ -6,11 +6,8 @@ interface UserState {
   users: AppUser[];
   currentUser: AppUser | null;
   isLoading: boolean;
-  isSyncingCloud: boolean;
-  lastCloudSync: Date | null;
   pendingPasswordSwitch: AppUser | null;
   loadUsers: () => Promise<void>;
-  syncCloudUsers: () => Promise<void>;
   requestSwitchUser: (userId: string) => Promise<boolean>;
   cancelPasswordSwitch: () => void;
   confirmPasswordSwitch: (password: string) => Promise<boolean>;
@@ -44,20 +41,11 @@ export const useUserStore = create<UserState>((set, get) => ({
   users: [],
   currentUser: null,
   isLoading: true,
-  isSyncingCloud: false,
-  lastCloudSync: null,
   pendingPasswordSwitch: null,
 
   loadUsers: async () => {
     set({ isLoading: true });
     try {
-      // 1. Prova prima la sincronizzazione rapida da Supabase Cloud
-      try {
-        await AppUserService.syncWithCloud();
-      } catch (syncErr) {
-        console.warn("[useUserStore] Sincronizzazione Cloud non disponibile, uso cache locale:", syncErr);
-      }
-
       const list = await AppUserService.getAllUsers();
       const activeId = AppUserService.getActiveUserId();
       let active = list.find((u) => u.id === activeId);
@@ -84,7 +72,6 @@ export const useUserStore = create<UserState>((set, get) => ({
           currentUser: active,
           pendingPasswordSwitch: null,
           isLoading: false,
-          lastCloudSync: new Date(),
         });
         return;
       }
@@ -97,7 +84,6 @@ export const useUserStore = create<UserState>((set, get) => ({
           currentUser: null,
           pendingPasswordSwitch: active,
           isLoading: false,
-          lastCloudSync: new Date(),
         });
       } else {
         set({
@@ -105,39 +91,11 @@ export const useUserStore = create<UserState>((set, get) => ({
           currentUser: active || null,
           pendingPasswordSwitch: null,
           isLoading: false,
-          lastCloudSync: new Date(),
         });
       }
     } catch (e) {
       console.error("Errore caricamento utenti:", e);
       set({ isLoading: false });
-    }
-  },
-
-  syncCloudUsers: async () => {
-    set({ isSyncingCloud: true });
-    try {
-      await AppUserService.syncWithCloud();
-      const list = await AppUserService.getAllUsers();
-      const current = get().currentUser;
-      if (current) {
-        const active = list.find((u) => u.id === current.id) || current;
-        set({
-          users: list,
-          currentUser: active,
-          isSyncingCloud: false,
-          lastCloudSync: new Date(),
-        });
-      } else {
-        set({
-          users: list,
-          isSyncingCloud: false,
-          lastCloudSync: new Date(),
-        });
-      }
-    } catch (err) {
-      console.error("[useUserStore] Errore sync cloud:", err);
-      set({ isSyncingCloud: false });
     }
   },
 

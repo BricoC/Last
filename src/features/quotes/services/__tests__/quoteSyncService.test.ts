@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuoteSyncService } from "../quoteSyncService";
 
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 const { invoke, select } = vi.hoisted(() => ({ invoke: vi.fn(), select: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@/shared/data-layer/database", () => ({
@@ -43,5 +47,30 @@ describe("Pull preventivi", () => {
         { sql: expect.stringContaining("UPDATE quote_items SET deleted_at"), params: [date, remote.id, "[]"] },
       ],
     });
+  });
+
+  it("conserva il preventivo attivo se Supabase rifiuta la scrittura nel cestino", async () => {
+    select.mockResolvedValueOnce([{
+      sequence: 1, record_id: remote.id, action: "trash", payload: JSON.stringify(remote),
+    }]);
+    fetch.mockResolvedValueOnce(new Response(null, { status: 503 }));
+
+    await QuoteSyncService.retryPendingChanges();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, request] = fetch.mock.calls[0];
+    expect(String(url)).toContain("/rest/v1/preventivi_cestino");
+    expect(request?.method).toBe("POST");
+  });
+
+  it("salva l'IVA dei preventivi legacy in subunità e conserva l'importo zero esplicito", async () => {
+    fetch.mockResolvedValueOnce(Response.json([{ ...remote, data_json: { righe: [
+      { id: "riga-1", importo_netto: 100, iva: 22, importo_iva: "22,00" },
+      { id: "riga-2", importo_netto: 100, iva: 22, importo_iva: "0" },
+    ] } }]));
+    await expect(QuoteSyncService.pullQuoteById(remote.id)).resolves.toBe(true);
+    const request = invoke.mock.calls.find(([command]) => command === "apply_local_database_batch")?.[1];
+    const items = request?.writes.filter((write: { sql: string }) => write.sql.includes("INSERT INTO quote_items"));
+    expect(items?.map((write: { params: unknown[] }) => write.params[22])).toEqual([2_200_000, 0]);
   });
 });

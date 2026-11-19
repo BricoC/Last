@@ -205,6 +205,7 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
 
+      if (res.failed) throw new Error(`Import parziale. Aggiornate: ${res.updated}, nuove: ${res.inserted}, non caricate: ${res.failed}. L’allineamento SQLite richiede un invio completo.`);
       addStructuredLog(
         "success",
         "Caricamento Listini Clienti Concluso",
@@ -263,6 +264,7 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
 
+      if (res.failed) throw new Error(`Ripristino parziale. Ripristinati: ${res.restored}, non ripristinati: ${res.failed}.`);
       addStructuredLog("success", "Ripristino Supabase Completato", `Ripristinati ${res.restored} record nello stato originale.`);
 
       addStructuredLog("info", "Ripristino SQLite Locale", "Ripristino tabella locale dal backup di sicurezza...");
@@ -341,6 +343,7 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
 
+      if (res.failed) throw new Error(`Import parziale. Articoli salvati: ${res.genInserted + res.genUpdated + res.varInserted + res.varUpdated}, non caricati: ${res.failed}.`);
       addStructuredLog(
         "success",
         "Caricamento Listino Generale Concluso",
@@ -418,6 +421,7 @@ export const ManualCloudImportPage: React.FC = () => {
         }
       );
 
+      if (res.failed) throw new Error(`Import DDT parziale. Testate salvate: ${res.headersUploaded}, righe salvate: ${res.rowsUploaded}, record non caricati: ${res.failed}.`);
       addStructuredLog(
         "success",
         "Caricamento DDT Concluso con Successo",
@@ -1145,7 +1149,7 @@ export const ManualCloudImportPage: React.FC = () => {
                       <td className="py-1 px-3 text-[var(--muted-foreground)]">{(previewPage - 1) * pageSize + i + 1}</td>
                       <td className="py-1 px-3 text-amber-300 truncate max-w-[180px]">{r.cliente.replace(/^LIST_/, "")}</td>
                       <td className="py-1 px-3 text-white font-sans truncate max-w-[320px]">{r.descrizione}</td>
-                      <td className="py-1 px-3 text-right text-emerald-400">{r.prezzo_fattura > 0 ? r.prezzo_fattura.toFixed(2) + " €" : "—"}</td>
+                      <td className="py-1 px-3 text-right text-emerald-400">{r.prezzo_fattura != null ? r.prezzo_fattura.toFixed(2) + " €" : "—"}</td>
                       <td className="py-1 px-3 bg-amber-500/5 border-x border-amber-500/20 font-bold">
                         {r.hasTextAcquisto ? (
                           <span className="text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded border border-emerald-500/30">
@@ -1155,7 +1159,7 @@ export const ManualCloudImportPage: React.FC = () => {
                           <span className="text-[var(--foreground)]">{r.acquisto_old || "—"}</span>
                         )}
                       </td>
-                      <td className="py-1 px-3 text-right text-sky-400">{r.ricarico > 0 ? r.ricarico.toFixed(1) + "%" : "—"}</td>
+                      <td className="py-1 px-3 text-right text-sky-400">{r.ricarico != null ? r.ricarico.toFixed(1) + "%" : "—"}</td>
                     </tr>
                   ))
                 )}

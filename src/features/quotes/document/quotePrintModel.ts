@@ -1,5 +1,5 @@
 import { money } from "@/shared/domain/monetaryValue";
-import { calculateQuoteItem, calculateQuoteTotals, type CalculatedQuoteItem, type CalculatedQuoteTotals } from "../utils/quoteCalculations";
+import { calculateQuoteItem, calculateQuoteTotals, quoteQuantityOrNull, type CalculatedQuoteItem, type CalculatedQuoteTotals } from "../utils/quoteCalculations";
 import { isQuoteDraftItemActive, type QuoteDraft, type QuoteDraftItem } from "../models/quoteDraft";
 
 export interface PreparedQuoteItem {
@@ -15,7 +15,7 @@ export interface PreparedQuote {
 export function prepareQuoteForPrint(draft: QuoteDraft): PreparedQuote {
   const rows = draft.items.filter(isQuoteDraftItemActive).map((item) => {
     const rawQuantity = String(item.quantity);
-    const quantity = validQuantity(rawQuantity) ? rawQuantity.trim() : "1";
+    const quantity = quoteQuantityOrNull(rawQuantity) ? rawQuantity.trim() : "1";
     const rawDiscount = Number(item.discount_pct ?? 0);
     const discount = Number.isFinite(rawDiscount) ? Math.min(100, Math.max(0, rawDiscount)) : 0;
     const rawVatRate = item.vat_rate ?? 22;
@@ -30,13 +30,6 @@ export function prepareQuoteForPrint(draft: QuoteDraft): PreparedQuote {
     return { item: printItem, calculation };
   });
   return { rows, totals: calculateQuoteTotals(rows.map((row) => row.calculation)) };
-}
-
-function validQuantity(value: string | number): boolean {
-  const normalized = String(value).trim().replace(",", ".");
-  if (!/^[+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) return false;
-  const number = Number(normalized);
-  return Number.isFinite(number) && number > 0;
 }
 
 function validDiscount(value?: number): number {

@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { OrderItem, Supplier } from "../types/order";
-import { orderRepository } from "./orderRepository";
 import { orderSupabaseService } from "./orderSupabaseService";
 
 export interface SendOrderEmailParams {
@@ -90,8 +89,7 @@ export class OrderEmailService {
       });
 
       // Se Outlook apre l'email, aggiorniamo Supabase Cloud e il database locale
-      await orderSupabaseService.markSupplierOrdersAsSent(supplierName);
-      await orderRepository.markSupplierOrdersAsSent(supplierName, currentUser);
+      await orderSupabaseService.markSupplierOrdersAsSent(supplierName, currentUser);
 
       return { success: true };
     } catch (err: any) {

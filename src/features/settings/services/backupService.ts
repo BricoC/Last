@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
@@ -320,11 +321,10 @@ export async function pushBackupSettingsToSupabase(config: BackupConfig): Promis
     };
 
     const url = `${creds.projectUrl}/rest/v1/backup_settings`;
-    const res = await fetch(url, {
+    const res = await supabaseFetch(url, {
       method: "POST",
       headers: {
         apikey: creds.anonKey,
-        Authorization: `Bearer ${creds.anonKey}`,
         "Content-Type": "application/json",
         Prefer: "resolution=merge-duplicates",
       },
@@ -350,11 +350,10 @@ export async function pullBackupSettingsFromSupabase(requireCloud = false): Prom
     }
 
     const url = `${creds.projectUrl}/rest/v1/backup_settings?id=eq.backup_config&select=*`;
-    const res = await fetch(url, {
+    const res = await supabaseFetch(url, {
       method: "GET",
       headers: {
         apikey: creds.anonKey,
-        Authorization: `Bearer ${creds.anonKey}`,
       },
     });
 
@@ -787,7 +786,10 @@ export async function restoreModularBackup(
       restoredCounts[table] = rows.length;
     }
 
-    await applyLocalDatabaseBatch(writes, true);
+    const referenceTables = Object.keys(restoredCounts).filter((table) =>
+      mode === "replace" || restoredCounts[table] > 0,
+    );
+    await applyLocalDatabaseBatch(writes, referenceTables);
     return { success: true, restoredCounts };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

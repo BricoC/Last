@@ -271,7 +271,7 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
         gridRef.current.api.refreshCells({ rowNodes: [params.node], force: true });
       }
     },
-    [setItems]
+    [setItems, globalMarkup, globalDiscount]
   );
 
   // Eliminazione effettiva della riga (scalano quelle sotto e ne crea una vuota a fine array mantenendo 500)

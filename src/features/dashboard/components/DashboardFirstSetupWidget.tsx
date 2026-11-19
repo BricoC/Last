@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+import { SupabaseStationLogin } from "@/shared/components/SupabaseStationLogin";
+import { getSupabaseSessionEmail, subscribeSupabaseSession } from "@/shared/services/supabaseSession";
+import React, { useState, useEffect, useSyncExternalStore } from "react";
 import {
   Cloud,
   HardDrive,
@@ -27,6 +29,7 @@ interface Props {
 }
 
 export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted }) => {
+  const sessionEmail = useSyncExternalStore(subscribeSupabaseSession, getSupabaseSessionEmail);
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isDismissed, setIsDismissed] = useState(() => {
@@ -87,9 +90,10 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
     }
     try {
       await invoke("save_supabase_config", {
-        config: { projectUrl: supabaseUrl.trim(), anonKey: supabaseKey.trim() },
+        config: { projectUrl: supabaseUrl.trim().replace(/\/$/, ""), anonKey: supabaseKey.trim() },
       });
-      setSaveStatusMessage("Credenziali Supabase salvate con successo!");
+      window.dispatchEvent(new Event("supabase-config-updated"));
+      setSaveStatusMessage("Configurazione Supabase salvata.");
       setTimeout(() => setSaveStatusMessage(null), 3000);
       void checkSetupStatus();
     } catch (e) {
@@ -97,9 +101,12 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
     }
   };
 
+  const canImport = Boolean(sessionEmail && supabaseUrl.trim().replace(/\/$/, "") === status?.supabaseUrl
+    && supabaseKey.trim() === status?.supabaseKey);
+
   const handleStartFullImport = async () => {
-    if (!supabaseUrl.trim() || !supabaseKey.trim()) {
-      setSaveStatusMessage("Inserisci e salva prima le credenziali Supabase.");
+    if (!canImport) {
+      setSaveStatusMessage("Salva la configurazione e accedi con l’account Supabase della postazione.");
       return;
     }
 
@@ -222,7 +229,7 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
                   <Cloud className="w-3.5 h-3.5 text-sky-400" />
                   <span>2. Cloud Supabase</span>
                 </div>
-                {!status.needsSupabase && (
+                {sessionEmail && (
                   <span className="text-[10px] text-emerald-400 flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3" /> Collegato
                   </span>
@@ -249,6 +256,7 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
               >
                 Salva Connessione
               </button>
+              {!status.needsSupabase && <SupabaseStationLogin />}
             </div>
 
             {/* 3. Cartella di Backup */}
@@ -294,11 +302,11 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
 
             <button
               type="button"
-              disabled={isRunningImport || !supabaseUrl || !supabaseKey}
+              disabled={isRunningImport || !canImport}
               onClick={handleStartFullImport}
               className={cn(
                 "shrink-0 px-4 py-2 rounded-lg text-xs font-bold text-white shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer",
-                isRunningImport || !supabaseUrl || !supabaseKey
+                isRunningImport || !canImport
                   ? "bg-emerald-800/40 opacity-60 cursor-not-allowed"
                   : "bg-emerald-600 hover:bg-emerald-500 active:scale-98"
               )}

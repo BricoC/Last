@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { invoke } from "@tauri-apps/api/core";
@@ -65,6 +66,79 @@ interface ConfigStatus {
 }
 
 export class ElectronicInvoicesService {
+  private retryingUploads: Promise<void> | null = null;
+
+  retryPendingUploads(): Promise<void> {
+    if (this.retryingUploads) return this.retryingUploads;
+    this.retryingUploads = this.uploadPendingInvoices().finally(() => { this.retryingUploads = null; });
+    return this.retryingUploads;
+  }
+
+  private async uploadPendingInvoices(): Promise<void> {
+    const db = await getDatabase();
+    const invoices = await db.select<Array<SupplierInvoice & { id: number }>>(
+      "SELECT * FROM supplier_invoices WHERE cloud_upload_pending = 1 ORDER BY id",
+    );
+    if (!invoices.length) return;
+    const status = await invoke<ConfigStatus>("load_supabase_config");
+    if (!status.config?.projectUrl || !status.config.anonKey) throw new Error("Invio fatture in attesa della connessione cloud.");
+    const { projectUrl, anonKey } = status.config;
+    const failures: string[] = [];
+
+    for (const invoice of invoices) {
+      const items = await db.select<SupplierInvoiceItem[]>(
+        "SELECT * FROM supplier_invoice_items WHERE invoice_id = $1 OR (supplier_name = $2 AND doc_number = $3 AND doc_date = $4) ORDER BY line_number, id",
+        [invoice.id, invoice.supplier_name, invoice.doc_number, invoice.doc_date],
+      );
+      const header = {
+        fornitore: invoice.supplier_name,
+        partita_iva: invoice.vat_number || null,
+        codice_fiscale: invoice.fiscal_code || null,
+        numero_documento: invoice.doc_number,
+        data_documento: invoice.doc_date,
+        anno: invoice.year,
+        totale_documento: invoice.total_amount,
+        imponibile: invoice.taxable_amount,
+        imposta: invoice.vat_amount,
+        tipo_pagamento: invoice.payment_method || null,
+        data_scadenza: invoice.due_date || null,
+        iban: invoice.iban || null,
+        istituto_finanziario: invoice.bank_name || null,
+        nome_file: invoice.file_name || null,
+        note: invoice.notes || null,
+      };
+      const lines = items.map((it) => ({
+        numero_linea: it.line_number || 1,
+        codice_articolo: it.article_code || null,
+        descrizione: it.description,
+        quantita: it.quantity,
+        unita_misura: it.unit || null,
+        prezzo_unitario: it.unit_price,
+        sconto_1: it.discount_1,
+        sconto_2: it.discount_2,
+        sconto_3: it.discount_3,
+        prezzo_scontato: it.discounted_price,
+        prezzo_totale: it.total_price,
+        aliquota_iva: it.vat_rate,
+      }));
+      try {
+        const response = await supabaseFetch(new URL("/rest/v1/rpc/last_replace_supplier_invoice", projectUrl), {
+          method: "POST",
+          headers: { apikey: anonKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ p_header: header, p_lines: lines }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        await db.execute(
+          "UPDATE supplier_invoices SET cloud_upload_pending = 0, cloud_uploaded_at = $1 WHERE id = $2",
+          [new Date().toISOString(), invoice.id],
+        );
+      } catch (error) {
+        failures.push(`${invoice.doc_number}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (failures.length) throw new Error(`Fatture salvate in locale. Invio cloud incompleto: ${failures.join(" · ")}.`);
+  }
+
   /**
    * Conta quanti record ci sono nel database locale
    */
@@ -94,7 +168,6 @@ export class ElectronicInvoicesService {
     const cleanUrl = projectUrl.replace(/\/+$/, "");
     const headers = {
       apikey: anonKey,
-      Authorization: `Bearer ${anonKey}`,
     };
 
     onProgress?.("Connessione a Supabase...", 5);
@@ -107,7 +180,7 @@ export class ElectronicInvoicesService {
     let totalTestate = 0;
 
     while (true) {
-      const testateRes = await fetch(
+      const testateRes = await supabaseFetch(
         `${cleanUrl}/rest/v1/fatture_elettroniche_testate?select=*&order=id.asc&offset=${testateOffset}&limit=${testatePageSize}`,
         { headers }
       );
@@ -186,7 +259,7 @@ export class ElectronicInvoicesService {
     });
 
     while (true) {
-      const righeRes = await fetch(
+      const righeRes = await supabaseFetch(
         `${cleanUrl}/rest/v1/fatture_elettroniche_righe?select=*&order=id.asc&offset=${offset}&limit=${pageSize}`,
         { headers }
       );
@@ -394,103 +467,17 @@ export class ElectronicInvoicesService {
 
     // 4. Invio a Supabase Cloud
     let cloudSynced = false;
-    let cloudError: string | undefined = undefined;
-
+    let cloudError: string | undefined;
     try {
       onProgress?.("Invio su Supabase Cloud...", 75);
-      const status = await invoke<ConfigStatus>("load_supabase_config").catch(() => null);
-      if (status?.config?.projectUrl && status?.config?.anonKey) {
-        const { projectUrl, anonKey } = status.config;
-        const cleanUrl = projectUrl.replace(/\/+$/, "");
-        const headers = {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates",
-        };
-
-        // Inserimento testate
-        const supabaseTestate = toInsert.map((p) => ({
-          fornitore: p.invoice.supplier_name,
-          partita_iva: p.invoice.vat_number || null,
-          codice_fiscale: p.invoice.fiscal_code || null,
-          numero_documento: p.invoice.doc_number,
-          data_documento: p.invoice.doc_date,
-          anno: p.invoice.year,
-          totale_documento: p.invoice.total_amount,
-          imponibile: p.invoice.taxable_amount,
-          imposta: p.invoice.vat_amount,
-          tipo_pagamento: p.invoice.payment_method || null,
-          data_scadenza: p.invoice.due_date || null,
-          iban: p.invoice.iban || null,
-          istituto_finanziario: p.invoice.bank_name || null,
-          nome_file: p.invoice.file_name || null,
-          note: p.invoice.notes || null,
-        }));
-
-        const tRes = await fetch(
-          `${cleanUrl}/rest/v1/fatture_elettroniche_testate?on_conflict=fornitore,numero_documento,data_documento`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify(supabaseTestate),
-          }
-        );
-
-        if (!tRes.ok) {
-          throw new Error(`Errore invio testate Supabase: HTTP ${tRes.status}`);
-        }
-
-        // Inserimento righe a blocchi di 200
-        const allItemsToPush = toInsert.flatMap((p) =>
-          p.items.map((it) => ({
-            fornitore: it.supplier_name,
-            numero_documento: it.doc_number,
-            data_documento: it.doc_date,
-            anno: it.year,
-            numero_linea: it.line_number || 1,
-            codice_articolo: it.article_code || null,
-            descrizione: it.description,
-            quantita: it.quantity,
-            unita_misura: it.unit || null,
-            prezzo_unitario: it.unit_price,
-            sconto_1: it.discount_1,
-            sconto_2: it.discount_2,
-            sconto_3: it.discount_3,
-            prezzo_scontato: it.discounted_price,
-            prezzo_totale: it.total_price,
-            aliquota_iva: it.vat_rate,
-          }))
-        );
-
-        const chunkSize = 200;
-        for (let c = 0; c < allItemsToPush.length; c += chunkSize) {
-          const chunk = allItemsToPush.slice(c, c + chunkSize);
-          const rRes = await fetch(`${cleanUrl}/rest/v1/fatture_elettroniche_righe`, {
-            method: "POST",
-            headers: {
-              apikey: anonKey,
-              Authorization: `Bearer ${anonKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(chunk),
-          });
-          if (!rRes.ok) {
-            throw new Error(`Fatture salvate in locale. Invio cloud incompleto: blocco righe ${Math.floor(c / chunkSize) + 1}, HTTP ${rRes.status}.`);
-          }
-        }
-
-        const uploadedAt = new Date().toISOString();
-        await applyLocalDatabaseBatch(toInsert.map(({ invoice }) => ({
-          sql: `UPDATE supplier_invoices SET cloud_upload_pending = 0, cloud_uploaded_at = $1
-                WHERE supplier_name = $2 AND doc_number = $3 AND doc_date = $4`,
-          params: [uploadedAt, invoice.supplier_name, invoice.doc_number, invoice.doc_date],
-        })));
-        cloudSynced = true;
-      }
-    } catch (cErr) {
-      console.warn("Avviso sincronizzazione Cloud non riuscita:", cErr);
-      cloudError = cErr instanceof Error ? cErr.message : "Errore connessione Cloud";
+      await this.retryPendingUploads();
+      const pending = await db.select<Array<{ id: number }>>(
+        "SELECT id FROM supplier_invoices WHERE cloud_upload_pending = 1 LIMIT 1"
+      );
+      cloudSynced = pending.length === 0;
+      if (!cloudSynced) cloudError = "Fatture salvate in locale. Invio cloud ancora in sospeso.";
+    } catch (error) {
+      cloudError = error instanceof Error ? error.message : String(error);
     }
 
     onProgress?.(cloudError ? "Importazione locale completata. Invio cloud incompleto." : "Importazione completata con successo!", 100);

@@ -1,3 +1,4 @@
+import { formatPriceListInput } from "./utils/priceListInput";
 import { generalPriceHistoryFields, generalPriceVariation } from "./utils/generalPriceHistory";
 import React, {
   useState,
@@ -22,7 +23,7 @@ import {
   Trash2,
   Receipt,
 } from "lucide-react";
-import { ListinoGeneraleRow, PriceListLogEntry, TrashListinoRow } from "./models/priceList";
+import { ListinoGeneraleRow, PriceListLogEntry } from "./models/priceList";
 import { parseItalianNumber } from "@/shared/utils/numberUtils";
 import { priceListRepository } from "./services/priceListRepository";
 import { priceListSyncService } from "./services/priceListSyncService";
@@ -208,17 +209,6 @@ function formatPercentClean(val: number | null | undefined): string {
 function getFormattedInitValue(val: any, col: string, char?: string): string {
   if (char !== undefined) return char;
   if (val == null) return "";
-  if (
-    col === "perc_pub" ||
-    col === "perc_prof" ||
-    col === "perc_fatt" ||
-    col === "aumento" ||
-    col === "maga" ||
-    col === "perc_iva"
-  ) {
-    const pct = val * 100;
-    return `${round5(pct)}%`;
-  }
   if (col === "prezzo_pubblico" || col === "prezzo_profess" || col === "prezzo_fattura") {
     const n = Number(val);
     if (!isNaN(n)) return (Math.round(n * 1000) / 1000).toString();
@@ -227,7 +217,7 @@ function getFormattedInitValue(val: any, col: string, char?: string): string {
     const n = Number(val);
     if (!isNaN(n)) return (Math.round(n * 10000) / 10000).toString();
   }
-  return String(val);
+  return formatPriceListInput(val, col);
 }
 
 function formatDateTime(date: Date | string | null | undefined): string {
@@ -1189,7 +1179,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         const selectedRows = items.filter((r) => selectedIds.has(r.id));
         const allVisibleCols = EDITABLE_COL_ORDER.filter((c) => visibleColumns[c] !== false);
         const tsv = selectedRows
-          .map((r) => allVisibleCols.map((col) => String((r as any)[col] ?? "")).join("\t"))
+          .map((r) => allVisibleCols.map((col) => formatPriceListInput(r[col], col)).join("\t"))
           .join("\n");
         void navigator.clipboard.writeText(tsv);
       } else if (activeCell) {
@@ -1197,7 +1187,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         const allRows = [newTopRow, ...filteredItems];
         const row = allRows.find((r) => r.id === activeCell.rowId);
         if (row) {
-          const val = String((row as any)[activeCell.colId] ?? "");
+          const val = formatPriceListInput(row[activeCell.colId as EditableColumnKey], activeCell.colId);
           void navigator.clipboard.writeText(val);
         }
       }
@@ -1225,14 +1215,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         return next;
       });
       setSelectedIds(new Set());
-      void priceListSyncService.deleteGeneralBatchFromSupabase(idsToDelete);
-      const nowStr = new Date().toISOString();
-      const trashRows: TrashListinoRow[] = rowsToDelete.map((r) => ({
-        ...r,
-        deleted_at: nowStr,
-        deleted_by: opName,
-      }));
-      void priceListSyncService.pushTrashBatchToSupabase(trashRows);
+      void priceListSyncService.flushTrash("listino_generale").catch(console.warn);
       return;
     }
 
@@ -1371,13 +1354,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
           next.delete(row.id);
           return next;
         });
-        void priceListSyncService.deleteGeneralBatchFromSupabase([row.id]);
-        const trashRow: TrashListinoRow = {
-          ...row,
-          deleted_at: new Date().toISOString(),
-          deleted_by: opName,
-        };
-        void priceListSyncService.pushTrashBatchToSupabase([trashRow]);
+        void priceListSyncService.flushTrash("listino_generale").catch(console.warn);
       } catch (err: any) {
         console.error("Errore spostamento nel cestino:", err);
         setError(`Errore eliminazione articolo: ${err?.message || err}`);
@@ -1391,8 +1368,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     setItems((prev) => [restoredItem, ...prev]);
     setTotalDbCount((prev) => prev + 1);
     setTrashCount((prev) => Math.max(0, prev - 1));
-    void priceListSyncService.pushGeneralBatchToSupabase([restoredItem]);
-    void priceListSyncService.deleteTrashFromSupabase(restoredItem.id);
+    void priceListSyncService.flushTrash("listino_generale").catch(console.warn);
   }, []);
 
   return (

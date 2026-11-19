@@ -1,6 +1,10 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { calculateNextRibaDeadline, openRibaEmailDraft, saveRemoteRibaPaid } from "../services/ribaService";
 
+vi.mock("@/shared/services/supabaseSession", () => ({
+  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@/features/settings/emailSettingsRepository", () => ({

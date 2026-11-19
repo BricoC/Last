@@ -50,6 +50,7 @@ pub async fn apply_local_database_batch(
     db_instances: State<'_, DbInstances>,
     writes: Vec<SqliteWrite>,
     validate_references_after_write: bool,
+    reference_tables: Option<Vec<String>>,
 ) -> Result<(), String> {
     let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
     if validate_references_after_write {
@@ -61,13 +62,14 @@ pub async fn apply_local_database_batch(
             .await
             .map_err(|error| error.to_string())?;
     }
-    apply_batch(&mut connection, writes, validate_references_after_write).await
+    let references = validate_references_after_write.then(|| reference_tables.as_deref().unwrap_or_default());
+    apply_batch(&mut connection, writes, references).await
 }
 
 async fn apply_batch(
     connection: &mut SqliteConnection,
     writes: Vec<SqliteWrite>,
-    validate_references_after_write: bool,
+    reference_tables: Option<&[String]>,
 ) -> Result<(), String> {
     let mut transaction = connection
         .begin_with("BEGIN IMMEDIATE")
@@ -80,10 +82,19 @@ async fn apply_batch(
                 .await
                 .map_err(|error| format!("Operazione SQLite {}: {error}", index + 1))?;
         }
-        if validate_references_after_write {
+        if let Some(tables) = reference_tables {
+            let scope = if tables.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(tables).map_err(|error| error.to_string())?)
+            };
             let broken_reference = sqlx::query_scalar::<_, String>(
-                "SELECT \"table\" FROM pragma_foreign_key_check LIMIT 1",
+                "SELECT \"table\" FROM pragma_foreign_key_check
+                 WHERE $1 IS NULL OR \"table\" IN (SELECT value FROM json_each($1))
+                   OR parent IN (SELECT value FROM json_each($1))
+                 LIMIT 1",
             )
+            .bind(scope)
             .fetch_optional(&mut *transaction)
             .await
             .map_err(|error| error.to_string())?;
@@ -137,7 +148,7 @@ mod tests {
                 write("INSERT INTO data VALUES ('first', 'valid')"),
                 write("INSERT INTO data VALUES ('second', NULL)"),
             ];
-            assert!(apply_batch(&mut connection, writes, false).await.is_err());
+            assert!(apply_batch(&mut connection, writes, None).await.is_err());
             let ids: Vec<String> = sqlx::query_scalar("SELECT id FROM data")
                 .fetch_all(&mut connection)
                 .await
@@ -154,20 +165,24 @@ mod tests {
                 CREATE TABLE child (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES parent(id) ON DELETE CASCADE);
                 INSERT INTO parent VALUES ('retained');
                 INSERT INTO child VALUES ('child', 'retained');
-                PRAGMA foreign_keys = OFF;")
+                CREATE TABLE legacy_child (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES other_parent(id));
+                CREATE TABLE other_parent (id TEXT PRIMARY KEY);
+                PRAGMA foreign_keys = OFF;
+                INSERT INTO legacy_child VALUES ('legacy', 'missing');")
                 .execute(&mut connection).await.unwrap();
+            let scope = ["parent".to_string()];
             apply_batch(
                 &mut connection,
                 vec![
                     write("DELETE FROM parent"),
                     write("INSERT INTO parent VALUES ('retained')"),
                 ],
-                true,
+                Some(&scope),
             )
             .await
             .unwrap();
             let failed =
-                apply_batch(&mut connection, vec![write("DELETE FROM parent")], true).await;
+                apply_batch(&mut connection, vec![write("DELETE FROM parent")], Some(&scope)).await;
             assert!(failed.unwrap_err().contains("child"));
             let children: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM child")
                 .fetch_one(&mut connection)

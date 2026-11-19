@@ -1,3 +1,4 @@
+import { parsePriceListNumber } from "../utils/priceListInput";
 import React, {
   useState,
   useEffect,
@@ -352,21 +353,6 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
     ): ListinoClienteRow => {
       const updated = { ...row };
 
-      const parseNumberInput = (v: string | number | null): number | null => {
-        if (v == null) return null;
-        if (typeof v === "number") return isNaN(v) ? null : round5(v);
-        const s = v.trim().replace(/€/g, "").replace(/%/g, "").trim();
-        if (!s) return null;
-        let normalized = s;
-        if (s.includes(",") && s.includes(".")) {
-          normalized = s.replace(/\./g, "").replace(",", ".");
-        } else if (s.includes(",")) {
-          normalized = s.replace(",", ".");
-        }
-        const num = parseFloat(normalized);
-        return isNaN(num) ? null : round5(num);
-      };
-
       const today = getTodayAaaaMmGg();
       updated.data_ref = today;
 
@@ -400,7 +386,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
           break;
 
         case "perc_acquisto": {
-          const newPerc = parseNumberInput(rawValue);
+          const newPerc = parsePriceListNumber(rawValue);
           updated.perc_acquisto = newPerc;
           if (updated.acquisto_eur != null && newPerc != null) {
             updated.prezzo_fattura = round5(updated.acquisto_eur * (1 + newPerc / 100));
@@ -411,7 +397,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
         }
 
         case "prezzo_fattura": {
-          const newVendita = parseNumberInput(rawValue);
+          const newVendita = parsePriceListNumber(rawValue);
           updated.prezzo_fattura = newVendita;
           if (updated.acquisto_eur != null && updated.acquisto_eur > 0 && newVendita != null) {
             const perc = ((newVendita - updated.acquisto_eur) / updated.acquisto_eur) * 100;
@@ -421,7 +407,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
         }
 
         case "acquisto_eur": {
-          const newAcq = parseNumberInput(rawValue);
+          const newAcq = parsePriceListNumber(rawValue);
           updated.acquisto_eur = newAcq;
           if (!updated.data_acquisto && newAcq != null) {
             updated.data_acquisto = today;
@@ -436,7 +422,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
         }
 
         case "ricarico": {
-          const newRic = parseNumberInput(rawValue);
+          const newRic = parsePriceListNumber(rawValue);
           updated.ricarico = newRic;
           break;
         }
@@ -759,20 +745,16 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
   const handleDeleteRow = useCallback(
     async (row: ListinoClienteRow) => {
       try {
+        const operatorName = currentUser?.name || currentUser?.station_name || "Operatore";
+        await priceListRepository.moveToClientTrash([row], operatorName);
         setItems((prev) => prev.filter((r) => r.id !== row.id));
         setDirtyRows((prev) => {
           const next = new Map(prev);
           next.delete(row.id);
           return next;
         });
-
-        if (!row.id.startsWith("new_")) {
-          const operatorName = currentUser?.name || currentUser?.station_name || "Operatore";
-          const trashEntries = await priceListRepository.moveToClientTrash([row], operatorName);
-          setTrashCount((c) => Math.min(50, c + 1));
-          void priceListSyncService.pushClientTrashBatchToSupabase(trashEntries);
-          void priceListSyncService.deleteClientRowsFromSupabase([row.id]);
-        }
+        setTrashCount((c) => Math.min(50, c + 1));
+        void priceListSyncService.flushTrash("listini_clienti").catch(console.warn);
       } catch (err) {
         console.error("Errore cancellazione articolo:", err);
       }

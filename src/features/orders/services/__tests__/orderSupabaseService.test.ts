@@ -52,14 +52,14 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
     globalThis.window = originalWindow;
   });
 
-  it("cleanId discards offline_/draft_/new_ IDs and preserves short supplier/order IDs", () => {
+  it("cleanId accepts a cloud UUID and rejects local and supplier IDs", () => {
     const service = new OrderSupabaseService();
     expect(service.cleanId("offline_1730000000000")).toBeNull();
     expect(service.cleanId("ord_offline_1730000000000")).toBeNull();
     expect(service.cleanId("ord_draft_1")).toBeNull();
     expect(service.cleanId("new_row")).toBeNull();
-    expect(service.cleanId("sup_42")).toBe("sup_42");
-    expect(service.cleanId("42")).toBe("42");
+    expect(service.cleanId("sup_42")).toBeNull();
+    expect(service.cleanId("42")).toBeNull();
     expect(service.cleanId("ord_9f8a7b6c-1234-4321-8888-111122223333")).toBe(
       "9f8a7b6c-1234-4321-8888-111122223333"
     );
@@ -68,20 +68,23 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
   it("rewrites targetId of queued updates after offline insert resolves remote ID", async () => {
     const service = new OrderSupabaseService();
     const updatedEqIds: string[] = [];
+    const remote = "9f8a7b6c-1234-4321-8888-111122223333";
 
     const mockSupabase = {
       from: () => ({
         upsert: () => ({
           select: async () => ({
-            data: [{ id: "real-uuid-999", created_at: "2026-11-18T10:00:00Z" }],
+            data: [{ id: remote, created_at: "2026-11-18T10:00:00Z" }],
             error: null,
           }),
         }),
         update: () => ({
-          eq: async (_col: string, id: string) => {
-            updatedEqIds.push(id);
-            return { error: null };
-          },
+          eq: (_col: string, id: string) => ({
+            select: async () => {
+              updatedEqIds.push(id);
+              return { data: [{ id }], error: null };
+            },
+          }),
         }),
       }),
     };
@@ -94,6 +97,7 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
           id: "q1",
           targetId: "ord_offline_12345",
           action: "insert",
+          remoteId: remote,
           payload: { descrizione: "TEST" },
           timestamp: "2026-11-18T10:00:00Z",
         },
@@ -109,7 +113,7 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
 
     const processed = await service.processOfflineQueue();
     expect(processed).toBe(2);
-    expect(updatedEqIds).toEqual(["real-uuid-999"]);
+    expect(updatedEqIds).toEqual([remote]);
   });
 
   it("riusa lo stesso UUID se il cloud salva ma la risposta va persa", async () => {
@@ -148,7 +152,7 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
     const upsert = vi.fn(() => ({
       select: () => new Promise((resolve) => { complete = resolve; started(); }),
     }));
-    const update = vi.fn(() => ({ eq: async () => ({ error: null }) }));
+    const update = vi.fn(() => ({ eq: () => ({ select: async () => ({ data: [{}], error: null }) }) }));
     vi.spyOn(service, "getClient").mockResolvedValue({ from: () => ({ upsert, update }) } as any);
     const run = service.processOfflineQueue();
     await sending;
@@ -163,4 +167,44 @@ describe("OrderSupabaseService - cleanId & Offline Queue", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ descrizione: "TERZA VERSIONE" }));
     expect(upsert).toHaveBeenCalledTimes(1);
   });
+  it("recupera un riordino legacy accodato come aggiornamento e usa un UUID idempotente", async () => {
+    const service = new OrderSupabaseService();
+    localStorage.setItem(queueKey, JSON.stringify([
+      { id: "legacy", targetId: "ord_1760000000000_abc", action: "update",
+        payload: { descrizione: "Riordino" }, timestamp: "2026-01-01T00:00:00Z" },
+    ]));
+    const upsert = vi.fn((rows: Array<{ id: string }>) => ({
+      select: async () => ({ data: rows, error: null }),
+    }));
+    vi.spyOn(service, "getClient").mockResolvedValue({ from: () => ({ upsert }) } as any);
+    await expect(service.processOfflineQueue()).resolves.toBe(1);
+    expect(service.cleanId(upsert.mock.calls[0][0][0].id)).not.toBeNull();
+    expect(service.getOfflineQueue()).toEqual([]);
+  });
+
+  it("inserisce un fornitore locale per nome e conserva in coda un errore REST", async () => {
+    const service = new OrderSupabaseService();
+    const upsert = vi.fn(() => ({
+      select: vi.fn().mockResolvedValueOnce({ error: { code: "503" } }),
+    }));
+    vi.spyOn(service, "getClient").mockResolvedValue({ from: () => ({ upsert }) } as any);
+    const supplier = await service.upsertSupplier({ id: "sup_1760000000000", name: "ACME" });
+    expect(supplier).toMatchObject({ id: "sup_1760000000000", sync_status: "pending" });
+    expect(upsert).toHaveBeenCalledWith([expect.objectContaining({ nome: "ACME" })], { onConflict: "nome" });
+    expect(service.getOfflineQueue()).toMatchObject([{ action: "upsert_supplier", targetId: supplier.id }]);
+  });
+
+  it("accoda l'archiviazione sia per la bozza sia per l'ordine cloud nello stesso lotto", async () => {
+    const service = new OrderSupabaseService();
+    (globalThis.navigator as { onLine: boolean }).onLine = false;
+    const cloud = "9f8a7b6c-1234-4321-8888-111122223333";
+    await service.saveOrder(draft, true);
+    await service.archiveOrders([draft.id, `ord_${cloud}`]);
+    expect(service.getOfflineQueue()).toMatchObject([
+      { action: "insert", targetId: draft.id },
+      { action: "archive", targetId: draft.id },
+      { action: "archive", targetId: cloud },
+    ]);
+  });
+
 });

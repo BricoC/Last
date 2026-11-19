@@ -1,3 +1,4 @@
+import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
@@ -211,10 +212,10 @@ export interface ParsedListinoClienteRow {
   cliente: string;
   fileName: string;
   descrizione: string;
-  prezzo_fattura: number;
-  prezzo_acquisto: number;
+  prezzo_fattura?: number;
+  prezzo_acquisto?: number;
   acquisto_old: string;
-  ricarico: number;
+  ricarico?: number;
   note?: string | null;
   note1?: string | null;
   note2?: string | null;
@@ -253,7 +254,7 @@ export function parseCustomerPriceListExcelRow(
   const normalized: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(rawRow)) {
     const cleanKey = key.trim().toUpperCase();
-    if (cleanKey && !(cleanKey in normalized && normalized[cleanKey] !== "")) {
+    if (cleanKey && !(cleanKey in normalized && String(normalized[cleanKey] ?? "").trim() !== "")) {
       normalized[cleanKey] = val;
     }
   }
@@ -263,29 +264,14 @@ export function parseCustomerPriceListExcelRow(
   const desc = String(descRaw).trim();
   if (!desc || desc === "0") return null;
 
-  let prezzoFattura = 0;
-  for (const candidate of SALE_PRICE_HEADER_CANDIDATES) {
-    const val = normalized[candidate];
-    if (val != null && val !== "") {
-      prezzoFattura = parseSafeNum(val);
-      break;
-    }
-  }
-
-  const acqRaw = normalized.ACQUISTO;
-  const acquistoOldText = acqRaw != null ? String(acqRaw).trim() : "";
-  const hasText = acquistoOldText !== "" && /[a-zA-Z]/.test(acquistoOldText);
-
-  let prezzoAcquisto = 0;
-  if (acquistoOldText && !hasText) {
-    prezzoAcquisto = parseSafeNum(acquistoOldText);
-  }
-
-  let ricarico = 0;
-  const ricRaw = normalized.RICARICO;
-  if (ricRaw != null && ricRaw !== "") {
-    ricarico = parseSafeNum(ricRaw);
-  }
+  const prezzoFattura = SALE_PRICE_HEADER_CANDIDATES
+    .map((candidate) => optionalImportNumber(normalized[candidate]))
+    .find((value) => value !== undefined);
+  const purchase = normalized.ACQUISTO;
+  const acquistoOldText = purchase == null ? "" : String(purchase).trim();
+  const hasText = typeof purchase === "string" && /[a-zA-Z]/.test(acquistoOldText);
+  const prezzoAcquisto = hasText ? undefined : optionalImportNumber(purchase);
+  const ricarico = optionalImportNumber(normalized.RICARICO);
 
   return {
     cliente: clienteWithPrefix,
@@ -386,8 +372,8 @@ async function readCloudInventory<T>(
   url.searchParams.set("limit", "1000");
   while (true) {
     url.searchParams.set("offset", String(rows.length));
-    const response = await fetch(url.toString(), {
-      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    const response = await supabaseFetch(url.toString(), {
+      headers: { apikey: anonKey },
     });
     if (!response.ok) throw new Error(`Inventario Supabase ${table} incompleto: HTTP ${response.status}`);
     const chunk = await response.json();
@@ -396,6 +382,34 @@ async function readCloudInventory<T>(
     rows.push(...chunk);
     onProgress?.(rows.length);
   }
+}
+
+function optionalImportNumber(value: unknown): number | undefined {
+  return parseItalianNumber(value) ?? undefined;
+}
+
+function optionalImportPercentage(value: unknown): number | undefined {
+  return optionalImportNumber(value) === undefined ? undefined : parseExcelPricePercentage(value);
+}
+
+function mergeImportDuplicates<T extends object>(rows: T[], keyFor: (row: T, index: number) => string): T[] {
+  const unique = new Map<string, T>();
+  for (const [index, row] of rows.entries()) {
+    const key = keyFor(row, index);
+    const fields = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+    unique.set(key, { ...unique.get(key), ...fields } as T);
+  }
+  return [...unique.values()];
+}
+
+const clientListKey = (row: { cliente: string; descrizione: string }) =>
+  JSON.stringify([String(row.cliente || "").trim().toLowerCase(), String(row.descrizione || "").trim().toLowerCase()]);
+
+function mergeClientImportRows(rows: ParsedListinoClienteRow[]) {
+  return mergeImportDuplicates(
+    rows.map((row) => ({ ...row, acquisto_old: row.acquisto_old?.trim() || undefined })),
+    clientListKey,
+  );
 }
 
 function groupByPayloadColumns(records: Record<string, unknown>[]): Record<string, unknown>[][] {
@@ -416,15 +430,16 @@ async function writePriceListBatches(
   let inserted = 0;
   let updated = 0;
   let failed = 0;
-  for (const group of groupByPayloadColumns(records)) {
+  const unique = mergeImportDuplicates(records, (row, index) => row.id == null ? `new:${index}` : `id:${row.id}`);
+  for (const group of groupByPayloadColumns(unique)) {
     for (let offset = 0; offset < group.length; offset += 200) {
       const chunk = group.slice(offset, offset + 200);
       const existing = chunk[0].id != null;
       try {
-        const response = await fetch(new URL(`/rest/v1/${table}`, projectUrl), {
+        const response = await supabaseFetch(new URL(`/rest/v1/${table}`, projectUrl), {
           method: "POST",
           headers: {
-            apikey: anonKey, Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json",
+            apikey: anonKey, "Content-Type": "application/json",
             Prefer: existing ? "resolution=merge-duplicates,return=minimal" : "return=minimal",
           },
           body: JSON.stringify(chunk),
@@ -435,7 +450,7 @@ async function writePriceListBatches(
       } catch {
         failed += chunk.length;
       }
-      onProgress?.(inserted + updated + failed, records.length);
+      onProgress?.(inserted + updated + failed, unique.length);
     }
   }
   return { inserted, updated, failed };
@@ -450,14 +465,10 @@ export async function uploadClientPriceListsToSupabase(
   const inventory = await readCloudInventory<{ id: number; cliente: string; descrizione: string }>(
     projectUrl, anonKey, "listini_clienti", "id,cliente,descrizione"
   );
-  const cloudMap = new Map(inventory.map((row) => [
-    `${String(row.cliente || "").trim().toLowerCase()}___${String(row.descrizione || "").trim().toLowerCase()}`,
-    row,
-  ]));
+  const cloudMap = new Map(inventory.map((row) => [clientListKey(row), row]));
   const nowIso = new Date().toISOString();
-  const toUpsert: Record<string, unknown>[] = rows.map((r) => {
-    const k = `${r.cliente.trim().toLowerCase()}___${r.descrizione.trim().toLowerCase()}`;
-    const match = cloudMap.get(k);
+  const toUpsert: Record<string, unknown>[] = mergeClientImportRows(rows).map((r) => {
+    const match = cloudMap.get(clientListKey(r));
     const payload: Record<string, unknown> = {
       cliente: r.cliente,
       descrizione: r.descrizione,
@@ -544,18 +555,18 @@ export async function scanAndParseGeneralPriceLists(
         data: r.DATA != null ? String(r.DATA).trim() : null,
         descrizione: desc,
         um: r.UM ? String(r.UM).trim() : "NR.",
-        perc_pub: parseExcelPricePercentage(r["% PUB"] ?? r["%PUB"] ?? r.perc_pub),
-        prezzo_pubblico: parseSafeNum(r.PUBBLICO ?? r.prezzo_pubblico),
-        perc_prof: parseExcelPricePercentage(r["% PROF"] ?? r["%PROF"] ?? r.perc_prof),
-        prezzo_profess: parseSafeNum(r.PROFESS ?? r.prezzo_profess),
-        perc_fatt: parseExcelPricePercentage(r["% FATT"] ?? r["%FATT"] ?? r.perc_fatt),
-        prezzo_fattura: parseSafeNum(r.FATTURA ?? r.prezzo_fattura),
-        prezzo_acquisto: parseSafeNum(r.ACQUISTO ?? r.prezzo_acquisto),
-        aumento: parseExcelPricePercentage(r.AUMENTO ?? r.aumento),
-        r1: parseSafeNum(r.R1 ?? r.r1),
-        maga: parseExcelPricePercentage(r.MAGA ?? r.maga),
-        r2: parseSafeNum(r.R2 ?? r.r2),
-        perc_iva: parseExcelPricePercentage(r.IVA ?? r["%IVA"] ?? r.perc_iva, 0.22),
+        perc_pub: optionalImportPercentage(r["% PUB"] ?? r["%PUB"] ?? r.perc_pub),
+        prezzo_pubblico: optionalImportNumber(r.PUBBLICO ?? r.prezzo_pubblico),
+        perc_prof: optionalImportPercentage(r["% PROF"] ?? r["%PROF"] ?? r.perc_prof),
+        prezzo_profess: optionalImportNumber(r.PROFESS ?? r.prezzo_profess),
+        perc_fatt: optionalImportPercentage(r["% FATT"] ?? r["%FATT"] ?? r.perc_fatt),
+        prezzo_fattura: optionalImportNumber(r.FATTURA ?? r.prezzo_fattura),
+        prezzo_acquisto: optionalImportNumber(r.ACQUISTO ?? r.prezzo_acquisto),
+        aumento: optionalImportPercentage(r.AUMENTO ?? r.aumento),
+        r1: optionalImportNumber(r.R1 ?? r.r1),
+        maga: optionalImportPercentage(r.MAGA ?? r.maga),
+        r2: optionalImportNumber(r.R2 ?? r.r2),
+        perc_iva: optionalImportPercentage(r.IVA ?? r["%IVA"] ?? r.perc_iva),
         note: r.NOTE ? String(r.NOTE).trim() : null,
         isVari: false,
       });
@@ -599,18 +610,18 @@ export async function scanAndParseGeneralPriceLists(
             data: r.DATA != null ? String(r.DATA).trim() : null,
             descrizione: desc,
             um: r.UM ? String(r.UM).trim() : "NR.",
-            perc_pub: parseExcelPricePercentage(r["% PUB"] ?? r["%PUB"] ?? r.perc_pub),
-            prezzo_pubblico: parseSafeNum(r.PUBBLICO ?? r.prezzo_pubblico),
-            perc_prof: parseExcelPricePercentage(r["% PROF"] ?? r["%PROF"] ?? r.perc_prof),
-            prezzo_profess: parseSafeNum(r.PROFESS ?? r.prezzo_profess),
-            perc_fatt: parseExcelPricePercentage(r["% FATT"] ?? r["%FATT"] ?? r.perc_fatt),
-            prezzo_fattura: parseSafeNum(r.FATTURA ?? r.prezzo_fattura),
-            prezzo_acquisto: parseSafeNum(r.ACQUISTO ?? r.prezzo_acquisto),
-            aumento: parseExcelPricePercentage(r.AUMENTO ?? r.aumento),
-            r1: parseSafeNum(r.R1 ?? r.r1),
-            maga: parseExcelPricePercentage(r.MAGA ?? r.maga),
-            r2: parseSafeNum(r.R2 ?? r.r2),
-            perc_iva: parseExcelPricePercentage(r.IVA ?? r["%IVA"] ?? r.perc_iva, 0.22),
+            perc_pub: optionalImportPercentage(r["% PUB"] ?? r["%PUB"] ?? r.perc_pub),
+            prezzo_pubblico: optionalImportNumber(r.PUBBLICO ?? r.prezzo_pubblico),
+            perc_prof: optionalImportPercentage(r["% PROF"] ?? r["%PROF"] ?? r.perc_prof),
+            prezzo_profess: optionalImportNumber(r.PROFESS ?? r.prezzo_profess),
+            perc_fatt: optionalImportPercentage(r["% FATT"] ?? r["%FATT"] ?? r.perc_fatt),
+            prezzo_fattura: optionalImportNumber(r.FATTURA ?? r.prezzo_fattura),
+            prezzo_acquisto: optionalImportNumber(r.ACQUISTO ?? r.prezzo_acquisto),
+            aumento: optionalImportPercentage(r.AUMENTO ?? r.aumento),
+            r1: optionalImportNumber(r.R1 ?? r.r1),
+            maga: optionalImportPercentage(r.MAGA ?? r.maga),
+            r2: optionalImportNumber(r.R2 ?? r.r2),
+            perc_iva: optionalImportPercentage(r.IVA ?? r["%IVA"] ?? r.perc_iva),
             note: r.NOTE ? String(r.NOTE).trim() : null,
             isVari: true,
           });
@@ -654,7 +665,7 @@ export async function uploadGeneralListsToSupabase(
     `${normalizeArtCode(row.codice_articolo)}___${String(row.descrizione || "").trim().toLowerCase()}`;
   const prepareRows = (rows: ParsedListinoGeneraleRow[], inventory: InventoryRow[]) => {
     const cloud = new Map(inventory.map((row) => [articleKey(row), row.id]));
-    return rows.map((row) => {
+    return mergeImportDuplicates(rows, articleKey).map((row) => {
       const { isVari: _isVari, cloudId: _cloudId, ...payload } = row;
       const id = cloud.get(articleKey(row));
       return {
@@ -1035,7 +1046,7 @@ export async function uploadDdtToSupabase(
     .filter((row) => !headerIds.has(headerKey(row.anno, row.numero)));
 
   const requestHeaders = {
-    apikey: anonKey, Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json",
+    apikey: anonKey, "Content-Type": "application/json",
   };
   let headersUploaded = 0;
   let rowsUploaded = 0;
@@ -1077,7 +1088,7 @@ export async function uploadDdtToSupabase(
       ultima_modifica: nowIso,
     })));
     try {
-      const response = await fetch(new URL("/rest/v1/ddt?on_conflict=anno,numero", projectUrl), {
+      const response = await supabaseFetch(new URL("/rest/v1/ddt?on_conflict=anno,numero", projectUrl), {
         method: "POST",
         headers: { ...requestHeaders, Prefer: "resolution=ignore-duplicates,return=representation" },
         body: JSON.stringify(chunk),
@@ -1115,13 +1126,13 @@ export async function uploadDdtToSupabase(
         ddt_id: parent,
         anno: row.anno, numero_ddt: row.numero_ddt, riga_nr: row.riga_nr,
         um: row.um ?? "", quantita: row.quantita, descrizione: row.descrizione, prezzo: row.prezzo ?? 0,
-        sconto_pct: row.sconto_pct ?? 0, importo: row.importo ?? 0, iva_pct: row.iva_pct ?? 22,
+        sconto_pct: row.sconto_pct ?? 0, importo: row.importo ?? 0, iva_pct: Math.round(row.iva_pct ?? 22),
         prezzo_acquisto: row.prezzo_acquisto ?? 0, prezzo_scontato: row.prezzo_scontato ?? 0, ricavo: row.ricavo ?? 0,
       });
     }
     if (chunk.length) {
       try {
-        const response = await fetch(new URL("/rest/v1/ddt_righe?on_conflict=id", projectUrl), {
+        const response = await supabaseFetch(new URL("/rest/v1/ddt_righe?on_conflict=id", projectUrl), {
           method: "POST",
           headers: { ...requestHeaders, Prefer: "resolution=ignore-duplicates,return=minimal" },
           body: JSON.stringify(chunk),
@@ -1192,28 +1203,29 @@ export async function syncClientRowsToLocalSqlite(
   rows: ParsedListinoClienteRow[],
   onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
-  if (rows.length === 0) {
+  const imported = mergeClientImportRows(rows);
+  if (imported.length === 0) {
     onProgress?.(0, 0);
     return;
   }
 
   if (isTauri()) {
     const CHUNK_SIZE = 5000;
-    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-      const chunk = rows.slice(i, i + CHUNK_SIZE).map((r) => ({
+    for (let i = 0; i < imported.length; i += CHUNK_SIZE) {
+      const chunk = imported.slice(i, i + CHUNK_SIZE).map((r) => ({
         cloud_id: r.cloudId ?? null,
         cliente: r.cliente,
         descrizione: r.descrizione,
-        prezzo_fattura: r.prezzo_fattura,
-        prezzo_acquisto: r.prezzo_acquisto,
+        prezzo_fattura: r.prezzo_fattura ?? null,
+        prezzo_acquisto: r.prezzo_acquisto ?? null,
         acquisto_old: r.acquisto_old ?? "",
-        ricarico: r.ricarico,
+        ricarico: r.ricarico ?? null,
         note: r.note ?? null,
         note1: r.note1 ?? null,
         note2: r.note2 ?? null,
       }));
       await invoke("sync_client_price_lists_to_local", { rows: chunk });
-      onProgress?.(Math.min(i + CHUNK_SIZE, rows.length), rows.length);
+      onProgress?.(Math.min(i + CHUNK_SIZE, imported.length), imported.length);
     }
     return;
   }
@@ -1235,9 +1247,8 @@ export async function syncClientRowsToLocalSqlite(
   }
 
   const BATCH_SIZE = 250;
-  const nowMs = Date.now();
-  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const chunk = rows.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < imported.length; i += BATCH_SIZE) {
+    const chunk = imported.slice(i, i + BATCH_SIZE);
     for (let j = 0; j < chunk.length; j++) {
       const r = chunk[j];
       const purchaseText = r.acquisto_old?.trim() ? r.acquisto_old : null;
@@ -1248,20 +1259,20 @@ export async function syncClientRowsToLocalSqlite(
         for (const id of matchedIds) {
           await db.execute(
             `UPDATE listini_clienti SET
-              prezzo_fattura = $1,
-              prezzo_acquisto = $2,
+              prezzo_fattura = COALESCE($1, prezzo_fattura),
+              prezzo_acquisto = COALESCE($2, prezzo_acquisto),
               acquisto_old = COALESCE($3, acquisto_old),
-              ricarico = $4,
+              ricarico = COALESCE($4, ricarico),
               note = $5,
               note1 = $6,
               note2 = $7,
               updated_at = $8
-            WHERE id = $9;`,
+            WHERE id = $9 AND sync_revision IS NULL;`,
             [
-              r.prezzo_fattura,
-              r.prezzo_acquisto,
+              r.prezzo_fattura ?? null,
+              r.prezzo_acquisto ?? null,
               purchaseText,
-              r.ricarico,
+              r.ricarico ?? null,
               r.note ?? null,
               r.note1 ?? null,
               r.note2 ?? null,
@@ -1271,9 +1282,9 @@ export async function syncClientRowsToLocalSqlite(
           );
         }
       } else {
-        let newId = r.cloudId != null ? `cli_${r.cloudId}` : `new_mig_${nowMs}_${i + j}`;
+        let newId = r.cloudId != null ? `cli_${r.cloudId}` : `new_mig_${crypto.randomUUID()}`;
         if (usedIds.has(newId)) {
-          newId = `new_mig_${nowMs}_${i + j}_${Math.random().toString(36).slice(2, 6)}`;
+          newId = `new_mig_${crypto.randomUUID()}`;
         }
         usedIds.add(newId);
         await db.execute(
@@ -1285,10 +1296,10 @@ export async function syncClientRowsToLocalSqlite(
             newId,
             r.cliente,
             r.descrizione,
-            r.prezzo_fattura,
-            r.prezzo_acquisto,
+            r.prezzo_fattura ?? null,
+            r.prezzo_acquisto ?? null,
             purchaseText,
-            r.ricarico,
+            r.ricarico ?? null,
             r.note ?? null,
             r.note1 ?? null,
             r.note2 ?? null,
@@ -1300,6 +1311,6 @@ export async function syncClientRowsToLocalSqlite(
       }
     }
 
-    onProgress?.(Math.min(i + BATCH_SIZE, rows.length), rows.length);
+    onProgress?.(Math.min(i + BATCH_SIZE, imported.length), imported.length);
   }
 }

@@ -1,5 +1,4 @@
 import { getDatabase } from "@/shared/data-layer/database";
-import { UserSyncService } from "./userSyncService";
 
 export interface AppPageModule {
   id: string;
@@ -405,8 +404,6 @@ export class AppUserService {
       created_at: createdAt,
     };
 
-    // Sincronizza immediatamente con Supabase Cloud
-    void UserSyncService.pushUserToSupabase(created);
 
     return created;
   }
@@ -446,29 +443,14 @@ export class AppUserService {
       ]
     );
 
-    // Sincronizza immediatamente con Supabase Cloud
-    void UserSyncService.pushUserToSupabase({
-      ...user,
-      can_access_settings: isAdmin ? true : user.can_access_settings,
-      can_edit_price_lists: isAdmin ? true : user.can_edit_price_lists,
-      can_edit_or_numbers: isAdmin ? true : user.can_edit_or_numbers,
-      allowed_pages: pages,
-      topbar_order: topbarOrder,
-    });
   }
 
   public static async deleteUser(id: string): Promise<void> {
     await this.ensureTable();
     const db = await getDatabase();
     await db.execute("DELETE FROM app_users WHERE id = $1", [id]);
-    // Rimuovi anche da Supabase Cloud
-    void UserSyncService.deleteUserFromSupabase(id);
   }
 
-  public static async syncWithCloud(): Promise<{ pulled: number; pushed: number; success: boolean }> {
-    await this.ensureTable();
-    return await UserSyncService.syncUsers();
-  }
 
   public static getActiveUserId(): string {
     if (typeof window !== "undefined") {

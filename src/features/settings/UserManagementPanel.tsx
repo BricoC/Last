@@ -29,7 +29,6 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
-  Cloud,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
@@ -38,8 +37,6 @@ export const UserManagementPanel: React.FC = () => {
     users,
     currentUser,
     loadUsers,
-    isSyncingCloud,
-    syncCloudUsers,
     requestSwitchUser,
     createUser,
     updateUser,
@@ -1073,17 +1070,6 @@ export const UserManagementPanel: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void syncCloudUsers()}
-              disabled={isSyncingCloud}
-              title="Sincronizza utenti, password e permessi con Supabase Cloud"
-              className="px-3 py-1.5 rounded-lg bg-[var(--card)] hover:bg-[var(--accent)] border border-[var(--border)] text-[var(--foreground)] text-xs font-semibold shadow-sm transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
-            >
-              <Cloud className={cn("w-3.5 h-3.5 text-sky-400", isSyncingCloud && "animate-spin")} />
-              <span>{isSyncingCloud ? "Sincronizzazione..." : "Sincronizza Cloud"}</span>
-            </button>
-
             {!isCreating && (
               <button
                 type="button"
