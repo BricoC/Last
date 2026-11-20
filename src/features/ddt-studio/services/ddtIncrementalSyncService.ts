@@ -406,7 +406,7 @@ class DdtIncrementalSyncService {
           modUrl.searchParams.set("anno", `eq.${year}`);
           modUrl.searchParams.set("select", HEADER_FIELDS);
           modUrl.searchParams.set("order", "ultima_modifica.desc.nullslast");
-          modUrl.searchParams.set("limit", "25");
+          modUrl.searchParams.set("limit", "50");
 
           const modRes = await supabaseFetch(modUrl.toString(), {
             headers: { apikey: anonKey },
@@ -664,6 +664,96 @@ class DdtIncrementalSyncService {
         if (recoveredLinesCount > 0 && typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("ddt-data-updated"));
         }
+      }
+
+      // 2c-repair. Riparazione una-tantum per DDT 2026+ con righe salvate come 'note' dal vecchio bug a prezzo zero
+      try {
+        const repairProjectNorm = projectUrl.trim().replace(/\/+$/, "").toLowerCase();
+        const repairPrefKey = `ddt_repair_zero_price_notes_v1:${repairProjectNorm}`;
+        const prefRows = await db.select<{ value: string }[]>(
+          "SELECT value FROM app_preferences WHERE key = $1 LIMIT 1",
+          [repairPrefKey]
+        );
+        if (prefRows.length === 0) {
+          const candidateDocs = await db.select<{ id: string; year: number; doc_number: number }[]>(
+            `SELECT DISTINCT d.id, d.year, d.doc_number
+             FROM ddt_documents d
+             INNER JOIN ddt_items i ON i.ddt_id = d.id
+             WHERE d.deleted_at IS NULL
+               AND d.doc_number IS NOT NULL
+               AND d.sync_status = 'synced'
+               AND d.year >= 2026
+               AND (d.project_url IS NULL OR LOWER(RTRIM(d.project_url, '/')) = $1)
+               AND i.row_kind = 'note'`,
+            [repairProjectNorm]
+          );
+
+          if (candidateDocs.length > 0) {
+            const docById = new Map<string, string>();
+            const docByYearNum = new Map<string, string>();
+            const byYear = new Map<number, number[]>();
+            for (const d of candidateDocs) {
+              docById.set(d.id, d.id);
+              docByYearNum.set(`${d.year}:${d.doc_number}`, d.id);
+              byYear.set(d.year, [...(byYear.get(d.year) ?? []), d.doc_number]);
+            }
+
+            let repairedCount = 0;
+            for (const [year, numbers] of byYear.entries()) {
+              const CHUNK = 50;
+              for (let i = 0; i < numbers.length; i += CHUNK) {
+                const chunk = numbers.slice(i, i + CHUNK);
+                const lines = await this.fetchLinesWithPagination(projectUrl, anonKey, year, chunk);
+                for (const line of lines) {
+                  const targetDocId =
+                    line.ddt_id && docById.has(line.ddt_id)
+                      ? line.ddt_id
+                      : docByYearNum.get(`${line.anno}:${line.numero_ddt}`);
+                  if (!targetDocId) continue;
+
+                  const mapped = mapLineForLocal(line, targetDocId, Number(line.riga_nr || 1));
+                  await db.execute(
+                    `INSERT OR REPLACE INTO ddt_items (
+                      id, ddt_id, row_index, description, row_kind, unit, quantity,
+                      unit_price_subunits, discount_pct, net_amount_subunits, vat_rate,
+                      vat_amount_subunits, purchase_price_subunits, created_at, updated_at,
+                      updated_by, sync_status
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'supabase-read-only-import','synced')`,
+                    [
+                      mapped.id,
+                      targetDocId,
+                      mapped.rowIndex,
+                      mapped.description,
+                      mapped.rowKind,
+                      mapped.unit,
+                      mapped.quantity,
+                      mapped.unitPriceSubunits,
+                      mapped.discountPct,
+                      mapped.netAmountSubunits,
+                      mapped.vatRate,
+                      mapped.vatAmountSubunits,
+                      mapped.purchasePriceSubunits,
+                      mapped.createdAt,
+                      mapped.updatedAt,
+                    ]
+                  );
+                  repairedCount++;
+                }
+              }
+            }
+
+            if (repairedCount > 0 && typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+            }
+          }
+
+          await db.execute(
+            "INSERT OR REPLACE INTO app_preferences (key, value, updated_at) VALUES ($1, '1', $2)",
+            [repairPrefKey, new Date().toISOString()]
+          );
+        }
+      } catch (repairErr) {
+        console.warn("[Sync Incrementale] Riparazione note a prezzo zero rinviata:", repairErr);
       }
 
       // 3. Se non ci sono nuovi DDT su Supabase e non c'erano righe da recuperare né storici modificati, chiudi all'istante
