@@ -1018,6 +1018,58 @@ export class DdtRepository {
         : undefined,
     };
   }
+
+  /**
+   * Restituisce l'ultimo prezzo di acquisto (> 0) praticato allo stesso cliente
+   * per ciascuna descrizione normalizzata (TRIM + UPPER), ordinato dal DDT più recente.
+   */
+  public async getLatestPurchasePricesForClient(options: {
+    clientId?: string | null;
+    clientName?: string | null;
+    descriptions: string[];
+    excludeDdtId?: string | null;
+  }): Promise<Map<string, number>> {
+    const targetDescs = new Set(
+      options.descriptions.map((d) => d.trim().toUpperCase()).filter(Boolean)
+    );
+    const clientId = (options.clientId || "").trim();
+    const clientNameNorm = (options.clientName || "").trim().toLowerCase();
+    const excludeId = (options.excludeDdtId || "").trim();
+    const result = new Map<string, number>();
+
+    if (targetDescs.size === 0 || (!clientId && !clientNameNorm)) {
+      return result;
+    }
+
+    const db = await getDatabase();
+    const rows = await db.select<Array<{ norm_desc: string; purchase_price_subunits: number }>>(
+      `SELECT TRIM(UPPER(i.description)) AS norm_desc, i.purchase_price_subunits
+       FROM ddt_items i
+       INNER JOIN ddt_documents d ON d.id = i.ddt_id
+       WHERE d.deleted_at IS NULL
+         AND d.status <> 'bozza'
+         AND i.deleted_at IS NULL
+         AND i.purchase_price_subunits > 0
+         AND TRIM(COALESCE(i.description, '')) <> ''
+         AND ($1 = '' OR d.id <> $1)
+         AND (
+           ($2 <> '' AND d.client_id = $2)
+           OR ($3 <> '' AND LOWER(TRIM(d.client_name)) = $3)
+         )
+       ORDER BY d.doc_date DESC, d.year DESC, COALESCE(d.doc_number, 0) DESC, i.row_index ASC`,
+      [excludeId, clientId, clientNameNorm]
+    );
+
+    for (const row of rows) {
+      if (!row.norm_desc || !targetDescs.has(row.norm_desc)) continue;
+      if (!result.has(row.norm_desc) && Number(row.purchase_price_subunits) > 0) {
+        result.set(row.norm_desc, Number(row.purchase_price_subunits));
+        if (result.size === targetDescs.size) break;
+      }
+    }
+
+    return result;
+  }
 }
 
 export const ddtRepository = new DdtRepository();

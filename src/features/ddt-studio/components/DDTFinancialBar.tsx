@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Eye, EyeOff, Search, Plus, UserCheck, Percent, TrendingUp } from "lucide-react";
+import { Eye, EyeOff, Search, Plus, UserCheck, Percent, TrendingUp, History } from "lucide-react";
 import { DdtTotals, DdtDocument } from "../models/ddt";
 import { OPERATORI, normalizeOperator } from "../utils/ddtCalculations";
 
@@ -11,6 +11,8 @@ export interface DDTFinancialBarProps {
   setShowMargini: (show: boolean | ((prev: boolean) => boolean)) => void;
   onOpenSearchModal: () => void;
   onOpenAlexModal?: () => void;
+  onFillPurchasePricesFromHistory?: () => void;
+  isFillingPurchasePrices?: boolean;
   globalDiscount: string;
   onChangeGlobalDiscount: (discountStr: string) => void;
   globalMarkup: string;
@@ -26,6 +28,8 @@ export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
   setShowMargini,
   onOpenSearchModal,
   onOpenAlexModal,
+  onFillPurchasePricesFromHistory,
+  isFillingPurchasePrices = false,
   globalDiscount,
   onChangeGlobalDiscount,
   globalMarkup,
@@ -196,18 +200,32 @@ export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
           <label className="text-[9.5px] font-bold uppercase text-zinc-400 mb-0.5">
             Visualizza
           </label>
-          <button
-            type="button"
-            onClick={() => setShowMargini((p) => !p)}
-            className={`flex items-center space-x-1.5 text-xs px-2.5 py-1 rounded-lg border font-semibold transition-colors cursor-default ${
-              showMargini
-                ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
-                : "bg-[#272a33] border-[#3b404d] text-zinc-400 hover:text-white"
-            }`}
-          >
-            {showMargini ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-            <span>Margini</span>
-          </button>
+          <div className="flex items-center space-x-1.5">
+            <button
+              type="button"
+              onClick={() => setShowMargini((p) => !p)}
+              className={`flex items-center space-x-1.5 text-xs px-2.5 py-1 rounded-lg border font-semibold transition-colors cursor-default ${
+                showMargini
+                  ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                  : "bg-[#272a33] border-[#3b404d] text-zinc-400 hover:text-white"
+              }`}
+            >
+              {showMargini ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              <span>Margini</span>
+            </button>
+            {showMargini && onFillPurchasePricesFromHistory && (
+              <button
+                type="button"
+                disabled={isFillingPurchasePrices}
+                onClick={onFillPurchasePricesFromHistory}
+                className="flex items-center space-x-1.5 text-xs px-2.5 py-1 rounded-lg border border-amber-500/40 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-bold transition-colors cursor-default disabled:opacity-50"
+                title="Inserisce l'ultimo prezzo di acquisto dallo storico di questo cliente sulle righe con ACQ. € vuoto"
+              >
+                <History className="w-3.5 h-3.5" />
+                <span>{isFillingPurchasePrices ? "Ricerca..." : "Acq. da Storico"}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Operatore */}

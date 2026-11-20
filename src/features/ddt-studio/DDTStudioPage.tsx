@@ -9,7 +9,7 @@ import { ddtIncrementalSyncService } from "./services/ddtIncrementalSyncService"
 import { DdtFieldConflict } from "./services/ddtMergeUtils";
 import { ensureDdtBaseSnapshotFromLocal } from "./services/ddtSnapshotService";
 import { clientRepository } from "@/features/clients/services/clientRepository";
-import { money, isPositivePrice } from "@/shared/domain/monetaryValue";
+import { money, isPositivePrice, MonetaryValue } from "@/shared/domain/monetaryValue";
 import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
 import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import { calculateRowAmounts, calculateDdtTotals, OPERATORI, normalizeOperator } from "./utils/ddtCalculations";
@@ -1025,6 +1025,71 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     }
   };
 
+  const [isFillingPurchasePrices, setIsFillingPurchasePrices] = useState(false);
+
+  const handleFillPurchasePricesFromHistory = async () => {
+    const clientName = ddt.client_name?.trim() || "";
+    const clientId = ddt.client_id || null;
+    if (!clientName && !clientId) {
+      showToast("Seleziona prima un cliente per cercare nello storico acquisti.");
+      return;
+    }
+
+    const candidateDescs = items
+      .filter((it) => Boolean(it.description?.trim()) && !isPositivePrice(it.purchase_price))
+      .map((it) => it.description!.trim());
+
+    if (candidateDescs.length === 0) {
+      showToast("Tutte le righe con descrizione hanno già un prezzo di acquisto.");
+      return;
+    }
+
+    setIsFillingPurchasePrices(true);
+    try {
+      const priceMap = await ddtRepository.getLatestPurchasePricesForClient({
+        clientId,
+        clientName,
+        descriptions: candidateDescs,
+        excludeDdtId: ddt.id || null,
+      });
+
+      if (priceMap.size === 0) {
+        showToast(`Nessun prezzo di acquisto trovato nello storico di ${clientName || "questo cliente"}.`);
+        return;
+      }
+
+      const updatedCount = items.filter((row) => {
+        const descNorm = (row.description || "").trim().toUpperCase();
+        return Boolean(descNorm) && !isPositivePrice(row.purchase_price) && (priceMap.get(descNorm) ?? 0) > 0;
+      }).length;
+
+      if (updatedCount === 0) {
+        showToast(`Nessun prezzo di acquisto trovato nello storico di ${clientName || "questo cliente"}.`);
+        return;
+      }
+
+      setItems((prev) =>
+        prev.map((row) => {
+          const descNorm = (row.description || "").trim().toUpperCase();
+          if (!descNorm || isPositivePrice(row.purchase_price)) return row;
+          const subunits = priceMap.get(descNorm);
+          if (!subunits || subunits <= 0) return row;
+          return {
+            ...row,
+            purchase_price: MonetaryValue.fromSubunits(subunits),
+          };
+        })
+      );
+
+      showToast(`Inseriti ${updatedCount} prezzi di acquisto dallo storico di ${clientName || "questo cliente"}.`);
+    } catch (err) {
+      console.error("Errore caricamento prezzi acquisto da storico:", err);
+      showToast(`Errore storico acquisti: ${getErrorMessage(err)}`);
+    } finally {
+      setIsFillingPurchasePrices(false);
+    }
+  };
+
   // Inserimento articolo selezionato da modale ricerca F3 o Alex
   const handleInsertArticle = (article: {
     code?: string;
@@ -1038,33 +1103,18 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     let insertedIdx = -1;
     setItems((prev) => {
       const copy = [...prev];
-      // Una riga è considerata "vuota/disponibile" se non ha codice, né prezzo, né quantità,
-      // e la sua descrizione è vuota (oppure coincideva con la stringa di ricerca digitata nel campo)
+      // Come in Excel (UserForm1.frm -> If Trim(cell.Value) = ""):
+      // una riga è disponibile se la descrizione è vuota (o coincide con la query di ricerca F3),
+      // anche se U.M. e/o Q.tà erano già compilate (verranno sovrascritte dall'articolo inserito).
       const isUnfilledRow = (row: DdtItem) => {
-        const hasCode = Boolean(row.code && row.code.trim().length > 0);
-        const hasPrice = isPositivePrice(row.unit_price) || isPositivePrice(row.purchase_price);
-        const hasQty = Boolean(row.quantity && row.quantity.trim().length > 0 && row.quantity.trim() !== "0");
-        if (hasCode || hasPrice || hasQty) return false;
         if (!row.description || !row.description.trim()) return true;
         if (searchQuery && row.description.trim().toUpperCase() === searchQuery.trim().toUpperCase()) return true;
         return false;
       };
 
-      // Come in Excel:
-      // 1. Se l'utente ha selezionato una riga specifica ed è vuota, usa quella.
-      // 2. Altrimenti cerca a partire da quella riga (o dall'inizio) la prima riga con descrizione vuota.
-      // 3. Se tutte le righe successive sono piene, cerca la prima riga vuota dall'inizio.
-      let targetIdx = -1;
-      const activeIdx = activeRowIndexRef.current;
-      if (activeIdx !== null && activeIdx >= 0 && activeIdx < copy.length && isUnfilledRow(copy[activeIdx])) {
-        targetIdx = activeIdx;
-      } else {
-        const startSearch = activeIdx !== null && activeIdx >= 0 ? activeIdx : 0;
-        targetIdx = copy.findIndex((it, idx) => idx >= startSearch && isUnfilledRow(it));
-        if (targetIdx === -1) {
-          targetIdx = copy.findIndex(isUnfilledRow);
-        }
-      }
+      // Come in Excel (UserForm1.frm -> For Each cell In D16:D43):
+      // cerca sempre dalla prima riga la prima riga con descrizione vuota (o che contiene solo la query F3).
+      let targetIdx = copy.findIndex(isUnfilledRow);
       if (targetIdx === -1) targetIdx = copy.length - 1;
       insertedIdx = targetIdx;
 
@@ -1514,6 +1564,8 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                 setShowMargini={setShowMargini}
                 onOpenSearchModal={() => setIsSearchModalOpen((p) => !p)}
                 onOpenAlexModal={() => setIsAlexModalOpen(true)}
+                onFillPurchasePricesFromHistory={handleFillPurchasePricesFromHistory}
+                isFillingPurchasePrices={isFillingPurchasePrices}
                 globalDiscount={globalDiscount}
                 onChangeGlobalDiscount={handleChangeGlobalDiscount}
                 globalMarkup={globalMarkup}

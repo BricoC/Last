@@ -678,7 +678,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
 
           <div className="h-4 w-px bg-[var(--border)] shrink-0" />
 
-          {/* Rif. Ordine (inserito subito tra Destinazione e In Conto / A Saldo) - ingrandito del 50% (w-36) */}
+          {/* Rif. Ordine (inserito subito tra Destinazione e In Conto / A Saldo) */}
           <div className="flex items-center gap-1.5 shrink-0">
             <span className="text-[11px] text-[var(--muted-foreground)] font-semibold whitespace-nowrap">
               Rif. Ordine:
@@ -688,7 +688,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
               value={ddt.order_reference || ""}
               onChange={(e) => setDdt((p) => ({ ...p, order_reference: e.target.value }))}
               placeholder="Es. ORD-01"
-              className="w-36 px-2 py-0.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 focus:border-[var(--primary)] outline-none font-medium transition-all"
+              className="w-64 px-2 py-0.5 text-xs bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 focus:border-[var(--primary)] outline-none font-medium transition-all"
             />
           </div>
 
