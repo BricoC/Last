@@ -17,10 +17,13 @@ import {
   calculateNextRibaDeadline,
   fetchRemoteRibaStatus,
   getLocalRibaStatus,
+  getSqliteRibaStatus,
   saveLocalRibaPaid,
+  saveSqliteRibaPaid,
   saveRemoteRibaPaid,
   type RibaDeadlineInfo,
 } from "./services/ribaService";
+import { SUPABASE_SESSION_UPDATED } from "@/shared/services/supabaseSession";
 import {
   TrendingUp,
   Calendar,
@@ -201,27 +204,38 @@ export const DashboardPage: React.FC = () => {
     const checkRiba = async () => {
       const initial = calculateNextRibaDeadline();
       if (!mounted) return;
-      const local = getLocalRibaStatus(initial.deadlineKey);
+      const localLs = getLocalRibaStatus(initial.deadlineKey);
+      const localDb = await getSqliteRibaStatus(initial.deadlineKey);
+      const local = localDb?.isPaid ? localDb : localLs;
+      if (mounted && local?.isPaid) {
+        setRibaInfo({
+          ...initial,
+          isPaid: true,
+          sentAt: local.sentAt,
+        });
+      }
       try {
         const remote = await fetchRemoteRibaStatus(initial.deadlineKey);
         if (!mounted) return;
         if (remote?.isPaid) {
           const sentAt = remote.sentAt || local?.sentAt || new Date().toISOString();
           saveLocalRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
+          await saveSqliteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
           setRibaInfo({
             ...initial,
             isPaid: true,
             sentAt,
           });
         } else if (local?.isPaid) {
+          const sentAt = local.sentAt || new Date().toISOString();
+          saveLocalRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
+          await saveSqliteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
           setRibaInfo({
             ...initial,
             isPaid: true,
-            sentAt: local.sentAt,
+            sentAt,
           });
-          if (remote && !remote.isPaid && local.sentAt) {
-            void saveRemoteRibaPaid(initial.deadlineKey, initial.deadlineStr, local.sentAt);
-          }
+          void saveRemoteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
         } else {
           setRibaInfo({
             ...initial,
@@ -233,8 +247,11 @@ export const DashboardPage: React.FC = () => {
       }
     };
     void checkRiba();
+    const onSessionUpdated = () => void checkRiba();
+    window.addEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
     return () => {
       mounted = false;
+      window.removeEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
     };
   }, []);
 

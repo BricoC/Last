@@ -188,10 +188,11 @@ export const TopNavBar: React.FC = () => {
       // Auto-sync intelligente: scarica automaticamente solo quando ci sono effettivamente nuovi dati
       // sul Cloud (nessun polling continuo), con cooldown di 60s per non consumare quota Supabase.
       const now = Date.now();
+      const activeSessionEmail = getSupabaseSessionEmail();
       if (
         s.hasPendingRemoteChanges &&
         !s.error &&
-        sessionEmail &&
+        activeSessionEmail &&
         !isSyncingRef.current &&
         now - lastAutoSyncAtRef.current > 60_000
       ) {

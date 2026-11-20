@@ -429,6 +429,7 @@ class CloudSyncStatusService {
     summary: string;
     success: boolean;
   }> {
+    await priceListSyncService.retryPendingChanges().catch(() => {});
     const [ddt, general, clients] = await Promise.allSettled([
       ddtIncrementalSyncService.syncNewDdtsFromSupabase({ includePreviousYear: true, checkModifiedRecent: true }),
       priceListSyncService.syncIncrementalGeneralFromSupabase(),

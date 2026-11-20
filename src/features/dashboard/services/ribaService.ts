@@ -2,6 +2,7 @@ import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
 import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
+import { getDatabase } from "@/shared/data-layer/database";
 
 export interface RibaDeadlineInfo {
   deadlineDate: Date;
@@ -162,6 +163,51 @@ export function saveLocalRibaPaid(
     );
   } catch {
     // ignore storage errors
+  }
+}
+
+export async function getSqliteRibaStatus(
+  deadlineKey: string
+): Promise<{ isPaid: boolean; sentAt?: string } | null> {
+  try {
+    const db = await getDatabase();
+    const rows = await db.select<Array<{ value: string }>>(
+      "SELECT value FROM app_preferences WHERE key = $1 LIMIT 1",
+      [`${LOCAL_RIBA_PREFIX}${deadlineKey}`]
+    );
+    if (!rows.length || !rows[0]?.value) return null;
+    const parsed = JSON.parse(rows[0].value) as { isPaid?: boolean; sentAt?: string };
+    if (parsed && parsed.isPaid) {
+      return { isPaid: true, sentAt: parsed.sentAt };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveSqliteRibaPaid(
+  deadlineKey: string,
+  deadlineStr: string,
+  sentAt: string
+): Promise<void> {
+  try {
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+    const payload = JSON.stringify({
+      deadlineKey,
+      deadlineStr,
+      isPaid: true,
+      sentAt,
+    });
+    await db.execute(
+      `INSERT INTO app_preferences (key, value, updated_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      [`${LOCAL_RIBA_PREFIX}${deadlineKey}`, payload, now]
+    );
+  } catch {
+    // ignore sqlite errors
   }
 }
 

@@ -12,6 +12,7 @@ import {
   type RibaDeadlineInfo,
   openRibaEmailDraft,
   saveLocalRibaPaid,
+  saveSqliteRibaPaid,
   saveRemoteRibaPaid,
 } from "../services/ribaService";
 import { getEmailSettings, type EmailSettings } from "@/features/settings/emailSettingsRepository";
@@ -93,6 +94,7 @@ export const RibaModal: React.FC<RibaModalProps> = ({
     try {
       const sentAt = new Date().toISOString();
       saveLocalRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
+      await saveSqliteRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
       const savedRemote = await saveRemoteRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
       onStatusUpdated({ isPaid: true, sentAt });
       setSuccessMsg(

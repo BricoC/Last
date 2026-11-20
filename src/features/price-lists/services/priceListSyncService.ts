@@ -474,7 +474,9 @@ export class PriceListSyncService {
         for (const r of items) {
           const localId = r.id;
           const revision = r.sync_revision;
-          const isNew = localId.startsWith("new_");
+          const isNew =
+            localId.startsWith("new_") ||
+            (!localId.startsWith("gen_") && !localId.startsWith("var_"));
           const updatedAt = new Date().toISOString();
           const payload = generalPriceListPayload(r, updatedAt);
 
@@ -744,7 +746,7 @@ export class PriceListSyncService {
       let localMaxIso: string | null = null;
       try {
         const rows = await db.select<{ max_up: string | null }[]>(
-          "SELECT MAX(updated_at) as max_up FROM listino_generale WHERE sync_revision IS NULL AND id NOT GLOB 'new_*';"
+          "SELECT MAX(updated_at) as max_up FROM listino_generale WHERE sync_revision IS NULL AND (id LIKE 'gen_%' OR id LIKE 'var_%');"
         );
         localMaxIso = rows[0]?.max_up || null;
       } catch {}
