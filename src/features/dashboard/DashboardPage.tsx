@@ -16,6 +16,9 @@ import { DashboardFirstSetupWidget } from "./components/DashboardFirstSetupWidge
 import {
   calculateNextRibaDeadline,
   fetchRemoteRibaStatus,
+  getLocalRibaStatus,
+  saveLocalRibaPaid,
+  saveRemoteRibaPaid,
   type RibaDeadlineInfo,
 } from "./services/ribaService";
 import {
@@ -119,9 +122,11 @@ export const DashboardPage: React.FC = () => {
   // Stato e scadenza autorizzazione Ri.Ba. Banca
   const [ribaInfo, setRibaInfo] = useState<RibaDeadlineInfo | null>(() => {
     const next = calculateNextRibaDeadline();
+    const local = getLocalRibaStatus(next.deadlineKey);
     return {
       ...next,
-      isPaid: false,
+      isPaid: local?.isPaid ?? false,
+      sentAt: local?.sentAt,
     };
   });
   const [isRibaModalOpen, setIsRibaModalOpen] = useState(false);
@@ -196,13 +201,31 @@ export const DashboardPage: React.FC = () => {
     const checkRiba = async () => {
       const initial = calculateNextRibaDeadline();
       if (!mounted) return;
+      const local = getLocalRibaStatus(initial.deadlineKey);
       try {
         const remote = await fetchRemoteRibaStatus(initial.deadlineKey);
-        if (mounted) {
+        if (!mounted) return;
+        if (remote?.isPaid) {
+          const sentAt = remote.sentAt || local?.sentAt || new Date().toISOString();
+          saveLocalRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
           setRibaInfo({
             ...initial,
-            isPaid: remote?.isPaid ?? false,
-            sentAt: remote?.sentAt,
+            isPaid: true,
+            sentAt,
+          });
+        } else if (local?.isPaid) {
+          setRibaInfo({
+            ...initial,
+            isPaid: true,
+            sentAt: local.sentAt,
+          });
+          if (remote && !remote.isPaid && local.sentAt) {
+            void saveRemoteRibaPaid(initial.deadlineKey, initial.deadlineStr, local.sentAt);
+          }
+        } else {
+          setRibaInfo({
+            ...initial,
+            isPaid: false,
           });
         }
       } catch (err) {
@@ -2123,9 +2146,19 @@ export const DashboardPage: React.FC = () => {
                       <span
                         className={cn(
                           "w-2 h-2 rounded-full",
-                          doc.hasCompleteMargins ? "bg-emerald-400" : "bg-amber-400"
+                          doc.pricingStatus === "complete_with_margins"
+                            ? "bg-emerald-400"
+                            : doc.pricingStatus === "priced_no_margins"
+                            ? "bg-amber-400"
+                            : "bg-rose-500"
                         )}
-                        title={doc.hasCompleteMargins ? "Margini completi" : "Margini incompleti"}
+                        title={
+                          doc.pricingStatus === "complete_with_margins"
+                            ? "Prezzato interamente con tutti i margini"
+                            : doc.pricingStatus === "priced_no_margins"
+                            ? "Prezzato interamente senza margini"
+                            : "Né prezzi né margini (non prezzato interamente)"
+                        }
                       />
                     </div>
                   </div>

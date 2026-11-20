@@ -12,6 +12,8 @@ import {
   Trash2,
   ChevronDown,
   Eye,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import { DdtDocument } from "../models/ddt";
 import { cn } from "@/shared/utils/cn";
@@ -40,6 +42,14 @@ export interface DDTStudioHeaderProps {
   isExportingPdf?: boolean;
   isPrinting?: boolean;
   isDirty?: boolean;
+  toastMessage?: string | null;
+  numberingStatus?: {
+    missing: number[];
+    maxNumber: number;
+    totalCount: number;
+    year: number;
+  } | null;
+  onOpenGapModal?: () => void;
 }
 
 export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
@@ -64,6 +74,9 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   isExportingPdf = false,
   isPrinting = false,
   isDirty = true,
+  toastMessage = null,
+  numberingStatus = null,
+  onOpenGapModal,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -165,8 +178,39 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
         )}
       </div>
 
+      {/* Infobox Controllo Numerazione DDT (tra Cestino e Editor/Foglio A4) */}
+      <div className="flex-1 flex items-center justify-center px-2 min-w-0">
+        {numberingStatus && numberingStatus.maxNumber > 0 && (
+          numberingStatus.missing.length === 0 ? (
+            <div
+              className="h-7 px-2.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-emerald-300 text-[11px] font-semibold flex items-center gap-1.5 max-w-full"
+              title={`Controllo numerazione ${numberingStatus.year}: tutti i ${numberingStatus.totalCount} numeri da 1 a ${numberingStatus.maxNumber} sono presenti senza salti.`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="truncate">
+                Numero DDT {numberingStatus.year}: OK (1–{numberingStatus.maxNumber})
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenGapModal}
+              className="h-7 px-2.5 rounded-md border border-amber-400 bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 text-[11px] font-bold flex items-center gap-1.5 max-w-full shadow-sm ring-1 ring-amber-400/40 transition-colors"
+              title={`Numeri mancanti nel ${numberingStatus.year}: ${numberingStatus.missing.map((n) => `#${n}`).join(", ")}. Clicca per recuperare o gestire.`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-pulse" />
+              <span className="truncate">
+                {numberingStatus.missing.length === 1
+                  ? `Numero saltato: #${numberingStatus.missing[0]}`
+                  : `${numberingStatus.missing.length} numeri saltati (#${numberingStatus.missing[numberingStatus.missing.length - 1]})`}
+              </span>
+            </button>
+          )
+        )}
+      </div>
+
       {/* Centro: Switcher Vista Editor vs Foglio A4 (con ESC key support!) */}
-      <div className="flex items-center bg-[var(--background)] p-0.5 rounded-lg border border-[var(--border)] shadow-inner">
+      <div className="flex items-center bg-[var(--background)] p-0.5 rounded-lg border border-[var(--border)] shadow-inner shrink-0">
         <button
           type="button"
           onClick={() => setActiveView("editor")}
@@ -193,6 +237,32 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
           <Eye className="w-3.5 h-3.5" />
           <span>{activeView === "a4" ? "Foglio A4 ESC" : "Foglio A4"}</span>
         </button>
+      </div>
+
+      {/* Spazio tra Editor/Foglio A4 e The One: Toast notifica salvataggio */}
+      <div className="flex-1 flex items-center justify-center px-3 min-w-0">
+        {toastMessage && (() => {
+          const isErrorOrWarning = /^(Errore|Attenzione|Impossibile)/i.test(toastMessage.trim());
+          return (
+            <div
+              role="status"
+              title={toastMessage}
+              className={cn(
+                "h-7 px-3 rounded-md border text-xs font-bold flex items-center gap-1.5 max-w-full shadow-md animate-in fade-in zoom-in-95 duration-150",
+                isErrorOrWarning
+                  ? "bg-amber-500/20 border-amber-400 text-amber-100 ring-1 ring-amber-400/40"
+                  : "bg-emerald-500/25 border-emerald-400 text-emerald-100 ring-1 ring-emerald-400/50"
+              )}
+            >
+              {isErrorOrWarning ? (
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+              )}
+              <span className="truncate">{toastMessage}</span>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Destra: Azioni The One, Salva, Draft, Stampa, Altro */}

@@ -81,6 +81,54 @@ describe("ClientRepository - upsertClientFromDocument & price list columns", () 
     expect(params[22]).toBe("cli-existing-1");
   });
 
+  it("upsertClientFromDocument riusa un cliente legacy (project_url=null) anche quando il documento ha project_url e non duplica la provincia in city", async () => {
+    const repo = new ClientRepository();
+    const legacyRow = {
+      id: "cli-legacy-1",
+      code: null,
+      business_name: "MIB",
+      address: "VIA TAZIO NUVOLARI",
+      city: "CARRAIA",
+      postal_code: null,
+      province: "LU",
+      vat_number: null,
+      fiscal_code: null,
+      sdi_code: null,
+      pec: null,
+      email: null,
+      payment_method: null,
+      destination_name: null,
+      destination_address: null,
+      destination_city: null,
+      destinations_json: "[]",
+      price_lists_json: "[]",
+      phones_json: "[]",
+      notes: null,
+      is_active: 1,
+      created_at: "2026-10-27T13:49:15.140Z",
+      updated_at: "2026-10-27T13:49:15.140Z",
+      updated_by: "supabase-sync",
+      deleted_at: null,
+      sync_status: "synced",
+      project_url: null,
+    };
+
+    mockSelect.mockResolvedValueOnce([legacyRow]);
+
+    const result = await repo.upsertClientFromDocument({
+      id: "cli-legacy-1",
+      business_name: "MIB",
+      address: "VIA TAZIO NUVOLARI",
+      city: "CARRAIA (LU)",
+      phones: [],
+      project_url: "https://example.supabase.co",
+    });
+
+    expect(result.id).toBe("cli-legacy-1");
+    expect(result.city).toBe("CARRAIA");
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+
   it("getPriceListArticles legge acquisto_eur e perc_acquisto da listini_clienti", async () => {
     const repo = new ClientRepository();
     mockSelect.mockResolvedValueOnce([

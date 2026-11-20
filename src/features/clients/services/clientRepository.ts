@@ -145,14 +145,17 @@ export class ClientRepository {
     const trimmedName = input.business_name.trim();
     const hasExplicitProjectScope = input.project_url !== undefined;
     const targetProjectUrl = input.project_url ?? null;
+    const matchesProjectScope = (rowProjectUrl: string | null | undefined): boolean => {
+      if (!hasExplicitProjectScope) return true;
+      const normalized = rowProjectUrl ?? null;
+      if (targetProjectUrl === null) return normalized === null;
+      return normalized === targetProjectUrl || normalized === null;
+    };
     let existing: Client | null = null;
 
     if (input.id) {
       const candidate = await this.getClientById(input.id);
-      if (
-        candidate &&
-        (!hasExplicitProjectScope || (candidate.project_url ?? null) === targetProjectUrl)
-      ) {
+      if (candidate && matchesProjectScope(candidate.project_url)) {
         existing = candidate;
       }
     }
@@ -160,7 +163,12 @@ export class ClientRepository {
       const rows = hasExplicitProjectScope
         ? targetProjectUrl
           ? await db.select<ClientRow[]>(
-              "SELECT * FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL AND project_url = $2 LIMIT 1",
+              `SELECT * FROM clients
+               WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1))
+                 AND deleted_at IS NULL
+                 AND (project_url = $2 OR project_url IS NULL)
+               ORDER BY CASE WHEN project_url = $2 THEN 0 ELSE 1 END
+               LIMIT 1`,
               [trimmedName, targetProjectUrl]
             )
           : await db.select<ClientRow[]>(
@@ -180,13 +188,28 @@ export class ClientRepository {
       return this.createOrUpdateClient({ ...input, id: undefined });
     }
 
+    const resolveCity = (): string | undefined => {
+      const trimmedInputCity = input.city?.trim();
+      if (!trimmedInputCity) return existing.city;
+      const existingCity = existing.city?.trim();
+      const existingProvince = existing.province?.trim();
+      if (
+        existingCity &&
+        existingProvince &&
+        trimmedInputCity.toLowerCase() === `${existingCity} (${existingProvince})`.toLowerCase()
+      ) {
+        return existing.city;
+      }
+      return trimmedInputCity;
+    };
+
     const mergedPhones = input.phones && input.phones.length > 0 ? input.phones : existing.phones;
     const merged: CreateClientInput & { id: string } = {
       id: existing.id,
       code: existing.code,
       business_name: existing.business_name || trimmedName,
       address: input.address?.trim() || existing.address,
-      city: input.city?.trim() || existing.city,
+      city: resolveCity(),
       postal_code: existing.postal_code,
       province: existing.province,
       vat_number: input.vat_number?.trim() || existing.vat_number,

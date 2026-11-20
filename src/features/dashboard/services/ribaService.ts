@@ -125,8 +125,48 @@ export async function fetchRemoteRibaStatus(
   }
 }
 
+const LOCAL_RIBA_PREFIX = "riba_paid_status_v1_";
+
+export function getLocalRibaStatus(
+  deadlineKey: string
+): { isPaid: boolean; sentAt?: string } | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(`${LOCAL_RIBA_PREFIX}${deadlineKey}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { isPaid?: boolean; sentAt?: string };
+    if (parsed && parsed.isPaid) {
+      return { isPaid: true, sentAt: parsed.sentAt };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLocalRibaPaid(
+  deadlineKey: string,
+  deadlineStr: string,
+  sentAt: string
+): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(
+      `${LOCAL_RIBA_PREFIX}${deadlineKey}`,
+      JSON.stringify({
+        deadlineKey,
+        deadlineStr,
+        isPaid: true,
+        sentAt,
+      })
+    );
+  } catch {
+    // ignore storage errors
+  }
+}
+
 /**
- * Salva lo stato "PAGATA" della scadenza Ri.Ba. esclusivamente su Supabase.
+ * Salva lo stato "PAGATA" della scadenza Ri.Ba. in locale e su Supabase.
  */
 export async function saveRemoteRibaPaid(
   deadlineKey: string,

@@ -11,6 +11,7 @@ import {
 import {
   type RibaDeadlineInfo,
   openRibaEmailDraft,
+  saveLocalRibaPaid,
   saveRemoteRibaPaid,
 } from "../services/ribaService";
 import { getEmailSettings, type EmailSettings } from "@/features/settings/emailSettingsRepository";
@@ -91,13 +92,14 @@ export const RibaModal: React.FC<RibaModalProps> = ({
     setSuccessMsg(null);
     try {
       const sentAt = new Date().toISOString();
-      const saved = await saveRemoteRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
-      if (!saved) {
-        setError("Impossibile registrare il pagamento su Supabase. Riprova.");
-        return;
-      }
+      saveLocalRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
+      const savedRemote = await saveRemoteRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
       onStatusUpdated({ isPaid: true, sentAt });
-      setSuccessMsg("Pagamento registrato.");
+      setSuccessMsg(
+        savedRemote
+          ? "Pagamento registrato."
+          : "Pagamento registrato in locale (sincronizzazione Cloud in sospeso)."
+      );
     } finally {
       setSending(false);
     }

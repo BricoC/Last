@@ -318,6 +318,15 @@ export function buildDdtSavePayloadFromImported(
   };
 }
 
+export interface PurchasePriceHistoryEntry {
+  purchasePriceSubunits: number;
+  ddtId: string;
+  docNumber: number | null;
+  series: string;
+  year: number;
+  docDate: string;
+}
+
 export class DdtRepository {
   /**
    * Recupera la lista dei DDT recenti filtrata per anno e ricerca facoltativa
@@ -550,7 +559,7 @@ export class DdtRepository {
 
     notifyDdtUpdated();
     if (shouldDeleteRemote) {
-      void ddtCloudPushService.deleteRemoteDdt(id).catch(() => {});
+      await ddtCloudPushService.deleteRemoteDdt(id).catch(() => {});
     }
   }
 
@@ -732,6 +741,56 @@ export class DdtRepository {
     });
     await this.pruneTrash().catch((error) => console.warn("[DDT] Pulizia cestino:", error));
     notifyDdtUpdated();
+  }
+
+  /**
+   * Verifica la continuità della numerazione annuale (1 .. MAX(doc_number)) nel DB locale.
+   */
+  public async getMissingDocNumbers(year: number): Promise<{
+    missing: number[];
+    maxNumber: number;
+    totalCount: number;
+  }> {
+    const db = await getDatabase();
+    const rows = await db.select<{ doc_number: number }[]>(
+      `SELECT DISTINCT doc_number
+       FROM ddt_documents
+       WHERE year = $1 AND deleted_at IS NULL AND doc_number IS NOT NULL
+       ORDER BY doc_number ASC`,
+      [year]
+    );
+    if (rows.length === 0) {
+      return { missing: [], maxNumber: 0, totalCount: 0 };
+    }
+    const existing = new Set(rows.map((r) => Number(r.doc_number)).filter((n) => n > 0));
+    let maxNumber = 0;
+    for (const n of existing) {
+      if (n > maxNumber) maxNumber = n;
+    }
+    const missing: number[] = [];
+    for (let n = 1; n <= maxNumber; n++) {
+      if (!existing.has(n)) missing.push(n);
+    }
+    return { missing, maxNumber, totalCount: existing.size };
+  }
+
+  /**
+   * Crea un DDT segnaposto (annullato) per colmare un numero saltato in archivio.
+   */
+  public async createPlaceholderDdt(year: number, docNumber: number): Promise<DdtDocument> {
+    const todayIso = new Date().toISOString().split("T")[0];
+    return this.saveDocumentInternal(
+      {
+        doc_number: docNumber,
+        year,
+        series: "",
+        doc_date: todayIso,
+        status: "annullato",
+        client_name: "DDT ANNULLATO (PLACEHOLDER)",
+      },
+      [],
+      false
+    );
   }
 
   /**
@@ -1023,27 +1082,44 @@ export class DdtRepository {
    * Restituisce l'ultimo prezzo di acquisto (> 0) praticato allo stesso cliente
    * per ciascuna descrizione normalizzata (TRIM + UPPER), ordinato dal DDT più recente.
    */
-  public async getLatestPurchasePricesForClient(options: {
+  public async getLatestPurchasePriceDetailsForClient(options: {
     clientId?: string | null;
     clientName?: string | null;
     descriptions: string[];
     excludeDdtId?: string | null;
-  }): Promise<Map<string, number>> {
+  }): Promise<Map<string, PurchasePriceHistoryEntry>> {
     const targetDescs = new Set(
       options.descriptions.map((d) => d.trim().toUpperCase()).filter(Boolean)
     );
     const clientId = (options.clientId || "").trim();
     const clientNameNorm = (options.clientName || "").trim().toLowerCase();
     const excludeId = (options.excludeDdtId || "").trim();
-    const result = new Map<string, number>();
+    const result = new Map<string, PurchasePriceHistoryEntry>();
 
     if (targetDescs.size === 0 || (!clientId && !clientNameNorm)) {
       return result;
     }
 
     const db = await getDatabase();
-    const rows = await db.select<Array<{ norm_desc: string; purchase_price_subunits: number }>>(
-      `SELECT TRIM(UPPER(i.description)) AS norm_desc, i.purchase_price_subunits
+    const rows = await db.select<
+      Array<{
+        norm_desc: string;
+        purchase_price_subunits: number;
+        ddt_id: string;
+        doc_number: number | null;
+        series: string | null;
+        year: number;
+        doc_date: string;
+      }>
+    >(
+      `SELECT
+         TRIM(UPPER(i.description)) AS norm_desc,
+         i.purchase_price_subunits,
+         d.id AS ddt_id,
+         d.doc_number,
+         d.series,
+         d.year,
+         d.doc_date
        FROM ddt_items i
        INNER JOIN ddt_documents d ON d.id = i.ddt_id
        WHERE d.deleted_at IS NULL
@@ -1063,11 +1139,32 @@ export class DdtRepository {
     for (const row of rows) {
       if (!row.norm_desc || !targetDescs.has(row.norm_desc)) continue;
       if (!result.has(row.norm_desc) && Number(row.purchase_price_subunits) > 0) {
-        result.set(row.norm_desc, Number(row.purchase_price_subunits));
+        result.set(row.norm_desc, {
+          purchasePriceSubunits: Number(row.purchase_price_subunits),
+          ddtId: row.ddt_id,
+          docNumber: row.doc_number !== null && row.doc_number !== undefined ? Number(row.doc_number) : null,
+          series: row.series || "",
+          year: Number(row.year),
+          docDate: row.doc_date || "",
+        });
         if (result.size === targetDescs.size) break;
       }
     }
 
+    return result;
+  }
+
+  public async getLatestPurchasePricesForClient(options: {
+    clientId?: string | null;
+    clientName?: string | null;
+    descriptions: string[];
+    excludeDdtId?: string | null;
+  }): Promise<Map<string, number>> {
+    const details = await this.getLatestPurchasePriceDetailsForClient(options);
+    const result = new Map<string, number>();
+    for (const [desc, entry] of details.entries()) {
+      result.set(desc, entry.purchasePriceSubunits);
+    }
     return result;
   }
 }

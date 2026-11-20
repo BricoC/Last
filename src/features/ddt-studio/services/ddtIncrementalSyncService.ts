@@ -94,7 +94,7 @@ class DdtIncrementalSyncService {
       const db = await getDatabase();
       if (!isCurrent()) return;
       const res = await db.execute(
-        `DELETE FROM ddt_documents WHERE id = $1 AND sync_status = 'synced'`,
+        `DELETE FROM ddt_documents WHERE id = $1 AND sync_status = 'synced' AND deleted_at IS NULL`,
         [remoteId]
       );
       if ((res.rowsAffected ?? 0) > 0 && typeof window !== "undefined") {

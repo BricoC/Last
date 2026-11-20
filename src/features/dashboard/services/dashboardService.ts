@@ -21,6 +21,8 @@ export interface ClientTurnoverRow {
   ddtCountByYear: Record<number, number>;
 }
 
+export type DdtPricingStatus = "complete_with_margins" | "priced_no_margins" | "unpriced";
+
 export interface DashboardRecentDdt {
   id: string;
   docNumber: number | null;
@@ -33,6 +35,7 @@ export interface DashboardRecentDdt {
   destinationCity?: string;
   totalDocument: number;
   hasCompleteMargins: boolean;
+  pricingStatus: DdtPricingStatus;
 }
 
 export interface TopArticleItem {
@@ -371,11 +374,20 @@ export class DashboardService {
        LIMIT 50`
     );
 
-    // Controllo margini per questi recenti tramite JOIN sicura (zero interpolazione stringhe)
-    const marginCheckMap = new Map<string, boolean>();
+    // Controllo prezzi e margini per questi recenti tramite JOIN sicura (zero interpolazione stringhe)
+    const pricingStatusMap = new Map<string, DdtPricingStatus>();
     if (recentDdtRows.length > 0) {
-      const marginSummary = await db.select<{ ddt_id: string; has_cost: number }[]>(
-        `SELECT i.ddt_id, MIN(CASE WHEN i.unit_price_subunits > 0 THEN (i.purchase_price_subunits > 0) ELSE 1 END) AS has_cost
+      const marginSummary = await db.select<{
+        ddt_id: string;
+        item_count: number;
+        priced_count: number;
+        margined_count: number;
+      }[]>(
+        `SELECT
+           i.ddt_id,
+           COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' THEN 1 END) AS item_count,
+           COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 THEN 1 END) AS priced_count,
+           COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 AND i.purchase_price_subunits > 0 THEN 1 END) AS margined_count
          FROM ddt_items i
          JOIN (
            SELECT id FROM ddt_documents
@@ -387,7 +399,14 @@ export class DashboardService {
          GROUP BY i.ddt_id`
       );
       marginSummary.forEach((m) => {
-        marginCheckMap.set(m.ddt_id, Number(m.has_cost) === 1);
+        const itemCount = Number(m.item_count) || 0;
+        const pricedCount = Number(m.priced_count) || 0;
+        const marginedCount = Number(m.margined_count) || 0;
+        let status: DdtPricingStatus = "unpriced";
+        if (itemCount > 0 && pricedCount === itemCount) {
+          status = marginedCount === itemCount ? "complete_with_margins" : "priced_no_margins";
+        }
+        pricingStatusMap.set(m.ddt_id, status);
       });
     }
 
@@ -398,6 +417,7 @@ export class DashboardService {
       const cName = (r.client_name || "").trim();
       const meaningfulName = dName && dName.toUpperCase() !== cName.toUpperCase() ? dName : "";
       const display = [meaningfulName, dAddr, dCity].filter(Boolean).join(" · ");
+      const pricingStatus = pricingStatusMap.get(r.id) ?? "unpriced";
 
       return {
         id: r.id,
@@ -410,7 +430,8 @@ export class DashboardService {
         destinationAddress: dAddr,
         destinationCity: dCity,
         totalDocument: (Number(r.total_document_subunits) || 0) / 100000,
-        hasCompleteMargins: marginCheckMap.get(r.id) ?? false,
+        hasCompleteMargins: pricingStatus === "complete_with_margins",
+        pricingStatus,
       };
     });
 
@@ -888,10 +909,19 @@ export class DashboardService {
 
     if (rows.length === 0) return [];
 
-    // Controllo margini con query parametrizzata in JOIN (zero interpolazione stringhe)
-    const marginCheckMap = new Map<string, boolean>();
-    const marginSummary = await db.select<{ ddt_id: string; has_cost: number }[]>(
-      `SELECT i.ddt_id, MIN(CASE WHEN i.unit_price_subunits > 0 THEN (i.purchase_price_subunits > 0) ELSE 1 END) AS has_cost
+    // Controllo prezzi e margini con query parametrizzata in JOIN (zero interpolazione stringhe)
+    const pricingStatusMap = new Map<string, DdtPricingStatus>();
+    const marginSummary = await db.select<{
+      ddt_id: string;
+      item_count: number;
+      priced_count: number;
+      margined_count: number;
+    }[]>(
+      `SELECT
+         i.ddt_id,
+         COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' THEN 1 END) AS item_count,
+         COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 THEN 1 END) AS priced_count,
+         COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 AND i.purchase_price_subunits > 0 THEN 1 END) AS margined_count
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
        WHERE i.deleted_at IS NULL
@@ -904,7 +934,14 @@ export class DashboardService {
       [year, month]
     );
     marginSummary.forEach((m) => {
-      marginCheckMap.set(m.ddt_id, Number(m.has_cost) === 1);
+      const itemCount = Number(m.item_count) || 0;
+      const pricedCount = Number(m.priced_count) || 0;
+      const marginedCount = Number(m.margined_count) || 0;
+      let status: DdtPricingStatus = "unpriced";
+      if (itemCount > 0 && pricedCount === itemCount) {
+        status = marginedCount === itemCount ? "complete_with_margins" : "priced_no_margins";
+      }
+      pricingStatusMap.set(m.ddt_id, status);
     });
 
     return rows.map((r) => {
@@ -914,6 +951,7 @@ export class DashboardService {
       const cName = (r.client_name || "").trim();
       const meaningfulName = dName && dName.toUpperCase() !== cName.toUpperCase() ? dName : "";
       const display = [meaningfulName, dAddr, dCity].filter(Boolean).join(" · ");
+      const pricingStatus = pricingStatusMap.get(r.id) ?? "unpriced";
 
       return {
         id: r.id,
@@ -926,7 +964,8 @@ export class DashboardService {
         destinationAddress: dAddr,
         destinationCity: dCity,
         totalDocument: (Number(r.total_document_subunits) || 0) / 100000,
-        hasCompleteMargins: marginCheckMap.get(r.id) ?? false,
+        hasCompleteMargins: pricingStatus === "complete_with_margins",
+        pricingStatus,
       };
     });
   }

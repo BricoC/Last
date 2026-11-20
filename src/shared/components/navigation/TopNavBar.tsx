@@ -159,6 +159,8 @@ export const TopNavBar: React.FC = () => {
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatusInfo | null>(null);
   const [isCheckingCloudStatus, setIsCheckingCloudStatus] = useState(false);
   const hoverTimeoutRef = useRef<number | null>(null);
+  const lastAutoSyncAtRef = useRef<number>(0);
+  const isSyncingRef = useRef<boolean>(false);
 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
     const stored = localStorage.getItem("last_supabase_sync_timestamp");
@@ -182,6 +184,20 @@ export const TopNavBar: React.FC = () => {
       } else {
         setLastSyncTime(null);
       }
+
+      // Auto-sync intelligente: scarica automaticamente solo quando ci sono effettivamente nuovi dati
+      // sul Cloud (nessun polling continuo), con cooldown di 60s per non consumare quota Supabase.
+      const now = Date.now();
+      if (
+        s.hasPendingRemoteChanges &&
+        !s.error &&
+        sessionEmail &&
+        !isSyncingRef.current &&
+        now - lastAutoSyncAtRef.current > 60_000
+      ) {
+        lastAutoSyncAtRef.current = now;
+        void handleManualSync();
+      }
     } finally {
       setIsCheckingCloudStatus(false);
     }
@@ -203,7 +219,8 @@ export const TopNavBar: React.FC = () => {
   };
 
   const handleManualSync = async () => {
-    if (isSyncing) return;
+    if (isSyncingRef.current) return;
+    isSyncingRef.current = true;
     setIsSyncing(true);
     try {
       const res = await cloudSyncStatusService.executeFullSync();
@@ -219,6 +236,7 @@ export const TopNavBar: React.FC = () => {
     } catch (error) {
       console.warn("[TopNavBar] Sincronizzazione cloud:", error);
     } finally {
+      isSyncingRef.current = false;
       setIsSyncing(false);
     }
   };
