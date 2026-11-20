@@ -290,7 +290,7 @@ export class OffersSyncService {
           remoteIds.add(Number(rem.id));
 
           const existing = await db.select<OfferRecord[]>(
-            `SELECT * FROM offers WHERE (supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL)) AND project_url = $3 LIMIT 1`,
+            `SELECT * FROM offers WHERE (supabase_id = $1 OR (id = $2 AND $2 IS NOT NULL)) AND (project_url = $3 OR project_url IS NULL) LIMIT 1`,
             [rem.id, rem.local_id || null, activeProjectUrl]
           );
 

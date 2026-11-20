@@ -174,6 +174,17 @@ class DdtIncrementalSyncService {
         };
       } while (this.pendingResync);
 
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("last_supabase_sync_timestamp", new Date().toISOString());
+        localStorage.removeItem("last_supabase_sync_failure");
+      }
+      if (
+        typeof window !== "undefined" &&
+        (totalHeaders > 0 || (lastResult.updatedHistoricalCount ?? 0) > 0 || (lastResult.recoveredGapsCount ?? 0) > 0)
+      ) {
+        window.dispatchEvent(new CustomEvent("cloud-sync-status-updated"));
+      }
+
       return { ...lastResult, newHeadersCount: totalHeaders, newLinesCount: totalLines };
     })().finally(() => {
       this.activeSyncPromise = null;

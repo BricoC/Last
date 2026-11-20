@@ -105,6 +105,9 @@ export function App() {
         .catch((err) => {
           console.warn("[App] Sync DDT non riuscita:", err);
         });
+      void priceListSyncService.syncIncrementalGeneralFromSupabase().catch(() => {});
+      void priceListSyncService.syncIncrementalClientiFromSupabase().catch(() => {});
+      void offersSyncService.sync().catch(() => {});
     };
 
     const retryPendingCloudWrites = () => {

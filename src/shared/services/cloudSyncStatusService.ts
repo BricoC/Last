@@ -132,6 +132,7 @@ class CloudSyncStatusService {
 
     let localLatestDdt: CloudSyncStatusInfo["localLatestDdt"] = null;
     let localLatestListino: CloudSyncStatusInfo["localLatestListino"] = null;
+    let localMaxDdtUpdatedAt: Date | null = null;
     let localMaxCliUpdatedAt: Date | null = null;
     let localMaxGenUpdatedAt: Date | null = null;
 
@@ -153,6 +154,16 @@ class CloudSyncStatusService {
           date: ddtRows[0].date || "",
           client: ddtRows[0].client_name || "",
         };
+      }
+
+      const ddtMaxUpdatedRows = await db.select<{ max_updated_at: string | null }[]>(
+        `SELECT MAX(updated_at) as max_updated_at
+         FROM ddt_documents
+         WHERE deleted_at IS NULL AND doc_number IS NOT NULL;`
+      );
+      if (ddtMaxUpdatedRows[0]?.max_updated_at) {
+        const d = new Date(ddtMaxUpdatedRows[0].max_updated_at);
+        if (!isNaN(d.getTime())) localMaxDdtUpdatedAt = d;
       }
 
       const listinoRows = await db.select<
@@ -342,6 +353,7 @@ class CloudSyncStatusService {
       // Controlla se la modifica Cloud più recente corrisponde a dati che il DB locale ha già
       const localMaxDate = Math.max(
         localLastSyncDate?.getTime() || 0,
+        localMaxDdtUpdatedAt?.getTime() || 0,
         localMaxGenUpdatedAt?.getTime() || 0,
         localMaxCliUpdatedAt?.getTime() || 0
       );

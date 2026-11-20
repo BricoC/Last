@@ -1,7 +1,12 @@
+import { invoke } from "@tauri-apps/api/core";
 import { pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { getDatabase } from "@/shared/data-layer/database";
-import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
+import {
+  getLastKnownSupabaseProjectUrl,
+  normalizeSupabaseProjectUrl,
+  setLastKnownSupabaseProjectUrl,
+} from "@/shared/services/supabaseConfigCache";
 import type { OfferRecord, OfferStatus, TrashOfferRow } from "../types/offer";
 import { offersSyncService } from "./offersSyncService";
 
@@ -90,11 +95,21 @@ export class OffersRepository {
     const created_by = params.created_by || "Operatore";
     const updated_by = created_by;
 
+    let activeProjectUrl = getLastKnownSupabaseProjectUrl();
+    if (!activeProjectUrl) {
+      const cfg = await invoke<{ config?: { projectUrl?: string } | null }>("load_supabase_config").catch(() => null);
+      const resolved = normalizeSupabaseProjectUrl(cfg?.config?.projectUrl);
+      if (resolved) {
+        setLastKnownSupabaseProjectUrl(resolved);
+        activeProjectUrl = resolved;
+      }
+    }
+
     await db.execute(
       `INSERT INTO offers (
         id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, sync_status, project_url
       ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, 'pending', $12)`,
-      [id, params.offer_date, requester, contact, items_text, status, is_urgent, created_by, updated_by, nowIso, nowIso, getLastKnownSupabaseProjectUrl()]
+      [id, params.offer_date, requester, contact, items_text, status, is_urgent, created_by, updated_by, nowIso, nowIso, activeProjectUrl]
     );
 
     const created: OfferRecord = {
