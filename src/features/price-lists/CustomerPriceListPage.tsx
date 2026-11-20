@@ -290,7 +290,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       const [count, clients, rows, tCount, supps] = await Promise.all([
         priceListRepository.getClientPriceCount(),
         priceListRepository.getDistinctClients(),
-        priceListRepository.searchClientPrices("", undefined, 20000),
+        priceListRepository.searchClientPrices("", undefined, 50000),
         priceListRepository.getClientTrashCount().catch(() => 0),
         orderRepository.getSuppliers().catch(() => []),
       ]);
@@ -318,7 +318,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
           const syncRes = await priceListSyncService.syncIncrementalClientiFromSupabase();
           if (syncRes.updatedCount > 0) {
             console.log(`[CustomerPriceListPage] Sincronizzati dal Cloud ${syncRes.updatedCount} articoli listini clienti.`);
-            const refreshedRows = await priceListRepository.searchClientPrices("", undefined, 20000);
+            const refreshedRows = await priceListRepository.searchClientPrices("", undefined, 50000);
             setItems(refreshedRows);
             setTotalDbCount(refreshedRows.length);
             setOriginalRowsSnapshot((prev) => {
@@ -349,7 +349,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
     const refreshClientiFromSqlite = async () => {
       const [clients, refreshedRows] = await Promise.all([
         priceListRepository.getDistinctClients(),
-        priceListRepository.searchClientPrices("", undefined, 20000),
+        priceListRepository.searchClientPrices("", undefined, 50000),
       ]);
       setDistinctClients(clients);
       setItems(refreshedRows);

@@ -26,6 +26,7 @@ import { electronicInvoicesService } from "@/features/invoices/services/electron
 import { QuoteSyncService } from "@/features/quotes/services/quoteSyncService";
 import { SupplierPriceListPage } from "@/features/supplier-price-lists/SupplierPriceListPage";
 import { ManualCloudImportPage } from "@/features/manual-cloud-import/ManualCloudImportPage";
+import { OneDriveListiniImportPage } from "@/features/onedrive-listini-import/OneDriveListiniImportPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
@@ -284,6 +285,8 @@ export function App() {
         return <SupplierPriceListPage />;
       case "manual-cloud-import":
         return currentUser?.is_admin ? <ManualCloudImportPage /> : null;
+      case "onedrive-listini-import":
+        return currentUser?.is_admin ? <OneDriveListiniImportPage /> : null;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">

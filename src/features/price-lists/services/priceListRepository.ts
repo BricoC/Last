@@ -191,7 +191,7 @@ export class PriceListRepository {
   async searchClientPrices(
     query: string,
     clientFilter?: string,
-    limit: number = 20000
+    limit: number = 50000
   ): Promise<ListinoClienteRow[]> {
     const db = await getDatabase();
     const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);

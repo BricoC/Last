@@ -487,6 +487,30 @@ export const TopNavBar: React.FC = () => {
               <span>Migrazione Listini</span>
             </button>
           )}
+
+          {/* Pulsante Provvisorio Importazione Listini OneDrive (Solo Admin - Sola Lettura) */}
+          {currentUser?.is_admin && (
+            <button
+              type="button"
+              onClick={() =>
+                openWindow({
+                  id: "onedrive-listini-import",
+                  title: "Importa Listini",
+                  componentId: "onedrive-listini-import",
+                })
+              }
+              title="Importa nuove voci dai Listini OneDrive in sola lettura (Solo Admin)"
+              className={cn(
+                "h-7 px-2.5 rounded-md flex items-center space-x-1.5 text-xs font-medium transition-all whitespace-nowrap shrink-0 select-none cursor-pointer border",
+                activeWindowId === "onedrive-listini-import"
+                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500 shadow-sm font-semibold"
+                  : "bg-emerald-500/10 text-emerald-400/90 border-emerald-500/30 hover:bg-emerald-500/20 hover:text-emerald-300"
+              )}
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Importa Listini</span>
+            </button>
+          )}
         </div>
 
       {/* Freccia Scorrimento Destra */}
