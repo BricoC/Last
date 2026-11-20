@@ -666,10 +666,10 @@ class DdtIncrementalSyncService {
         }
       }
 
-      // 2c-repair. Riparazione una-tantum per DDT 2026+ con righe salvate come 'note' dal vecchio bug a prezzo zero
+      // 2c-repair. Riparazione una-tantum per DDT 2026+ con righe salvate come 'note' o con U.M./Q.tà vuote dal vecchio bug a prezzo zero
       try {
         const repairProjectNorm = projectUrl.trim().replace(/\/+$/, "").toLowerCase();
-        const repairPrefKey = `ddt_repair_zero_price_notes_v1:${repairProjectNorm}`;
+        const repairPrefKey = `ddt_repair_zero_price_notes_v2:${repairProjectNorm}`;
         const prefRows = await db.select<{ value: string }[]>(
           "SELECT value FROM app_preferences WHERE key = $1 LIMIT 1",
           [repairPrefKey]
@@ -684,7 +684,8 @@ class DdtIncrementalSyncService {
                AND d.sync_status = 'synced'
                AND d.year >= 2026
                AND (d.project_url IS NULL OR LOWER(RTRIM(d.project_url, '/')) = $1)
-               AND i.row_kind = 'note'`,
+               AND i.deleted_at IS NULL
+               AND (i.row_kind = 'note' OR TRIM(COALESCE(i.unit, '')) = '' OR TRIM(COALESCE(i.quantity, '')) = '')`,
             [repairProjectNorm]
           );
 
