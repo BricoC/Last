@@ -891,18 +891,9 @@ export class DdtRepository {
     };
 
     const activeProjectUrl = getLastKnownSupabaseProjectUrl();
-    let isBrandNewDoc = false;
-    if (activeProjectUrl) {
-      const db = await getDatabase();
-      const existingDocRows = await db.select<{ id: string; project_url?: string | null }[]>(
-        "SELECT id, project_url FROM ddt_documents WHERE id = $1 LIMIT 1",
-        [docId]
-      );
-      isBrandNewDoc = existingDocRows.length === 0;
-    }
 
     await invoke("save_ddt_transaction", { payload });
-    if (activeProjectUrl && isBrandNewDoc) {
+    if (activeProjectUrl) {
       const db = await getDatabase();
       await db.execute(
         "UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2",
@@ -911,11 +902,15 @@ export class DdtRepository {
     }
 
     // Se è un DDT confermato/emesso, sincronizza subito su Supabase (con riallineamento numero su collisione in prima emissione)
+    let cloudPushError: string | undefined;
     if (status !== "bozza" && docNumber !== null) {
       if (isEmission) {
-        await ddtCloudPushService.pushDdtById(docId, {
+        const pushResult = await ddtCloudPushService.pushDdtById(docId, {
           reassignNumberOnConflict: isNewEmission,
         });
+        if (!pushResult.success) {
+          cloudPushError = pushResult.error || "Sincronizzazione cloud non riuscita";
+        }
       } else {
         void ddtCloudPushService.pushDdtById(docId, { reassignNumberOnConflict: false }).catch(() => {});
       }
@@ -925,6 +920,9 @@ export class DdtRepository {
 
     const saved = await this.getDdtById(docId);
     if (!saved) throw new Error("Errore durante il salvataggio del DDT");
+    if (cloudPushError) {
+      return Object.assign(saved, { _cloudPushError: cloudPushError });
+    }
     return saved;
   }
 

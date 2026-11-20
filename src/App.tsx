@@ -120,7 +120,7 @@ export function App() {
 
     const runQuickSync = () => {
       if (!getSupabaseSessionEmail() || (typeof navigator !== "undefined" && !navigator.onLine)) return;
-      triggerDdtSync(false, false, false);
+      triggerDdtSync(false, true, false);
       retryPendingCloudWrites();
     };
     const runStartupSync = () => {

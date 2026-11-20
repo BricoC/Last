@@ -75,10 +75,13 @@ class DdtIncrementalSyncService {
             } else {
               const changedAnno = Number((payload.new as { anno?: number } | null)?.anno || 0);
               const isPrevYear = changedAnno > 0 && changedAnno < new Date().getFullYear();
-              void this.syncNewDdtsFromSupabase({
-                includePreviousYear: isPrevYear,
-                checkModifiedRecent: true,
-              }).catch(() => {});
+              setTimeout(() => {
+                if (!isCurrent()) return;
+                void this.syncNewDdtsFromSupabase({
+                  includePreviousYear: isPrevYear,
+                  checkModifiedRecent: true,
+                }).catch(() => {});
+              }, 500);
             }
           }
         )

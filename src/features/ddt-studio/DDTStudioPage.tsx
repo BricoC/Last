@@ -5,6 +5,7 @@ import { DdtArchiveEntry, DdtDocument, DdtItem } from "./models/ddt";
 import { ddtRepository, normalizeImportedDdt } from "./services/ddtRepository";
 import { subscribeToOpenDdt } from "./services/ddtNavigation";
 import { ddtCloudPushService } from "./services/ddtCloudPushService";
+import { ddtIncrementalSyncService } from "./services/ddtIncrementalSyncService";
 import { DdtFieldConflict } from "./services/ddtMergeUtils";
 import { ensureDdtBaseSnapshotFromLocal } from "./services/ddtSnapshotService";
 import { clientRepository } from "@/features/clients/services/clientRepository";
@@ -623,6 +624,12 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   }, [loadRecentDdts, loadAvailableYears, signature, globalDiscount, globalMarkup]);
 
   useEffect(() => {
+    void ddtIncrementalSyncService
+      .syncNewDdtsFromSupabase({ checkModifiedRecent: true })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const handleQuoteConversion = (event: Event) => {
       const detail = (event as CustomEvent<{ ddt: Partial<DdtDocument>; items: DdtItem[] }>).detail;
       if (!detail?.ddt?.id) return;
@@ -819,7 +826,12 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       }
 
       const identifier = `${saved.series ? `${saved.series}/` : ""}${saved.doc_number}`;
-      showToast(`DDT emesso con successo! Numero assegnato: #${identifier}`);
+      const cloudPushError = (saved as DdtDocument & { _cloudPushError?: string })._cloudPushError;
+      if (cloudPushError) {
+        showToast(`DDT #${identifier} salvato in locale, ma invio al Cloud non riuscito: ${cloudPushError}`);
+      } else {
+        showToast(`DDT emesso con successo! Numero assegnato: #${identifier}`);
+      }
       return true;
     } catch (e) {
       console.error("Errore emissione DDT:", e);
@@ -868,7 +880,12 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       setIsSaving(false);
 
       const identifier = `${saved.series ? `${saved.series}/` : ""}${saved.doc_number}`;
-      showToast(`DDT #${identifier} salvato! Invio stampa di 3 copie immediate...`);
+      const cloudPushError = (saved as DdtDocument & { _cloudPushError?: string })._cloudPushError;
+      showToast(
+        cloudPushError
+          ? `DDT #${identifier} salvato in locale (Cloud in attesa: ${cloudPushError}). Invio stampa di 3 copie...`
+          : `DDT #${identifier} salvato! Invio stampa di 3 copie immediate...`
+      );
 
       // 2. Stampa 3 copie immediate senza preview
       setIsPrinting(true);
