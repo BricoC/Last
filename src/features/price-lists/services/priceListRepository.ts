@@ -17,8 +17,9 @@ function cleanNum5(val: number | null | undefined): number | null {
 
 function preservePendingPriceListRows(table: string): string {
   return `WHERE ${table}.sync_revision IS NULL AND ${table}.id NOT GLOB 'new_*'
-    AND (julianday(${table}.updated_at) IS NULL
-      OR julianday(excluded.updated_at) >= julianday(${table}.updated_at))`;
+    AND (CASE WHEN excluded.remote_sync_revision IS NOT NULL THEN
+      ${table}.remote_sync_revision IS NULL OR CAST(excluded.remote_sync_revision AS INTEGER) >= CAST(${table}.remote_sync_revision AS INTEGER)
+      ELSE julianday(${table}.updated_at) IS NULL OR julianday(excluded.updated_at) >= julianday(${table}.updated_at) END)`;
 }
 
 export class PriceListRepository {
@@ -365,8 +366,8 @@ export class PriceListRepository {
       const params: unknown[] = [];
 
       chunk.forEach((row, rIdx) => {
-        const offset = rIdx * 24;
-        const placeholders = Array.from({ length: 24 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
+        const offset = rIdx * 25;
+        const placeholders = Array.from({ length: 25 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
         valueClauses.push(`(${placeholders})`);
 
         if (source === "local") {
@@ -398,19 +399,25 @@ export class PriceListRepository {
           row.created_at || new Date().toISOString(),
           row.updated_at || new Date().toISOString(),
           source === "local" ? row.sync_revision : null,
+          source === "cloud" ? row.remote_sync_revision ?? null : null,
         );
       });
 
+      if (source === "cloud") {
+        params.push(JSON.stringify(Object.fromEntries(chunk.filter((row) => row.cloud_write_key)
+          .map((row) => [row.id, row.cloud_write_key]))));
+      }
       const sql = `INSERT INTO listino_generale (
           id, source_table, cat, fornitore, codice_articolo, data_ref,
           descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
           perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
-          perc_iva, note, created_at, updated_at, sync_revision
+          perc_iva, note, created_at, updated_at, sync_revision, remote_sync_revision
         ) ${source === "cloud"
           ? `SELECT * FROM (VALUES ${valueClauses.join(", ")}) AS incoming
              WHERE NOT EXISTS (
                SELECT 1 FROM pending_cloud_operations AS pending
-               WHERE pending.scope = 'listino_generale' AND pending.record_id = incoming.column1
+               WHERE pending.scope = 'listino_generale' AND (pending.record_id = incoming.column1 OR
+                 pending.record_id = (SELECT value FROM json_each(${`$${params.length}`}) WHERE key = incoming.column1))
              )`
           : `VALUES ${valueClauses.join(", ")}`}
         ON CONFLICT(id) DO UPDATE SET
@@ -434,7 +441,8 @@ export class PriceListRepository {
           perc_iva = excluded.perc_iva,
           note = excluded.note,
           updated_at = excluded.updated_at,
-          sync_revision = excluded.sync_revision
+          sync_revision = excluded.sync_revision,
+          remote_sync_revision = COALESCE(excluded.remote_sync_revision, listino_generale.remote_sync_revision)
         ${source === "cloud" ? preservePendingPriceListRows("listino_generale") : ""};`;
       writes.push({ sql, params });
     }
@@ -602,8 +610,8 @@ export class PriceListRepository {
       const params: unknown[] = [];
 
       chunk.forEach((row, rIdx) => {
-        const offset = rIdx * 19;
-        const placeholders = Array.from({ length: 19 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
+        const offset = rIdx * 20;
+        const placeholders = Array.from({ length: 20 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
         valueClauses.push(`(${placeholders})`);
 
         if (source === "local") {
@@ -630,19 +638,25 @@ export class PriceListRepository {
           row.created_at || new Date().toISOString(),
           row.updated_at || new Date().toISOString(),
           source === "local" ? row.sync_revision : null,
+          source === "cloud" ? row.remote_sync_revision ?? null : null,
         );
       });
 
+      if (source === "cloud") {
+        params.push(JSON.stringify(Object.fromEntries(chunk.filter((row) => row.cloud_write_key)
+          .map((row) => [row.id, row.cloud_write_key]))));
+      }
       const sql = `INSERT INTO listini_clienti (
           id, cliente, fornitore, codice_articolo, descrizione,
           prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto,
           data_acquisto, acquisto_old, ricarico, data_ref,
-          note, note1, note2, created_at, updated_at, sync_revision
+          note, note1, note2, created_at, updated_at, sync_revision, remote_sync_revision
         ) ${source === "cloud"
           ? `SELECT * FROM (VALUES ${valueClauses.join(", ")}) AS incoming
              WHERE NOT EXISTS (
                SELECT 1 FROM pending_cloud_operations AS pending
-               WHERE pending.scope = 'listini_clienti' AND pending.record_id = incoming.column1
+               WHERE pending.scope = 'listini_clienti' AND (pending.record_id = incoming.column1 OR
+                 pending.record_id = (SELECT value FROM json_each(${`$${params.length}`}) WHERE key = incoming.column1))
              )`
           : `VALUES ${valueClauses.join(", ")}`}
         ON CONFLICT(id) DO UPDATE SET
@@ -662,7 +676,8 @@ export class PriceListRepository {
           note1 = excluded.note1,
           note2 = excluded.note2,
           updated_at = excluded.updated_at,
-          sync_revision = excluded.sync_revision
+          sync_revision = excluded.sync_revision,
+          remote_sync_revision = COALESCE(excluded.remote_sync_revision, listini_clienti.remote_sync_revision)
         ${source === "cloud" ? preservePendingPriceListRows("listini_clienti") : ""};`;
       writes.push({ sql, params });
     }

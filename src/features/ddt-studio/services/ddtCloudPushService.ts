@@ -1,27 +1,20 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
-import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { invoke } from "@tauri-apps/api/core";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { getDatabase } from "@/shared/data-layer/database";
 import {
   matchesActiveSupabaseProject,
-  normalizeSupabaseProjectUrl,
 } from "@/shared/services/supabaseConfigCache";
 import {
   CloudHeader,
   CloudLine,
-  HEADER_FIELDS,
-  LINE_FIELDS,
   mapHeaderForLocal,
   mapLineForLocal,
 } from "@/features/settings/data-import/ddtReadOnlyPreviewService";
-import {
-  buildSnapshotFromCloud,
-  buildSnapshotFromLocal,
-  DdtFieldConflict,
-  mergeDdtSnapshots,
-} from "./ddtMergeUtils";
-import { getDdtBaseSnapshot, saveDdtBaseSnapshot } from "./ddtSnapshotService";
-import { parseCascadeDiscounts } from "../utils/ddtCalculations";
+import { DdtFieldConflict, mergeDdtSnapshots } from "./ddtMergeUtils";
+import { buildSnapshotFromCloud, buildSnapshotFromLocal } from "./ddtSnapshotBuilders";
+import { buildDdtSnapshotWrite, ddtSnapshotSchema, getDdtBaseSnapshot } from "./ddtSnapshotService";
+import { buildSupabaseDdtPayloads, type LocalDdtItemRow, type LocalDdtRow } from "./ddtCloudPayload";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -30,60 +23,6 @@ interface SupabaseConfig {
 
 interface ConfigStatus {
   config: SupabaseConfig | null;
-}
-
-interface LocalDdtRow {
-  id: string;
-  doc_number: number | null;
-  year: number;
-  series: string;
-  doc_date: string;
-  status: string;
-  client_name: string;
-  client_address: string | null;
-  client_city: string | null;
-  client_vat: string | null;
-  client_fiscal_code: string | null;
-  client_sdi: string | null;
-  client_phones_json: string | null;
-  destination_name: string | null;
-  destination_address?: string | null;
-  destination_city: string | null;
-  transport_reason: string | null;
-  payment_method: string | null;
-  order_reference: string | null;
-  operator: string | null;
-  goods_appearance: string | null;
-  carriage_terms: string | null;
-  packages_count: string | null;
-  weight_kg: string | null;
-  carrier: string | null;
-  internal_notes: string | null;
-  total_taxable_subunits: number;
-  total_vat_subunits: number;
-  total_document_subunits: number;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
-  sync_status: string;
-  project_url?: string | null;
-}
-
-interface LocalDdtItemRow {
-  id: string;
-  ddt_id: string;
-  row_index: number;
-  code: string | null;
-  description: string;
-  row_kind: string | null;
-  unit: string | null;
-  quantity: string | null;
-  unit_price_subunits: number;
-  discount_pct: string | null;
-  net_amount_subunits: number;
-  vat_rate: number;
-  purchase_price_subunits: number;
-  deleted_at: string | null;
 }
 
 export interface DdtPushResult {
@@ -103,15 +42,9 @@ export interface DdtBatchPushResult {
 const DEFAULT_TIMEOUT_MS = 6000;
 const RECENT_DELETE_TTL_MS = 30_000;
 
-function parseNumericString(value: string | number | null | undefined, fallback = 0): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  if (value === null || value === undefined) return fallback;
-  const parsed = parseFloat(String(value).trim().replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function round5(value: number): number {
-  return Math.round(value * 100000) / 100000;
+async function ddtWriteKey(payload: ReturnType<typeof buildSupabaseDdtPayloads>): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(payload)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function fetchWithTimeout(
@@ -126,129 +59,6 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
-}
-
-export function buildSupabaseDdtPayloads(doc: LocalDdtRow, items: LocalDdtItemRow[]) {
-  let phones: unknown[] = [];
-  try {
-    if (doc.client_phones_json) {
-      const parsed = JSON.parse(doc.client_phones_json);
-      if (Array.isArray(parsed)) phones = parsed;
-    }
-  } catch {
-    phones = [];
-  }
-
-  const activeItems = items.filter((it) => !it.deleted_at);
-  let totalPurchaseCost = 0;
-  let totalDiscount = 0;
-
-  const linePayloads = activeItems.map((it) => {
-    const isNote =
-      it.row_kind === "note" ||
-      (it.row_kind !== "item" &&
-        Boolean(it.description?.trim()) &&
-        (it.unit_price_subunits ?? 0) === 0 &&
-        (it.net_amount_subunits ?? 0) === 0 &&
-        (it.purchase_price_subunits ?? 0) === 0 &&
-        (!it.code || !String(it.code).trim()) &&
-        !parseDdtQuantity(it.quantity) &&
-        (!it.unit || !String(it.unit).trim()));
-
-    const qty = isNote ? 0 : parseDdtQuantity(it.quantity) ?? (it.quantity?.trim() ? 0 : 1);
-    const unitPrice = isNote ? 0 : (it.unit_price_subunits || 0) / 100000;
-    const cascadeDiscounts = isNote ? [] : parseCascadeDiscounts(it.discount_pct);
-    const discountFactor = cascadeDiscounts.reduce((acc, pct) => acc * (1 - pct / 100), 1);
-    const discountDecimal = round5(1 - discountFactor);
-    const netAmount = isNote ? 0 : (it.net_amount_subunits || 0) / 100000;
-    const purchaseUnit = isNote ? 0 : (it.purchase_price_subunits || 0) / 100000;
-    const discountedUnit = !isNote && qty > 0 ? round5(netAmount / qty) : 0;
-    const lineCost = isNote ? 0 : purchaseUnit * qty;
-    const lineProfit = isNote ? 0 : round5(netAmount - lineCost);
-
-    if (!isNote) {
-      totalPurchaseCost += lineCost;
-      totalDiscount += Math.max(0, unitPrice * qty - netAmount);
-    }
-
-    return {
-      id: it.id,
-      ddt_id: doc.id,
-      riga_nr: it.row_index,
-      um: isNote ? "" : it.unit || "NR",
-      quantita: qty,
-      descrizione: it.description || "",
-      prezzo: round5(unitPrice),
-      sconto_pct: discountDecimal,
-      importo: round5(netAmount),
-      iva_pct: isNote ? 0 : Math.round(Number(it.vat_rate || 0)),
-      prezzo_acquisto: round5(purchaseUnit),
-      prezzo_scontato: discountedUnit,
-      ricavo: lineProfit,
-      anno: doc.year,
-      numero_ddt: doc.doc_number,
-    };
-  });
-
-  const taxable = (doc.total_taxable_subunits || 0) / 100000;
-  const vat = (doc.total_vat_subunits || 0) / 100000;
-  const totalDoc = (doc.total_document_subunits || 0) / 100000;
-  const roundedCost = round5(totalPurchaseCost);
-  const profit = round5(taxable - roundedCost);
-  const markup = roundedCost > 0 ? round5(profit / roundedCost) : 0;
-
-  const rawDestName = (doc.destination_name || "").trim();
-  const rawDestAddr = (doc.destination_address || "").trim();
-  const rawDestCity = (doc.destination_city || "").trim();
-  const clientName = (doc.client_name || "").trim();
-  const isDestNameMissingOrClient = !rawDestName || rawDestName.toUpperCase() === clientName.toUpperCase();
-  const isDestNameSameAsAddr = Boolean(rawDestAddr && rawDestName.toUpperCase() === rawDestAddr.toUpperCase());
-  const cloudDestinazione = rawDestAddr
-    ? isDestNameMissingOrClient || isDestNameSameAsAddr
-      ? rawDestAddr
-      : rawDestCity
-      ? rawDestName
-      : `${rawDestName} - ${rawDestAddr}`
-    : rawDestName;
-  const cloudCittaDest = rawDestCity;
-
-  const headerPayload = {
-    id: doc.id,
-    numero: doc.doc_number,
-    anno: doc.year,
-    data: doc.doc_date,
-    cliente: doc.client_name,
-    indirizzo: doc.client_address || "",
-    citta: doc.client_city || "",
-    pagamento: doc.payment_method || "",
-    destinazione: cloudDestinazione,
-    citta_dest: cloudCittaDest,
-    nr_vs_ordine: doc.order_reference || "",
-    causale: doc.transport_reason || "Vendita",
-    porto: doc.carriage_terms || "",
-    aspetto: doc.goods_appearance || "",
-    colli: doc.packages_count || "",
-    peso_kg: parseNumericString(doc.weight_kg, 0),
-    vettore: doc.carrier || "",
-    operatore: doc.operator || "",
-    note: doc.internal_notes || "",
-    totale_imponibile: round5(taxable),
-    totale_iva: round5(vat),
-    totale_documento: round5(totalDoc),
-    stato: doc.status,
-    created_at: doc.created_at,
-    ultima_modifica: doc.updated_at,
-    piva: doc.client_vat || "",
-    cod_fiscale: doc.client_fiscal_code || "",
-    sdi: doc.client_sdi || "",
-    telefoni: phones,
-    prezzo_acquisto_totale: roundedCost,
-    ricavo: profit,
-    ricarico_totale: markup,
-    sconto_totale: round5(totalDiscount),
-  };
-
-  return { headerPayload, linePayloads };
 }
 
 class DdtCloudPushService {
@@ -353,50 +163,48 @@ class DdtCloudPushService {
     }
   }
 
-  private async fetchRemoteDdtFull(
-    creds: SupabaseConfig,
-    ddtId: string
-  ): Promise<{ header: CloudHeader; lines: CloudLine[] } | null> {
-    const hUrl = new URL("/rest/v1/ddt", creds.projectUrl);
-    hUrl.searchParams.set("id", `eq.${ddtId}`);
-    hUrl.searchParams.set("select", HEADER_FIELDS);
-    hUrl.searchParams.set("limit", "1");
+  private async fetchRemoteDdtVersion(creds: SupabaseConfig, id: string) {
+    const response = await this.ddtRpc(creds, "last_ddt_snapshot", { p_id: id });
+    if (!response.ok) throw new Error(`Lettura DDT: HTTP ${response.status}. Verifica la migrazione Supabase DDT.`);
+    return await response.json() as {
+      revision: string;
+      deletedAt: string | null;
+      writeKey?: string | null;
+      header?: CloudHeader;
+      lines?: CloudLine[];
+    } | null;
+  }
 
-    const lUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
-    lUrl.searchParams.set("ddt_id", `eq.${ddtId}`);
-    lUrl.searchParams.set("select", LINE_FIELDS);
-    lUrl.searchParams.set("order", "riga_nr.asc");
+  private async fetchRemoteDdtFull(creds: SupabaseConfig, id: string) {
+    const remote = await this.fetchRemoteDdtVersion(creds, id);
+    return remote?.header && Array.isArray(remote.lines) ? { header: remote.header, lines: remote.lines } : null;
+  }
 
-    const [hRes, lRes] = await Promise.all([
-      fetchWithTimeout(hUrl.toString(), {
-        headers: { apikey: creds.anonKey },
-      }),
-      fetchWithTimeout(lUrl.toString(), {
-        headers: { apikey: creds.anonKey },
-      }),
-    ]);
-
-    if (!hRes.ok || !lRes.ok) return null;
-    const headers = (await hRes.json()) as CloudHeader[];
-    if (!headers?.[0]) return null;
-    const lines = (await lRes.json()) as CloudLine[];
-    return { header: headers[0], lines };
+  private ddtRpc(creds: SupabaseConfig, name: string, payload: unknown) {
+    const url = new URL(`/rest/v1/rpc/${name}`, creds.projectUrl);
+    return fetchWithTimeout(url.toString(), {
+      method: "POST",
+      headers: { apikey: creds.anonKey, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   }
 
   private async applyMergedSnapshotToLocal(
-    docId: string,
+    doc: LocalDdtRow,
     merged: ReturnType<typeof mergeDdtSnapshots>["merged"],
     totalTaxableSubunits: number,
     totalVatSubunits: number,
     totalDocumentSubunits: number,
     updatedAt: string,
-    syncStatus: "pending" | "synced"
+    syncStatus: "pending" | "synced",
+    snapshotWrite?: SqliteWrite
   ): Promise<{ updatedDoc: LocalDdtRow; updatedItems: LocalDdtItemRow[] }> {
     const db = await getDatabase();
     const h = merged.header;
+    const docId = doc.id;
 
-    await db.execute(
-      `UPDATE ddt_documents SET
+    const writes: SqliteWrite[] = [{
+      sql: `UPDATE ddt_documents SET
         doc_date = $1, client_name = $2, client_address = $3, client_city = $4,
         client_vat = $5, client_fiscal_code = $6, client_sdi = $7,
         destination_name = $8, destination_city = $9, transport_reason = $10,
@@ -405,8 +213,8 @@ class DdtCloudPushService {
         weight_kg = $17, carrier = $18, internal_notes = $19,
         total_taxable_subunits = $20, total_vat_subunits = $21, total_document_subunits = $22,
         updated_at = $23, sync_status = $24
-       WHERE id = $25`,
-      [
+       WHERE id = $25 AND updated_at IS $26 AND deleted_at IS NULL AND sync_status IS $27`,
+      params: [
         h.doc_date,
         h.client_name,
         h.client_address,
@@ -431,27 +239,20 @@ class DdtCloudPushService {
         totalDocumentSubunits,
         updatedAt,
         syncStatus,
-        docId,
-      ]
-    );
+        docId, doc.updated_at, doc.sync_status,
+      ],
+      expectedRows: 1,
+    }];
 
-    const keepIds = new Set(merged.items.map((it) => it.id));
-    const existingRows = await db.select<{ id: string }[]>(
-      `SELECT id FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NULL`,
-      [docId]
-    );
-    for (const row of existingRows) {
-      if (!keepIds.has(row.id)) {
-        await db.execute(
-          `UPDATE ddt_items SET deleted_at = $1, updated_at = $1, sync_status = $2 WHERE id = $3`,
-          [updatedAt, syncStatus, row.id]
-        );
-      }
-    }
+    writes.push({
+      sql: `UPDATE ddt_items SET deleted_at = $1, updated_at = $1, sync_status = $2
+            WHERE ddt_id = $3 AND deleted_at IS NULL AND id NOT IN (SELECT value FROM json_each($4))`,
+      params: [updatedAt, syncStatus, docId, JSON.stringify(merged.items.map((item) => item.id))],
+    });
 
     for (const it of merged.items) {
-      await db.execute(
-        `INSERT INTO ddt_items (
+      writes.push({
+        sql: `INSERT INTO ddt_items (
           id, ddt_id, row_index, code, description, row_kind, unit, quantity,
           unit_price_subunits, discount_pct, net_amount_subunits, vat_rate,
           vat_amount_subunits, purchase_price_subunits, created_at, updated_at,
@@ -464,8 +265,9 @@ class DdtCloudPushService {
           net_amount_subunits = excluded.net_amount_subunits, vat_rate = excluded.vat_rate,
           vat_amount_subunits = excluded.vat_amount_subunits,
           purchase_price_subunits = excluded.purchase_price_subunits,
-          updated_at = excluded.updated_at, deleted_at = NULL, sync_status = excluded.sync_status`,
-        [
+          updated_at = excluded.updated_at, deleted_at = NULL, sync_status = excluded.sync_status
+        WHERE ddt_items.ddt_id = excluded.ddt_id`,
+        params: [
           it.id,
           docId,
           it.row_index,
@@ -482,10 +284,13 @@ class DdtCloudPushService {
           it.purchase_price_subunits,
           updatedAt,
           syncStatus,
-        ]
-      );
+        ],
+        expectedRows: 1,
+      });
     }
 
+    if (snapshotWrite) writes.push({ sql: ddtSnapshotSchema, params: [] }, snapshotWrite);
+    await applyLocalDatabaseBatch(writes);
     const updatedDocs = await db.select<LocalDdtRow[]>(
       `SELECT * FROM ddt_documents WHERE id = $1 LIMIT 1`,
       [docId]
@@ -529,7 +334,7 @@ class DdtCloudPushService {
 
     let currentDoc = { ...doc };
     let wasAutoMerged = false;
-    let pushedHeader = false;
+    let saved = false;
     let savedRemoteModified: string | null = null;
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -583,25 +388,44 @@ class DdtCloudPushService {
           };
         }
         const nextNumber = await this.computeNextAvailableNumber(currentDoc.year);
-        await db.execute(`UPDATE ddt_documents SET doc_number = $1 WHERE id = $2`, [
-          nextNumber,
-          currentDoc.id,
-        ]);
+        await applyLocalDatabaseBatch([{
+          sql: "UPDATE ddt_documents SET doc_number = $1 WHERE id = $2 AND updated_at = $3 AND deleted_at IS NULL",
+          params: [nextNumber, currentDoc.id, currentDoc.updated_at], expectedRows: 1,
+        }]);
         currentDoc = { ...currentDoc, doc_number: nextNumber };
       }
 
-      // 3-Way Merge intelligente se un altro PC ha aggiornato questo stesso DDT su Supabase
-      if (!forceOverwrite && remoteMeta && remoteMeta.id === currentDoc.id) {
+      const remote = await this.fetchRemoteDdtVersion(creds, currentDoc.id);
+      const localVersion = await db.select<{ updated_at: string; deleted_at: string | null }[]>(
+        "SELECT updated_at, deleted_at FROM ddt_documents WHERE id = $1", [currentDoc.id],
+      );
+      if (localVersion[0]?.updated_at !== currentDoc.updated_at || localVersion[0].deleted_at) {
+        return { success: false, docNumber: currentDoc.doc_number, error: "Il DDT è stato modificato durante l’invio" };
+      }
+      if (remote?.deletedAt && !currentDoc.cloud_restore_requested) {
+        return { success: false, docNumber: currentDoc.doc_number, error: "DDT eliminato sul cloud. Ripristinalo esplicitamente per riattivarlo." };
+      }
+      const originalPayload = buildSupabaseDdtPayloads(currentDoc, items);
+      const originalKey = await ddtWriteKey(originalPayload);
+      if (remote?.writeKey === originalKey && remote.header?.ultima_modifica) {
+        savedRemoteModified = remote.header.ultima_modifica;
+        saved = true;
+        break;
+      }
+      if (remote?.header && Array.isArray(remote.lines) && !forceOverwrite) {
         const baseSnap = await getDdtBaseSnapshot(currentDoc.id);
-        if (
-          baseSnap?.remoteUltimaModifica &&
-          remoteMeta.ultima_modifica &&
-          baseSnap.remoteUltimaModifica !== remoteMeta.ultima_modifica
-        ) {
-          const remoteFull = await this.fetchRemoteDdtFull(creds, currentDoc.id);
-          if (remoteFull) {
-            const localSnap = buildSnapshotFromLocal(currentDoc, items);
-            const remoteSnap = buildSnapshotFromCloud(remoteFull.header, remoteFull.lines);
+        const localSnap = buildSnapshotFromLocal(currentDoc, items);
+        const remoteSnap = buildSnapshotFromCloud(remote.header, remote.lines);
+        if (!baseSnap && JSON.stringify(localSnap) !== JSON.stringify(remoteSnap)) {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("ddt-merge-conflict", {
+              detail: { docId: currentDoc.id, year: currentDoc.year, docNumber: currentDoc.doc_number, conflicts: [] },
+            }));
+          }
+          return { success: false, docNumber: currentDoc.doc_number, error: "Versione di base DDT assente. Scegli la versione da mantenere." };
+        }
+        if (baseSnap && (baseSnap.remoteUltimaModifica !== remote.header.ultima_modifica ||
+             JSON.stringify(baseSnap.snapshot) !== JSON.stringify(remoteSnap))) {
             const delRows = await db.select<{ id: string }[]>(
               `SELECT id FROM ddt_items WHERE ddt_id = $1 AND deleted_at IS NOT NULL AND sync_status = 'pending'`,
               [currentDoc.id]
@@ -638,7 +462,7 @@ class DdtCloudPushService {
             if (mergeResult.autoMergedChanges > 0) {
               const mergeTs = new Date().toISOString();
               const applied = await this.applyMergedSnapshotToLocal(
-                currentDoc.id,
+                currentDoc,
                 mergeResult.merged,
                 mergeResult.totalTaxableSubunits,
                 mergeResult.totalVatSubunits,
@@ -646,144 +470,62 @@ class DdtCloudPushService {
                 mergeTs,
                 "pending"
               );
+              if (applied.updatedDoc?.updated_at !== mergeTs) {
+                return { success: false, error: "Il DDT è stato modificato durante l’unione" };
+              }
               currentDoc = applied.updatedDoc;
               items = applied.updatedItems;
               wasAutoMerged = true;
             }
-          }
         }
       }
 
-      const { headerPayload } = buildSupabaseDdtPayloads(currentDoc, items);
-      const headerUrl = new URL("/rest/v1/ddt?on_conflict=id", creds.projectUrl);
-      const headerRes = await fetchWithTimeout(headerUrl.toString(), {
-        method: "POST",
-        headers: {
-          apikey: creds.anonKey,
-          "Content-Type": "application/json",
-          Prefer: "return=representation,resolution=merge-duplicates",
-        },
-        body: JSON.stringify([headerPayload]),
+      const payload = wasAutoMerged ? buildSupabaseDdtPayloads(currentDoc, items) : originalPayload;
+      const response = await this.ddtRpc(creds, "last_write_ddt", {
+        p_header: payload.headerPayload,
+        p_lines: payload.linePayloads,
+        p_expected_revision: remote?.revision ?? null,
+        p_restore: Boolean(currentDoc.cloud_restore_requested),
+        p_write_key: wasAutoMerged ? await ddtWriteKey(payload) : originalKey,
       });
-
-      if (headerRes.ok) {
-        const repRows = (await headerRes.json().catch(() => [])) as Array<{
-          ultima_modifica?: string | null;
-        }>;
-        savedRemoteModified = repRows?.[0]?.ultima_modifica ?? currentDoc.updated_at;
-        pushedHeader = true;
+      if (response.ok) {
+        const confirmation = await response.json() as { updatedAt?: string; revision?: string };
+        if (!confirmation.updatedAt || !confirmation.revision) throw new Error("Supabase non ha confermato la versione del DDT");
+        savedRemoteModified = confirmation.updatedAt;
+        saved = true;
         break;
       }
-
-      if (headerRes.status === 409 && reassignNumberOnConflict && attempt < 2) {
-        const nextNumber = await this.computeNextAvailableNumber(currentDoc.year);
-        await db.execute(`UPDATE ddt_documents SET doc_number = $1 WHERE id = $2`, [
-          nextNumber,
-          currentDoc.id,
-        ]);
-        currentDoc = { ...currentDoc, doc_number: nextNumber };
+      const error = await response.json().catch(() => ({})) as { code?: string; message?: string };
+      if (error.code === "23505" && reassignNumberOnConflict && attempt < 2) {
+        const number = await this.computeNextAvailableNumber(currentDoc.year);
+        await applyLocalDatabaseBatch([{
+          sql: "UPDATE ddt_documents SET doc_number = $1 WHERE id = $2 AND updated_at = $3 AND deleted_at IS NULL",
+          params: [number, currentDoc.id, currentDoc.updated_at], expectedRows: 1,
+        }]);
+        currentDoc = { ...currentDoc, doc_number: number };
         continue;
       }
-
-      const errBody = (await headerRes.json().catch(() => ({}))) as { message?: string };
       return {
-        success: false,
-        docNumber: currentDoc.doc_number,
-        error: `Errore push testata DDT: ${errBody?.message || headerRes.statusText || headerRes.status}`,
+        success: false, docNumber: currentDoc.doc_number,
+        error: `Errore push DDT: ${error.message || response.status}`,
       };
     }
+    if (!saved) return { success: false, docNumber: currentDoc.doc_number, error: "Numero DDT non disponibile" };
 
-    if (!pushedHeader) {
-      return {
-        success: false,
-        docNumber: currentDoc.doc_number,
-        error: "Impossibile assegnare un numero univoco su Supabase dopo 3 tentativi",
-      };
-    }
-
-    // Upsert righe PRIMA di eliminare le righe rimosse: evita DDT a 0 righe su Supabase se cade la rete a metà
-    const { linePayloads } = buildSupabaseDdtPayloads(currentDoc, items);
-    if (linePayloads.length > 0) {
-      const linesUrl = new URL("/rest/v1/ddt_righe?on_conflict=id", creds.projectUrl);
-      const linesRes = await fetchWithTimeout(linesUrl.toString(), {
-        method: "POST",
-        headers: {
-          apikey: creds.anonKey,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal,resolution=merge-duplicates",
-        },
-        body: JSON.stringify(linePayloads),
-      });
-
-      if (!linesRes.ok) {
-        const errBody = (await linesRes.json().catch(() => ({}))) as { message?: string };
-        return {
-          success: false,
-          docNumber: currentDoc.doc_number,
-          error: `Errore push righe DDT: ${errBody?.message || linesRes.statusText || linesRes.status}`,
-        };
-      }
-
-      const delRemovedUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
-      delRemovedUrl.searchParams.set("ddt_id", `eq.${currentDoc.id}`);
-      delRemovedUrl.searchParams.set("id", `not.in.(${linePayloads.map((l) => l.id).join(",")})`);
-      const delRemovedRes = await fetchWithTimeout(delRemovedUrl.toString(), {
-        method: "DELETE",
-        headers: { apikey: creds.anonKey },
-      });
-      if (!delRemovedRes.ok) {
-        const errBody = (await delRemovedRes.json().catch(() => ({}))) as { message?: string };
-        return {
-          success: false,
-          docNumber: currentDoc.doc_number,
-          error: `Errore pulizia righe rimosse DDT: ${errBody?.message || delRemovedRes.statusText || delRemovedRes.status}`,
-        };
-      }
-    } else {
-      const delAllUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
-      delAllUrl.searchParams.set("ddt_id", `eq.${currentDoc.id}`);
-      const delAllRes = await fetchWithTimeout(delAllUrl.toString(), {
-        method: "DELETE",
-        headers: { apikey: creds.anonKey },
-      });
-      if (!delAllRes.ok) {
-        const errBody = (await delAllRes.json().catch(() => ({}))) as { message?: string };
-        return {
-          success: false,
-          docNumber: currentDoc.doc_number,
-          error: `Errore pulizia righe DDT: ${errBody?.message || delAllRes.statusText || delAllRes.status}`,
-        };
-      }
-    }
-
-    // Pulisce eventuali righe orfane con stesso anno/numero e ddt_id NULL
-    const delOrphanUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
-    delOrphanUrl.searchParams.set("anno", `eq.${currentDoc.year}`);
-    delOrphanUrl.searchParams.set("numero_ddt", `eq.${currentDoc.doc_number}`);
-    delOrphanUrl.searchParams.set("ddt_id", "is.null");
-    const delOrphanRes = await fetchWithTimeout(delOrphanUrl.toString(), {
-      method: "DELETE",
-      headers: { apikey: creds.anonKey },
-    });
-    if (!delOrphanRes.ok) {
-      const errBody = (await delOrphanRes.json().catch(() => ({}))) as { message?: string };
-      return {
-        success: false,
-        docNumber: currentDoc.doc_number,
-        error: `Errore pulizia righe orfane DDT: ${errBody?.message || delOrphanRes.statusText || delOrphanRes.status}`,
-      };
-    }
-
-    await db.execute(`UPDATE ddt_documents SET sync_status = 'synced', project_url = $2 WHERE id = $1`, [
-      currentDoc.id,
-      normalizeSupabaseProjectUrl(creds.projectUrl),
+    await applyLocalDatabaseBatch([
+      { sql: ddtSnapshotSchema, params: [] },
+      buildDdtSnapshotWrite(currentDoc.id, savedRemoteModified, buildSnapshotFromLocal(currentDoc, items)),
+      {
+        sql: `UPDATE ddt_items SET sync_status = 'synced' WHERE ddt_id = $1 AND EXISTS (
+          SELECT 1 FROM ddt_documents WHERE id=$1 AND updated_at=$2 AND doc_number IS $3 AND deleted_at IS NULL AND project_url IS $4)`,
+        params: [currentDoc.id, currentDoc.updated_at, currentDoc.doc_number, currentDoc.project_url ?? null],
+      },
+      {
+        sql: `UPDATE ddt_documents SET sync_status='synced', cloud_restore_requested=0
+          WHERE id=$1 AND updated_at=$2 AND doc_number IS $3 AND deleted_at IS NULL AND project_url IS $4`,
+        params: [currentDoc.id, currentDoc.updated_at, currentDoc.doc_number, currentDoc.project_url ?? null],
+      },
     ]);
-    await db.execute(`UPDATE ddt_items SET sync_status = 'synced' WHERE ddt_id = $1`, [
-      currentDoc.id,
-    ]);
-
-    const finalSnap = buildSnapshotFromLocal(currentDoc, items);
-    await saveDdtBaseSnapshot(currentDoc.id, savedRemoteModified, finalSnap);
 
     if (wasAutoMerged && typeof window !== "undefined") {
       window.dispatchEvent(
@@ -837,8 +579,8 @@ class DdtCloudPushService {
       vatSub += it.vat_amount_subunits;
     }
     const ts = remoteFull.header.ultima_modifica || new Date().toISOString();
-    await this.applyMergedSnapshotToLocal(docId, remoteSnap, taxSub, vatSub, taxSub + vatSub, ts, "synced");
-    await saveDdtBaseSnapshot(docId, ts, remoteSnap);
+    await this.applyMergedSnapshotToLocal(docs[0], remoteSnap, taxSub, vatSub, taxSub + vatSub, ts, "synced",
+      buildDdtSnapshotWrite(docId, ts, remoteSnap));
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("ddt-data-updated"));
     }
@@ -863,24 +605,30 @@ class DdtCloudPushService {
       if (!matchesActiveSupabaseProject(docProjectUrl, creds.projectUrl)) {
         return false;
       }
-      const linesUrl = new URL("/rest/v1/ddt_righe", creds.projectUrl);
-      linesUrl.searchParams.set("ddt_id", `eq.${id}`);
-      const delLinesRes = await fetchWithTimeout(linesUrl.toString(), {
-        method: "DELETE",
-        headers: { apikey: creds.anonKey },
+      const [before] = await db.select<{ updated_at: string; deleted_at: string | null }[]>(
+        "SELECT updated_at, deleted_at FROM ddt_documents WHERE id=$1", [id],
+      );
+      if (before && !before.deleted_at) return false;
+      const remote = await this.fetchRemoteDdtVersion(creds, id);
+      const [current] = await db.select<{ updated_at: string; deleted_at: string | null }[]>(
+        "SELECT updated_at, deleted_at FROM ddt_documents WHERE id=$1", [id],
+      );
+      if (current?.updated_at !== before?.updated_at || current?.deleted_at !== before?.deleted_at) return false;
+      const response = await this.ddtRpc(creds, "last_delete_ddt", {
+        p_id: id, p_expected_revision: remote?.revision ?? null,
       });
-      if (!delLinesRes.ok) return false;
-
-      const docUrl = new URL("/rest/v1/ddt", creds.projectUrl);
-      docUrl.searchParams.set("id", `eq.${id}`);
-      const delDocRes = await fetchWithTimeout(docUrl.toString(), {
-        method: "DELETE",
-        headers: { apikey: creds.anonKey },
-      });
-      if (!delDocRes.ok) return false;
-
-      await db.execute(`UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`, [id]);
-      await db.execute(`UPDATE ddt_items SET sync_status = 'synced' WHERE ddt_id = $1`, [id]);
+      if (!response.ok) return false;
+      if (before) await applyLocalDatabaseBatch([
+        {
+          sql: `UPDATE ddt_items SET sync_status='synced' WHERE ddt_id=$1 AND EXISTS (
+            SELECT 1 FROM ddt_documents WHERE id=$1 AND updated_at=$2 AND deleted_at=$3)`,
+          params: [id, before.updated_at, before.deleted_at],
+        },
+        {
+          sql: "UPDATE ddt_documents SET sync_status='synced' WHERE id=$1 AND updated_at=$2 AND deleted_at=$3",
+          params: [id, before.updated_at, before.deleted_at],
+        },
+      ]);
       return true;
     } catch (err) {
       console.warn("[DdtPush] Impossibile eliminare DDT remoto su Supabase (verrà ritentato):", err);

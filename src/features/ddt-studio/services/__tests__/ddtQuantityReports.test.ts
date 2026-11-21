@@ -1,7 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { expect, it, vi } from "vitest";
 import { DashboardService } from "@/features/dashboard/services/dashboardService";
-import { getDdtMonthlyReportData } from "../ddtReportService";
+import { getDdtMonthlyReportData } from "../ddtMonthlyReportDataService";
 
 const { getDatabase } = vi.hoisted(() => ({ getDatabase: vi.fn() }));
 vi.mock("@/shared/data-layer/database", () => ({ getDatabase }));

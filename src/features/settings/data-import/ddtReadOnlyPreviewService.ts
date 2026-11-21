@@ -168,34 +168,31 @@ export async function importAllReadableSupabaseDdts(projectUrl: string, anonKey:
   if (anonKey.startsWith("sb_secret_") || anonKey.toLowerCase().includes("service_role")) {
     throw new Error("L’importazione accetta solo la chiave anon/pubblica.");
   }
-  const [headers, lines] = await Promise.all([
-    readAll<CloudHeader>(normalizedUrl, anonKey.trim(), "ddt", HEADER_FIELDS),
-    readAll<CloudLine>(normalizedUrl, anonKey.trim(), "ddt_righe", LINE_FIELDS),
+  const [{ readDdtChangePage }, { buildSnapshotFromCloud }] = await Promise.all([
+    import("@/features/ddt-studio/services/ddtCloudPull"),
+    import("@/features/ddt-studio/services/ddtSnapshotBuilders"),
   ]);
-  const byId = new Map(headers.map((header) => [header.id, header]));
-  const byNumber = new Map<string, CloudHeader[]>();
-  headers.forEach((header) => {
-    if (Number.isFinite(Number(header.anno)) && Number.isFinite(Number(header.numero))) {
-      const key = documentKey(Number(header.anno), Number(header.numero));
-      byNumber.set(key, [...(byNumber.get(key) ?? []), header]);
+  const changeById = new Map<string, { header: CloudHeader; lines: CloudLine[] }>();
+  let cursor = "0";
+  for (;;) {
+    const page = await readDdtChangePage(normalizedUrl, anonKey.trim(), cursor);
+    if (!page.length) break;
+    for (const change of page) {
+      if (change.document) changeById.set(change.id, change.document);
+      else changeById.delete(change.id);
+      cursor = change.revision;
     }
-  });
-  const importProjectUrl = normalizeSupabaseProjectUrl(normalizedUrl);
-  const importedHeaders = headers.filter((header) => Boolean(header.id)
-    && Number.isFinite(Number(header.anno)) && Number.isFinite(Number(header.numero)) && Boolean(header.data))
-    .map((h) => ({ ...mapHeaderForLocal(h), projectUrl: importProjectUrl }));
-  const rowSequences = new Map<string, number>();
-  const mappedLines = lines.map((line) => {
-    let header = line.ddt_id ? byId.get(line.ddt_id) : undefined;
-    if (!header && !line.ddt_id && line.anno !== null && line.numero_ddt !== null) {
-      const matches = byNumber.get(documentKey(Number(line.anno), Number(line.numero_ddt))) ?? [];
-      if (matches.length === 1) header = matches[0];
-    }
-    const headerId = header?.id ?? null;
-    const fallbackRowIndex = headerId ? (rowSequences.get(headerId) ?? 0) + 1 : 0;
-    if (headerId) rowSequences.set(headerId, fallbackRowIndex);
-    return mapLineForLocal(line, headerId, fallbackRowIndex);
-  });
+  }
+  const projectUrlForImport = normalizeSupabaseProjectUrl(normalizedUrl);
+  const importedHeaders: (LocalImportHeader & { baseSnapshotJson: string })[] = [];
+  const mappedLines: LocalImportLine[] = [];
+  for (const { header, lines } of changeById.values()) {
+    importedHeaders.push({
+      ...mapHeaderForLocal(header), projectUrl: projectUrlForImport,
+      baseSnapshotJson: JSON.stringify(buildSnapshotFromCloud(header, lines)),
+    });
+    mappedLines.push(...lines.map((line, index) => mapLineForLocal(line, header.id, index + 1)));
+  }
   return invoke<DdtImportResult>("import_supabase_ddt_into_local", { payload: { headers: importedHeaders, lines: mappedLines } });
 }
 

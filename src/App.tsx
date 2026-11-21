@@ -1,32 +1,8 @@
 import { SUPABASE_SESSION_UPDATED, getSupabaseSessionEmail, restoreSupabaseSession } from "@/shared/services/supabaseSession";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { TopNavBar } from "@/shared/components/navigation/TopNavBar";
 import { WindowTabBar } from "@/shared/components/navigation/WindowTabBar";
 import { DesktopWorkspace } from "@/shared/components/desktop/DesktopWorkspace";
-import { DashboardPage } from "@/features/dashboard/DashboardPage";
-import { ProductListPage } from "@/features/price-lists/ProductListPage";
-import { CustomerPriceListPage } from "@/features/price-lists/CustomerPriceListPage";
-import { SettingsPage } from "@/features/settings/SettingsPage";
-import { DDTStudioPage } from "@/features/ddt-studio/DDTStudioPage";
-import { DDTListPage } from "@/features/ddt-studio/DDTListPage";
-import { DDTArticlesPage } from "@/features/ddt-studio/DDTArticlesPage";
-import { ClientListPage } from "@/features/clients/ClientListPage";
-import { QuoteStudioPage } from "@/features/quotes/QuoteStudioPage";
-import { ElectronicInvoicesPage } from "@/features/invoices/ElectronicInvoicesPage";
-import { OrderManagerPage } from "@/features/orders/OrderManagerPage";
-import { OrNumbersPage } from "@/features/or-numbers/OrNumbersPage";
-import { OrNumbersRepository } from "@/features/or-numbers/services/orNumbersRepository";
-import { OffersPage } from "@/features/offers/OffersPage";
-import { NotesPage } from "@/features/notes/NotesPage";
-import { notesSyncService } from "@/features/notes/services/notesSyncService";
-import { offersSyncService } from "@/features/offers/services/offersSyncService";
-import { orderSupabaseService } from "@/features/orders/services/orderSupabaseService";
-import { priceListSyncService } from "@/features/price-lists/services/priceListSyncService";
-import { electronicInvoicesService } from "@/features/invoices/services/electronicInvoicesService";
-import { QuoteSyncService } from "@/features/quotes/services/quoteSyncService";
-import { SupplierPriceListPage } from "@/features/supplier-price-lists/SupplierPriceListPage";
-import { ManualCloudImportPage } from "@/features/manual-cloud-import/ManualCloudImportPage";
-import { OneDriveListiniImportPage } from "@/features/onedrive-listini-import/OneDriveListiniImportPage";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 import { useUserStore } from "@/shared/stores/useUserStore";
 import { Card } from "@/shared/components/ui/card";
@@ -35,28 +11,54 @@ import { isTauri } from "@tauri-apps/api/core";
 import { hasAnyUnsavedChanges, runAllWindowCloseGuards } from "@/shared/stores/useWindowStore";
 import { isPageAllowedForUser } from "@/shared/services/appUserService";
 import { UserPasswordModal } from "@/shared/components/ui/UserPasswordModal";
-import { DdtBatchExportRunner } from "@/features/ddt-studio/components/DdtBatchExportRunner";
 import { AppUpdaterRunner } from "@/shared/components/updater/AppUpdaterRunner";
 import { UpdateReadyModal } from "@/shared/components/updater/UpdateReadyModal";
-import { IllidanCinematicOverlay } from "@/shared/easter-eggs/IllidanCinematicOverlay";
-import { EasterEggVaultModal } from "@/shared/easter-eggs/EasterEggVaultModal";
-import { MgsCodecOverlay } from "@/shared/easter-eggs/MgsCodecOverlay";
-import { StreetFighterOverlay } from "@/shared/easter-eggs/StreetFighterOverlay";
-import { Ff9MoguoOverlay } from "@/shared/easter-eggs/Ff9MoguoOverlay";
-import { NierAutomataOverlay } from "@/shared/easter-eggs/NierAutomataOverlay";
-import { SuperMarioOverlay } from "@/shared/easter-eggs/SuperMarioOverlay";
-import { MetalSlugOverlay } from "@/shared/easter-eggs/MetalSlugOverlay";
-import { Ff7VictoryOverlay } from "@/shared/easter-eggs/Ff7VictoryOverlay";
-import { MgsAlertOverlay } from "@/shared/easter-eggs/MgsAlertOverlay";
+import { useDdtBatchExportStore } from "@/features/ddt-studio/stores/useDdtBatchExportStore";
 import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 
-import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
-import { clientSyncService } from "@/features/clients/services/clientSyncService";
-import { checkAndExecuteDailyBackup } from "@/features/settings/services/backupService";
+
+const DashboardPage = lazy(() => import("@/features/dashboard/DashboardPage").then((module) => ({ default: module.DashboardPage })));
+const ProductListPage = lazy(() => import("@/features/price-lists/ProductListPage").then((module) => ({ default: module.ProductListPage })));
+const CustomerPriceListPage = lazy(() => import("@/features/price-lists/CustomerPriceListPage").then((module) => ({ default: module.CustomerPriceListPage })));
+const SettingsPage = lazy(() => import("@/features/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })));
+const DDTStudioPage = lazy(() => import("@/features/ddt-studio/DDTStudioPage").then((module) => ({ default: module.DDTStudioPage })));
+const DDTListPage = lazy(() => import("@/features/ddt-studio/DDTListPage").then((module) => ({ default: module.DDTListPage })));
+const DDTArticlesPage = lazy(() => import("@/features/ddt-studio/DDTArticlesPage").then((module) => ({ default: module.DDTArticlesPage })));
+const ClientListPage = lazy(() => import("@/features/clients/ClientListPage").then((module) => ({ default: module.ClientListPage })));
+const QuoteStudioPage = lazy(() => import("@/features/quotes/QuoteStudioPage").then((module) => ({ default: module.QuoteStudioPage })));
+const ElectronicInvoicesPage = lazy(() => import("@/features/invoices/ElectronicInvoicesPage").then((module) => ({ default: module.ElectronicInvoicesPage })));
+const OrderManagerPage = lazy(() => import("@/features/orders/OrderManagerPage").then((module) => ({ default: module.OrderManagerPage })));
+const OrNumbersPage = lazy(() => import("@/features/or-numbers/OrNumbersPage").then((module) => ({ default: module.OrNumbersPage })));
+const OffersPage = lazy(() => import("@/features/offers/OffersPage").then((module) => ({ default: module.OffersPage })));
+const NotesPage = lazy(() => import("@/features/notes/NotesPage").then((module) => ({ default: module.NotesPage })));
+const SupplierPriceListPage = lazy(() => import("@/features/supplier-price-lists/SupplierPriceListPage").then((module) => ({ default: module.SupplierPriceListPage })));
+const ManualCloudImportPage = lazy(() => import("@/features/manual-cloud-import/ManualCloudImportPage").then((module) => ({ default: module.ManualCloudImportPage })));
+const OneDriveListiniImportPage = lazy(() => import("@/features/onedrive-listini-import/OneDriveListiniImportPage").then((module) => ({ default: module.OneDriveListiniImportPage })));
+const DdtBatchExportRunner = lazy(() => import("@/features/ddt-studio/components/DdtBatchExportRunner").then((module) => ({ default: module.DdtBatchExportRunner })));
+const IllidanCinematicOverlay = lazy(() => import("@/shared/easter-eggs/IllidanCinematicOverlay").then((module) => ({ default: module.IllidanCinematicOverlay })));
+const EasterEggVaultModal = lazy(() => import("@/shared/easter-eggs/EasterEggVaultModal").then((module) => ({ default: module.EasterEggVaultModal })));
+const MgsCodecOverlay = lazy(() => import("@/shared/easter-eggs/MgsCodecOverlay").then((module) => ({ default: module.MgsCodecOverlay })));
+const StreetFighterOverlay = lazy(() => import("@/shared/easter-eggs/StreetFighterOverlay").then((module) => ({ default: module.StreetFighterOverlay })));
+const Ff9MoguoOverlay = lazy(() => import("@/shared/easter-eggs/Ff9MoguoOverlay").then((module) => ({ default: module.Ff9MoguoOverlay })));
+const NierAutomataOverlay = lazy(() => import("@/shared/easter-eggs/NierAutomataOverlay").then((module) => ({ default: module.NierAutomataOverlay })));
+const SuperMarioOverlay = lazy(() => import("@/shared/easter-eggs/SuperMarioOverlay").then((module) => ({ default: module.SuperMarioOverlay })));
+const MetalSlugOverlay = lazy(() => import("@/shared/easter-eggs/MetalSlugOverlay").then((module) => ({ default: module.MetalSlugOverlay })));
+const Ff7VictoryOverlay = lazy(() => import("@/shared/easter-eggs/Ff7VictoryOverlay").then((module) => ({ default: module.Ff7VictoryOverlay })));
+const MgsAlertOverlay = lazy(() => import("@/shared/easter-eggs/MgsAlertOverlay").then((module) => ({ default: module.MgsAlertOverlay })));
+
+function renderLazyPage(page: ReactNode) {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[var(--muted-foreground)]" role="status">Caricamento modulo…</div>}>
+      {page}
+    </Suspense>
+  );
+}
 
 export function App() {
   const { applyToDom } = useThemeStore();
   const {
+    isIllidanPlaying,
+    isVaultOpen,
     isMgsCodecOpen,
     activeCodecFreq,
     closeMgsCodec,
@@ -76,6 +78,9 @@ export function App() {
     isMgsAlertActive,
     stopMgsAlert,
   } = useEasterEggStore();
+  const ddtBatchExportActive = useDdtBatchExportStore((state) => Boolean(
+    state.isExporting || state.isModalOpen || state.batchRenderDoc || state.successMsg || state.errorMsg
+  ));
   const {
     currentUser,
     users,
@@ -95,29 +100,65 @@ export function App() {
   useEffect(() => {
     // Sincronizzazione bidirezionale DDT all'avvio, Realtime Supabase (<1s), polling leggero di sicurezza (2 min) e sync su online/focus con throttle
     let lastQuickSyncMs = 0;
+    let disposed = false;
+    let realtimeSubscribed = false;
+    let unsubscribeRealtime: (() => void) | undefined;
+
+    const ensureRealtimeSubscription = () => {
+      if (realtimeSubscribed || !getSupabaseSessionEmail()) return;
+      realtimeSubscribed = true;
+      void import("@/features/ddt-studio/services/ddtIncrementalSyncService")
+        .then(({ ddtIncrementalSyncService }) => {
+          if (disposed) return;
+          if (!getSupabaseSessionEmail()) {
+            realtimeSubscribed = false;
+            return;
+          }
+          unsubscribeRealtime = ddtIncrementalSyncService.subscribeRealtime();
+        })
+        .catch((error) => {
+          realtimeSubscribed = false;
+          console.warn("[App] Sottoscrizione Realtime DDT non riuscita:", error);
+        });
+    };
 
     const triggerDdtSync = (includePreviousYear: boolean, checkModifiedRecent: boolean, force = false) => {
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
       const now = Date.now();
       if (!force && now - lastQuickSyncMs < 30_000) return;
       lastQuickSyncMs = now;
-      void ddtIncrementalSyncService
-        .syncNewDdtsFromSupabase({ includePreviousYear, checkModifiedRecent })
+      void import("@/features/ddt-studio/services/ddtIncrementalSyncService")
+        .then(({ ddtIncrementalSyncService }) => ddtIncrementalSyncService
+          .syncNewDdtsFromSupabase({ includePreviousYear, checkModifiedRecent }))
         .catch((err) => {
           console.warn("[App] Sync DDT non riuscita:", err);
         });
-      void priceListSyncService.syncIncrementalGeneralFromSupabase().catch(() => {});
-      void priceListSyncService.syncIncrementalClientiFromSupabase().catch(() => {});
-      void offersSyncService.sync().catch(() => {});
+      void import("@/features/price-lists/services/priceListSyncService").then(({ priceListSyncService }) =>
+        priceListSyncService.syncIncrementalGeneralFromSupabase()).catch(() => {});
+      void import("@/features/price-lists/services/priceListSyncService").then(({ priceListSyncService }) =>
+        priceListSyncService.syncIncrementalClientiFromSupabase()).catch(() => {});
+      void import("@/features/offers/services/offersSyncService").then(({ offersSyncService }) =>
+        offersSyncService.sync()).catch(() => {});
     };
 
     const retryPendingCloudWrites = () => {
       const tasks = [
-        clientSyncService.syncPendingClientsToSupabase(), notesSyncService.retryPendingDeletions(),
-        orderSupabaseService.processOfflineQueue(), offersSyncService.retryPendingChanges(),
-        priceListSyncService.retryPendingChanges(), electronicInvoicesService.retryPendingUploads(),
-        QuoteSyncService.retryPendingChanges(),
-        OrNumbersRepository.retryPendingLogs(),
+        import("@/features/clients/services/clientSyncService").then(({ clientSyncService }) =>
+          clientSyncService.syncPendingClientsToSupabase()),
+        import("@/features/notes/services/notesSyncService").then(({ notesSyncService }) =>
+          notesSyncService.retryPendingDeletions()),
+        import("@/features/orders/services/orderSupabaseService").then(({ orderSupabaseService }) =>
+          orderSupabaseService.processOfflineQueue()),
+        import("@/features/offers/services/offersSyncService").then(({ offersSyncService }) =>
+          offersSyncService.retryPendingChanges()),
+        import("@/features/price-lists/services/priceListSyncService").then(({ priceListSyncService }) =>
+          priceListSyncService.retryPendingChanges()),
+        import("@/features/invoices/services/electronicInvoicesService").then(({ electronicInvoicesService }) =>
+          electronicInvoicesService.retryPendingUploads()),
+        import("@/features/quotes/services/quoteSyncService").then(({ QuoteSyncService }) =>
+          QuoteSyncService.retryPendingChanges()),
+        import("@/features/or-numbers/services/orNumbersRepository").then(({ OrNumbersRepository }) =>
+          OrNumbersRepository.retryPendingLogs()),
       ];
       for (const task of tasks) void task.catch((error) => console.warn("[App] Operazione cloud in sospeso:", error));
     };
@@ -129,6 +170,7 @@ export function App() {
     };
     const runStartupSync = () => {
       if (!getSupabaseSessionEmail()) return;
+      ensureRealtimeSubscription();
       triggerDdtSync(true, true, true);
       if (typeof navigator === "undefined" || navigator.onLine) {
         retryPendingCloudWrites();
@@ -139,8 +181,6 @@ export function App() {
     if (!getSupabaseSessionEmail()) {
       void restoreSupabaseSession();
     }
-    const unsubscribeRealtime = ddtIncrementalSyncService.subscribeRealtime();
-
     const onOnline = () => {
       if (!getSupabaseSessionEmail()) {
         void restoreSupabaseSession();
@@ -155,29 +195,52 @@ export function App() {
     const interval = setInterval(runQuickSync, 120_000);
     const ordersRetry = setInterval(() => {
       if (getSupabaseSessionEmail() && navigator.onLine) {
-        void orderSupabaseService.processOfflineQueue().catch(console.warn);
+        void import("@/features/orders/services/orderSupabaseService")
+          .then(({ orderSupabaseService }) => orderSupabaseService.processOfflineQueue())
+          .catch(console.warn);
       }
     }, 15_000);
     window.addEventListener("online", onOnline);
     window.addEventListener("focus", runQuickSync);
 
     return () => {
+      disposed = true;
       clearInterval(interval);
       clearInterval(ordersRetry);
       window.removeEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
       window.removeEventListener("online", onOnline);
       window.removeEventListener("focus", runQuickSync);
-      unsubscribeRealtime();
+      unsubscribeRealtime?.();
     };
   }, []);
 
   // Controllo ed esecuzione silenziosa del backup giornaliero automatico quando l'utente è autenticato
   useEffect(() => {
-    if (currentUser?.name) {
-      void checkAndExecuteDailyBackup(currentUser.name).catch((err) => {
+    if (!currentUser?.name) return;
+    const userName = currentUser.name;
+    let running = false;
+    let checkedDay = "";
+    const check = async () => {
+      const day = new Date().toDateString();
+      if (running || checkedDay === day) return;
+      running = true;
+      try {
+        const { checkAndExecuteDailyBackup } = await import("@/features/settings/services/backupService");
+        const result = await checkAndExecuteDailyBackup(userName);
+        if (result.ran || result.skippedMultiUser) checkedDay = day;
+      } catch (err) {
         console.warn("[App] Backup giornaliero automatico non riuscito:", err);
-      });
-    }
+      } finally {
+        running = false;
+      }
+    };
+    void check();
+    const timer = window.setInterval(check, 60_000);
+    window.addEventListener("focus", check);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", check);
+    };
   }, [currentUser?.name]);
 
   // Blocco di sicurezza chiusura browser/tab in caso di modifiche non salvate
@@ -209,6 +272,7 @@ export function App() {
               event.preventDefault();
             }
           } catch (e) {
+            event.preventDefault();
             console.warn("[App] Errore verifica modifiche non salvate in chiusura:", e);
           }
         });
@@ -254,39 +318,39 @@ export function App() {
 
     switch (componentId) {
       case "dashboard":
-        return <DashboardPage />;
+        return renderLazyPage(<DashboardPage />);
       case "orders":
-        return <OrderManagerPage windowId={windowId} />;
+        return renderLazyPage(<OrderManagerPage windowId={windowId} />);
       case "price-lists":
-        return <ProductListPage windowId={windowId} />;
+        return renderLazyPage(<ProductListPage windowId={windowId} />);
       case "settings":
-        return <SettingsPage />;
+        return renderLazyPage(<SettingsPage />);
       case "ddt-studio":
-        return <DDTStudioPage windowId={windowId} />;
+        return renderLazyPage(<DDTStudioPage windowId={windowId} />);
       case "ddt-list":
-        return <DDTListPage />;
+        return renderLazyPage(<DDTListPage />);
       case "ddt-articles":
-        return <DDTArticlesPage />;
+        return renderLazyPage(<DDTArticlesPage />);
       case "client-lists":
-        return <CustomerPriceListPage windowId={windowId} />;
+        return renderLazyPage(<CustomerPriceListPage windowId={windowId} />);
       case "clients":
-        return <ClientListPage />;
+        return renderLazyPage(<ClientListPage />);
       case "quotes":
-        return <QuoteStudioPage windowId={windowId} />;
+        return renderLazyPage(<QuoteStudioPage windowId={windowId} />);
       case "invoices":
-        return <ElectronicInvoicesPage />;
+        return renderLazyPage(<ElectronicInvoicesPage />);
       case "or-numbers":
-        return <OrNumbersPage windowId={windowId} />;
+        return renderLazyPage(<OrNumbersPage windowId={windowId} />);
       case "offers":
-        return <OffersPage windowId={windowId} />;
+        return renderLazyPage(<OffersPage windowId={windowId} />);
       case "notes":
-        return <NotesPage windowId={windowId} />;
+        return renderLazyPage(<NotesPage windowId={windowId} />);
       case "supplier-price-lists":
-        return <SupplierPriceListPage />;
+        return renderLazyPage(<SupplierPriceListPage />);
       case "manual-cloud-import":
-        return currentUser?.is_admin ? <ManualCloudImportPage /> : null;
+        return currentUser?.is_admin ? renderLazyPage(<ManualCloudImportPage />) : null;
       case "onedrive-listini-import":
-        return currentUser?.is_admin ? <OneDriveListiniImportPage /> : null;
+        return currentUser?.is_admin ? renderLazyPage(<OneDriveListiniImportPage />) : null;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">
@@ -347,49 +411,27 @@ export function App() {
       />
 
       {/* Runner Esportazione Report DDT in Background & Floating Widget */}
-      <DdtBatchExportRunner />
+      {ddtBatchExportActive && (
+        <Suspense fallback={null}>
+          <DdtBatchExportRunner />
+        </Suspense>
+      )}
 
       {/* Runner Controllo & Download Aggiornamenti Automatici + Modale Riavvio */}
       <AppUpdaterRunner />
       <UpdateReadyModal />
 
       {/* Easter Egg Vault, Illidan Cinematic Overlay, MGS Codec & Street Fighter */}
-      <IllidanCinematicOverlay />
-      <EasterEggVaultModal />
-      <MgsCodecOverlay
-        isOpen={isMgsCodecOpen}
-        frequency={activeCodecFreq}
-        onClose={closeMgsCodec}
-      />
-      <StreetFighterOverlay
-        move={streetFighterMove}
-        onClose={closeStreetFighter}
-      />
-      <Ff9MoguoOverlay
-        isActive={isFf9MoguoActive}
-        stage={ff9MoguoStage}
-        onClose={closeFf9Moguo}
-      />
-      <NierAutomataOverlay
-        isActive={isNierActive}
-        onClose={closeNier}
-      />
-      <SuperMarioOverlay
-        isActive={isMarioActive}
-        onClose={closeMario}
-      />
-      <MetalSlugOverlay
-        isActive={isMetalSlugActive}
-        onClose={closeMetalSlug}
-      />
-      <Ff7VictoryOverlay
-        isActive={isFf7Active}
-        onClose={closeFf7}
-      />
-      <MgsAlertOverlay
-        isActive={isMgsAlertActive}
-        onStop={stopMgsAlert}
-      />
+      {isIllidanPlaying && <Suspense fallback={null}><IllidanCinematicOverlay /></Suspense>}
+      {isVaultOpen && <Suspense fallback={null}><EasterEggVaultModal /></Suspense>}
+      {isMgsCodecOpen && <Suspense fallback={null}><MgsCodecOverlay isOpen frequency={activeCodecFreq} onClose={closeMgsCodec} /></Suspense>}
+      {streetFighterMove && <Suspense fallback={null}><StreetFighterOverlay move={streetFighterMove} onClose={closeStreetFighter} /></Suspense>}
+      {isFf9MoguoActive && <Suspense fallback={null}><Ff9MoguoOverlay isActive stage={ff9MoguoStage} onClose={closeFf9Moguo} /></Suspense>}
+      {isNierActive && <Suspense fallback={null}><NierAutomataOverlay isActive onClose={closeNier} /></Suspense>}
+      {isMarioActive && <Suspense fallback={null}><SuperMarioOverlay isActive onClose={closeMario} /></Suspense>}
+      {isMetalSlugActive && <Suspense fallback={null}><MetalSlugOverlay isActive onClose={closeMetalSlug} /></Suspense>}
+      {isFf7Active && <Suspense fallback={null}><Ff7VictoryOverlay isActive onClose={closeFf7} /></Suspense>}
+      {isMgsAlertActive && <Suspense fallback={null}><MgsAlertOverlay isActive onStop={stopMgsAlert} /></Suspense>}
     </div>
   );
 }

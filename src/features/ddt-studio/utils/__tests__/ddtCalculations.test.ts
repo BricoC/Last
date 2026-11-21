@@ -3,13 +3,13 @@ import { money } from "@/shared/domain/monetaryValue";
 import {
   calculateRowAmounts,
   calculateDdtTotals,
-  paginateDdtRows,
   getOperatorSymbol,
   normalizeOperator,
   parseCascadeDiscounts,
   formatCascadeDiscountDisplay,
   resolveDestinazioneDisplay,
 } from "../ddtCalculations";
+import { paginateDdtRows } from "../ddtPagination";
 import { DdtItem } from "../../models/ddt";
 import { formatDdtImageFilename, formatDdtPdfFilename } from "../ddtExportManager";
 import { isTextOnlyRow } from "../../components/DDTArticoliTable";

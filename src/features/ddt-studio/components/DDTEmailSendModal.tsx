@@ -1,15 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { Mail, LoaderCircle, X, Paperclip, CheckCircle2 } from "lucide-react";
 import { DdtDocument } from "../models/ddt";
-import { ddtRepository } from "../services/ddtRepository";
-import { clientRepository } from "@/features/clients/services/clientRepository";
-import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
-import { getCompanySettings } from "@/features/settings/companySettingsRepository";
 import { DDTA4Document } from "../document/DDTA4Document";
 import { generatePdfBytesFromElements, formatDdtPdfFilename } from "../utils/ddtExportManager";
 import { waitForDomPaint } from "@/shared/utils/a4PdfCapture";
+import { useDdtEmailDraft } from "../hooks/useDdtEmailDraft";
 
 export interface DDTEmailSendModalProps {
   isOpen: boolean;
@@ -24,110 +21,24 @@ export const DDTEmailSendModal: React.FC<DDTEmailSendModalProps> = ({
   selectedDdtIds,
   onSuccess,
 }) => {
-  const [loadingDocs, setLoadingDocs] = useState(true);
-  const [docs, setDocs] = useState<DdtDocument[]>([]);
-  const [toEmail, setToEmail] = useState("");
-  const [ccEmail, setCcEmail] = useState("");
-  const [subject, setSubject] = useState("");
-  const [bodyText, setBodyText] = useState("");
+  const {
+    loadingDocs,
+    docs,
+    toEmail,
+    setToEmail,
+    ccEmail,
+    setCcEmail,
+    subject,
+    setSubject,
+    bodyText,
+    setBodyText,
+    errorMessage,
+    setErrorMessage,
+  } = useDdtEmailDraft(isOpen, selectedDdtIds);
 
   // Stato per la generazione batch dei PDF tramite portale offscreen
   const [batchRenderDoc, setBatchRenderDoc] = useState<DdtDocument | null>(null);
   const [generatingProgress, setGeneratingProgress] = useState<{ current: number; total: number; filename: string } | null>(null);
-  const [errorMessage, setErrorMessage] = useState("");
-
-  // Caricamento documenti selezionati e precompilazione email
-  useEffect(() => {
-    if (!isOpen || selectedDdtIds.length === 0) return;
-
-    let active = true;
-    setLoadingDocs(true);
-    setErrorMessage("");
-
-    (async () => {
-      try {
-        const loaded: DdtDocument[] = [];
-        for (const id of selectedDdtIds) {
-          const doc = await ddtRepository.getDdtById(id);
-          if (doc) loaded.push(doc);
-        }
-
-        if (!active) return;
-        setDocs(loaded);
-
-        if (loaded.length > 0) {
-          const first = loaded[0];
-          const clientName = first.client_name || "Cliente";
-
-          // Cerca se esiste un'email nell'anagrafica cliente
-          let destTo = "";
-          let destCc = "";
-
-          const [emailConfig, companySettings] = await Promise.all([
-            getEmailSettings(),
-            getCompanySettings(),
-          ]);
-
-          // Controlli speciali per clienti noti o anagrafica
-          if (clientName.toUpperCase().includes("CARRARA")) {
-            destTo = emailConfig.carrara_to;
-            destCc = emailConfig.carrara_cc;
-          } else if (clientName.toUpperCase().includes("WEPA")) {
-            const isSalanetti = loaded.some((d) =>
-              (d.destination_name || d.destination_address || "").toUpperCase().includes("SALANETTI")
-            );
-            if (isSalanetti) {
-              destTo = emailConfig.wepa_salanetti_to;
-              destCc = emailConfig.wepa_salanetti_cc;
-            } else {
-              destTo = emailConfig.wepa_ralletta_to;
-              destCc = emailConfig.wepa_ralletta_cc;
-            }
-          } else if (first.client_id) {
-            const clientObj = await clientRepository.getClientById(first.client_id);
-            if (clientObj?.email) {
-              destTo = clientObj.email;
-            }
-            if (companySettings?.email) {
-              destCc = companySettings.email;
-            }
-          }
-
-          setToEmail(destTo);
-          setCcEmail(destCc);
-
-          const docNumbersStr = loaded
-            .map((d) => `DDT ${d.doc_number ?? "Bozza"}`)
-            .join(", ");
-
-          setSubject(`Invio ${docNumbersStr} — Brico Class`);
-
-          const now = new Date();
-          const timeVal = now.getHours() * 100 + now.getMinutes();
-          const greeting = timeVal > 0 && timeVal <= 1230 ? "Buongiorno." : "Buonasera.";
-
-          const ddtLines = loaded
-            .map((d) => `• DDT ${d.doc_number ?? "Bozza"} del ${d.doc_date || ""} ${d.destination_address ? `(${d.destination_address})` : ""}`)
-            .join("\n");
-
-          setBodyText(
-            `${greeting}\n\nIn allegato i seguenti DDT in formato PDF:\n${ddtLines}\n\nRestiamo a disposizione per qualsiasi chiarimento.\n\nCordiali saluti,\nBrico Class S.r.l.`
-          );
-        }
-      } catch (err) {
-        if (!active) return;
-        console.error("Errore caricamento DDT per email:", err);
-        setErrorMessage("Errore nel caricamento dei dati dei DDT selezionati.");
-      } finally {
-        if (active) setLoadingDocs(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [isOpen, selectedDdtIds]);
-
   if (!isOpen) return null;
 
   const handleSendViaOutlook = async () => {

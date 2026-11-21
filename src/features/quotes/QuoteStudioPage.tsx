@@ -74,6 +74,22 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
     }
   }, []);
   useEffect(() => { void refreshQuotes(); }, [refreshQuotes]);
+  useEffect(() => {
+    const onNumberAssigned = (event: Event) => {
+      const { id, number } = (event as CustomEvent<{ id: string; number: number }>).detail;
+      setDraft((current) => {
+        if (current.id !== id || current.quote_number != null) return current;
+        if (savedSignature.current) {
+          const saved = JSON.parse(savedSignature.current) as QuoteDraft;
+          if (saved.id === id) savedSignature.current = signature({ ...saved, quote_number: number });
+        }
+        return { ...current, quote_number: number };
+      });
+      void refreshQuotes();
+    };
+    window.addEventListener("quote-number-assigned", onNumberAssigned);
+    return () => window.removeEventListener("quote-number-assigned", onNumberAssigned);
+  }, [refreshQuotes]);
 
   useEffect(() => {
     let active = true;
@@ -111,7 +127,9 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
       const saved = await quoteRepository.saveDraft(toQuoteInput(draft));
       const nextDraft = quoteToDraft(saved);
       setDraft(nextDraft); savedSignature.current = signature(nextDraft);
-      setMessage("Preventivo salvato."); await refreshQuotes(); return true;
+      setMessage(saved.quote_number == null ? "Bozza salvata. Il numero sarà assegnato alla sincronizzazione." : "Preventivo salvato.");
+      await refreshQuotes();
+      return true;
     } catch (error) { setMessage(errorMessage(error)); return false; }
     finally { setSaving(false); }
   }, [draft, refreshQuotes]);

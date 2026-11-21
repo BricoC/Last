@@ -1046,17 +1046,39 @@ export async function uploadDdtToSupabase(
   const missingHeaders = [...new Map(headers.map((row) => [headerKey(row.anno, row.numero), row])).values()]
     .filter((row) => !headerIds.has(headerKey(row.anno, row.numero)));
 
-  const requestHeaders = {
-    apikey: anonKey, "Content-Type": "application/json",
-  };
+  const requestHeaders = { apikey: anonKey, "Content-Type": "application/json" };
+  const rpc = (name: string, payload: unknown) => supabaseFetch(new URL(`/rest/v1/rpc/${name}`, projectUrl), {
+    method: "POST", headers: requestHeaders, body: JSON.stringify(payload),
+  });
+  const existingLines = new Set(cloudLines.map(lineKey));
+  const missingLines = [...new Map(rows.map((row) => [lineKey(row), row])).values()]
+    .filter((row) => !existingLines.has(lineKey(row)));
+  const affected = new Map<string, { header?: ParsedDdtHeader; lines: ParsedDdtRow[] }>();
+  for (const header of missingHeaders) affected.set(headerKey(header.anno, header.numero), { header, lines: [] });
+  for (const line of missingLines) {
+    const key = headerKey(line.anno, line.numero_ddt);
+    const group = affected.get(key) ?? { lines: [] };
+    group.lines.push(line);
+    affected.set(key, group);
+  }
+
   let headersUploaded = 0;
   let rowsUploaded = 0;
   let failed = 0;
-  let refreshHeaders = false;
-  const nowIso = new Date().toISOString();
-  for (let offset = 0; offset < missingHeaders.length; offset += 200) {
-    const chunk = await Promise.all(missingHeaders.slice(offset, offset + 200).map(async (h) => ({
-      id: await deterministicUuid(`last:ddt:${headerKey(h.anno, h.numero)}`),
+  let processed = 0;
+  const total = missingHeaders.length + missingLines.length;
+  for (const [key, group] of affected) {
+    const h = group.header;
+    const parent = headerIds.get(key) ?? (h ? await deterministicUuid(`last:ddt:${key}`) : null);
+    const groupSize = Number(Boolean(h)) + group.lines.length;
+    try {
+      if (!parent) throw new Error("Righe DDT senza testata");
+      let header: unknown;
+      let savedLines: unknown[] = [];
+      let revision: string | null = null;
+      if (h) {
+        header = {
+      id: parent,
       numero: h.numero,
       anno: h.anno,
       data: h.data,
@@ -1086,65 +1108,38 @@ export async function uploadDdtToSupabase(
       piva: h.piva ?? null,
       cod_fiscale: h.cod_fiscale ?? null,
       sdi: h.sdi ?? null,
-      ultima_modifica: nowIso,
-    })));
-    try {
-      const response = await supabaseFetch(new URL("/rest/v1/ddt?on_conflict=anno,numero", projectUrl), {
-        method: "POST",
-        headers: { ...requestHeaders, Prefer: "resolution=ignore-duplicates,return=representation" },
-        body: JSON.stringify(chunk),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const inserted = await response.json() as CloudHeader[];
-      if (!Array.isArray(inserted)) throw new Error("Risposta inserimento DDT non valida");
-      for (const row of inserted) headerIds.set(headerKey(row.anno, row.numero), row.id);
-      headersUploaded += inserted.length;
-      refreshHeaders ||= inserted.length < chunk.length;
-    } catch {
-      failed += chunk.length;
-    }
-    onProgress?.("Invio Nuovi DDT", Math.min(offset + 200, missingHeaders.length), missingHeaders.length);
-  }
-  if (refreshHeaders) {
-    const current = await readCloudInventory<CloudHeader>(projectUrl, anonKey, "ddt", "id,anno,numero");
-    for (const row of current) headerIds.set(headerKey(row.anno, row.numero), row.id);
-  }
-
-  const existingLines = new Set(cloudLines.map(lineKey));
-  const missingLines = [...new Map(rows.map((row) => [lineKey(row), row])).values()]
-    .filter((row) => !existingLines.has(lineKey(row)));
-  for (let offset = 0; offset < missingLines.length; offset += 300) {
-    const candidates = missingLines.slice(offset, offset + 300);
-    const chunk = [];
-    for (const row of candidates) {
-      const parent = headerIds.get(headerKey(row.anno, row.numero_ddt));
-      if (!parent) {
-        failed++;
-        continue;
+        };
+      } else {
+        const stored = await rpc("last_ddt_snapshot", { p_id: parent });
+        if (!stored.ok) throw new Error(`HTTP ${stored.status}`);
+        const snapshot = await stored.json();
+        if (!snapshot?.header || !Array.isArray(snapshot.lines) || !snapshot.revision) {
+          throw new Error("DDT cloud non più disponibile");
+        }
+        header = snapshot.header;
+        savedLines = snapshot.lines;
+        revision = snapshot.revision;
       }
-      chunk.push({
+      const newLines = await Promise.all(group.lines.map(async (row) => ({
         id: await deterministicUuid(`last:ddt-riga:${parent}:${lineKey(row)}`),
         ddt_id: parent,
         anno: row.anno, numero_ddt: row.numero_ddt, riga_nr: row.riga_nr,
         um: row.um ?? "", quantita: row.quantita, descrizione: row.descrizione, prezzo: row.prezzo ?? 0,
         sconto_pct: row.sconto_pct ?? 0, importo: row.importo ?? 0, iva_pct: Math.round(row.iva_pct ?? 22),
         prezzo_acquisto: row.prezzo_acquisto ?? 0, prezzo_scontato: row.prezzo_scontato ?? 0, ricavo: row.ricavo ?? 0,
+      })));
+      const result = await rpc("last_write_ddt", {
+        p_header: header, p_lines: [...savedLines, ...newLines],
+        p_expected_revision: revision, p_restore: false,
       });
+      if (!result.ok) throw new Error(`HTTP ${result.status}`);
+      if (h) headersUploaded++;
+      rowsUploaded += newLines.length;
+    } catch {
+      failed += groupSize;
     }
-    if (chunk.length) {
-      try {
-        const response = await supabaseFetch(new URL("/rest/v1/ddt_righe?on_conflict=id", projectUrl), {
-          method: "POST",
-          headers: { ...requestHeaders, Prefer: "resolution=ignore-duplicates,return=minimal" },
-          body: JSON.stringify(chunk),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        rowsUploaded += chunk.length;
-      } catch {
-        failed += chunk.length;
-      }
-    }
-    onProgress?.("Invio Nuove Righe Articoli", Math.min(offset + 300, missingLines.length), missingLines.length);
+    processed += groupSize;
+    onProgress?.("Invio DDT e righe", processed, total);
   }
   return { headersUploaded, rowsUploaded, failed };
 }

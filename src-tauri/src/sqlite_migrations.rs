@@ -1,6 +1,6 @@
 use crate::sqlite_batch::SqliteWrite;
 use serde::Deserialize;
-use sqlx::{Connection, SqliteConnection};
+use sqlx::{AssertSqlSafe, Connection, SqliteConnection};
 use std::collections::HashSet;
 use tauri::State;
 use tauri_plugin_sql::DbInstances;
@@ -107,7 +107,7 @@ async fn apply_migration_step(
     match step {
         MigrationStep::Write { write } => write.execute(connection).await?,
         MigrationStep::RequireEmpty { sql, message } => {
-            let conflicts: Vec<String> = sqlx::query_scalar(&sql)
+            let conflicts: Vec<String> = sqlx::query_scalar(AssertSqlSafe(sql.as_str()))
                 .fetch_all(connection)
                 .await
                 .map_err(|error| error.to_string())?;
@@ -139,14 +139,15 @@ async fn apply_migration_step(
             .await
             .map_err(|error| error.to_string())?;
             if !exists {
-                sqlx::query(&format!(
+                // Identifiers are validated above and definitions come from the app's migration plan.
+                sqlx::query(AssertSqlSafe(format!(
                     "ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition}"
-                ))
+                )))
                 .execute(&mut *connection)
                 .await
                 .map_err(|error| error.to_string())?;
                 if let Some(sql) = backfill {
-                    sqlx::query(&sql)
+                    sqlx::query(AssertSqlSafe(sql.as_str()))
                         .execute(connection)
                         .await
                         .map_err(|error| error.to_string())?;

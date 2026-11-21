@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import { AppUser, AppUserService, verifyPassword } from "@/shared/services/appUserService";
+import {
+  AppUser,
+  AppUserService,
+  hashPassword,
+  isLegacyPasswordHash,
+  verifyPassword,
+} from "@/shared/services/appUserService";
 import { useThemeStore } from "@/shared/stores/useThemeStore";
 
 interface UserState {
@@ -146,17 +152,25 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   confirmPasswordSwitch: async (password: string): Promise<boolean> => {
-    const { pendingPasswordSwitch, switchUser } = get();
+    const { pendingPasswordSwitch } = get();
     if (!pendingPasswordSwitch) return false;
 
     const ok = await verifyPassword(password, pendingPasswordSwitch.password_hash);
-    if (ok) {
-      const targetId = pendingPasswordSwitch.id;
-      set({ pendingPasswordSwitch: null });
-      switchUser(targetId);
-      return true;
+    if (!ok) return false;
+
+    // Upgrade legacy SHA-256 only after it has authenticated successfully.
+    // Persist before granting access so a failed DB write never silently keeps
+    // the account on the weaker hash.
+    if (isLegacyPasswordHash(pendingPasswordSwitch.password_hash)) {
+      await get().updateUser({
+        ...pendingPasswordSwitch,
+        password_hash: await hashPassword(password),
+      });
     }
-    return false;
+
+    set({ pendingPasswordSwitch: null });
+    get().switchUser(pendingPasswordSwitch.id);
+    return true;
   },
 
   switchUser: (userId: string) => {

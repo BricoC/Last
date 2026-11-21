@@ -46,7 +46,6 @@ import {
   CloudSyncStatusInfo,
 } from "@/shared/services/cloudSyncStatusService";
 import { CloudSyncHoverPopover } from "./CloudSyncHoverPopover";
-import { checkSupabaseSchemaInitialized } from "@/features/settings/data-import/supabaseSchemaSql";
 
 export interface NavModule {
   id: string;
@@ -160,6 +159,7 @@ export const TopNavBar: React.FC = () => {
   const [isCheckingCloudStatus, setIsCheckingCloudStatus] = useState(false);
   const hoverTimeoutRef = useRef<number | null>(null);
   const lastAutoSyncAtRef = useRef<number>(0);
+  const autoSyncTimerRef = useRef<number | null>(null);
   const isSyncingRef = useRef<boolean>(false);
 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
@@ -189,15 +189,18 @@ export const TopNavBar: React.FC = () => {
       // sul Cloud (nessun polling continuo), con cooldown di 60s per non consumare quota Supabase.
       const now = Date.now();
       const activeSessionEmail = getSupabaseSessionEmail();
-      if (
-        s.hasPendingRemoteChanges &&
-        !s.error &&
-        activeSessionEmail &&
-        !isSyncingRef.current &&
-        now - lastAutoSyncAtRef.current > 60_000
-      ) {
-        lastAutoSyncAtRef.current = now;
-        void handleManualSync();
+      if (autoSyncTimerRef.current !== null) {
+        window.clearTimeout(autoSyncTimerRef.current);
+        autoSyncTimerRef.current = null;
+      }
+      if ((s.hasPendingRemoteChanges || s.hasPendingLocalChanges) && s.canAutoSync && activeSessionEmail) {
+        const wait = Math.max(0, 60_000 - (now - lastAutoSyncAtRef.current));
+        if (wait || isSyncingRef.current) {
+          autoSyncTimerRef.current = window.setTimeout(() => void fetchCloudStatus(true), Math.max(1000, wait));
+        } else {
+          lastAutoSyncAtRef.current = now;
+          void handleManualSync();
+        }
       }
     } finally {
       setIsCheckingCloudStatus(false);
@@ -246,6 +249,7 @@ export const TopNavBar: React.FC = () => {
     void fetchCloudStatus(false);
     const onSyncStatusUpdated = () => void fetchCloudStatus(true);
     window.addEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
+    window.addEventListener("online", onSyncStatusUpdated);
     const onSessionUpdated = () => {
       setShowCloudLogin(false);
       onSyncStatusUpdated();
@@ -253,7 +257,9 @@ export const TopNavBar: React.FC = () => {
     window.addEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
     return () => {
       window.removeEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
+      window.removeEventListener("online", onSyncStatusUpdated);
       window.removeEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
+      if (autoSyncTimerRef.current !== null) window.clearTimeout(autoSyncTimerRef.current);
     };
   }, []);
 
@@ -267,6 +273,7 @@ export const TopNavBar: React.FC = () => {
           "load_supabase_config"
         ).catch(() => null);
         if (!active || !cfg?.config?.projectUrl || !cfg?.config?.anonKey) return;
+        const { checkSupabaseSchemaInitialized } = await import("@/features/settings/data-import/supabaseSchemaSql");
         const result = await checkSupabaseSchemaInitialized(
           cfg.config.projectUrl,
           cfg.config.anonKey
@@ -741,7 +748,7 @@ export const TopNavBar: React.FC = () => {
                 ? "bg-amber-500/15 border-amber-500/40 text-amber-300 animate-pulse"
                 : gapWarning
                 ? "bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25"
-                : cloudStatus?.hasPendingRemoteChanges
+                : cloudStatus?.error || cloudStatus?.hasPendingRemoteChanges || cloudStatus?.hasPendingLocalChanges
                 ? "bg-amber-500/20 border-amber-500/50 text-amber-300 hover:bg-amber-500/30"
                 : lastSyncTime
                 ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
@@ -751,9 +758,9 @@ export const TopNavBar: React.FC = () => {
           >
             {isSyncing ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-            ) : gapWarning ? (
+            ) : gapWarning || cloudStatus?.error ? (
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-            ) : cloudStatus?.hasPendingRemoteChanges ? (
+            ) : cloudStatus?.hasPendingRemoteChanges || cloudStatus?.hasPendingLocalChanges ? (
               <span className="relative flex h-3.5 w-3.5 items-center justify-center">
                 <Cloud className="w-3.5 h-3.5 text-amber-400" />
                 <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
@@ -773,6 +780,8 @@ export const TopNavBar: React.FC = () => {
                 ? "Cloud: verifica incompleta"
                 : cloudStatus?.hasPendingRemoteChanges
                 ? "Cloud: Nuovi dati!"
+                : cloudStatus?.hasPendingLocalChanges
+                ? "Cloud: Dati da inviare"
                 : lastSyncTime
                 ? `Cloud: ${lastSyncTime}`
                 : "Cloud Sync"}

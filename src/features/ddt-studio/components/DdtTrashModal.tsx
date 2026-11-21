@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Trash2, RotateCcw, X, Loader2, AlertCircle, Check, AlertTriangle } from "lucide-react";
+import { Trash2, RotateCcw, X, Loader2, AlertCircle, Check } from "lucide-react";
 import { ddtRepository } from "../services/ddtRepository";
-import { formatDdtMoney, formatDdtViewDate } from "../services/ddtViewFormatting";
+import { formatDdtDeletedAt, formatDdtMoney, formatDdtViewDate } from "../services/ddtViewFormatting";
+import { DdtRestoreConflictBanner, type DdtRestoreConflict } from "./DdtRestoreConflictBanner";
 
 interface TrashItem {
   id: string;
@@ -34,11 +35,7 @@ export const DdtTrashModal: React.FC<DdtTrashModalProps> = ({
   const [feedback, setFeedback] = useState<string | null>(null);
 
   // Conflitto di numerazione durante il ripristino
-  const [conflictItem, setConflictItem] = useState<{
-    id: string;
-    docNumber: number;
-    year: number;
-  } | null>(null);
+  const [conflictItem, setConflictItem] = useState<DdtRestoreConflict | null>(null);
 
   const loadTrash = async () => {
     setLoading(true);
@@ -117,6 +114,10 @@ export const DdtTrashModal: React.FC<DdtTrashModalProps> = ({
     }
   };
 
+  const restoreConflictAs = (mode: "draft" | "new_number") => {
+    const target = trashItems.find((item) => item.id === conflictItem?.id);
+    if (target) void handleRestore(target, mode);
+  };
   const handleEmptyTrash = async () => {
     if (!confirm("Sei sicuro di voler svuotare definitivamente il Cestino DDT? I documenti eliminati non potranno più essere recuperati.")) {
       return;
@@ -133,21 +134,6 @@ export const DdtTrashModal: React.FC<DdtTrashModalProps> = ({
       setError("Impossibile svuotare il Cestino.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const formatDeletedAt = (iso: string) => {
-    try {
-      const d = new Date(iso);
-      return d.toLocaleDateString("it-IT", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return iso;
     }
   };
 
@@ -206,54 +192,12 @@ export const DdtTrashModal: React.FC<DdtTrashModalProps> = ({
         )}
 
         {/* Modalità Conflitto Numerazione */}
-        {conflictItem && (
-          <div className="p-4 bg-amber-950/40 border-b border-amber-500/40 text-amber-200 text-xs space-y-3 animate-in slide-in-from-top-2 duration-150">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold text-amber-300 text-sm">
-                  Numero DDT già occupato!
-                </p>
-                <p className="mt-1 text-slate-300">
-                  Il DDT n. <span className="font-mono font-bold text-white">{conflictItem.docNumber}/{conflictItem.year}</span> risulta attualmente già assegnato a un altro documento attivo.
-                </p>
-                <p className="mt-1 text-[11px] text-amber-300/80">
-                  Come desideri ripristinare questo documento?
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 pl-7">
-              <button
-                type="button"
-                onClick={() => {
-                  const target = trashItems.find((r) => r.id === conflictItem.id);
-                  if (target) void handleRestore(target, "draft");
-                }}
-                className="px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition-colors cursor-pointer"
-              >
-                Ripristina come Bozza
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const target = trashItems.find((r) => r.id === conflictItem.id);
-                  if (target) void handleRestore(target, "new_number");
-                }}
-                className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors cursor-pointer"
-              >
-                Assegna Nuovo Numero Libero
-              </button>
-              <button
-                type="button"
-                onClick={() => setConflictItem(null)}
-                className="px-2.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors cursor-pointer"
-              >
-                Annulla
-              </button>
-            </div>
-          </div>
-        )}
-
+        <DdtRestoreConflictBanner
+          conflict={conflictItem}
+          onRestoreAsDraft={() => restoreConflictAs("draft")}
+          onAssignNewNumber={() => restoreConflictAs("new_number")}
+          onCancel={() => setConflictItem(null)}
+        />
         {/* Contenuto Lista Cestino */}
         <div className="flex-1 overflow-y-auto p-3 divide-y divide-[var(--border)]/50">
           {loading ? (
@@ -307,7 +251,7 @@ export const DdtTrashModal: React.FC<DdtTrashModalProps> = ({
                         <span>{item.items_count} {item.items_count === 1 ? "riga" : "righe"}</span>
                         <span>•</span>
                         <span className="text-[10px] text-slate-500">
-                          Eliminato: {formatDeletedAt(item.deleted_at)}
+                          Eliminato: {formatDdtDeletedAt(item.deleted_at)}
                         </span>
                       </div>
                     </div>

@@ -18,6 +18,20 @@ export const ITALIAN_MONTHS = [
 export const formatDdtMoney = (subunits: number) => `€ ${MonetaryValue.fromSubunits(subunits).formatIT(false)}`;
 export const formatDdtPercent = (value: number | null) => value === null ? "—" : `${value.toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
 
+export const formatDdtDeletedAt = (iso: string): string => {
+  try {
+    return new Date(iso).toLocaleDateString("it-IT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+};
+
 /**
  * Formatta la data in formato leggibile e ricercabile con nome mese per esteso:
  * es. "25.Settembre.2025"

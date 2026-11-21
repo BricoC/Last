@@ -87,7 +87,9 @@ fn read_mgmt_config(app: &AppHandle) -> Result<SupabaseManagementConfig, String>
                 Err(legacy_err) if legacy_err.kind() == std::io::ErrorKind::NotFound => {
                     return Ok(SupabaseManagementConfig::default());
                 }
-                Err(_) => return Err("Impossibile leggere la configurazione token Management".into()),
+                Err(_) => {
+                    return Err("Impossibile leggere la configurazione token Management".into())
+                }
             };
             serde_json::from_reader(file)
                 .map_err(|_| "Configurazione token Management non valida".to_string())
@@ -104,7 +106,9 @@ fn extract_project_ref(project_url: &str) -> Result<String, String> {
         .ok_or("URL progetto Supabase non valido (atteso https://<ref>.supabase.co)")?;
     if ref_part.is_empty()
         || ref_part.len() > 64
-        || !ref_part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        || !ref_part
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
     {
         return Err("Project ref Supabase non valido".into());
     }
@@ -231,8 +235,7 @@ async fn run_mgmt_sql(
             text.chars().take(180).collect::<String>()
         ));
     }
-    serde_json::from_str(&text)
-        .map_err(|e| format!("Risposta JSON Management API non valida: {e}"))
+    serde_json::from_str(&text).map_err(|e| format!("Risposta JSON Management API non valida: {e}"))
 }
 
 #[tauri::command]
@@ -245,8 +248,8 @@ pub async fn fetch_supabase_cloud_metrics(app: AppHandle) -> Result<SupabaseClou
         let sup_path = supabase_config_path(&app)?;
         let sup_file = fs::File::open(sup_path)
             .map_err(|_| "Configura prima URL e chiave anon di Supabase in Cloud & Database")?;
-        let sup_cfg: BasicSupabaseConfig = serde_json::from_reader(sup_file)
-            .map_err(|_| "Configurazione Supabase non valida")?;
+        let sup_cfg: BasicSupabaseConfig =
+            serde_json::from_reader(sup_file).map_err(|_| "Configurazione Supabase non valida")?;
         let project_ref = extract_project_ref(&sup_cfg.project_url)?;
 
         let mgmt_cfg = read_mgmt_config(&app)?;
@@ -309,7 +312,13 @@ pub async fn fetch_supabase_cloud_metrics(app: AppHandle) -> Result<SupabaseClou
     let db_size_bytes = db_size_val
         .as_array()
         .and_then(|arr| arr.first())
-        .and_then(|row| row["db_size_bytes"].as_u64().or_else(|| row["db_size_bytes"].as_str().and_then(|s| s.parse::<u64>().ok())))
+        .and_then(|row| {
+            row["db_size_bytes"].as_u64().or_else(|| {
+                row["db_size_bytes"]
+                    .as_str()
+                    .and_then(|s| s.parse::<u64>().ok())
+            })
+        })
         .unwrap_or(0);
 
     let storage_size_bytes = match run_mgmt_sql(

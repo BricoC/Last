@@ -57,9 +57,12 @@ fn is_public_api_key(key: &str) -> bool {
     }
 
     let mut segments = key.split('.');
-    let (Some(header), Some(payload), Some(signature), None) =
-        (segments.next(), segments.next(), segments.next(), segments.next())
-    else {
+    let (Some(header), Some(payload), Some(signature), None) = (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) else {
         return false;
     };
     if header.is_empty() || signature.is_empty() {

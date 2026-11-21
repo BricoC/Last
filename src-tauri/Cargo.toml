@@ -1,9 +1,10 @@
 [package]
 name = "last"
-version = "0.2.7"
+version = "0.3.3"
 description = "Last — Gestionale Desktop BricoClass"
 authors = ["BricoC"]
 edition = "2021"
+rust-version = "1.94"
 
 [lib]
 name = "last_lib"
@@ -18,7 +19,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite"] }
 base64 = "0.22"
 tauri-plugin-process = "2"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
@@ -33,3 +34,6 @@ strip = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+[patch.crates-io]
+tauri-plugin-sql = { path = "vendor/tauri-plugin-sql" }

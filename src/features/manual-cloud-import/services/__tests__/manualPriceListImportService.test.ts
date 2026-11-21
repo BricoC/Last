@@ -132,25 +132,29 @@ describe("Import cloud manuale", () => {
     expect(fetch.mock.calls.every(([, init]) => !init?.method)).toBe(true);
   });
 
-  it("assegna ID deterministici a testata e righe e usa il padre restituito dal cloud", async () => {
+  it("assegna ID deterministici e invia testata e righe nella stessa RPC", async () => {
     const header = { anno: 2026, numero: 7, data: "2026-01-01", cliente: "ACME" } as ParsedDdtHeader;
     const row = { anno: 2026, numero_ddt: 7, riga_nr: 1, descrizione: "Articolo", iva_pct: 21.7 } as ParsedDdtRow;
     const fetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
       if (!init?.method) return Response.json([]);
-      if (String(url).includes("/ddt?")) return Response.json(JSON.parse(String(init.body)));
+      expect(String(url)).toContain("/rpc/last_write_ddt");
       return new Response(null, { status: 201 });
     });
     vi.stubGlobal("fetch", fetch);
     await expect(uploadDdtToSupabase([header], [row], project, "test")).resolves.toEqual({
       headersUploaded: 1, rowsUploaded: 1, failed: 0,
     });
-    const ids = () => fetch.mock.calls.filter(([, init]) => init?.method === "POST")
-      .map(([, init]) => JSON.parse(String(init?.body))[0]);
-    const [testata, riga] = ids();
+    const payload = () => {
+      const sends = fetch.mock.calls.filter(([, init]) => init?.method === "POST");
+      expect(sends).toHaveLength(1);
+      return JSON.parse(String(sends[0][1]?.body));
+    };
+    const { p_header: testata, p_lines: [riga] } = payload();
     expect(testata.id).toMatch(/^[a-f0-9-]{36}$/);
     expect(riga).toMatchObject({ id: expect.stringMatching(/^[a-f0-9-]{36}$/), ddt_id: testata.id, iva_pct: 22 });
     fetch.mockClear();
     await uploadDdtToSupabase([header], [row], project, "test");
-    expect(ids().map(({ id }) => id)).toEqual([testata.id, riga.id]);
+    expect(payload().p_header.id).toBe(testata.id);
+    expect(payload().p_lines[0].id).toBe(riga.id);
   });
 });

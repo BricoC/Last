@@ -9,13 +9,13 @@ import {
 } from "@/features/settings/companySettingsRepository";
 import {
   calculateDdtTotals,
-  paginateDdtRows,
   toDateIT,
   getOperatorSymbol,
   formatAddressOrCity,
   formatCascadeDiscountDisplay,
   resolveDestinazioneDisplay,
 } from "../utils/ddtCalculations";
+import { paginateDdtRows } from "../utils/ddtPagination";
 import bricoLogo from "@/assets/logo_brico_class.jpg";
 
 export const DDT_CONFIG = {

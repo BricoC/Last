@@ -1,14 +1,6 @@
 import { create } from "zustand";
-import {
-  generateDdtMonthlyExcelReport,
-  getMonthlyFullDdtDocuments,
-  saveReportToDesktop,
-  ITALIAN_MONTH_NAMES,
-} from "../services/ddtReportService";
-import { formatDdtPdfFilename, generatePdfBase64FromElements } from "../utils/ddtExportManager";
-import { DdtDocument, DdtItem } from "../models/ddt";
-import { getCompanySettings } from "@/features/settings/companySettingsRepository";
-import { waitForDomPaint } from "@/shared/utils/a4PdfCapture";
+import { ITALIAN_MONTH_NAMES } from "../utils/italianMonthNames";
+import type { DdtDocument, DdtItem } from "../models/ddt";
 
 export interface BatchProgressInfo {
   year: number;
@@ -92,6 +84,12 @@ export const useDdtBatchExportStore = create<DdtBatchExportState>((set, get) => 
     });
 
     try {
+      const [excelService, desktopService] = await Promise.all([
+        import("../services/ddtMonthlyExcelReportService"),
+        import("../services/ddtReportDesktopService"),
+      ]);
+      const { generateDdtMonthlyExcelReport } = excelService;
+      const { saveReportToDesktop } = desktopService;
       const result = await generateDdtMonthlyExcelReport(year, month);
       if (get().cancelRequested) {
         set({
@@ -151,8 +149,16 @@ export const useDdtBatchExportStore = create<DdtBatchExportState>((set, get) => 
     });
 
     try {
+      const [excelService, desktopService, documentsService, exportManager, companySettings, pdfCapture] = await Promise.all([
+        import("../services/ddtMonthlyExcelReportService"),
+        import("../services/ddtReportDesktopService"),
+        import("../services/ddtMonthlyDocumentsService"),
+        import("../utils/ddtExportManager"),
+        import("@/features/settings/companySettingsRepository"),
+        import("@/shared/utils/a4PdfCapture"),
+      ]);
       // 1. Genera file Excel
-      const excelRes = await generateDdtMonthlyExcelReport(year, month);
+      const excelRes = await excelService.generateDdtMonthlyExcelReport(year, month);
       if (get().cancelRequested) {
         set({
           isExporting: false,
@@ -164,11 +170,11 @@ export const useDdtBatchExportStore = create<DdtBatchExportState>((set, get) => 
         return;
       }
 
-      await saveReportToDesktop(`${folderName}/${excelRes.filename}`, excelRes.buffer);
+      await desktopService.saveReportToDesktop(`${folderName}/${excelRes.filename}`, excelRes.buffer);
 
       // 2. Pre-carica i dati aziendali una sola volta in cache e recupera tutti i DDT del mese
-      await getCompanySettings();
-      const ddtDocs = await getMonthlyFullDdtDocuments(year, month);
+      await companySettings.getCompanySettings();
+      const ddtDocs = await documentsService.getMonthlyFullDdtDocuments(year, month);
       const total = ddtDocs.length;
 
       if (total === 0) {
@@ -224,19 +230,19 @@ export const useDdtBatchExportStore = create<DdtBatchExportState>((set, get) => 
         });
 
         // Attendi che il DOM renderizzi il documento nel portale invisibile
-        await waitForDomPaint(25);
+        await pdfCapture.waitForDomPaint(25);
 
         const portalPages = document.querySelectorAll("#ddt-batch-export-portal .ddt-a4-page");
         const pagesArray = Array.from(portalPages) as HTMLElement[];
 
         if (pagesArray.length > 0) {
           // pixelRatio 1.85 + JPEG 0.92: nitidezza elevata, peso 3-4x minore e cattura rapida
-          const pdfBase64 = await generatePdfBase64FromElements(pagesArray, {
+          const pdfBase64 = await exportManager.generatePdfBase64FromElements(pagesArray, {
             pixelRatio: 1.85,
             quality: 0.92,
           });
-          const pdfFilename = formatDdtPdfFilename(doc);
-          await saveReportToDesktop(`${folderName}/PDF/${pdfFilename}`, pdfBase64);
+          const pdfFilename = exportManager.formatDdtPdfFilename(doc);
+          await desktopService.saveReportToDesktop(`${folderName}/PDF/${pdfFilename}`, pdfBase64);
         }
 
         // Cede il controllo al Main Thread JS tra un documento e l'altro

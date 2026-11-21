@@ -439,12 +439,7 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     setIsLoadingLines(true);
     setIsDetailOpen(true);
     try {
-      const found = invoices.find(
-        (d) =>
-          d.supplier_name.trim().toUpperCase() === item.supplier_name.trim().toUpperCase() &&
-          d.doc_number.trim().toUpperCase() === item.doc_number.trim().toUpperCase() &&
-          d.doc_date.trim() === item.doc_date.trim()
-      );
+      const found = item.invoice_id == null ? undefined : await electronicInvoicesService.getInvoiceById(item.invoice_id);
 
       setSelectedInvoice(
         found || {
@@ -461,7 +456,8 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
       const lines = await electronicInvoicesService.getInvoiceLines(
         item.supplier_name,
         item.doc_number,
-        item.doc_date
+        item.doc_date,
+        item.invoice_id,
       );
       setInvoiceLines(lines.length > 0 ? lines : [item]);
     } catch (err) {
@@ -480,7 +476,8 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
       const lines = await electronicInvoicesService.getInvoiceLines(
         inv.supplier_name,
         inv.doc_number,
-        inv.doc_date
+        inv.doc_date,
+        inv.id,
       );
       setInvoiceLines(lines);
     } catch (err) {

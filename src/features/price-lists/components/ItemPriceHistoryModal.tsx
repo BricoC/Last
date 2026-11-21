@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { X, History, ArrowRight, LoaderCircle } from "lucide-react";
 import { ListinoGeneraleRow, PriceListLogEntry } from "../models/priceList";
 import { priceListRepository } from "../services/priceListRepository";
+import { formatPriceHistoryDate, formatPriceHistoryValue, getPriceHistoryTextDiff, round5 } from "../utils/priceHistoryFormatting";
 
 interface ItemPriceHistoryModalProps {
   isOpen: boolean;
@@ -10,10 +11,6 @@ interface ItemPriceHistoryModalProps {
   item: ListinoGeneraleRow | null;
   originalItem?: ListinoGeneraleRow;
   pendingItem?: ListinoGeneraleRow;
-}
-
-function round5(num: number): number {
-  return Math.round((num + Number.EPSILON) * 100000) / 100000;
 }
 
 export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
@@ -138,55 +135,6 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
 
   if (!isOpen || !item) return null;
 
-  const formatDate = (isoString: string) => {
-    if (!isoString) return "—";
-    try {
-      const d = new Date(isoString);
-      return `${d.toLocaleDateString("it-IT")} ${d.toLocaleTimeString("it-IT", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })}`;
-    } catch {
-      return isoString;
-    }
-  };
-
-  const formatVal = (val: number | null | undefined, campo: string) => {
-    const c = campo.toLowerCase();
-    const isPct = c.includes("%") || c.includes("iva") || c.includes("aumento") || c.includes("magazzino");
-    const isMoney = c.includes("prezzo") || c.includes("costo") || c.includes("acquisto") || c.includes("fattura") || c.includes("pubblico") || c.includes("profess");
-
-    if (val == null) {
-      if (isPct) return "0% (Non impostato)";
-      if (isMoney) return "€ 0,00";
-      return "(vuoto)";
-    }
-    if (isPct) {
-      const pct = val * 100;
-      return `${round5(pct)}%`;
-    }
-    if (isMoney) {
-      return `€ ${round5(val).toLocaleString("it-IT", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 5,
-      })}`;
-    }
-    return String(round5(val));
-  };
-
-  const getTextDiff = (log: PriceListLogEntry) => {
-    if (log.vecchio_testo != null || log.nuovo_testo != null) {
-      return { oldText: log.vecchio_testo || "(vuoto)", newText: log.nuovo_testo || "(vuoto)" };
-    }
-    if (log.motivo) {
-      const match = log.motivo.match(/da "([^"]*)" a "([^"]*)"/i);
-      if (match) {
-        return { oldText: match[1] || "(vuoto)", newText: match[2] || "(vuoto)" };
-      }
-    }
-    return { oldText: null, newText: null };
-  };
-
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="w-[94vw] max-w-6xl max-h-[90vh] bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl flex flex-col overflow-hidden select-none animate-in fade-in zoom-in-95 duration-100">
@@ -234,7 +182,7 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
               <p>Non ci sono ancora variazioni di prezzo o dati archiviate per questo articolo.</p>
               {item.updated_at && (
                 <p className="text-[11px] text-[var(--muted-foreground)] mt-2">
-                  Ultimo aggiornamento registrato: {formatDate(item.updated_at)}
+                  Ultimo aggiornamento registrato: {formatPriceHistoryDate(item.updated_at)}
                 </p>
               )}
             </div>
@@ -260,9 +208,9 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                   const isPositive = (variance ?? 0) > 0;
                   const isNegative = (variance ?? 0) < 0;
                   const isPending = (log.id ?? 0) < 0;
-                  const textDiff = getTextDiff(log);
-                  const displayOld = textDiff.oldText ?? formatVal(log.vecchio_valore, log.campo_modificato);
-                  const displayNew = textDiff.newText ?? formatVal(log.nuovo_valore, log.campo_modificato);
+                  const textDiff = getPriceHistoryTextDiff(log);
+                  const displayOld = textDiff.oldText ?? formatPriceHistoryValue(log.vecchio_valore, log.campo_modificato);
+                  const displayNew = textDiff.newText ?? formatPriceHistoryValue(log.nuovo_valore, log.campo_modificato);
 
                   return (
                     <tr
@@ -277,7 +225,7 @@ export const ItemPriceHistoryModal: React.FC<ItemPriceHistoryModalProps> = ({
                         {isPending ? (
                           <span className="font-bold text-amber-400">ADESSO (In corso)</span>
                         ) : (
-                          formatDate(log.created_at)
+                          formatPriceHistoryDate(log.created_at)
                         )}
                       </td>
                       <td className="px-3 py-2 font-bold text-[var(--primary)] font-sans">

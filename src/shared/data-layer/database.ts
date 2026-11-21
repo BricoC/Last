@@ -1,3 +1,5 @@
+import { consumeRestoredOrderQueue } from "./orderQueueBackup";
+import { migrateInvoiceIssuerV39 } from "./migrations/invoiceIssuerSchema";
 import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
 import { buildMigrationPlan, type MigrationDatabase } from "./migrationPlan";
@@ -519,6 +521,25 @@ const MIGRATIONS: Migration[] = [
     name: "add_project_url_to_trash_tables",
     up: migrateTrashTablesProjectUrlV38,
   },
+  { version: 39, name: "invoice_issuer_identity", up: migrateInvoiceIssuerV39 },
+  {
+    version: 40, name: "explicit_ddt_cloud_restore",
+    up: (db) => db.addColumnIfMissing("ddt_documents", "cloud_restore_requested", "INTEGER NOT NULL DEFAULT 0"),
+  },
+  {
+    version: 41, name: "price_list_cloud_revision",
+    up: async (db) => {
+      await db.addColumnIfMissing("listino_generale", "remote_sync_revision", "TEXT");
+      await db.addColumnIfMissing("listini_clienti", "remote_sync_revision", "TEXT");
+    },
+  },
+  {
+    version: 42, name: "backup_order_queue_and_app_preferences",
+    up: async db => {
+      await db.execute("CREATE TABLE IF NOT EXISTS order_queue_restore (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL, merge_queue INTEGER NOT NULL)");
+      await db.execute("CREATE TABLE IF NOT EXISTS app_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)");
+    },
+  },
 ];
 
 const BUSY_RETRY_DELAYS_MS = [150, 300, 600, 1200, 2000];
@@ -586,6 +607,7 @@ export async function getDatabase(): Promise<Database> {
       await runMigrations();
       const db = wrapDatabaseWithBusyRetry(Database.get(DB_FILENAME));
 
+      if (typeof window !== "undefined") await consumeRestoredOrderQueue(db);
       dbInstance = db;
       return db;
     } catch (err) {

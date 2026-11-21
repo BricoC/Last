@@ -1,3 +1,4 @@
+import { consumeRestoredOrderQueue, parseOrderQueue, readOrderQueueForBackup } from "@/shared/data-layer/orderQueueBackup";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
@@ -228,6 +229,7 @@ export interface BackupPackage {
   selectedCategories: string[];
   tableCounts: Record<string, number>;
   tables: Record<string, any[]>;
+  orderQueue?: ReturnType<typeof readOrderQueueForBackup>;
 }
 
 export interface BackupFileInfo {
@@ -549,6 +551,10 @@ function getBackupFileTimestamp(): string {
 /**
  * Esegue il backup completo dell'intero database SQLite con pulizia FIFO a 15 elementi
  */
+export function getLocalBackupDate(): string {
+  return getBackupFileTimestamp().slice(0, 10).replace(/\./g, "-");
+}
+
 export async function executeFullDatabaseBackup(folderPath: string): Promise<{
   success: boolean;
   filePath: string;
@@ -560,7 +566,7 @@ export async function executeFullDatabaseBackup(folderPath: string): Promise<{
     const ts = getBackupFileTimestamp();
     const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\Backup Completo ${ts}.db`;
 
-    const size = await invoke<number>("copy_database_file", { targetFilePath: targetFile });
+    const size = await invoke<number>("copy_database_file", { targetFilePath: targetFile, orderQueue: JSON.stringify(readOrderQueueForBackup()) });
 
     // Pulizia FIFO: mantieni massimo 15 backup
     const deleted = await cleanOldBackups(folderPath, DEFAULT_MAX_HISTORY);
@@ -638,6 +644,7 @@ export async function executeModularBackup(
       selectedCategories: selectedCategoryIds,
       tableCounts,
       tables: exportedData,
+      ...(selectedCategoryIds.includes("orders") ? { orderQueue: readOrderQueueForBackup() } : {}),
     };
 
     const ts = getBackupFileTimestamp();
@@ -862,7 +869,13 @@ export async function restoreModularBackup(
     const referenceTables = Object.keys(restoredCounts).filter((table) =>
       mode === "replace" || restoredCounts[table] > 0,
     );
+    const importQueue = categoriesToRestore.includes("orders") && pkg.orderQueue !== undefined;
+    if (importQueue) writes.push({
+      sql: "INSERT OR REPLACE INTO order_queue_restore(id,payload,merge_queue) VALUES(1,$1,$2)",
+      params: [JSON.stringify(parseOrderQueue(pkg.orderQueue)), mode === "merge" ? 1 : 0],
+    });
     await applyLocalDatabaseBatch(writes, referenceTables);
+    if (importQueue) await consumeRestoredOrderQueue(db);
     return { success: true, restoredCounts };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -885,7 +898,6 @@ export async function checkAndExecuteDailyBackup(currentUserName?: string): Prom
   const config = loadBackupConfig();
   // Se la cartella di backup non è stata esplicitamente configurata dall'utente, non fare backup automatico
   if (!config.folderPath || config.folderPath.trim() === "") {
-    console.log("[backupService] Backup automatico saltato: nessuna cartella di backup configurata.");
     return { ran: false };
   }
   const folder = config.folderPath;
@@ -893,19 +905,8 @@ export async function checkAndExecuteDailyBackup(currentUserName?: string): Prom
     return { ran: false };
   }
 
-  // Non eseguire il backup se il database locale è vuoto (es. prima installazione)
-  try {
-    const db = await getDatabase();
-    const ddtCheck = await db.select<{ count: number }[]>("SELECT COUNT(*) as count FROM ddt_documents WHERE deleted_at IS NULL");
-    if (!ddtCheck || !ddtCheck[0] || ddtCheck[0].count === 0) {
-      console.log("[backupService] Backup automatico saltato: database vuoto o non ancora inizializzato (0 DDT).");
-      return { ran: false };
-    }
-  } catch {
-    return { ran: false };
-  }
-
-  const todayStr = new Date().toISOString().slice(0, 10);
+  await getDatabase();
+  const todayStr = getLocalBackupDate();
 
   // 1. Verifica multi-utente: se il backup per oggi esiste già nella cartella condivisa o su Supabase
   const check = await checkTodayBackupAlreadyDone(folder, todayStr);

@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
@@ -30,6 +30,18 @@ export default defineConfig(() => ({
       : undefined,
     watch: {
       ignored: ["**/src-tauri/**"],
+    },
+  },
+  test: {
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/*.test.*", "src/**/*.spec.*", "src/**/__tests__/**", "src/**/*.d.ts"],
+      reporter: ["text"],
+      thresholds: {
+        lines: 16,
+        branches: 14,
+      },
     },
   },
 }));

@@ -1,3 +1,4 @@
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { getDatabase } from "@/shared/data-layer/database";
 import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { Client, ClientPhone, CreateClientInput } from "../models/client";
@@ -35,62 +36,8 @@ export class ClientRepository {
     const projectUrl =
       input.project_url !== undefined ? input.project_url : getLastKnownSupabaseProjectUrl();
     if (input.id) {
-      await db.execute(
-        `UPDATE clients SET
-          code = $1,
-          pending_previous_name = CASE
-            WHEN LOWER(TRIM(business_name)) <> LOWER(TRIM($2))
-            THEN COALESCE(pending_previous_name, business_name)
-            ELSE pending_previous_name END,
-          business_name = $2,
-          address = $3,
-          city = $4,
-          postal_code = $5,
-          province = $6,
-          vat_number = $7,
-          fiscal_code = $8,
-          sdi_code = $9,
-          pec = $10,
-          email = $11,
-          payment_method = $12,
-          destination_name = $13,
-          destination_address = $14,
-          destination_city = $15,
-          destinations_json = $16,
-          price_lists_json = $17,
-          phones_json = $18,
-          notes = $19,
-          is_active = $20,
-          updated_at = $21,
-          updated_by = $22,
-          sync_status = 'pending'
-        WHERE id = $23 AND deleted_at IS NULL`,
-        [
-          input.code || null,
-          input.business_name.trim(),
-          input.address || null,
-          input.city || null,
-          input.postal_code || null,
-          input.province || null,
-          input.vat_number || null,
-          input.fiscal_code || null,
-          input.sdi_code || null,
-          input.pec || null,
-          input.email || null,
-          input.payment_method || null,
-          input.destination_name || null,
-          input.destination_address || null,
-          input.destination_city || null,
-          destinationsJson,
-          priceListsJson,
-          phonesJson,
-          input.notes || null,
-          input.is_active === false ? 0 : 1,
-          now,
-          "system",
-          id,
-        ]
-      );
+      const { sql, params } = this.clientUpdate(input, id, now);
+      await db.execute(sql, params);
     } else {
       await db.execute(
         `INSERT INTO clients (
@@ -134,6 +81,68 @@ export class ClientRepository {
     const saved = await this.getClientById(id);
     if (!saved) throw new Error("Errore recupero cliente salvato");
     return saved;
+  }
+
+  private clientUpdate(input: CreateClientInput, id: string, now: string): SqliteWrite {
+    const phonesJson = JSON.stringify(input.phones || []);
+    const destinationsJson = JSON.stringify(input.destinations || []);
+    const priceListsJson = JSON.stringify(input.price_lists || []);
+    return {
+      sql: `UPDATE clients SET
+          code = $1,
+          pending_previous_name = CASE
+            WHEN LOWER(TRIM(business_name)) <> LOWER(TRIM($2))
+            THEN COALESCE(pending_previous_name, business_name)
+            ELSE pending_previous_name END,
+          business_name = $2,
+          address = $3,
+          city = $4,
+          postal_code = $5,
+          province = $6,
+          vat_number = $7,
+          fiscal_code = $8,
+          sdi_code = $9,
+          pec = $10,
+          email = $11,
+          payment_method = $12,
+          destination_name = $13,
+          destination_address = $14,
+          destination_city = $15,
+          destinations_json = $16,
+          price_lists_json = $17,
+          phones_json = $18,
+          notes = $19,
+          is_active = $20,
+          updated_at = $21,
+          updated_by = $22,
+          sync_status = 'pending'
+        WHERE id = $23 AND deleted_at IS NULL`,
+      params: [
+          input.code || null,
+          input.business_name.trim(),
+          input.address || null,
+          input.city || null,
+          input.postal_code || null,
+          input.province || null,
+          input.vat_number || null,
+          input.fiscal_code || null,
+          input.sdi_code || null,
+          input.pec || null,
+          input.email || null,
+          input.payment_method || null,
+          input.destination_name || null,
+          input.destination_address || null,
+          input.destination_city || null,
+          destinationsJson,
+          priceListsJson,
+          phonesJson,
+          input.notes || null,
+          input.is_active === false ? 0 : 1,
+          now,
+          "system",
+          id,
+        ],
+    };
   }
 
   /**
@@ -349,11 +358,11 @@ export class ClientRepository {
    * - Soft-delete dei record duplicati
    */
   public async mergeClients(canonicalId: string, duplicateIds: string[]): Promise<Client> {
-    const db = await getDatabase();
     const target = await this.getClientById(canonicalId);
     if (!target) throw new Error("Cliente principale non trovato.");
 
     const now = new Date().toISOString();
+    const writes: SqliteWrite[] = [];
     const destinations = [...target.destinations];
     const phones = [...target.phones];
     const priceLists = new Set(target.price_lists);
@@ -369,7 +378,7 @@ export class ClientRepository {
     let email = target.email;
     let paymentMethod = target.payment_method;
 
-    for (const dupId of duplicateIds) {
+    for (const dupId of new Set(duplicateIds)) {
       if (dupId === canonicalId) continue;
       const dup = await this.getClientById(dupId);
       if (!dup) continue;
@@ -413,35 +422,35 @@ export class ClientRepository {
       const mergeProjectUrl = target.project_url ?? dup.project_url ?? null;
 
       // Riassegna tutti i DDT del duplicato al cliente principale (solo dello stesso progetto)
-      await db.execute(
-        `UPDATE ddt_documents 
+      writes.push({
+        sql: `UPDATE ddt_documents
          SET client_name = $1, client_id = $2, sync_status = 'pending', updated_at = $3
-         WHERE (LOWER(TRIM(client_name)) = LOWER(TRIM($4)) OR client_id = $5)
+         WHERE deleted_at IS NULL AND (client_id = $5 OR (client_id IS NULL AND LOWER(TRIM(client_name)) = LOWER(TRIM($4))))
            AND (($6 IS NULL AND project_url IS NULL) OR project_url = $6)`,
-        [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl]
-      );
+        params: [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl],
+      });
 
       // Riassegna eventuali preventivi del duplicato al cliente principale (solo dello stesso progetto)
-      await db.execute(
-        `UPDATE quotes
+      writes.push({
+        sql: `UPDATE quotes
          SET client_name = $1, client_id = $2, sync_status = 'pending', updated_at = $3
-         WHERE (LOWER(TRIM(client_name)) = LOWER(TRIM($4)) OR client_id = $5)
+         WHERE deleted_at IS NULL AND (client_id = $5 OR (client_id IS NULL AND LOWER(TRIM(client_name)) = LOWER(TRIM($4))))
            AND (($6 IS NULL AND project_url IS NULL) OR project_url = $6)`,
-        [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl]
-      );
+        params: [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl],
+      });
 
       // Soft delete del record duplicato
-      await db.execute(
-        `UPDATE clients 
+      writes.push({
+        sql: `UPDATE clients
          SET deleted_at = $1, updated_at = $1, notes = coalesce(notes, '') || ' [Unito a ' || $2 || ']', sync_status = 'pending'
-         WHERE id = $3`,
-        [now, target.business_name, dup.id]
-      );
+         WHERE id = $3 AND deleted_at IS NULL AND updated_at IS $4 AND project_url IS $5`,
+        params: [now, target.business_name, dup.id, dup.updated_at, mergeProjectUrl],
+        expectedRows: 1,
+      });
     }
 
     // Salva il target arricchito
-    const updatedTarget = await this.createOrUpdateClient({
-      id: target.id,
+    const targetUpdate = this.clientUpdate({
       code: target.code,
       business_name: target.business_name,
       address,
@@ -454,13 +463,23 @@ export class ClientRepository {
       pec,
       email,
       payment_method: paymentMethod,
+      destination_name: target.destination_name,
+      destination_address: target.destination_address,
+      destination_city: target.destination_city,
       destinations: deduplicateDestinations(destinations),
       price_lists: Array.from(priceLists),
       phones,
       notes: target.notes,
       is_active: target.is_active,
+    }, target.id, now);
+    writes.push({
+      sql: targetUpdate.sql + ' AND updated_at IS $24 AND project_url IS $25',
+      params: [...targetUpdate.params, target.updated_at, target.project_url ?? null],
+      expectedRows: 1,
     });
-
+    await applyLocalDatabaseBatch(writes);
+    const updatedTarget = await this.getClientById(target.id);
+    if (!updatedTarget) throw new Error("Cliente principale non trovato dopo l'unione.");
     return updatedTarget;
   }
 

@@ -5,6 +5,7 @@ import {
   ALL_APP_PAGE_MODULES,
   AppUser,
   hashPassword,
+  isLegacyPasswordHash,
   verifyPassword,
 } from "../appUserService";
 
@@ -87,19 +88,31 @@ describe("isPageAllowedForUser", () => {
     expect(isPageAllowedForUser(userWithSettingsInList, "dashboard")).toBe(true);
   });
 
-  it("hashes and correctly verifies passwords", async () => {
+  it("creates salted PBKDF2 password hashes and verifies the right password", async () => {
     const hash = await hashPassword("segreto123");
-    expect(hash).toBeTruthy();
-    expect(hash.length).toBe(64); // SHA-256 hex string
-    const match = await verifyPassword("segreto123", hash);
-    expect(match).toBe(true);
-    const wrong = await verifyPassword("sbagliata", hash);
-    expect(wrong).toBe(false);
+    const secondHash = await hashPassword("segreto123");
+    expect(hash).toMatch(/^pbkdf2-sha256\$600000\$/);
+    expect(hash).not.toBe(secondHash);
+    expect(isLegacyPasswordHash(hash)).toBe(false);
+    expect(await verifyPassword("segreto123", hash)).toBe(true);
+    expect(await verifyPassword("sbagliata", hash)).toBe(false);
+  });
+
+  it("continues accepting legacy SHA-256 hashes so they can be upgraded at login", async () => {
+    const digest = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode("segreto123"))
+    );
+    const legacyHash = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+    expect(isLegacyPasswordHash(legacyHash)).toBe(true);
+    expect(await verifyPassword("segreto123", legacyHash)).toBe(true);
+    expect(await verifyPassword("sbagliata", legacyHash)).toBe(false);
   });
 
   it("fails verification when hash is empty or undefined", async () => {
     expect(await verifyPassword("segreto123", "")).toBe(false);
     expect(await verifyPassword("segreto123", undefined)).toBe(false);
+    expect(await verifyPassword("segreto123", "pbkdf2-sha256$100000$invalid$invalid")).toBe(false);
   });
 });
 

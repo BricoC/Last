@@ -11,9 +11,7 @@ import {
 import {
   type RibaDeadlineInfo,
   openRibaEmailDraft,
-  saveLocalRibaPaid,
-  saveSqliteRibaPaid,
-  saveRemoteRibaPaid,
+  registerRibaPayment,
 } from "../services/ribaService";
 import { getEmailSettings, type EmailSettings } from "@/features/settings/emailSettingsRepository";
 
@@ -93,12 +91,14 @@ export const RibaModal: React.FC<RibaModalProps> = ({
     setSuccessMsg(null);
     try {
       const sentAt = new Date().toISOString();
-      saveLocalRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
-      await saveSqliteRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
-      const savedRemote = await saveRemoteRibaPaid(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
+      const result = await registerRibaPayment(ribaInfo.deadlineKey, ribaInfo.deadlineStr, sentAt);
+      if (!result.confirmed) {
+        setError("Pagamento non registrato. Verifica lo spazio disponibile o la connessione e riprova.");
+        return;
+      }
       onStatusUpdated({ isPaid: true, sentAt });
       setSuccessMsg(
-        savedRemote
+        result.remote
           ? "Pagamento registrato."
           : "Pagamento registrato in locale (sincronizzazione Cloud in sospeso)."
       );

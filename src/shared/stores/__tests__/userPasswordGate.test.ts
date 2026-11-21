@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useUserStore } from "@/shared/stores/useUserStore";
-import { AppUserService, AppUser, hashPassword } from "@/shared/services/appUserService";
+import { AppUserService, AppUser, hashPassword, verifyPassword } from "@/shared/services/appUserService";
+
+async function legacySha256Hash(password: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password))
+  );
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 describe("useUserStore Password Gate", () => {
   beforeEach(() => {
@@ -101,6 +108,66 @@ describe("useUserStore Password Gate", () => {
     expect(okRes).toBe(true);
     expect(useUserStore.getState().currentUser?.id).toBe("admin");
     expect(useUserStore.getState().pendingPasswordSwitch).toBeNull();
+  });
+
+  it("upgrades a legacy hash after successful login without changing the password", async () => {
+    const legacyHash = await legacySha256Hash("legacy-secret");
+    const legacyUser: AppUser = {
+      id: "admin",
+      name: "Admin",
+      station_name: "PC Ufficio",
+      can_access_settings: true,
+      can_access_ddt: true,
+      can_access_price_lists: true,
+      can_edit_price_lists: true,
+      can_edit_or_numbers: true,
+      is_admin: true,
+      allowed_pages: ["dashboard"],
+      theme_preset: "grigio",
+      theme_brightness: 4,
+      require_password: true,
+      password_hash: legacyHash,
+      created_at: new Date().toISOString(),
+    };
+    const persistUpgrade = vi.spyOn(AppUserService, "updateUser").mockResolvedValue();
+    useUserStore.setState({ users: [legacyUser], currentUser: null, pendingPasswordSwitch: legacyUser });
+
+    expect(await useUserStore.getState().confirmPasswordSwitch("wrong-secret")).toBe(false);
+    expect(persistUpgrade).not.toHaveBeenCalled();
+    expect(useUserStore.getState().currentUser).toBeNull();
+
+    expect(await useUserStore.getState().confirmPasswordSwitch("legacy-secret")).toBe(true);
+    const migratedUser = useUserStore.getState().currentUser;
+    expect(migratedUser?.password_hash).toMatch(/^pbkdf2-sha256\$600000\$/);
+    expect(migratedUser?.password_hash).not.toBe(legacyHash);
+    expect(persistUpgrade).toHaveBeenCalledWith(expect.objectContaining({ id: "admin", password_hash: migratedUser?.password_hash }));
+    expect(await verifyPassword("legacy-secret", migratedUser?.password_hash)).toBe(true);
+  });
+
+  it("does not grant access when the legacy-hash upgrade cannot be persisted", async () => {
+    const legacyUser: AppUser = {
+      id: "admin",
+      name: "Admin",
+      station_name: "PC Ufficio",
+      can_access_settings: true,
+      can_access_ddt: true,
+      can_access_price_lists: true,
+      can_edit_price_lists: true,
+      can_edit_or_numbers: true,
+      is_admin: true,
+      allowed_pages: ["dashboard"],
+      theme_preset: "grigio",
+      theme_brightness: 4,
+      require_password: true,
+      password_hash: await legacySha256Hash("legacy-secret"),
+      created_at: new Date().toISOString(),
+    };
+    vi.spyOn(AppUserService, "updateUser").mockRejectedValue(new Error("SQLite non disponibile"));
+    useUserStore.setState({ users: [legacyUser], currentUser: null, pendingPasswordSwitch: legacyUser });
+
+    await expect(useUserStore.getState().confirmPasswordSwitch("legacy-secret")).rejects.toThrow("SQLite non disponibile");
+    expect(useUserStore.getState().currentUser).toBeNull();
+    expect(useUserStore.getState().pendingPasswordSwitch?.id).toBe("admin");
   });
 
   it("switches to unprotected user if cancelled without active user (startup lock)", async () => {

@@ -49,9 +49,15 @@ export const CloudSyncHoverPopover: React.FC<CloudSyncHoverPopoverProps> = ({
     remoteLatestSummary,
     remoteLatestDdt,
     hasPendingRemoteChanges,
+    hasPendingLocalChanges,
     alignmentMessage,
     error,
   } = status;
+  const needsAttention = Boolean(error || hasPendingRemoteChanges || hasPendingLocalChanges);
+  const alignmentTitle = error ? "Verifica Cloud incompleta"
+    : hasPendingRemoteChanges ? "Nuovi dati sul Cloud"
+    : hasPendingLocalChanges ? "Modifiche locali da inviare"
+    : "Programma allineato";
 
   return (
     <div
@@ -80,23 +86,19 @@ export const CloudSyncHoverPopover: React.FC<CloudSyncHoverPopoverProps> = ({
       <div
         className={cn(
           "mb-3.5 p-2.5 rounded-lg border flex items-start gap-2.5 transition-all",
-          hasPendingRemoteChanges
+          needsAttention
             ? "bg-amber-500/15 border-amber-500/40 text-amber-200"
             : "bg-emerald-500/15 border-emerald-500/35 text-emerald-200"
         )}
       >
-        {hasPendingRemoteChanges ? (
+        {needsAttention ? (
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         ) : (
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
         )}
         <div className="flex-1">
           <div className="font-bold text-[12px] flex items-center justify-between">
-            <span>
-              {hasPendingRemoteChanges
-                ? "⚡ Nuovi dati presenti sul Cloud!"
-                : "✅ Programma perfettamente allineato"}
-            </span>
+            <span>{alignmentTitle}</span>
           </div>
           <p className="text-[11px] mt-0.5 opacity-90 leading-relaxed">{alignmentMessage}</p>
         </div>
@@ -191,7 +193,7 @@ export const CloudSyncHoverPopover: React.FC<CloudSyncHoverPopoverProps> = ({
         disabled={isSyncing}
         className={cn(
           "w-full py-2 px-3 rounded-lg flex items-center justify-center gap-2 font-semibold text-xs transition-all shadow-md cursor-pointer",
-          hasPendingRemoteChanges
+          needsAttention
             ? "bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold animate-pulse"
             : "bg-emerald-600 hover:bg-emerald-500 text-white"
         )}

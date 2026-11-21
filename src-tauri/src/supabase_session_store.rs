@@ -66,7 +66,7 @@ pub(crate) mod dpapi {
     }
 
     pub fn protect(plain: &[u8]) -> Result<Vec<u8>, String> {
-        let mut input = DataBlob {
+        let input = DataBlob {
             cb_data: u32::try_from(plain.len()).map_err(|_| "Sessione troppo grande")?,
             pb_data: plain.as_ptr() as *mut u8,
         };
@@ -76,7 +76,7 @@ pub(crate) mod dpapi {
         };
         let ok = unsafe {
             CryptProtectData(
-                &mut input,
+                &input,
                 null(),
                 null(),
                 null_mut(),
@@ -88,9 +88,8 @@ pub(crate) mod dpapi {
         if ok == 0 || output.pb_data.is_null() {
             return Err("Impossibile proteggere la sessione sul PC".into());
         }
-        let encrypted = unsafe {
-            std::slice::from_raw_parts(output.pb_data, output.cb_data as usize).to_vec()
-        };
+        let encrypted =
+            unsafe { std::slice::from_raw_parts(output.pb_data, output.cb_data as usize).to_vec() };
         unsafe {
             LocalFree(output.pb_data as *mut c_void);
         }
@@ -98,7 +97,7 @@ pub(crate) mod dpapi {
     }
 
     pub fn unprotect(encrypted: &[u8]) -> Result<Vec<u8>, String> {
-        let mut input = DataBlob {
+        let input = DataBlob {
             cb_data: u32::try_from(encrypted.len()).map_err(|_| "Sessione non valida")?,
             pb_data: encrypted.as_ptr() as *mut u8,
         };
@@ -108,7 +107,7 @@ pub(crate) mod dpapi {
         };
         let ok = unsafe {
             CryptUnprotectData(
-                &mut input,
+                &input,
                 null_mut(),
                 null(),
                 null_mut(),
@@ -120,9 +119,8 @@ pub(crate) mod dpapi {
         if ok == 0 || output.pb_data.is_null() {
             return Err("Impossibile decifrare la sessione salvata sul PC".into());
         }
-        let plain = unsafe {
-            std::slice::from_raw_parts(output.pb_data, output.cb_data as usize).to_vec()
-        };
+        let plain =
+            unsafe { std::slice::from_raw_parts(output.pb_data, output.cb_data as usize).to_vec() };
         unsafe {
             LocalFree(output.pb_data as *mut c_void);
         }

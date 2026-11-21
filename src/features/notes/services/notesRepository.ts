@@ -91,20 +91,21 @@ export class NotesRepository {
     const db = await getDatabase();
     const nowIso = new Date().toISOString();
     const updatedBy = params.updated_by || "Operatore";
-    const color = params.color || "default";
+    const color = params.color ?? null;
 
-    await db.execute(
+    const result = await db.execute(
       `UPDATE notes SET
         title = $1,
         content_html = $2,
         content_text = $3,
-        color = $4,
+        color = COALESCE($4, color),
         updated_by = $5,
         updated_at = $6,
         sync_status = 'pending'
       WHERE id = $7`,
       [params.title, params.content_html, params.content_text, color, updatedBy, nowIso, params.id]
     );
+    if (result.rowsAffected !== 1) throw new Error("Nota non disponibile per il salvataggio.");
   }
 
   /**

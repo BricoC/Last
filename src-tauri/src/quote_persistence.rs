@@ -66,7 +66,7 @@ async fn persist_header(
           destination_city, subject, global_discount_pct, validity_days, payment_method,
           delivery_date, delivery_terms, default_supplier, internal_notes, customer_notes,
           converted_ddt_id, total_taxable_subunits, total_vat_subunits, total_document_subunits,
-          total_cost_subunits, total_profit_subunits, created_at, updated_at, updated_by, sync_status
+          total_cost_subunits, total_profit_subunits, created_at, updated_at, updated_by, sync_status, project_url
         ) ",
     );
     query.push_values(std::iter::once(payload), |mut row, quote| {
@@ -107,7 +107,8 @@ async fn persist_header(
             .push_bind(&quote.created_at)
             .push_bind(&quote.updated_at)
             .push_bind(&quote.updated_by)
-            .push_bind("pending");
+            .push_bind("pending")
+            .push_bind(&quote.project_url);
     });
     query.push(
         " ON CONFLICT(id) DO UPDATE SET

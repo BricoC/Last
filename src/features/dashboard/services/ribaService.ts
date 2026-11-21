@@ -149,9 +149,9 @@ export function saveLocalRibaPaid(
   deadlineKey: string,
   deadlineStr: string,
   sentAt: string
-): void {
+): boolean {
   try {
-    if (typeof localStorage === "undefined") return;
+    if (typeof localStorage === "undefined") return false;
     localStorage.setItem(
       `${LOCAL_RIBA_PREFIX}${deadlineKey}`,
       JSON.stringify({
@@ -161,8 +161,9 @@ export function saveLocalRibaPaid(
         sentAt,
       })
     );
+    return true;
   } catch {
-    // ignore storage errors
+    return false;
   }
 }
 
@@ -190,7 +191,7 @@ export async function saveSqliteRibaPaid(
   deadlineKey: string,
   deadlineStr: string,
   sentAt: string
-): Promise<void> {
+): Promise<boolean> {
   try {
     const db = await getDatabase();
     const now = new Date().toISOString();
@@ -200,14 +201,15 @@ export async function saveSqliteRibaPaid(
       isPaid: true,
       sentAt,
     });
-    await db.execute(
+    const result = await db.execute(
       `INSERT INTO app_preferences (key, value, updated_at)
        VALUES ($1, $2, $3)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
       [`${LOCAL_RIBA_PREFIX}${deadlineKey}`, payload, now]
     );
+    return result.rowsAffected === 1;
   } catch {
-    // ignore sqlite errors
+    return false;
   }
 }
 
@@ -237,7 +239,7 @@ export async function saveRemoteRibaPaid(
       headers: {
         apikey: creds.anonKey,
         "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates",
+        Prefer: "resolution=merge-duplicates,return=representation",
       },
       body: JSON.stringify(row),
     });
@@ -248,11 +250,21 @@ export async function saveRemoteRibaPaid(
       return false;
     }
 
-    return true;
+    const rows = await res.json();
+    return Array.isArray(rows) && rows.length === 1 && rows[0]?.deadline_key === deadlineKey && rows[0]?.is_paid === true;
   } catch (err) {
     console.warn("[ribaService] Errore rete saveRemoteRibaPaid:", err);
     return false;
   }
+}
+
+export async function registerRibaPayment(deadlineKey: string, deadlineStr: string, sentAt: string) {
+  const cached = saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt);
+  const [sqlite, remote] = await Promise.all([
+    saveSqliteRibaPaid(deadlineKey, deadlineStr, sentAt),
+    saveRemoteRibaPaid(deadlineKey, deadlineStr, sentAt),
+  ]);
+  return { confirmed: cached || sqlite || remote, remote };
 }
 
 /**

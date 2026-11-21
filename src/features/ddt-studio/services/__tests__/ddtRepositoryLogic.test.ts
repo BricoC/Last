@@ -21,11 +21,8 @@ import { money } from "@/shared/domain/monetaryValue";
 import { calculateDdtTotals } from "../../utils/ddtCalculations";
 import { ddtCloudPushService } from "../ddtCloudPushService";
 import { DdtDocument, DdtItem } from "../../models/ddt";
-import {
-  buildDdtSavePayloadFromImported,
-  ddtRepository,
-  normalizeImportedDdt,
-} from "../ddtRepository";
+import { ddtRepository } from "../ddtRepository";
+import { buildDdtSavePayloadFromImported, normalizeImportedDdt } from "../ddtImportNormalization";
 
 describe("DdtRepository Logic & Life-cycle", () => {
   beforeEach(() => {

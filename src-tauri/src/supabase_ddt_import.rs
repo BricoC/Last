@@ -57,6 +57,8 @@ struct DdtImportHeader {
     updated_at: String,
     #[serde(default)]
     project_url: Option<String>,
+    #[serde(default)]
+    base_snapshot_json: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -171,6 +173,17 @@ async fn import_transaction(
     headers: &[&DdtImportHeader],
     lines: &[&DdtImportLine],
 ) -> Result<(usize, usize), String> {
+    if headers
+        .iter()
+        .any(|header| header.base_snapshot_json.is_some())
+    {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ddt_sync_snapshots (
+               ddt_id TEXT PRIMARY KEY, remote_ultima_modifica TEXT, snapshot_json TEXT NOT NULL, updated_at TEXT NOT NULL
+            )",
+        )
+        .execute(&mut *connection).await.map_err(|error| error.to_string())?;
+    }
     for header in headers {
         sqlx::query(
             "INSERT INTO ddt_documents (
@@ -194,6 +207,14 @@ async fn import_transaction(
         .bind(header.total_taxable_subunits).bind(header.total_vat_subunits).bind(header.total_document_subunits)
         .bind(&header.created_at).bind(&header.updated_at).bind(&header.project_url)
         .execute(&mut *connection).await.map_err(|error| format!("Importazione testata DDT {}/{} fallita: {error}", header.year, header.doc_number))?;
+        if let Some(snapshot) = &header.base_snapshot_json {
+            sqlx::query(
+                "INSERT OR REPLACE INTO ddt_sync_snapshots
+                  (ddt_id, remote_ultima_modifica, snapshot_json, updated_at) VALUES (?1, ?2, ?3, ?2)",
+            )
+            .bind(&header.id).bind(&header.updated_at).bind(snapshot)
+            .execute(&mut *connection).await.map_err(|error| error.to_string())?;
+        }
     }
 
     for line in lines {

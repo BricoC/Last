@@ -77,6 +77,8 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
   // Stato sincronizzazione
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [missingOfferIds, setMissingOfferIds] = useState<string[]>([]);
+  const [republishingOfferId, setRepublishingOfferId] = useState<string | null>(null);
   const [isSupabaseTableMissing, setIsSupabaseTableMissing] = useState(false);
   const [archivingSent, setArchivingSent] = useState(false);
 
@@ -156,6 +158,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
       ]);
       setAllOffers(list);
       setCounts(c);
+      setMissingOfferIds(offersSyncService.getStatus().missingOfferIds);
     } catch (err) {
       console.error("[OffersPage] Errore caricamento offerte:", err);
     } finally {
@@ -176,6 +179,22 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
     window.addEventListener("offers-data-updated", handleUpdate);
     return () => window.removeEventListener("offers-data-updated", handleUpdate);
   }, [loadData]);
+
+  const handleRepublishOffer = async (item: OfferRecord) => {
+    if (republishingOfferId || !window.confirm(
+      `Vuoi ripubblicare l’offerta di ${item.requester} su Supabase? Verrà ricreata se è stata eliminata sul cloud.`,
+    )) return;
+    setRepublishingOfferId(item.id);
+    try {
+      const result = await offersSyncService.republishMissingOffer(item.id);
+      setSyncMessage(result.success ? "Offerta ripubblicata." : result.error || "Sincronizzazione offerte incompleta.");
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRepublishingOfferId(null);
+      await loadData(true);
+    }
+  };
 
   const handleSync = useCallback(async (silent = false) => {
     if (!silent) {
@@ -880,6 +899,16 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
 
                   {/* Azioni Rapide a Destra */}
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {item.sync_status === "pending" && missingOfferIds.includes(item.id) && (
+                      <button
+                        type="button"
+                        onClick={() => void handleRepublishOffer(item)}
+                        disabled={republishingOfferId !== null}
+                        className="flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-[11px] text-[var(--muted-foreground)] hover:bg-[var(--card)] disabled:opacity-50"
+                      >
+                        {republishingOfferId === item.id ? "Ripubblicazione…" : "Ripubblica sul cloud"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handlePrintOffer(item)}

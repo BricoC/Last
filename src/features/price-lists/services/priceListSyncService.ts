@@ -1,3 +1,4 @@
+import { priceListPullWrites, readPriceListPullState, reconcilePriceListId, type PriceListCloudTable } from "./priceListPullState";
 import { flushPendingCloudOperations, type PendingCloudOperation } from "@/shared/data-layer/pendingCloudOperations";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
@@ -46,7 +47,7 @@ function buildAuthHeaders(anonKey: string, extra?: Record<string, string>): Reco
 }
 
 const CLIENT_SELECT_FIELDS =
-  "id,created_at,updated_at,cliente,fornitore,codice_articolo,descrizione,prezzo_fattura,prezzo_acquisto,acquisto_eur,perc_acquisto,data_acquisto,acquisto_old,ricarico,data_ref,note,note1,note2";
+  "id,last_write_key,last_sync_revision,created_at,updated_at,cliente,fornitore,codice_articolo,descrizione,prezzo_fattura,prezzo_acquisto,acquisto_eur,perc_acquisto,data_acquisto,acquisto_old,ricarico,data_ref,note,note1,note2";
 
 function mapSupabaseClientRow(r: any): ListinoClienteRow {
   return {
@@ -68,6 +69,8 @@ function mapSupabaseClientRow(r: any): ListinoClienteRow {
     note2: r.note2 ?? null,
     created_at: r.created_at ?? undefined,
     updated_at: r.updated_at ?? undefined,
+    remote_sync_revision: r.last_sync_revision == null ? null : String(r.last_sync_revision),
+    cloud_write_key: r.last_write_key ?? null,
   };
 }
 
@@ -121,16 +124,23 @@ async function acknowledgePriceListWrite(
   if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.id == null) {
     throw new Error(`Supabase non ha confermato la riga ${localId}`);
   }
-  const newId = localId.startsWith("new_") ? prefix + rows[0].id : localId;
-  const db = await getDatabase();
-  await db.execute(
-    `UPDATE ${table} SET id = $1,
+  const newId = prefix ? prefix + rows[0].id : localId;
+  const acknowledgement: SqliteWrite = {
+    sql: `UPDATE ${table} SET
        updated_at = CASE WHEN sync_revision IS $2 THEN $3 ELSE updated_at END,
        sync_revision = CASE WHEN sync_revision IS $2 THEN NULL ELSE sync_revision END,
-       sync_confirmed_at = $5
-     WHERE id = $4`,
-    [newId, revision ?? null, updatedAt, localId, new Date().toISOString()]
-  );
+       sync_confirmed_at = $4,
+       remote_sync_revision = CASE
+         WHEN $5 IS NOT NULL AND (remote_sync_revision IS NULL OR CAST($5 AS INTEGER) > CAST(remote_sync_revision AS INTEGER)) THEN $5
+         ELSE remote_sync_revision END
+     WHERE id = $1`,
+    params: [newId, revision ?? null, rows[0].updated_at ?? updatedAt, new Date().toISOString(),
+      rows[0].last_sync_revision == null ? null : String(rows[0].last_sync_revision)],
+  };
+  await applyLocalDatabaseBatch([
+    ...reconcilePriceListId(table, localId, newId),
+    acknowledgement,
+  ]);
   return newId;
 }
 
@@ -189,43 +199,44 @@ async function fetchAllPages<T extends { id: number | string }>(
   return allRows;
 }
 
-async function fetchPagesWithFilter<T>(
-  baseUrl: string,
-  anonKey: string,
-  table: string,
+async function fetchChangedPriceList(
+  creds: SupabaseConfig,
+  table: PriceListCloudTable,
   select: string,
-  filterParam: string,
-  filterVal: string
-): Promise<T[]> {
-  const allRows: T[] = [];
-  let offset = 0;
-  const PAGE_SIZE = 1000;
-
-  while (true) {
-    const pageUrl = new URL(`/rest/v1/${table}`, baseUrl);
-    pageUrl.searchParams.set("select", select);
-    pageUrl.searchParams.set(filterParam, filterVal);
-    pageUrl.searchParams.set("order", "updated_at.desc,id.asc");
-    pageUrl.searchParams.set("limit", String(PAGE_SIZE));
-    pageUrl.searchParams.set("offset", String(offset));
-
-    const response = await supabaseFetch(pageUrl.toString(), {
-      method: "GET",
-      headers: buildAuthHeaders(anonKey),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Errore fetch Supabase su ${table}: ${response.status}`);
+  cursor?: string,
+): Promise<any[]> {
+  const rows: any[] = [];
+  let lastRevision = cursor ?? "0";
+  for (;;) {
+    const url = new URL(`/rest/v1/${table}`, creds.projectUrl);
+    url.searchParams.set("select", select);
+    url.searchParams.set("order", "last_sync_revision.asc");
+    url.searchParams.set("limit", String(PAGE_SIZE));
+    url.searchParams.set("last_sync_revision", `gt.${lastRevision}`);
+    const response = await supabaseFetch(url, { headers: buildAuthHeaders(creds.anonKey) });
+    if (!response.ok) throw new Error(`Errore fetch Supabase su ${table}: HTTP ${response.status}`);
+    const page = await response.json();
+    if (!Array.isArray(page)) throw new Error(`Risposta Supabase non valida per ${table}`);
+    if (!page.length) return rows;
+    for (const row of page) {
+      const next = String(row.last_sync_revision ?? "");
+      if (!/^\d+$/.test(next) || BigInt(next) <= BigInt(lastRevision)) {
+        throw new Error(`Paginazione incompleta di ${table}`);
+      }
+      lastRevision = next;
     }
-
-    const rows: T[] = await response.json();
-    if (!Array.isArray(rows)) throw new Error(`Risposta Supabase non valida per ${table}`);
-    if (rows.length === 0) break;
-    allRows.push(...rows);
-    offset += rows.length;
+    rows.push(...page);
   }
+}
 
-  return allRows;
+function reconcileDownloadedRows(
+  table: PriceListScope,
+  prefix: string,
+  rows: { id: string | number; last_write_key?: string | null }[],
+): SqliteWrite[] {
+  return rows.flatMap((row) => row.last_write_key
+    ? reconcilePriceListId(table, row.last_write_key, prefix + row.id)
+    : []);
 }
 
 function generalPriceListPayload(r: ListinoGeneraleRow, updatedAt: string) {
@@ -259,7 +270,7 @@ function priceListCloudTarget(scope: PriceListScope, row: ListinoGeneraleRow | L
   const table = scope === "listino_generale" && "source_table" in row && row.source_table === "listini_vari"
     ? "listini_vari" : scope;
   const remoteId = /^(?:gen_|var_|cli_)?(\d+)$/.exec(row.id)?.[1];
-  if (!remoteId && !row.id.startsWith("new_")) throw new Error("Identificativo del listino non valido");
+  if (!remoteId && /^(gen_|var_|cli_)/.test(row.id)) throw new Error("Identificativo del listino non valido");
   return { table, remoteId };
 }
 
@@ -301,7 +312,7 @@ export class PriceListSyncService {
     });
 
     const genFields =
-      "id,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
+      "id,last_write_key,last_sync_revision,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
 
     const rawGeneral = await fetchAllPages<any>(
       creds.projectUrl,
@@ -398,6 +409,8 @@ export class PriceListSyncService {
         note: r.note ?? null,
         created_at: r.created_at ?? undefined,
         updated_at: r.updated_at ?? undefined,
+        remote_sync_revision: r.last_sync_revision == null ? null : String(r.last_sync_revision),
+        cloud_write_key: r.last_write_key ?? null,
       })),
       ...rawVari.map((r: any): ListinoGeneraleRow => ({
         id: `var_${r.id}`,
@@ -423,6 +436,8 @@ export class PriceListSyncService {
         note: r.note ?? null,
         created_at: r.created_at ?? undefined,
         updated_at: r.updated_at ?? undefined,
+        remote_sync_revision: r.last_sync_revision == null ? null : String(r.last_sync_revision),
+        cloud_write_key: r.last_write_key ?? null,
       })),
     ];
 
@@ -432,10 +447,16 @@ export class PriceListSyncService {
     // Inserimento batch in SQLite preservando eventuali nuove righe locali non ancora inviate
     const { priceListRepository } = await import("./priceListRepository");
     await applyLocalDatabaseBatch([
+      ...reconcileDownloadedRows("listino_generale", "gen_", rawGeneral),
+      ...reconcileDownloadedRows("listino_generale", "var_", rawVari),
+      ...reconcileDownloadedRows("listini_clienti", "cli_", rawClienti),
       deleteMissingPriceListRows("listino_generale", generalRows, startedAt),
       ...priceListRepository.buildGeneralWrites(generalRows, "cloud"),
       deleteMissingPriceListRows("listini_clienti", clientRows, startedAt),
       ...priceListRepository.buildClientWrites(clientRows, "cloud"),
+      ...priceListPullWrites(creds.projectUrl, [
+        ["listino_generale", rawGeneral], ["listini_vari", rawVari], ["listini_clienti", rawClienti],
+      ]),
     ]);
 
     onProgress?.({
@@ -719,8 +740,25 @@ export class PriceListSyncService {
         ) ORDER BY id`;
       const general = await db.select<ListinoGeneraleRow[]>(pending("listino_generale"));
       const clients = await db.select<ListinoClienteRow[]>(pending("listini_clienti"));
-      for (const row of general) await this.pushGeneralBatchToSupabase([row]);
-      for (const row of clients) await this.pushClientBatchToSupabase([row]);
+      const errors = new Set<string>();
+      for (const row of general) {
+        const result = await this.pushGeneralBatchToSupabase([row]);
+        if (!result.success) errors.add(result.error || "Invio listino generale incompleto");
+      }
+      for (const row of clients) {
+        const result = await this.pushClientBatchToSupabase([row]);
+        if (!result.success) errors.add(result.error || "Invio listini clienti incompleto");
+      }
+      const queue = await db.select<{ project_url: string | null }[]>(
+        "SELECT DISTINCT project_url FROM pending_cloud_operations WHERE scope IN ('listino_generale','listini_clienti')",
+      );
+      if (queue.length) {
+        const project = normalizeSupabaseProjectUrl((await getSupabaseCredentials()).projectUrl);
+        if (queue.some((row) => !row.project_url || normalizeSupabaseProjectUrl(row.project_url) === project)) {
+          errors.add("Operazioni di cestino dei listini ancora in sospeso");
+        }
+      }
+      if (errors.size) throw new Error([...errors].join(" · "));
     })().finally(() => { this.pendingRetry = null; });
     return this.pendingRetry;
   }
@@ -743,44 +781,13 @@ export class PriceListSyncService {
       const creds = await getSupabaseCredentials();
       const db = await getDatabase();
 
-      let localMaxIso: string | null = null;
-      try {
-        const rows = await db.select<{ max_up: string | null }[]>(
-          "SELECT MAX(updated_at) as max_up FROM listino_generale WHERE sync_revision IS NULL AND (id LIKE 'gen_%' OR id LIKE 'var_%');"
-        );
-        localMaxIso = rows[0]?.max_up || null;
-      } catch {}
-
-      let referenceDate: Date;
-      if (localMaxIso && !isNaN(new Date(localMaxIso).getTime())) {
-        referenceDate = new Date(localMaxIso);
-      } else {
-        referenceDate = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-      }
-
-      // 10 secondi di tolleranza per compensare differenze di orologio tra macchine
-      const sinceIso = new Date(referenceDate.getTime() - 10000).toISOString();
-
+      const cursor = await readPriceListPullState(creds.projectUrl);
       const genFields =
-        "id,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
+        "id,last_write_key,last_sync_revision,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
 
       const [rawGen, rawVar] = await Promise.all([
-        fetchPagesWithFilter<any>(
-          creds.projectUrl,
-          creds.anonKey,
-          "listino_generale",
-          genFields,
-          "updated_at",
-          `gt.${sinceIso}`
-        ),
-        fetchPagesWithFilter<any>(
-          creds.projectUrl,
-          creds.anonKey,
-          "listini_vari",
-          genFields,
-          "updated_at",
-          `gt.${sinceIso}`
-        ),
+        fetchChangedPriceList(creds, "listino_generale", genFields, cursor.get("listino_generale")),
+        fetchChangedPriceList(creds, "listini_vari", genFields, cursor.get("listini_vari")),
       ]);
 
       if ((!rawGen || rawGen.length === 0) && (!rawVar || rawVar.length === 0)) {
@@ -812,6 +819,8 @@ export class PriceListSyncService {
           note: r.note ?? null,
           created_at: r.created_at ?? undefined,
           updated_at: r.updated_at ?? undefined,
+        remote_sync_revision: r.last_sync_revision == null ? null : String(r.last_sync_revision),
+        cloud_write_key: r.last_write_key ?? null,
         })),
         ...rawVar.map((r: any): ListinoGeneraleRow => ({
           id: `var_${r.id}`,
@@ -837,11 +846,18 @@ export class PriceListSyncService {
           note: r.note ?? null,
           created_at: r.created_at ?? undefined,
           updated_at: r.updated_at ?? undefined,
+        remote_sync_revision: r.last_sync_revision == null ? null : String(r.last_sync_revision),
+        cloud_write_key: r.last_write_key ?? null,
         })),
       ];
 
       const { priceListRepository } = await import("./priceListRepository");
-      await priceListRepository.saveGeneralRows(rowsToUpsert, "cloud");
+      await applyLocalDatabaseBatch([
+        ...reconcileDownloadedRows("listino_generale", "gen_", rawGen),
+        ...reconcileDownloadedRows("listino_generale", "var_", rawVar),
+        ...priceListRepository.buildGeneralWrites(rowsToUpsert, "cloud"),
+        ...priceListPullWrites(creds.projectUrl, [["listino_generale", rawGen], ["listini_vari", rawVar]]),
+      ]);
 
       const updatedRows = await db.select<ListinoGeneraleRow[]>(
         "SELECT * FROM listino_generale WHERE id IN (SELECT value FROM json_each($1))",
@@ -870,30 +886,9 @@ export class PriceListSyncService {
       const creds = await getSupabaseCredentials();
       const db = await getDatabase();
 
-      let localMaxIso: string | null = null;
-      try {
-        const rows = await db.select<{ max_up: string | null }[]>(
-          "SELECT MAX(updated_at) as max_up FROM listini_clienti WHERE sync_revision IS NULL AND id NOT GLOB 'new_*';"
-        );
-        localMaxIso = rows[0]?.max_up || null;
-      } catch {}
-
-      let referenceDate: Date;
-      if (localMaxIso && !isNaN(new Date(localMaxIso).getTime())) {
-        referenceDate = new Date(localMaxIso);
-      } else {
-        referenceDate = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-      }
-
-      const sinceIso = new Date(referenceDate.getTime() - 10000).toISOString();
-
-      const rawClienti = await fetchPagesWithFilter<any>(
-        creds.projectUrl,
-        creds.anonKey,
-        "listini_clienti",
-        CLIENT_SELECT_FIELDS,
-        "updated_at",
-        `gt.${sinceIso}`
+      const cursor = await readPriceListPullState(creds.projectUrl);
+      const rawClienti = await fetchChangedPriceList(
+        creds, "listini_clienti", CLIENT_SELECT_FIELDS, cursor.get("listini_clienti"),
       );
 
       if (!rawClienti || rawClienti.length === 0) {
@@ -903,7 +898,11 @@ export class PriceListSyncService {
       const rowsToUpsert: ListinoClienteRow[] = rawClienti.map(mapSupabaseClientRow);
 
       const { priceListRepository } = await import("./priceListRepository");
-      await priceListRepository.saveClientRows(rowsToUpsert, "cloud");
+      await applyLocalDatabaseBatch([
+        ...reconcileDownloadedRows("listini_clienti", "cli_", rawClienti),
+        ...priceListRepository.buildClientWrites(rowsToUpsert, "cloud"),
+        ...priceListPullWrites(creds.projectUrl, [["listini_clienti", rawClienti]]),
+      ]);
 
       const updatedRows = await db.select<ListinoClienteRow[]>(
         "SELECT * FROM listini_clienti WHERE id IN (SELECT value FROM json_each($1))",

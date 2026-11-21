@@ -1,31 +1,36 @@
 import { getDatabase } from "@/shared/data-layer/database";
-import { buildSnapshotFromLocal, DdtSnapshot } from "./ddtMergeUtils";
+import type { SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
+import { buildSnapshotFromLocal } from "./ddtSnapshotBuilders";
+import type { DdtSnapshot } from "./ddtMergeUtils";
 
 export interface StoredBaseSnapshot {
   remoteUltimaModifica: string | null;
   snapshot: DdtSnapshot;
 }
 
-let tableEnsured = false;
-
-async function ensureTable(): Promise<void> {
-  if (tableEnsured) return;
-  const db = await getDatabase();
-  await db.execute(
-    `CREATE TABLE IF NOT EXISTS ddt_sync_snapshots (
+export const ddtSnapshotSchema = `CREATE TABLE IF NOT EXISTS ddt_sync_snapshots (
       ddt_id TEXT PRIMARY KEY,
       remote_ultima_modifica TEXT,
       snapshot_json TEXT NOT NULL,
       updated_at TEXT NOT NULL
-    )`
-  );
-  tableEnsured = true;
+    )`;
+
+export function buildDdtSnapshotWrite(
+  ddtId: string,
+  remoteUltimaModifica: string | null,
+  snapshot: DdtSnapshot,
+): SqliteWrite {
+  return {
+    sql: `INSERT OR REPLACE INTO ddt_sync_snapshots (ddt_id, remote_ultima_modifica, snapshot_json, updated_at)
+          VALUES ($1,$2,$3,$4)`,
+    params: [ddtId, remoteUltimaModifica, JSON.stringify(snapshot), new Date().toISOString()],
+  };
 }
 
 export async function getDdtBaseSnapshot(ddtId: string): Promise<StoredBaseSnapshot | null> {
   try {
-    await ensureTable();
     const db = await getDatabase();
+    await db.execute(ddtSnapshotSchema);
     const rows = await db.select<
       Array<{ remote_ultima_modifica: string | null; snapshot_json: string }>
     >(
@@ -49,14 +54,10 @@ export async function saveDdtBaseSnapshot(
   snapshot: DdtSnapshot
 ): Promise<void> {
   try {
-    await ensureTable();
     const db = await getDatabase();
-    const now = new Date().toISOString();
-    await db.execute(
-      `INSERT OR REPLACE INTO ddt_sync_snapshots (ddt_id, remote_ultima_modifica, snapshot_json, updated_at)
-       VALUES ($1, $2, $3, $4)`,
-      [ddtId, remoteUltimaModifica, JSON.stringify(snapshot), now]
-    );
+    await db.execute(ddtSnapshotSchema);
+    const { sql, params } = buildDdtSnapshotWrite(ddtId, remoteUltimaModifica, snapshot);
+    await db.execute(sql, params);
   } catch (err) {
     console.warn("[DdtSnapshot] Salvataggio snapshot base non riuscito:", err);
   }

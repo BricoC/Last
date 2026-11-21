@@ -644,9 +644,9 @@ export const DashboardPage: React.FC = () => {
       <DashboardFirstSetupWidget onSetupCompleted={() => void loadData()} />
 
       {/* 1. Header Toolbar Dashboard con Metriche Chiave Inline e Tasti su singola riga */}
-      <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] pb-2 gap-2 flex-nowrap min-w-0">
+      <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] pb-2 gap-2 flex-wrap min-w-0">
         {/* Metriche Chiave Inline (Fatturato Annuo YTD, Margine Lordo Medio Annuo, Mese Corrente, Lordo Medio Mese, DDT Emessi) */}
-        <div className="flex items-center gap-2 bg-[var(--card)]/90 border border-[var(--border)] px-2.5 py-1 rounded-xl shadow-xs overflow-visible min-w-0 shrink">
+        <div className="flex flex-wrap max-w-full items-center gap-2 bg-[var(--card)]/90 border border-[var(--border)] px-2.5 py-1 rounded-xl shadow-xs overflow-visible min-w-0 shrink">
           {/* 1. Fatturato Annuo con confronto YTD a oggi e Popover al passaggio del mouse */}
           <div
             className="relative flex items-center gap-1.5 text-xs shrink-0 cursor-help"
@@ -1323,7 +1323,7 @@ export const DashboardPage: React.FC = () => {
         />
 
         {/* Destra: Tasto Ri.Ba. Banca, Tasto Storico Articoli, Menù a tendina Multi-selezione Anni & Ricarica */}
-        <div className="flex items-center space-x-2 shrink-0">
+        <div className="ml-auto flex flex-wrap items-center gap-2 max-w-full">
           {/* Pulsante Ri.Ba. Banca */}
           {ribaInfo && (
             <button

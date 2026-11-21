@@ -1,3 +1,4 @@
+import { ORDER_QUEUE_KEY } from "@/shared/data-layer/orderQueueBackup";
 import { createSupabaseRealtimeSubscription } from "@/shared/services/supabaseRealtimeSubscription";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { orderRepository } from "./orderRepository";
@@ -45,7 +46,7 @@ export interface OfflineQueueItem {
   projectUrl?: string;
 }
 
-const QUEUE_STORAGE_KEY = "last_order_offline_queue";
+
 
 export class OrderSupabaseService {
   public recentlyPushedRemoteIds = new Set<string>();
@@ -592,7 +593,7 @@ export class OrderSupabaseService {
 
   public getOfflineQueue(): OfflineQueueItem[] {
     try {
-      const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
+      const raw = localStorage.getItem(ORDER_QUEUE_KEY);
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
@@ -600,7 +601,7 @@ export class OrderSupabaseService {
   }
 
   private saveOfflineQueue(queue: OfflineQueueItem[]): void {
-    localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue));
+    localStorage.setItem(ORDER_QUEUE_KEY, JSON.stringify(queue));
   }
 
   private enqueueOffline(item: OfflineQueueItem): void {
@@ -648,7 +649,9 @@ export class OrderSupabaseService {
   }
 
   async processOfflineQueue(): Promise<number> {
-    if (this.queueFlight || !navigator.onLine) return 0;
+    if (!navigator.onLine) return 0;
+    await getDatabase();
+    if (this.queueFlight) return 0;
     const initialQueue = this.getOfflineQueue();
     if (initialQueue.length === 0) return 0;
     this.queueFlight = this.drainOfflineQueue(initialQueue).finally(() => { this.queueFlight = null; });

@@ -21,7 +21,8 @@ vi.mock("@/shared/data-layer/database", () => ({
   })),
 }));
 
-import { buildSupabaseDdtPayloads, ddtCloudPushService } from "../ddtCloudPushService";
+import { buildSupabaseDdtPayloads } from "../ddtCloudPayload";
+import { ddtCloudPushService } from "../ddtCloudPushService";
 
 describe("ddtCloudPushService", () => {
   const originalFetch = globalThis.fetch;
@@ -182,7 +183,8 @@ describe("ddtCloudPushService", () => {
     mockSelect
       .mockResolvedValueOnce([localDoc]) // pushDdtById -> load doc
       .mockResolvedValueOnce([]) // upsertSingleDdt -> load items
-      .mockResolvedValueOnce([{ max_num: 3026 }]); // computeNextAvailableNumber -> local max
+      .mockResolvedValueOnce([{ max_num: 3026 }])
+      .mockResolvedValueOnce([localDoc]); // serialized local version
 
     mockExecute.mockResolvedValue({ rowsAffected: 1 });
 
@@ -204,8 +206,9 @@ describe("ddtCloudPushService", () => {
       if (method === "GET" && url.includes("numero=eq.3027")) {
         return new Response(JSON.stringify([]), { status: 200 });
       }
-      // POST header or DELETE lines
-      return new Response(JSON.stringify([]), { status: 200 });
+      if (url.includes("/rpc/last_ddt_snapshot")) return Response.json(null);
+      if (url.includes("/rpc/last_write_ddt")) return Response.json({ revision: "1", updatedAt: localDoc.updated_at });
+      throw new Error(`Unexpected request: ${url}`);
     }) as typeof fetch;
 
     const res = await ddtCloudPushService.pushDdtById("ddt-local-uuid", {
@@ -213,16 +216,12 @@ describe("ddtCloudPushService", () => {
     });
 
     expect(res).toEqual({ success: true, docNumber: 3027 });
-    expect(mockExecute).toHaveBeenCalledWith(
-      `UPDATE ddt_documents SET doc_number = $1 WHERE id = $2`,
-      [3027, "ddt-local-uuid"]
-    );
-    expect(mockExecute).toHaveBeenCalledWith(
-      `UPDATE ddt_documents SET sync_status = 'synced', project_url = $2 WHERE id = $1`,
-      ["ddt-local-uuid", "https://example.supabase.co"]
-    );
-    const headerPost = fetchCalls.find((c) => c.method === "POST" && c.url.includes("/rest/v1/ddt?"));
-    expect(headerPost?.body).toContain('"numero":3027');
+    const batches = mockInvoke.mock.calls.filter(([name]) => name === "apply_local_database_batch");
+    expect(batches[0][1].writes[0].params).toEqual([3027, localDoc.id, localDoc.updated_at]);
+    expect(batches[1][1].writes[3].params).toEqual([localDoc.id, localDoc.updated_at, 3027, localDoc.project_url]);
+    const write = fetchCalls.filter((call) => call.url.includes("/rpc/last_write_ddt"));
+    expect(write).toHaveLength(1);
+    expect(JSON.parse(write[0].body!)).toMatchObject({ p_header: { numero: 3027 }, p_lines: [], p_expected_revision: null });
   });
 
   it("pushes active pending DDTs and deletes soft-deleted DDTs remotely in batch push", async () => {
@@ -271,22 +270,25 @@ describe("ddtCloudPushService", () => {
 
     mockSelect
       .mockResolvedValueOnce([trashedDoc, activeDoc]) // pendingDocs
-      .mockResolvedValueOnce([]); // items for activeDoc
+      .mockResolvedValueOnce([trashedDoc]) // local deletion version
+      .mockResolvedValueOnce([trashedDoc]) // confirm local deletion is still pending
+      .mockResolvedValueOnce([]) // items for activeDoc
+      .mockResolvedValueOnce([activeDoc]); // local active version
 
     mockExecute.mockResolvedValue({ rowsAffected: 1 });
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([]), { status: 200 })) as typeof fetch;
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.includes("/rpc/last_ddt_snapshot")) return Response.json(null);
+      if (url.includes("/rpc/last_write_ddt")) return Response.json({ revision: "2", updatedAt: activeDoc.updated_at });
+      return Response.json([]);
+    });
 
     const batchRes = await ddtCloudPushService.pushPendingDdts();
 
     expect(batchRes).toEqual({ pushed: 1, deleted: 1, errors: 0 });
-    expect(mockExecute).toHaveBeenCalledWith(
-      `UPDATE ddt_documents SET sync_status = 'synced' WHERE id = $1`,
-      ["doc-trashed"]
-    );
-    expect(mockExecute).toHaveBeenCalledWith(
-      `UPDATE ddt_documents SET sync_status = 'synced', project_url = $2 WHERE id = $1`,
-      ["doc-active", "https://example.supabase.co"]
-    );
+    const batches = mockInvoke.mock.calls.filter(([name]) => name === "apply_local_database_batch");
+    expect(batches[0][1].writes[1].params).toEqual([trashedDoc.id, trashedDoc.updated_at, trashedDoc.deleted_at]);
+    expect(batches[1][1].writes[3].params).toEqual([activeDoc.id, activeDoc.updated_at, activeDoc.doc_number, activeDoc.project_url]);
   });
 
   it("maps cascade discount (10+3 -> 0.127) and explicit zero quantity without coercing to 1", () => {

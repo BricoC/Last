@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde_json::Value;
-use sqlx::{Connection, SqliteConnection};
+use sqlx::{AssertSqlSafe, Connection, SqliteConnection};
 use tauri::State;
 use tauri_plugin_sql::DbInstances;
 
@@ -14,7 +14,8 @@ pub struct SqliteWrite {
 
 impl SqliteWrite {
     pub(crate) async fn execute(self, connection: &mut SqliteConnection) -> Result<(), String> {
-        let mut query = sqlx::query(&self.sql);
+        // The statement is application-authored; runtime values are bound below.
+        let mut query = sqlx::query(AssertSqlSafe(self.sql.as_str()));
         for param in self.params {
             query = match param {
                 Value::Null => query.bind(None::<String>),
@@ -62,7 +63,8 @@ pub async fn apply_local_database_batch(
             .await
             .map_err(|error| error.to_string())?;
     }
-    let references = validate_references_after_write.then(|| reference_tables.as_deref().unwrap_or_default());
+    let references =
+        validate_references_after_write.then(|| reference_tables.as_deref().unwrap_or_default());
     apply_batch(&mut connection, writes, references).await
 }
 
@@ -181,8 +183,12 @@ mod tests {
             )
             .await
             .unwrap();
-            let failed =
-                apply_batch(&mut connection, vec![write("DELETE FROM parent")], Some(&scope)).await;
+            let failed = apply_batch(
+                &mut connection,
+                vec![write("DELETE FROM parent")],
+                Some(&scope),
+            )
+            .await;
             assert!(failed.unwrap_err().contains("child"));
             let children: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM child")
                 .fetch_one(&mut connection)

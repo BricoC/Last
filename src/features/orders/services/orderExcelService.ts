@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import { invoke } from "@tauri-apps/api/core";
 import { OrderItem, OrderViewMode } from "../types/order";
 import { TODAY } from "../utils/constants";
@@ -84,25 +85,29 @@ export class OrderExcelService {
    */
   async parseOrdersExcelFile(file: File): Promise<Array<Partial<OrderItem>>> {
     const arrayBuffer = await file.arrayBuffer();
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(arrayBuffer);
-    const worksheet = workbook.worksheets[0];
+    const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : undefined;
     if (!worksheet) return [];
 
     const items: Array<Partial<OrderItem>> = [];
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return; // Salta intestazione
-      const values = row.values as any[];
-      if (!values || values.length < 2) return;
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+      raw: false,
+    });
+    rows.forEach((values, rowIndex) => {
+      if (rowIndex === 0 || values.length < 2) return; // Salta intestazione
 
-      const order_date = String(values[1] || '').trim();
-      const supplier_name = String(values[2] || '').trim();
-      const article_code = String(values[3] || '').trim();
-      const description = String(values[4] || '').trim().toUpperCase();
-      const quantity = String(values[5] || '').trim();
-      const price = String(values[6] || '').trim();
-      const ordered_date = String(values[7] || '').trim() || null;
-      const notes = String(values[8] || '').trim();
+      const order_date = String(values[0] || '').trim();
+      const supplier_name = String(values[1] || '').trim();
+      const article_code = String(values[2] || '').trim();
+      const description = String(values[3] || '').trim().toUpperCase();
+      const quantity = String(values[4] || '').trim();
+      const price = String(values[5] || '').trim();
+      const ordered_date = String(values[6] || '').trim() || null;
+      const notes = String(values[7] || '').trim();
 
       if (supplier_name || article_code || description) {
         items.push({

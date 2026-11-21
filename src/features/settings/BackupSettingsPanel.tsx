@@ -40,6 +40,7 @@ import {
   inspectBackupFile,
   restoreDatabaseFile,
   restoreModularBackup,
+  getLocalBackupDate,
   pullBackupSettingsFromSupabase,
   cleanOldBackups,
   deleteBackupFile,
@@ -273,7 +274,7 @@ export const BackupSettingsPanel: React.FC = () => {
           message: `Backup completo creato con successo! File: ${res.filePath.split(/[\\/]/).pop()} (${mb} MB)`,
         });
         updateConfig({
-          lastRunDate: new Date().toISOString().slice(0, 10),
+          lastRunDate: getLocalBackupDate(),
           lastRunTimestamp: new Date().toISOString(),
         });
         void refreshBackupsList(config.folderPath);
@@ -313,7 +314,7 @@ export const BackupSettingsPanel: React.FC = () => {
           message: `Backup modulare salvato con successo! File: ${fileName} (${kb} KB)`,
         });
         updateConfig({
-          lastRunDate: new Date().toISOString().slice(0, 10),
+          lastRunDate: getLocalBackupDate(),
           lastRunTimestamp: new Date().toISOString(),
         });
         void refreshBackupsList(config.folderPath);

@@ -28,12 +28,18 @@ use std::os::windows::process::CommandExt;
 
 fn resolve_desktop_dir() -> Result<PathBuf, String> {
     let candidates = [
-        std::env::var("USERPROFILE").ok().map(|p| PathBuf::from(p).join("Desktop")),
-        std::env::var("OneDrive").ok().map(|p| PathBuf::from(p).join("Desktop")),
+        std::env::var("USERPROFILE")
+            .ok()
+            .map(|p| PathBuf::from(p).join("Desktop")),
+        std::env::var("OneDrive")
+            .ok()
+            .map(|p| PathBuf::from(p).join("Desktop")),
         std::env::var("USERPROFILE")
             .ok()
             .map(|p| PathBuf::from(p).join("OneDrive").join("Desktop")),
-        std::env::var("HOME").ok().map(|p| PathBuf::from(p).join("Desktop")),
+        std::env::var("HOME")
+            .ok()
+            .map(|p| PathBuf::from(p).join("Desktop")),
     ];
 
     for candidate in candidates.iter().flatten() {
@@ -387,7 +393,7 @@ fn send_email_with_attachments(
     {
         use base64::{engine::general_purpose, Engine as _};
         let to_b64 = general_purpose::STANDARD.encode(&to);
-        let cc_b64 = general_purpose::STANDARD.encode(&cc.unwrap_or_default());
+        let cc_b64 = general_purpose::STANDARD.encode(cc.unwrap_or_default());
         let subj_b64 = general_purpose::STANDARD.encode(&subject);
         let body_b64 = general_purpose::STANDARD.encode(&body);
         let att_json = serde_json::to_string(&attachments).unwrap_or_default();

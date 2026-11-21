@@ -1,3 +1,7 @@
+import SUPABASE_DDT_CONSISTENCY_SQL from "./supabaseDdtConsistency.sql?raw";
+import SUPABASE_QUOTE_NUMBERING_SQL from "./supabaseQuoteNumbering.sql?raw";
+import SUPABASE_INVOICE_IDENTITY_SQL from "./supabaseInvoiceIdentity.sql?raw";
+import SUPABASE_PRICE_LIST_REVISIONS_SQL from "./supabasePriceListRevisions.sql?raw";
 import SUPABASE_STATION_ACCESS_SQL from "./supabaseStationAccess.sql?raw";
 import SUPABASE_OFFLINE_WRITES_SQL from "./supabaseOfflineWrites.sql?raw";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
@@ -422,7 +426,11 @@ CREATE TABLE IF NOT EXISTS public.riba_pagamenti (
 
 -- 9. RLS e canali Realtime privati
 ` + SUPABASE_OFFLINE_WRITES_SQL.replace(/^(?:BEGIN|COMMIT);\r?$/gm, "")
-  + SUPABASE_STATION_ACCESS_SQL.replace(/^BEGIN;\r?$/m, "");
+  + SUPABASE_STATION_ACCESS_SQL.replace(/^(?:BEGIN|COMMIT);\r?$/gm, "")
+  + SUPABASE_DDT_CONSISTENCY_SQL.replace(/^(?:BEGIN|COMMIT);\r?$/gm, "")
+  + SUPABASE_QUOTE_NUMBERING_SQL.replace(/^(?:BEGIN|COMMIT);\r?$/gm, "")
+  + SUPABASE_PRICE_LIST_REVISIONS_SQL.replace(/^(?:BEGIN|COMMIT);\r?$/gm, "")
+  + SUPABASE_INVOICE_IDENTITY_SQL.replace(/^BEGIN;\r?$/m, "");
 
 export type SchemaCheckStatus = "ok" | "missing_tables" | "offline" | "unconfigured";
 

@@ -1,8 +1,8 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
+import { normalizeSupabaseProjectUrl } from "./supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
-import { ddtIncrementalSyncService, IncrementalSyncResult } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
-import { priceListSyncService } from "@/features/price-lists/services/priceListSyncService";
+import type { IncrementalSyncResult } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 
 export interface CloudSyncStatusInfo {
   isConfigured: boolean;
@@ -42,6 +42,8 @@ export interface CloudSyncStatusInfo {
 
   // Confronto Allineamento
   hasPendingRemoteChanges: boolean;
+  hasPendingLocalChanges?: boolean;
+  canAutoSync?: boolean;
   alignmentMessage: string;
 }
 
@@ -132,9 +134,8 @@ class CloudSyncStatusService {
 
     let localLatestDdt: CloudSyncStatusInfo["localLatestDdt"] = null;
     let localLatestListino: CloudSyncStatusInfo["localLatestListino"] = null;
-    let localMaxDdtUpdatedAt: Date | null = null;
-    let localMaxCliUpdatedAt: Date | null = null;
-    let localMaxGenUpdatedAt: Date | null = null;
+    let hasPendingLocalChanges = false;
+    let localError: string | null = null;
 
     try {
       const db = await getDatabase();
@@ -156,16 +157,6 @@ class CloudSyncStatusService {
         };
       }
 
-      const ddtMaxUpdatedRows = await db.select<{ max_updated_at: string | null }[]>(
-        `SELECT MAX(updated_at) as max_updated_at
-         FROM ddt_documents
-         WHERE deleted_at IS NULL AND doc_number IS NOT NULL;`
-      );
-      if (ddtMaxUpdatedRows[0]?.max_updated_at) {
-        const d = new Date(ddtMaxUpdatedRows[0].max_updated_at);
-        if (!isNaN(d.getTime())) localMaxDdtUpdatedAt = d;
-      }
-
       const listinoRows = await db.select<
         { codice_articolo: string; descrizione: string; updated_at: string }[]
       >(
@@ -181,25 +172,18 @@ class CloudSyncStatusService {
           description: listinoRows[0].descrizione || "",
           updatedAt: listinoRows[0].updated_at || null,
         };
-        if (listinoRows[0].updated_at) {
-          const d = new Date(listinoRows[0].updated_at);
-          if (!isNaN(d.getTime())) localMaxGenUpdatedAt = d;
-        }
       }
-
-      const cliRows = await db.select<{ updated_at: string }[]>(
-        `SELECT updated_at 
-         FROM listini_clienti 
-         WHERE updated_at IS NOT NULL AND updated_at != '' 
-         ORDER BY updated_at DESC 
-         LIMIT 1;`
-      );
-      if (cliRows.length > 0 && cliRows[0].updated_at) {
-        const d = new Date(cliRows[0].updated_at);
-        if (!isNaN(d.getTime())) localMaxCliUpdatedAt = d;
-      }
+      const [pending] = await db.select<{ count: number }[]>(`SELECT (
+        EXISTS(SELECT 1 FROM listino_generale WHERE sync_revision IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM listini_clienti WHERE sync_revision IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM pending_cloud_operations
+          WHERE scope IN ('listino_generale', 'listini_clienti')
+            AND (project_url IS NULL OR project_url = $1))
+      ) AS count`, [normalizeSupabaseProjectUrl(cfgStatus?.config?.projectUrl ?? "")]);
+      hasPendingLocalChanges = Boolean(pending?.count);
     } catch (err) {
       console.warn("[CloudSyncStatus] Errore lettura dati locali SQLite:", err);
+      localError = "Verifica dei dati locali incompleta";
     }
 
     if (!isConfigured || !cfgStatus?.config) {
@@ -231,180 +215,73 @@ class CloudSyncStatusService {
     let remoteLatestSummary: string | null = null;
     let remoteError: string | null = null;
 
-    try {
-      const [ddtFetch, genFetch, cliFetch] = await Promise.allSettled([
-        supabaseFetch(
-          `${projectUrl}/rest/v1/ddt?select=anno,numero,cliente,data,created_at,ultima_modifica&order=anno.desc,numero.desc&limit=1`,
-          { headers }
-        ),
-        supabaseFetch(
-          `${projectUrl}/rest/v1/listino_generale?select=codice_articolo,descrizione,updated_at&order=updated_at.desc.nullslast&limit=1`,
-          { headers }
-        ),
-        supabaseFetch(
-          `${projectUrl}/rest/v1/listini_clienti?select=cliente,codice_articolo,updated_at&order=updated_at.desc.nullslast&limit=1`,
-          { headers }
-        ),
-      ]);
-
-      const incomplete = [
-        ["DDT", ddtFetch], ["Listino generale", genFetch], ["Listini clienti", cliFetch],
-      ] as const;
-      const unavailable = incomplete.filter(([, result]) =>
-        result.status === "rejected" || !result.value.ok
-      ).map(([label]) => label);
-      if (unavailable.length) remoteError = `Verifica cloud incompleta: ${unavailable.join(", ")}`;
-
-      let ddtDate: Date | null = null;
-      if (ddtFetch.status === "fulfilled" && ddtFetch.value.ok) {
-        const ddtData = (await ddtFetch.value.json()) as any[];
-        if (ddtData && ddtData.length > 0) {
-          const r = ddtData[0];
-          remoteLatestDdt = {
-            year: Number(r.anno) || new Date().getFullYear(),
-            number: Number(r.numero) || 0,
-            date: r.data || "",
-            client: r.cliente || "",
-            createdAt: r.created_at || r.ultima_modifica || undefined,
-          };
-          const rawDateStr = r.created_at || r.ultima_modifica || r.data;
-          if (rawDateStr) {
-            const p = new Date(rawDateStr);
-            if (!isNaN(p.getTime())) ddtDate = p;
-          }
-        }
-      }
-
-      let genDate: Date | null = null;
-      if (genFetch.status === "fulfilled" && genFetch.value.ok) {
-        const genData = (await genFetch.value.json()) as any[];
-        if (genData && genData.length > 0) {
-          const g = genData[0];
-          remoteLatestListino = {
-            code: g.codice_articolo || "",
-            description: g.descrizione || "",
-            updatedAt: g.updated_at || null,
-          };
-          if (g.updated_at) {
-            const p = new Date(g.updated_at);
-            if (!isNaN(p.getTime())) genDate = p;
-          }
-        }
-      }
-
-      let cliDate: Date | null = null;
-      if (cliFetch.status === "fulfilled" && cliFetch.value.ok) {
-        const cliData = (await cliFetch.value.json()) as any[];
-        if (cliData && cliData.length > 0) {
-          const c = cliData[0];
-          if (c.updated_at) {
-            const p = new Date(c.updated_at);
-            if (!isNaN(p.getTime())) cliDate = p;
-          }
-        }
-      }
-
-      // Trova la data più recente tra quelle trovate su Supabase
-      const candidateDates: { date: Date; summary: string }[] = [];
-      if (ddtDate && remoteLatestDdt) {
-        candidateDates.push({
-          date: ddtDate,
-          summary: `DDT n. ${remoteLatestDdt.number} (${remoteLatestDdt.client || "Senza cliente"})`,
-        });
-      }
-      if (genDate && remoteLatestListino) {
-        candidateDates.push({
-          date: genDate,
-          summary: `Listino Generale (${remoteLatestListino.code || "Articolo"} - ${remoteLatestListino.description || ""})`,
-        });
-      }
-      if (cliDate) {
-        candidateDates.push({
-          date: cliDate,
-          summary: `Listini Clienti dedicati`,
-        });
-      }
-
-      candidateDates.sort((a, b) => b.date.getTime() - a.date.getTime());
-      if (candidateDates.length > 0) {
-        remoteLatestDate = candidateDates[0].date;
-        remoteLatestSummary = candidateDates[0].summary;
-      }
-    } catch (err: any) {
-      console.warn("[CloudSyncStatus] Errore connessione Supabase:", err);
-      remoteError = err?.message || "Errore di connessione a Supabase";
-    }
-
-    // 4. Calcola se ci sono modifiche remote non ancora scaricate in locale
     let hasPendingRemoteChanges = false;
-    let alignmentMessage = "Programma allineato a Supabase";
-
-    // Verifica se il database locale SQLite è già aggiornato rispetto alle ultime date rilevate sul Cloud
-    // (es. se la migrazione o il salvataggio è partito da questo stesso PC, o se i dati locali sono già più recenti o identici)
-    const isLocalDdtUpToDate =
-      !remoteLatestDdt ||
-      Boolean(localLatestDdt && (
-        localLatestDdt.year > remoteLatestDdt.year ||
-        (localLatestDdt.year === remoteLatestDdt.year && localLatestDdt.number >= remoteLatestDdt.number)
-      ));
-
-    let isLocalDataAlreadyUpToDate = false;
-    if (isLocalDdtUpToDate && remoteLatestDate) {
-      // Controlla se la modifica Cloud più recente corrisponde a dati che il DB locale ha già
-      const localMaxDate = Math.max(
-        localLastSyncDate?.getTime() || 0,
-        localMaxDdtUpdatedAt?.getTime() || 0,
-        localMaxGenUpdatedAt?.getTime() || 0,
-        localMaxCliUpdatedAt?.getTime() || 0
-      );
-      // Tolleranza di 5 secondi per disallineamenti di clock o conversioni millisecondi
-      if (localMaxDate > 0 && localMaxDate >= remoteLatestDate.getTime() - 5000) {
-        isLocalDataAlreadyUpToDate = true;
+    try {
+      const listTables = ["listino_generale", "listini_vari", "listini_clienti"] as const;
+      const [remoteRevision, ddt, ...lists] = await Promise.all([
+        supabaseFetch(`${projectUrl}/rest/v1/rpc/last_ddt_revision`, {
+          method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: "{}",
+        }),
+        supabaseFetch(`${projectUrl}/rest/v1/ddt?select=anno,numero,cliente,data,created_at,ultima_modifica&order=anno.desc,numero.desc&limit=1`, { headers }),
+        ...listTables.map((table) => supabaseFetch(
+          `${projectUrl}/rest/v1/${table}?select=codice_articolo,descrizione,updated_at,last_sync_revision&order=last_sync_revision.desc&limit=1`, { headers },
+        )),
+      ]);
+      if (!remoteRevision.ok || !ddt.ok || lists.some((response) => !response.ok)) {
+        throw new Error("Verifica cloud incompleta. Controlla la connessione e le migrazioni Supabase.");
       }
-    }
-
-    // Regola A: Se su Supabase esiste un DDT con numero superiore al massimo locale
-    if (remoteLatestDdt && !isLocalDdtUpToDate) {
-      hasPendingRemoteChanges = true;
-      alignmentMessage = `DDT n. ${remoteLatestDdt.number}/${remoteLatestDdt.year} presente sul Cloud e da scaricare`;
-    }
-    // Regola B: Se i dati locali (SQLite) sono già uguali o più recenti dell'attività del Cloud
-    else if (isLocalDataAlreadyUpToDate) {
-      hasPendingRemoteChanges = false;
-      alignmentMessage = "Programma aggiornato: allineato con l'ultima attività del Cloud";
-    }
-    // Regola C: Se l'attività remota è più recente dell'ultimo scaricamento locale (con 5s di tolleranza)
-    else if (remoteLatestDate && localLastSyncDate) {
-      const diffMs = remoteLatestDate.getTime() - localLastSyncDate.getTime();
-      if (diffMs > 5000) {
-        hasPendingRemoteChanges = true;
-        alignmentMessage = `Modifiche rilevate sul Cloud (${formatRelativeTime(remoteLatestDate)}): ${remoteLatestSummary || "Nuovi dati"}`;
-      } else {
-        alignmentMessage = "Programma aggiornato: allineato con l'ultima attività del Cloud";
+      const [{ readPriceListPullState }, { getDdtPullState }] = await Promise.all([
+        import("@/features/price-lists/services/priceListPullState"),
+        import("@/features/ddt-studio/services/ddtCloudPull"),
+      ]);
+      const [revision, [latestDdt], priceState, ddtState, ...latestLists] = await Promise.all([
+        remoteRevision.json(), ddt.json(), readPriceListPullState(projectUrl), getDdtPullState(projectUrl),
+        ...lists.map((response) => response.json()),
+      ]);
+      if (!/^\d+$/.test(String(revision))) throw new Error("Revisione DDT non valida");
+      hasPendingRemoteChanges = !ddtState.initialized || BigInt(revision) > BigInt(ddtState.revision);
+      const registerActivity = (time: string | null | undefined, summary: string) => {
+        if (!time) return;
+        const date = new Date(time);
+        if (Number.isFinite(date.getTime()) && (!remoteLatestDate || date > remoteLatestDate)) {
+          remoteLatestDate = date;
+          remoteLatestSummary = summary;
+        }
+      };
+      if (latestDdt) {
+        remoteLatestDdt = {
+          year: Number(latestDdt.anno), number: Number(latestDdt.numero), date: latestDdt.data || "",
+          client: latestDdt.cliente || "", createdAt: latestDdt.created_at || undefined,
+        };
+        registerActivity(latestDdt.ultima_modifica || latestDdt.created_at, `DDT n. ${latestDdt.numero}`);
       }
-    }
-    // Regola D: Se non è mai stato registrato uno scaricamento locale su questa macchina
-    else if (!localLastSyncDate && remoteLatestDate) {
-      if (isLocalDdtUpToDate) {
-        hasPendingRemoteChanges = false;
-        alignmentMessage = "Programma allineato a Supabase";
-      } else {
-        hasPendingRemoteChanges = true;
-        alignmentMessage = "Nessuna sincronizzazione recente registrata in locale";
+      for (const [index, table] of listTables.entries()) {
+        const [row] = latestLists[index];
+        if (!row) continue;
+        const cursor = priceState.get(table);
+        if (!/^\d+$/.test(String(row.last_sync_revision))) throw new Error("Revisione listino non valida");
+        if (!cursor || BigInt(row.last_sync_revision) > BigInt(cursor)) hasPendingRemoteChanges = true;
+        if (table !== "listini_clienti" &&
+          (!remoteLatestListino || Date.parse(row.updated_at) > Date.parse(remoteLatestListino.updatedAt ?? ""))) {
+          remoteLatestListino = { code: row.codice_articolo || "", description: row.descrizione || "", updatedAt: row.updated_at };
+        }
+        registerActivity(row.updated_at, table === "listini_clienti" ? "Listini Clienti" : "Listino Generale");
       }
+    } catch (error) {
+      remoteError = error instanceof Error ? error.message : String(error);
     }
-
     const lastFailure = localStorage.getItem("last_supabase_sync_failure");
-    if (lastFailure || remoteError) {
-      remoteError = lastFailure ?? remoteError;
-      hasPendingRemoteChanges = true;
-      alignmentMessage = remoteError ?? alignmentMessage;
-    }
+    const alignmentMessage = remoteError ?? localError ?? lastFailure ?? (
+      hasPendingRemoteChanges ? "Modifiche remote da scaricare" :
+      hasPendingLocalChanges ? "Modifiche locali da inviare" : "Programma allineato a Supabase"
+    );
 
     return {
       isConfigured: true,
       isChecking: false,
-      error: remoteError,
+      error: remoteError ?? localError ?? lastFailure,
+      canAutoSync: !remoteError && !localError,
+      hasPendingLocalChanges,
       localLastSyncDate,
       localLastSyncSummary,
       localLatestDdt,
@@ -429,7 +306,21 @@ class CloudSyncStatusService {
     summary: string;
     success: boolean;
   }> {
-    await priceListSyncService.retryPendingChanges().catch(() => {});
+    const [priceListModule, offersModule, clientModule, ddtModule] = await Promise.all([
+      import("@/features/price-lists/services/priceListSyncService"),
+      import("@/features/offers/services/offersSyncService"),
+      import("@/features/clients/services/clientSyncService"),
+      import("@/features/ddt-studio/services/ddtIncrementalSyncService"),
+    ]);
+    const { priceListSyncService } = priceListModule;
+    const { offersSyncService } = offersModule;
+    const { clientSyncService } = clientModule;
+    const { ddtIncrementalSyncService } = ddtModule;
+    const [priceWrites, offerWrites, clientWrites] = await Promise.allSettled([
+      priceListSyncService.retryPendingChanges(),
+      offersSyncService.retryPendingChanges(),
+      clientSyncService.syncPendingClientsToSupabase(),
+    ]);
     const [ddt, general, clients] = await Promise.allSettled([
       ddtIncrementalSyncService.syncNewDdtsFromSupabase({ includePreviousYear: true, checkModifiedRecent: true }),
       priceListSyncService.syncIncrementalGeneralFromSupabase(),
@@ -442,6 +333,9 @@ class CloudSyncStatusService {
     const cliCount = clients.status === "fulfilled" ? clients.value.updatedCount : 0;
 
     const failures = [
+      ["Invio listini", priceWrites.status === "rejected" ? String(priceWrites.reason) : undefined],
+      ["Offerte", offerWrites.status === "rejected" ? String(offerWrites.reason) : undefined],
+      ["Clienti", clientWrites.status === "rejected" ? String(clientWrites.reason) : undefined],
       ["DDT", ddtResult.error],
       ["Listino generale", general.status === "fulfilled" ? general.value.error : String(general.reason)],
       ["Listini clienti", clients.status === "fulfilled" ? clients.value.error : String(clients.reason)],

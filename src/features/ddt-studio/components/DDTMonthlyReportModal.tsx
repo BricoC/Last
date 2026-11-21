@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import {
   getDdtMonthlyCounts,
-  MonthSummaryCount,
-} from "../services/ddtReportService";
+} from "../services/ddtMonthlyReportDataService";
+import type { MonthSummaryCount } from "../services/ddtReportTypes";
 import { useDdtBatchExportStore } from "../stores/useDdtBatchExportStore";
 import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 import { cn } from "@/shared/utils/cn";

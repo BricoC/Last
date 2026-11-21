@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ITALIAN_MONTH_NAMES } from "../ddtReportService";
+import { ITALIAN_MONTH_NAMES } from "../../utils/italianMonthNames";
 
 describe("ddtReportService - Italian months & formats", () => {
   it("contiene esattamente i 12 mesi in italiano", () => {

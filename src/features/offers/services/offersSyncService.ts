@@ -6,6 +6,7 @@ import { matchesActiveSupabaseProject, normalizeSupabaseProjectUrl } from "@/sha
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import type { OfferRecord } from "../types/offer";
+import { writeRemoteOffer } from "./offerCloudWrite";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -64,12 +65,14 @@ export class OffersSyncService {
   private lastSyncTime: Date | null = null;
   private activeSyncPromise: Promise<OffersSyncResult> | null = null;
   private pendingResync = false;
+  private missingOffers = new Map<string, { remoteId: number; projectUrl: string }>();
 
   public getStatus() {
     return {
       isSyncing: this.isSyncing,
       syncError: this.syncError,
       lastSyncTime: this.lastSyncTime,
+      missingOfferIds: [...this.missingOffers.keys()],
     };
   }
 
@@ -94,7 +97,32 @@ export class OffersSyncService {
       `SELECT 1 FROM pending_cloud_operations WHERE scope = 'offers'
        UNION ALL SELECT 1 FROM offers WHERE sync_status = 'pending' LIMIT 1`,
     );
-    if (pending.length) await this.sync();
+    if (pending.length) {
+      const result = await this.sync();
+      if (!result.success) throw new Error(result.error || "Sincronizzazione offerte incompleta");
+    }
+  }
+
+  public async republishMissingOffer(id: string): Promise<OffersSyncResult> {
+    await this.activeSyncPromise;
+    const missing = this.missingOffers.get(id);
+    const creds = await this.getSupabaseCredentials();
+    if (!missing || !matchesActiveSupabaseProject(missing.projectUrl, creds?.projectUrl)) {
+      throw new Error("Verifica di nuovo lo stato cloud dell’offerta prima di ripubblicarla.");
+    }
+    const db = await getDatabase();
+    const write = await db.execute(
+      `UPDATE offers SET supabase_id = NULL
+       WHERE id = $1 AND supabase_id = $2 AND project_url = $3 AND sync_status = 'pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM pending_cloud_operations WHERE scope = 'offers' AND record_id = offers.id
+         )`,
+      [id, missing.remoteId, missing.projectUrl],
+    );
+    if (write.rowsAffected !== 1) throw new Error("Lo stato dell’offerta è cambiato. Aggiorna la lista e riprova.");
+    this.missingOffers.delete(id);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("offers-data-updated"));
+    return this.sync();
   }
 
   private flushDeletions(creds: SupabaseConfig): Promise<number> {
@@ -108,9 +136,22 @@ export class OffersSyncService {
         }
         const { remoteId } = JSON.parse(payload) as { remoteId: number | null };
         const target = new URL("/rest/v1/offerte", creds.projectUrl);
-        target.searchParams.set(remoteId ? "id" : "local_id", `eq.${remoteId ?? record_id}`);
-        const response = await supabaseFetch(target, { method: "DELETE", headers: { apikey: creds.anonKey } });
+        target.searchParams.set("local_id", `eq.${record_id}`);
+        target.searchParams.set("select", "id");
+        const response = await supabaseFetch(target, {
+          method: "DELETE",
+          headers: { apikey: creds.anonKey, Prefer: "return=representation" },
+        });
         if (!response.ok) throw new Error(`Eliminazione offerta: HTTP ${response.status}`);
+        const removed = await response.json();
+        if (!Array.isArray(removed) || removed.length > 1) throw new Error("Eliminazione offerta non confermata");
+        if (!removed.length && remoteId) {
+          target.search = "";
+          target.searchParams.set("id", `eq.${remoteId}`);
+          target.searchParams.set("local_id", "is.null");
+          const legacyDelete = await supabaseFetch(target, { method: "DELETE", headers: { apikey: creds.anonKey } });
+          if (!legacyDelete.ok) throw new Error(`Eliminazione offerta: HTTP ${legacyDelete.status}`);
+        }
       },
       creds.projectUrl,
     );
@@ -180,6 +221,7 @@ export class OffersSyncService {
     let pulled = 0;
     let updated = 0;
     let deleted = 0;
+    const missingOffers = new Map<string, { remoteId: number; projectUrl: string }>();
 
     try {
       const db = await getDatabase();
@@ -195,73 +237,20 @@ export class OffersSyncService {
       );
 
       for (const item of pendings) {
-        if (!matchesActiveSupabaseProject(item.project_url, activeProjectUrl)) continue;
-        const payload = {
-          local_id: item.id,
-          offer_date: item.offer_date,
-          requester: item.requester,
-          contact: item.contact || "",
-          items_text: item.items_text,
-          status: item.status,
-          is_urgent: Boolean(item.is_urgent),
-          is_archived: Boolean(item.is_archived),
-          created_by: item.created_by || "Operatore",
-          updated_by: item.updated_by || "Operatore",
-          created_at: item.created_at,
-          updated_at: item.updated_at,
-        };
-
-        if (item.supabase_id) {
-          const url = new URL(`/rest/v1/offerte?id=eq.${item.supabase_id}`, creds.projectUrl);
-          const res = await supabaseFetch(url.toString(), {
-            method: "PATCH",
-            headers: {
-              apikey: creds.anonKey,
-              "Content-Type": "application/json",
-              Prefer: "return=representation",
-            },
-            body: JSON.stringify(payload),
-          });
-
-          if (res.ok) {
-            const confirmed = await res.json();
-            if (!Array.isArray(confirmed) || confirmed.length !== 1) throw new Error("Offerta non confermata da Supabase");
-            await db.execute(
-              "UPDATE offers SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2",
-              [item.id, item.updated_at],
-            );
-            pushed++;
-          } else {
-            const errBody = (await res.json().catch(() => ({}))) as { message?: string };
-            throw new Error(`Errore invio Supabase: ${errBody?.message || res.statusText || res.status}`);
-          }
-        } else {
-          const url = new URL("/rest/v1/offerte?on_conflict=local_id", creds.projectUrl);
-          const res = await supabaseFetch(url.toString(), {
-            method: "POST",
-            headers: {
-              apikey: creds.anonKey,
-              "Content-Type": "application/json",
-              Prefer: "return=representation,resolution=merge-duplicates",
-            },
-            body: JSON.stringify(payload),
-          });
-
-          if (res.ok) {
-            const data = await res.json().catch(() => []);
-            const remoteId = Array.isArray(data) && data[0]?.id ? Number(data[0].id) : null;
-            if (!remoteId) throw new Error("Offerta non confermata da Supabase");
-            await db.execute(
-              `UPDATE offers SET supabase_id = $1,
-               sync_status = CASE WHEN updated_at = $3 THEN 'synced' ELSE sync_status END WHERE id = $2`,
-              [remoteId, item.id, item.updated_at],
-            );
-            pushed++;
-          } else {
-            const errBody = (await res.json().catch(() => ({}))) as { message?: string };
-            throw new Error(`Errore invio Supabase: ${errBody?.message || res.statusText || res.status}`);
-          }
+        const itemProjectUrl = item.project_url;
+        if (!itemProjectUrl || !matchesActiveSupabaseProject(itemProjectUrl, activeProjectUrl)) continue;
+        const remoteId = await writeRemoteOffer(creds, item);
+        if (remoteId === null && item.supabase_id) {
+          missingOffers.set(item.id, { remoteId: item.supabase_id, projectUrl: itemProjectUrl });
+          continue;
         }
+        await db.execute(
+          `UPDATE offers SET supabase_id = $1,
+             sync_status = CASE WHEN updated_at = $3 THEN 'synced' ELSE sync_status END
+           WHERE id = $2 AND project_url = $4 AND supabase_id IS $5 AND sync_status = 'pending'`,
+          [remoteId, item.id, item.updated_at, itemProjectUrl, item.supabase_id ?? null],
+        );
+        pushed++;
       }
 
       // 2. PULL: Scarica le offerte remote e aggiorna la copia locale
@@ -379,12 +368,11 @@ export class OffersSyncService {
         }
       }
 
-      this.lastSyncTime = new Date();
-      if (pushed > 0 || pulled > 0 || updated > 0 || deleted > 0) {
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("offers-data-updated"));
-        }
+      if (missingOffers.size) {
+        this.syncError = `Offerte da verificare prima di ripubblicarle sul cloud: ${missingOffers.size}`;
+        return { success: false, pushed, pulled, error: this.syncError };
       }
+      this.lastSyncTime = new Date();
       return { success: true, pushed, pulled };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -393,6 +381,12 @@ export class OffersSyncService {
       return { success: false, pushed, pulled, error: msg };
     } finally {
       this.isSyncing = false;
+      const missingChanged = this.missingOffers.size !== missingOffers.size ||
+        [...this.missingOffers.keys()].some((id) => !missingOffers.has(id));
+      this.missingOffers = missingOffers;
+      if (typeof window !== "undefined" && (pushed || pulled || updated || deleted || missingChanged)) {
+        window.dispatchEvent(new CustomEvent("offers-data-updated"));
+      }
     }
   }
 

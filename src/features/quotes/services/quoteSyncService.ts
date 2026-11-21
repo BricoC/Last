@@ -516,6 +516,33 @@ export class QuoteSyncService {
       const creds = overrideCreds ?? (await getSupabaseCredentials());
       if (!creds) return false;
 
+      const db = await getDatabase();
+      if (quote.quote_number == null) {
+        const [local] = await db.select<{ floor: number }[]>(
+          `SELECT MAX(
+            COALESCE((SELECT last_number FROM quote_sequences WHERE year=$1),0),
+            COALESCE((SELECT MAX(quote_number) FROM quotes WHERE year=$1),0),
+            COALESCE((SELECT MAX(quote_number) FROM quotes_trash WHERE year=$1),0)
+          ) AS floor`, [quote.year],
+        );
+        const allocation = await supabaseFetch(new URL("/rest/v1/rpc/last_reserve_quote_number", creds.projectUrl), {
+          method: "POST",
+          headers: { apikey: creds.anonKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ p_year: quote.year, p_quote_id: quote.id, p_local_floor: local?.floor ?? 0 }),
+        });
+        if (!allocation.ok) throw new Error(`Numerazione preventivi: HTTP ${allocation.status}. Verifica la migrazione Supabase.`);
+        const number = await allocation.json();
+        if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Numero preventivo cloud non valido");
+        const applied = await db.execute(
+          "UPDATE quotes SET quote_number=$1 WHERE id=$2 AND year=$3 AND updated_at=$4 AND quote_number IS NULL AND deleted_at IS NULL",
+          [number, quote.id, quote.year, quote.updated_at],
+        );
+        if (applied.rowsAffected !== 1) return false;
+        quote = { ...quote, quote_number: number };
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("quote-number-assigned", { detail: { id: quote.id, number } }));
+        }
+      }
       const row = this.mapQuoteToSupabase(quote);
       const url = `${creds.projectUrl}/rest/v1/preventivi`;
 
@@ -530,8 +557,7 @@ export class QuoteSyncService {
       });
 
       if (res.ok) {
-        const db = await getDatabase();
-        await db.execute("UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2", [quote.id, quote.updated_at]);
+        await db.execute("UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2 AND quote_number IS $3", [quote.id, quote.updated_at, quote.quote_number]);
         return true;
       } else {
         const txt = await res.text();
@@ -784,81 +810,5 @@ export class QuoteSyncService {
     }
   }
 
-  /**
-   * Ottiene il massimo numero progressivo preventivi noto da Supabase (per garantire unicità anche tra postazioni)
-   */
-  public static async getRemoteMaxQuoteNumber(year: number): Promise<number> {
-    try {
-      const creds = await getSupabaseCredentials();
-      if (!creds) return 0;
 
-      let maxFound = 0;
-
-      // 1. Controlla la tabella sequenze
-      const seqUrl = `${creds.projectUrl}/rest/v1/preventivi_sequenza?anno=eq.${year}&select=ultimo_numero`;
-      const seqRes = await supabaseFetch(seqUrl, {
-        headers: { apikey: creds.anonKey },
-      });
-      if (seqRes.ok) {
-        const rows = await seqRes.json();
-        if (Array.isArray(rows) && rows.length > 0 && rows[0].ultimo_numero != null) {
-          maxFound = Math.max(maxFound, Number(rows[0].ultimo_numero) || 0);
-        }
-      }
-
-      // 2. Controlla max quote_number in preventivi attivi
-      const prevUrl = `${creds.projectUrl}/rest/v1/preventivi?anno=eq.${year}&select=quote_number&order=quote_number.desc&limit=1`;
-      const prevRes = await supabaseFetch(prevUrl, {
-        headers: { apikey: creds.anonKey },
-      });
-      if (prevRes.ok) {
-        const rows = await prevRes.json();
-        if (Array.isArray(rows) && rows.length > 0 && rows[0].quote_number != null) {
-          maxFound = Math.max(maxFound, Number(rows[0].quote_number) || 0);
-        }
-      }
-
-      // 3. Controlla max quote_number in preventivi_cestino
-      const cestUrl = `${creds.projectUrl}/rest/v1/preventivi_cestino?anno=eq.${year}&select=quote_number&order=quote_number.desc&limit=1`;
-      const cestRes = await supabaseFetch(cestUrl, {
-        headers: { apikey: creds.anonKey },
-      });
-      if (cestRes.ok) {
-        const rows = await cestRes.json();
-        if (Array.isArray(rows) && rows.length > 0 && rows[0].quote_number != null) {
-          maxFound = Math.max(maxFound, Number(rows[0].quote_number) || 0);
-        }
-      }
-
-      return maxFound;
-    } catch {
-      return 0;
-    }
-  }
-
-  /**
-   * Aggiorna il numero massimo nella sequenza remota su Supabase
-   */
-  public static async updateRemoteSequence(year: number, lastNumber: number): Promise<void> {
-    try {
-      const creds = await getSupabaseCredentials();
-      if (!creds) return;
-
-      const url = `${creds.projectUrl}/rest/v1/preventivi_sequenza`;
-      await supabaseFetch(url, {
-        method: "POST",
-        headers: {
-          apikey: creds.anonKey,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates",
-        },
-        body: JSON.stringify({
-          anno: year,
-          ultimo_numero: lastNumber,
-        }),
-      });
-    } catch (err) {
-      console.warn("[QuoteSyncService] Errore aggiornamento sequenza remota:", err);
-    }
-  }
 }

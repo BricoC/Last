@@ -23,6 +23,8 @@ export interface ListinoGeneraleRow {
   created_at?: string;
   updated_at?: string;
   sync_revision?: string | null;
+  remote_sync_revision?: string | null;
+  cloud_write_key?: string | null;
 }
 
 export interface ListinoClienteRow {
@@ -45,6 +47,8 @@ export interface ListinoClienteRow {
   created_at?: string;
   updated_at?: string;
   sync_revision?: string | null;
+  remote_sync_revision?: string | null;
+  cloud_write_key?: string | null;
 }
 
 export interface TrashListinoClienteRow extends ListinoClienteRow {

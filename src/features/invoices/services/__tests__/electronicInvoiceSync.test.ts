@@ -56,7 +56,8 @@ describe("Sincronizzazione fatture elettroniche", () => {
       validateReferencesAfterWrite: false,
       writes: [
         { sql: expect.stringContaining("INSERT INTO supplier_invoices"), params: expect.any(Array) },
-        { sql: expect.stringContaining("invoice.cloud_upload_pending = 1"), params: [expect.any(String), "https://example.test"] },
+        { sql: expect.stringContaining("DELETE FROM supplier_invoice_items WHERE invoice_id IN"),
+          params: [expect.any(String), "https://example.test", JSON.stringify([["name:ACME", "42", "2026-01-01"]])] },
         { sql: expect.stringContaining("INSERT INTO supplier_invoice_items"), params: expect.arrayContaining([0]) },
       ],
     });
@@ -101,5 +102,24 @@ describe("Sincronizzazione fatture elettroniche", () => {
         ],
       }],
     ]);
+  });
+
+  it("imports same-name issuers independently and attaches lines by their fiscal key", async () => {
+    const doc = { supplier_name: "ACME", doc_number: "42", doc_date: "2026-01-01", year: 2026 };
+    parse.mockReturnValue(["IT00000000001", "00000000002"].map((vat, index) => ({
+      invoice: { ...doc, vat_number: vat, total_amount: 1, taxable_amount: 1, vat_amount: 0 },
+      items: [{
+        ...doc, line_number: 1, description: `Riga ${index + 1}`, quantity: 1, unit_price: 1,
+        discounted_price: 1, total_price: 1, discount_1: 0, discount_2: 0, discount_3: 0, vat_rate: 0,
+      }],
+    })));
+    select.mockResolvedValue([]);
+    await expect(electronicInvoicesService.importXmlFiles([{ name: "sample.xml", content: "" }]))
+      .resolves.toMatchObject({ importedInvoices: 2, skippedDuplicates: 0, totalLines: 2 });
+    const writes = invoke.mock.calls.find(([command]) => command === "apply_local_database_batch")?.[1].writes;
+    expect(writes[0].params.at(-1)).toBe("vat:00000000001");
+    expect(writes[1].params[0]).toBe("vat:00000000001");
+    expect(writes[2].params.at(-1)).toBe("vat:00000000002");
+    expect(writes[3].params[0]).toBe("vat:00000000002");
   });
 });

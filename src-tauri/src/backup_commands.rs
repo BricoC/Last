@@ -208,8 +208,7 @@ pub fn write_binary_file(file_path: String, bytes: Vec<u8>) -> Result<u64, Strin
         fs::create_dir_all(parent)
             .map_err(|e| format!("Errore creazione cartella di destinazione: {}", e))?;
     }
-    fs::write(path, &bytes)
-        .map_err(|e| format!("Errore scrittura file binario: {}", e))?;
+    fs::write(path, &bytes).map_err(|e| format!("Errore scrittura file binario: {}", e))?;
     let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
 }
@@ -231,7 +230,11 @@ static BACKUP_FILE_OPERATION: tauri::async_runtime::Mutex<()> =
 
 /// Writes a consistent SQLite snapshot before replacing the destination file.
 #[tauri::command]
-pub async fn copy_database_file(app: AppHandle, target_file_path: String) -> Result<u64, String> {
+pub async fn copy_database_file(
+    app: AppHandle,
+    target_file_path: String,
+    order_queue: String,
+) -> Result<u64, String> {
     let _operation = BACKUP_FILE_OPERATION.lock().await;
     let db_path = local_database_path(&app)?;
     let target = Path::new(&target_file_path);
@@ -241,13 +244,17 @@ pub async fn copy_database_file(app: AppHandle, target_file_path: String) -> Res
     let mut source = open_database(&db_path, true).await?;
     stage.capture(&mut source).await?;
     source.close().await.map_err(|error| error.to_string())?;
+    stage.store_order_queue(&order_queue).await?;
     stage.validate(false).await?;
     stage.install(target)
 }
 
 /// Restores an independent snapshot of the selected database, including its WAL.
 #[tauri::command]
-pub async fn restore_database_file(app: AppHandle, source_file_path: String) -> Result<u64, String> {
+pub async fn restore_database_file(
+    app: AppHandle,
+    source_file_path: String,
+) -> Result<u64, String> {
     use tauri_plugin_sql::{DbInstances, DbPool};
     let _operation = BACKUP_FILE_OPERATION.lock().await;
     let db_path = local_database_path(&app)?;
@@ -421,10 +428,9 @@ pub fn clean_old_backups(folder_path: String, keep_count: usize) -> Result<usize
         let fpath = Path::new(&item.path);
         if fpath.is_file()
             && (item.backup_type != "full_db" || matches!(has_sidecars(fpath), Ok(false)))
+            && fs::remove_file(fpath).is_ok()
         {
-            if fs::remove_file(fpath).is_ok() {
-                deleted_count += 1;
-            }
+            deleted_count += 1;
         }
     }
 
@@ -477,7 +483,7 @@ pub async fn inspect_sqlite_backup_file(
     for name in table_names {
         let escaped_name = name.replace('"', "\"\"");
         let count_query = format!("SELECT COUNT(*) FROM \"{}\"", escaped_name);
-        let count = sqlx::query_scalar::<_, i64>(&count_query)
+        let count = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(count_query))
             .fetch_one(&mut conn)
             .await
             .map_err(|e| format!("Errore conteggio tabella '{}': {}", name, e))?;

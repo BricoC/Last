@@ -89,10 +89,11 @@ mod tests {
                     ("foreign_keys", 1),
                     ("synchronous", 1),
                 ] {
-                    let value: i64 = sqlx::query_scalar(&format!("PRAGMA {pragma}"))
-                        .fetch_one(&mut **connection)
-                        .await
-                        .unwrap();
+                    let value: i64 =
+                        sqlx::query_scalar(sqlx::AssertSqlSafe(format!("PRAGMA {pragma}")))
+                            .fetch_one(&mut **connection)
+                            .await
+                            .unwrap();
                     assert_eq!(value, expected, "{pragma}");
                 }
                 let journal: String = sqlx::query_scalar("PRAGMA journal_mode")

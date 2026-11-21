@@ -1,3 +1,4 @@
+import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
 import { getSupabaseSessionEmail, subscribeSupabaseSession } from "@/shared/services/supabaseSession";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import DOMPurify from "dompurify";
@@ -73,7 +74,7 @@ const HIGHLIGHT_COLORS = [
   { name: "Grigio chiaro", value: "#e2e8f0" },
 ];
 
-export const NotesPage: React.FC<NotesPageProps> = () => {
+export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
   const [notes, setNotes] = useState<NoteRecord[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -110,7 +111,9 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isInternalChangeRef = useRef(false);
-  const isSavingDraftRef = useRef(false);
+  const pending = useRef<{ title: string; html: string } | null>(null);
+  const saving = useRef<Promise<boolean> | null>(null);
+  const justCreated = useRef<string | null>(null);
 
   const activeNoteIdRef = useRef<string | null>(activeNoteId);
   useEffect(() => {
@@ -202,6 +205,10 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
   const activeNote = notes.find((n) => n.id === activeNoteId) || null;
 
   useEffect(() => {
+    if (activeNoteId && activeNoteId === justCreated.current) {
+      justCreated.current = null;
+      return;
+    }
     if (activeNote) {
       setTitle(activeNote.title || "");
       if (editorRef.current) {
@@ -219,80 +226,62 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
     }
   }, [activeNoteId]);
 
-  // Salvataggio ritardato automatico (Debounce 400ms)
-  const triggerAutoSave = useCallback(
-    (newTitle: string, newHtml: string) => {
-      setSaveStatus("saving");
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-
-      saveTimeoutRef.current = setTimeout(async () => {
-        saveTimeoutRef.current = null;
-        try {
-          const tempDiv = document.createElement("div");
-          tempDiv.innerHTML = newHtml;
-          const textOnly = tempDiv.innerText || tempDiv.textContent || "";
-
-          // Se entrambi i campi sono vuoti e non c'è una nota salvata, non creare record vuoti
-          if (!activeNoteIdRef.current && !newTitle.trim() && !textOnly.trim()) {
-            setSaveStatus("saved");
-            return;
-          }
-
-          let currentId = activeNoteIdRef.current;
-          if (!currentId) {
-            if (isSavingDraftRef.current) return;
-            isSavingDraftRef.current = true;
-            try {
-              const created = await notesRepository.createNote({
-                title: newTitle.trim() || "Nuova Nota",
-                created_by: currentUser,
-              });
-              currentId = created.id;
-              activeNoteIdRef.current = created.id;
-              setActiveNoteId(created.id);
-              setNotes((prev) => [created, ...prev]);
-            } finally {
-              isSavingDraftRef.current = false;
+  const flushPendingDraft = useCallback((): Promise<boolean> => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = null;
+    if (saving.current) return saving.current;
+    const drain = async () => {
+      try {
+        while (pending.current) {
+          const draft = pending.current;
+          const div = document.createElement("div");
+          div.innerHTML = draft.html;
+          const text = (div.innerText || div.textContent || "").trim();
+          let id = activeNoteIdRef.current;
+          if (id || draft.title.trim() || text) {
+            const name = draft.title.trim() || "Nuova Nota";
+            if (!id) {
+              const note = await notesRepository.createNote({ title: name, created_by: currentUser });
+              id = note.id;
+              justCreated.current = id;
+              activeNoteIdRef.current = id;
+              setActiveNoteId(id);
+              setNotes(prev => [note, ...prev]);
             }
+            await notesRepository.saveNote({ id, title: name, content_html: draft.html,
+              content_text: text, updated_by: currentUser });
+            setNotes(prev => prev.map(note => note.id === id ? { ...note, title: name,
+              content_html: draft.html, content_text: text, updated_at: new Date().toISOString() } : note));
           }
-
-          if (!currentId) return;
-
-          await notesRepository.saveNote({
-            id: currentId,
-            title: newTitle.trim() || "Nuova Nota",
-            content_html: newHtml,
-            content_text: textOnly.trim(),
-            updated_by: currentUser,
-          });
-
-          // Aggiorna stato locale lista note
-          setNotes((prev) =>
-            prev.map((n) =>
-              n.id === currentId
-                ? {
-                    ...n,
-                    title: newTitle.trim() || "Nuova Nota",
-                    content_html: newHtml,
-                    content_text: textOnly.trim(),
-                    updated_at: new Date().toISOString(),
-                  }
-                : n
-            )
-          );
-          setSaveStatus("saved");
-          // Sincronizzazione automatica cloud in background
-          void notesSyncService.sync();
-        } catch (err) {
-          console.error("[NotesPage] Errore salvataggio automatico:", err);
-          setSaveStatus("unsaved");
+          if (pending.current === draft) pending.current = null;
         }
-      }, 400);
-    },
-    [currentUser]
-  );
+        setSaveStatus("saved");
+        void notesSyncService.sync();
+        return true;
+      } catch (error) {
+        console.error("[NotesPage] Salvataggio nota:", error);
+        setSaveStatus("unsaved");
+        return false;
+      }
+    };
+    if (!pending.current) return Promise.resolve(true);
+    saving.current = drain().finally(() => { saving.current = null; });
+    return saving.current;
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!windowId) return;
+    const unregisterDirty = registerDirtyCheck(windowId, () => Boolean(pending.current || saving.current));
+    const unregisterClose = registerWindowCloseGuard(windowId, flushPendingDraft);
+    return () => { unregisterDirty(); unregisterClose(); };
+  }, [windowId, flushPendingDraft]);
+
+  const triggerAutoSave = (title: string, html: string) => {
+    pending.current = { title, html };
+    setSaveStatus("saving");
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => void flushPendingDraft(), 400);
+  };
 
   // Modifica del titolo
   const handleTitleChange = (val: string) => {
@@ -308,67 +297,16 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
     triggerAutoSave(title, html);
   };
 
-  const flushPendingDraft = useCallback(() => {
-    if (!saveTimeoutRef.current) return;
-    clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = null;
-
-    const draftTitle = title;
-    const draftHtml = editorRef.current?.innerHTML || "";
-    const tempDiv = document.createElement("div");
-    tempDiv.innerHTML = draftHtml;
-    const draftText = (tempDiv.innerText || tempDiv.textContent || "").trim();
-    const targetId = activeNoteIdRef.current;
-
-    if (!draftTitle.trim() && !draftText) return;
-
-    void (async () => {
-      try {
-        let noteId = targetId;
-        if (!noteId) {
-          const created = await notesRepository.createNote({
-            title: draftTitle.trim() || "Nuova Nota",
-            created_by: currentUser,
-          });
-          noteId = created.id;
-          setNotes((prev) => [created, ...prev]);
-        }
-        await notesRepository.saveNote({
-          id: noteId,
-          title: draftTitle.trim() || "Nuova Nota",
-          content_html: draftHtml,
-          content_text: draftText,
-          updated_by: currentUser,
-        });
-        setNotes((prev) =>
-          prev.map((n) =>
-            n.id === noteId
-              ? {
-                  ...n,
-                  title: draftTitle.trim() || "Nuova Nota",
-                  content_html: draftHtml,
-                  content_text: draftText,
-                  updated_at: new Date().toISOString(),
-                }
-              : n
-          )
-        );
-        void notesSyncService.sync();
-      } catch (err) {
-        console.error("[NotesPage] Errore flush automatico bozza:", err);
-      }
-    })();
-  }, [currentUser, title]);
-
   // Selezione nota dall'elenco laterale con salvataggio al volo della precedente se necessario
-  const handleSelectNote = (id: string) => {
-    flushPendingDraft();
+  const handleSelectNote = async (id: string) => {
+    if (!await flushPendingDraft()) return;
+    activeNoteIdRef.current = id;
     setActiveNoteId(id);
   };
 
   // Creazione nuova nota / foglio vuoto pronto per scrivere
-  const handleCreateNewNote = () => {
-    flushPendingDraft();
+  const handleCreateNewNote = async () => {
+    if (!await flushPendingDraft()) return;
     setActiveNoteId(null);
     activeNoteIdRef.current = null;
     setTitle("");
@@ -410,6 +348,7 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
   // Sposta nota nel Cestino (senza popup di conferma)
   const handleDeleteNote = async (id: string) => {
     try {
+      if (activeNoteIdRef.current === id && !await flushPendingDraft()) return;
       await notesRepository.moveToTrash(id, currentUser);
       const remaining = notes.filter((n) => n.id !== id);
       setNotes(remaining);
@@ -915,6 +854,8 @@ export const NotesPage: React.FC<NotesPageProps> = () => {
                       <Loader2 className="w-3 h-3 text-amber-400 animate-spin" />
                       <span className="text-amber-300">Salvataggio...</span>
                     </>
+                  ) : saveStatus === "unsaved" ? (
+                    <button onClick={() => void flushPendingDraft()}>Salvataggio fallito · Riprova</button>
                   ) : activeNote ? (
                     <>
                       <Check className="w-3 h-3 text-emerald-400" />

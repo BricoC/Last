@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isReturnDdt, matchesMarginFilter } from "../DDTStudioSidebar";
+import { isReturnDdt, matchesMarginFilter } from "../../utils/ddtArchiveFilters";
 
 describe("DDTStudioSidebar return (reso) margin handling", () => {
   it("detects 'reso' in transport_reason case-insensitively", () => {

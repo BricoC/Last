@@ -70,6 +70,14 @@ interface ConfigStatus {
   configPath: string;
 }
 
+export function invoiceIssuerKey(vat: string | null | undefined, fiscalCode: string | null | undefined, supplier: string): string {
+  const taxId = (value: string | null | undefined) => (value ?? "").replace(/[ \t\r\n]/g, "").toUpperCase();
+  const vatNumber = taxId(vat);
+  if (vatNumber) return "vat:" + vatNumber.replace(/^IT(?=\d{11}$)/, "");
+  const fiscal = taxId(fiscalCode);
+  return fiscal ? "cf:" + fiscal : "name:" + supplier.trim().toUpperCase();
+}
+
 export class ElectronicInvoicesService {
   private retryingUploads: Promise<void> | null = null;
 
@@ -97,8 +105,8 @@ export class ElectronicInvoicesService {
 
     for (const invoice of matchingInvoices) {
       const items = await db.select<SupplierInvoiceItem[]>(
-        "SELECT * FROM supplier_invoice_items WHERE invoice_id = $1 OR (supplier_name = $2 AND doc_number = $3 AND doc_date = $4) ORDER BY line_number, id",
-        [invoice.id, invoice.supplier_name, invoice.doc_number, invoice.doc_date],
+        "SELECT * FROM supplier_invoice_items WHERE invoice_id = $1 ORDER BY line_number, id",
+        [invoice.id],
       );
       const header = {
         fornitore: invoice.supplier_name,
@@ -132,7 +140,7 @@ export class ElectronicInvoicesService {
         aliquota_iva: it.vat_rate,
       }));
       try {
-        const response = await supabaseFetch(new URL("/rest/v1/rpc/last_replace_supplier_invoice", projectUrl), {
+        const response = await supabaseFetch(new URL("/rest/v1/rpc/last_replace_supplier_invoice_v2", projectUrl), {
           method: "POST",
           headers: { apikey: anonKey, "Content-Type": "application/json" },
           body: JSON.stringify({ p_header: header, p_lines: lines }),
@@ -185,6 +193,8 @@ export class ElectronicInvoicesService {
     // 1. Scarica tutte le testate con paginazione
     onProgress?.("Download testate fatture...", 10);
     const writes: SqliteWrite[] = [];
+    const remoteInvoices = new Map<string, [string, string, string]>();
+    const legacyInvoiceKeys = new Map<string, [string, string, string] | null>();
     let testateOffset = 0;
     const testatePageSize = 1000;
     let totalTestate = 0;
@@ -205,13 +215,21 @@ export class ElectronicInvoicesService {
       onProgress?.(`Scaricate ${totalTestate} testate...`, 20);
 
       for (const t of rawTestate) {
+        const issuer = t.issuer_key || invoiceIssuerKey(t.partita_iva, t.codice_fiscale, t.fornitore || "");
+        const identity: [string, string, string] = [
+          issuer, String(t.numero_documento || "").trim(), t.data_documento || "",
+        ];
+        if (t.id != null) remoteInvoices.set(String(t.id), identity);
+        const legacyKey = JSON.stringify([t.fornitore || "", identity[1], identity[2]]);
+        legacyInvoiceKeys.set(legacyKey, legacyInvoiceKeys.has(legacyKey) ? null : identity);
         writes.push({
           sql: `INSERT INTO supplier_invoices (
             supplier_name, vat_number, fiscal_code, doc_number, doc_date, year,
             total_amount, taxable_amount, vat_amount, payment_method, due_date,
-            iban, bank_name, file_name, notes, project_url
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$17)
-          ON CONFLICT(supplier_name, doc_number, doc_date) DO UPDATE SET
+            iban, bank_name, file_name, notes, project_url, issuer_key
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$17,$18)
+          ON CONFLICT(issuer_key, doc_number, doc_date) DO UPDATE SET
+            supplier_name = excluded.supplier_name,
             vat_number = excluded.vat_number,
             fiscal_code = excluded.fiscal_code,
             year = excluded.year,
@@ -247,6 +265,7 @@ export class ElectronicInvoicesService {
             t.note || null,
             startedAt,
             normalizeSupabaseProjectUrl(projectUrl),
+            issuer,
           ]
         });
       }
@@ -262,19 +281,17 @@ export class ElectronicInvoicesService {
 
     const activeSyncProjectUrl = normalizeSupabaseProjectUrl(projectUrl);
     writes.push({
-      sql: `DELETE FROM supplier_invoice_items AS item
-        WHERE NOT EXISTS (
-          SELECT 1 FROM supplier_invoices AS invoice
-          WHERE invoice.supplier_name = item.supplier_name AND invoice.doc_number = item.doc_number
-            AND invoice.doc_date = item.doc_date
-            AND (
-              invoice.cloud_upload_pending = 1
-              OR julianday(invoice.cloud_uploaded_at) >= julianday($1)
-              OR invoice.project_url IS NULL
-              OR invoice.project_url <> $2
-            )
-        )`,
-      params: [startedAt, activeSyncProjectUrl],
+      sql: `DELETE FROM supplier_invoice_items WHERE invoice_id IN (
+        SELECT invoice.id FROM supplier_invoices AS invoice
+        JOIN json_each($3) AS imported
+          ON invoice.issuer_key = json_extract(imported.value,'$[0]')
+          AND invoice.doc_number = json_extract(imported.value,'$[1]')
+          AND invoice.doc_date = json_extract(imported.value,'$[2]')
+        WHERE invoice.cloud_upload_pending = 0 AND invoice.project_url = $2
+          AND (invoice.cloud_uploaded_at IS NULL OR julianday(invoice.cloud_uploaded_at) < julianday($1))
+      )`,
+      params: [startedAt, activeSyncProjectUrl,
+        JSON.stringify([...remoteInvoices.values(), ...[...legacyInvoiceKeys.values()].filter(Boolean)])],
     });
 
     while (true) {
@@ -294,26 +311,26 @@ export class ElectronicInvoicesService {
       onProgress?.(`Scaricate ${totalRighe} righe articolo...`, pct);
 
       for (const r of rawRighe) {
+        const identity = r.invoice_id != null
+          ? remoteInvoices.get(String(r.invoice_id))
+          : legacyInvoiceKeys.get(JSON.stringify([r.fornitore || "", String(r.numero_documento || "").trim(), r.data_documento || ""]));
+        if (!identity) {
+          if (r.invoice_id != null || identity === null) {
+            throw new Error("Una riga fattura cloud non ha una testata univoca. Verifica i dati su Supabase.");
+          }
+          continue;
+        }
         writes.push({
           sql: `INSERT INTO supplier_invoice_items (
-            supplier_name, doc_number, doc_date, year, line_number, article_code,
+            invoice_id, supplier_name, doc_number, doc_date, year, line_number, article_code,
             description, quantity, unit, unit_price, discount_1, discount_2, discount_3,
             discounted_price, total_price, vat_rate
-          ) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
-          WHERE NOT EXISTS (
-            SELECT 1 FROM supplier_invoices
-            WHERE supplier_name = $1 AND doc_number = $2 AND doc_date = $3
-              AND (
-                cloud_upload_pending = 1
-                OR julianday(cloud_uploaded_at) >= julianday($17)
-                OR project_url IS NULL
-                OR project_url <> $18
-              )
-          );`,
+          ) SELECT id,supplier_name,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+          FROM supplier_invoices WHERE issuer_key = $1 AND doc_number = $2 AND doc_date = $3
+            AND cloud_upload_pending = 0 AND project_url = $18
+            AND (cloud_uploaded_at IS NULL OR julianday(cloud_uploaded_at) < julianday($17));`,
           params: [
-            r.fornitore || "",
-            String(r.numero_documento || "").trim(),
-            r.data_documento || "",
+            ...identity,
             Number(r.anno) || new Date(r.data_documento || "").getFullYear() || 2026,
             Number(r.numero_linea) || 1,
             r.codice_articolo || null,
@@ -391,13 +408,13 @@ export class ElectronicInvoicesService {
     // 2. Controllo duplicati con SQLite
     onProgress?.("Verifica duplicati nel database locale...", 30);
     const db = await getDatabase();
-    const existing = await db.select<{ s_name: string; d_num: string; d_date: string }[]>(
-      `SELECT supplier_name as s_name, doc_number as d_num, doc_date as d_date FROM supplier_invoices`
+    const existing = await db.select<{ issuer_key: string; d_num: string; d_date: string }[]>(
+      `SELECT issuer_key, doc_number as d_num, doc_date as d_date FROM supplier_invoices`
     );
 
     const existingKeySet = new Set<string>();
     for (const r of existing) {
-      const k = `${(r.s_name || "").trim().toUpperCase()}||${(r.d_num || "").trim().toUpperCase()}||${(r.d_date || "").trim()}`;
+      const k = JSON.stringify([r.issuer_key, r.d_num.trim().toUpperCase(), r.d_date.trim()]);
       existingKeySet.add(k);
     }
 
@@ -405,7 +422,9 @@ export class ElectronicInvoicesService {
     let skippedDuplicates = 0;
 
     for (const p of parsedList) {
-      const k = `${p.invoice.supplier_name.trim().toUpperCase()}||${p.invoice.doc_number.trim().toUpperCase()}||${p.invoice.doc_date.trim()}`;
+      const { invoice } = p;
+      const issuer = invoiceIssuerKey(invoice.vat_number, invoice.fiscal_code, invoice.supplier_name);
+      const k = JSON.stringify([issuer, invoice.doc_number.trim().toUpperCase(), invoice.doc_date.trim()]);
       if (existingKeySet.has(k)) {
         skippedDuplicates++;
       } else {
@@ -431,6 +450,7 @@ export class ElectronicInvoicesService {
     let totalLinesInserted = 0;
     for (let i = 0; i < toInsert.length; i++) {
       const { invoice, items } = toInsert[i];
+      const issuer = invoiceIssuerKey(invoice.vat_number, invoice.fiscal_code, invoice.supplier_name);
       const pct = Math.min(70, Math.round(30 + ((i + 1) / toInsert.length) * 40));
       onProgress?.(`Salvataggio ${invoice.supplier_name} doc. ${invoice.doc_number}...`, pct);
 
@@ -438,8 +458,8 @@ export class ElectronicInvoicesService {
         sql: `INSERT INTO supplier_invoices (
           supplier_name, vat_number, fiscal_code, doc_number, doc_date, year,
           total_amount, taxable_amount, vat_amount, payment_method, due_date,
-          iban, bank_name, file_name, notes, cloud_upload_pending, project_url
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,1,$16);`,
+          iban, bank_name, file_name, notes, cloud_upload_pending, project_url, issuer_key
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,1,$16,$17);`,
         params: [
           invoice.supplier_name,
           invoice.vat_number || null,
@@ -457,20 +477,22 @@ export class ElectronicInvoicesService {
           invoice.file_name || null,
           invoice.notes || null,
           getLastKnownSupabaseProjectUrl(),
+          issuer,
         ],
       });
 
       for (const it of items) {
         localWrites.push({
           sql: `INSERT INTO supplier_invoice_items (
-            supplier_name, doc_number, doc_date, year, line_number, article_code,
+            invoice_id, supplier_name, doc_number, doc_date, year, line_number, article_code,
             description, quantity, unit, unit_price, discount_1, discount_2, discount_3,
             discounted_price, total_price, vat_rate
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16);`,
+          ) SELECT id, supplier_name, $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+          FROM supplier_invoices WHERE issuer_key = $1 AND doc_number = $2 AND doc_date = $3;`,
           params: [
-            it.supplier_name,
-            it.doc_number,
-            it.doc_date,
+            issuer,
+            invoice.doc_number,
+            invoice.doc_date,
             it.year,
             it.line_number || 1,
             it.article_code || null,
@@ -642,16 +664,20 @@ export class ElectronicInvoicesService {
     );
   }
 
-  /**
-   * Recupera tutte le righe di una singola fattura per la modale di dettaglio
-   */
-  async getInvoiceLines(supplierName: string, docNumber: string, docDate: string): Promise<SupplierInvoiceItem[]> {
+  async getInvoiceById(id: number): Promise<SupplierInvoice | undefined> {
+    const db = await getDatabase();
+    const [invoice] = await db.select<SupplierInvoice[]>("SELECT * FROM supplier_invoices WHERE id=$1", [id]);
+    return invoice;
+  }
+
+  async getInvoiceLines(supplierName: string, docNumber: string, docDate: string, invoiceId?: number): Promise<SupplierInvoiceItem[]> {
     const db = await getDatabase();
     return db.select<SupplierInvoiceItem[]>(
       `SELECT * FROM supplier_invoice_items
-       WHERE supplier_name = $1 AND doc_number = $2 AND doc_date = $3
+       WHERE invoice_id = $4 OR ($4 IS NULL AND invoice_id IS NULL
+         AND supplier_name = $1 AND doc_number = $2 AND doc_date = $3)
        ORDER BY line_number ASC, id ASC`,
-      [supplierName, docNumber, docDate]
+      [supplierName, docNumber, docDate, invoiceId ?? null]
     );
   }
 

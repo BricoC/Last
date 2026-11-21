@@ -74,19 +74,105 @@ export interface AppUser {
   created_at: string;
 }
 
+const PASSWORD_HASH_SCHEME = "pbkdf2-sha256";
+const PASSWORD_HASH_ITERATIONS = 600_000;
+const MIN_ACCEPTED_PASSWORD_HASH_ITERATIONS = 100_000;
+const MAX_ACCEPTED_PASSWORD_HASH_ITERATIONS = 2_000_000;
+const PASSWORD_SALT_BYTES = 16;
+const PASSWORD_DERIVED_KEY_BYTES = 32;
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function fromBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function constantTimeEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
+}
+
+async function derivePasswordKey(plain: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  const saltBuffer = new ArrayBuffer(salt.byteLength);
+  new Uint8Array(saltBuffer).set(salt);
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(plain),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: saltBuffer, iterations },
+    material,
+    PASSWORD_DERIVED_KEY_BYTES * 8
+  );
+  return new Uint8Array(bits);
+}
+
+/** True for hashes created by the former unsalted SHA-256 implementation. */
+export function isLegacyPasswordHash(hash?: string): boolean {
+  return Boolean(hash && /^[a-f\d]{64}$/i.test(hash));
+}
+
 export async function hashPassword(plain: string): Promise<string> {
   if (!plain) return "";
+  const salt = crypto.getRandomValues(new Uint8Array(PASSWORD_SALT_BYTES));
+  const derivedKey = await derivePasswordKey(plain, salt, PASSWORD_HASH_ITERATIONS);
+  return [
+    PASSWORD_HASH_SCHEME,
+    String(PASSWORD_HASH_ITERATIONS),
+    toBase64(salt),
+    toBase64(derivedKey),
+  ].join("$");
+}
+
+async function verifyLegacyPassword(plain: string, hash: string): Promise<boolean> {
   const data = new TextEncoder().encode(plain);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+  const expected = Uint8Array.from(
+    hash.match(/.{2}/g) || [],
+    (byte) => Number.parseInt(byte, 16)
+  );
+  return constantTimeEqual(digest, expected);
 }
 
 export async function verifyPassword(plain: string, hash?: string): Promise<boolean> {
-  if (!hash) return false;
-  const computed = await hashPassword(plain);
-  return computed === hash;
+  if (!hash || !plain) return false;
+  if (isLegacyPasswordHash(hash)) return verifyLegacyPassword(plain, hash);
+
+  const [scheme, iterationsText, saltText, derivedKeyText, extra] = hash.split("$");
+  const iterations = Number(iterationsText);
+  if (
+    scheme !== PASSWORD_HASH_SCHEME ||
+    extra !== undefined ||
+    !Number.isSafeInteger(iterations) ||
+    iterations < MIN_ACCEPTED_PASSWORD_HASH_ITERATIONS ||
+    iterations > MAX_ACCEPTED_PASSWORD_HASH_ITERATIONS
+  ) {
+    return false;
+  }
+
+  try {
+    const salt = fromBase64(saltText);
+    const expected = fromBase64(derivedKeyText);
+    if (salt.length < PASSWORD_SALT_BYTES || expected.length !== PASSWORD_DERIVED_KEY_BYTES) {
+      return false;
+    }
+    const actual = await derivePasswordKey(plain, salt, iterations);
+    return constantTimeEqual(actual, expected);
+  } catch {
+    return false;
+  }
 }
 
 const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [

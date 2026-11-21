@@ -1,11 +1,8 @@
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
-import {
-  buildCustomerPriceListWorkbook,
-  buildGeneralPriceListWorkbook,
-  sanitizeExcelFilename,
-  toExcelFraction,
-} from "../priceListExcelExportService";
+import { buildCustomerPriceListWorkbook } from "../customerPriceListWorkbook";
+import { buildGeneralPriceListWorkbook } from "../generalPriceListWorkbook";
+import { sanitizeExcelFilename, toExcelFraction } from "../priceListExcelExportService";
 import { ListinoClienteRow, ListinoGeneraleRow } from "../../models/priceList";
 
 describe("priceListExcelExportService", () => {

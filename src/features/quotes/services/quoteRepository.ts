@@ -1,6 +1,6 @@
 import { applyLocalDatabaseBatch } from "@/shared/data-layer/localDatabaseBatch";
 import { pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
-import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
+import { getLastKnownSupabaseProjectUrl, normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
@@ -16,7 +16,7 @@ import { buildQuoteDdtConversion } from "./quoteDdtConversion";
 import { buildQuoteSavePayload } from "./quotePayload";
 import { quoteToDraft, toQuoteInput } from "../models/quoteDraft";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
-import { QuoteSyncService } from "./quoteSyncService";
+import { getSupabaseCredentials, QuoteSyncService } from "./quoteSyncService";
 
 export class QuoteRepository {
   public async getQuotes(search = ""): Promise<Quote[]> {
@@ -26,7 +26,6 @@ export class QuoteRepository {
     } catch (err) {
       console.warn("[QuoteRepository] Sync pullQuotes non riuscito:", err);
     }
-    await this.ensureQuoteNumbersAssigned();
     const searchSql = buildMultiTermSqlSearch(search, [
       "client_name",
       "subject",
@@ -114,107 +113,34 @@ export class QuoteRepository {
     return this.mapQuote(quote, items.map(this.mapItem));
   }
 
-  public async generateUniqueQuoteNumber(year: number): Promise<number> {
-    return this.generateNextQuoteNumber(year);
-  }
-
-  /**
-   * Genera il prossimo numero progressivo per l'anno specificato.
-   * Il numero è STRETTAMENTE univoco: se un preventivo viene cancellato o eliminato,
-   * quel numero è perso per sempre e la sequenza avanza al successivo senza mai riutilizzarlo.
-   */
+  /** Atomically reserves numbers for installations without a configured cloud project. */
   public async generateNextQuoteNumber(year: number): Promise<number> {
     const db = await getDatabase();
-
-    // 1. Leggi l'ultimo numero registrato nella tabella sequenze persistente
-    let seqMax = 0;
-    try {
-      const seqRows = await db.select<{ last_number: number }[]>(
-        "SELECT last_number FROM quote_sequences WHERE year = $1",
-        [year]
-      );
-      seqMax = seqRows[0]?.last_number ?? 0;
-    } catch (err) {
-      console.warn("[QuoteRepository] Lettura quote_sequences:", err);
-    }
-
-    // 2. Leggi il massimo quote_number da tutti i preventivi locali (compresi quelli cancellati/soft-deleted)
-    let quotesMax = 0;
-    try {
-      const rows = await db.select<{ max_num: number | null }[]>(
-        "SELECT MAX(quote_number) as max_num FROM quotes WHERE year = $1",
-        [year]
-      );
-      quotesMax = rows[0]?.max_num ?? 0;
-    } catch (err) {
-      console.warn("[QuoteRepository] Lettura MAX quotes:", err);
-    }
-
-    // 3. Leggi il massimo quote_number dal cestino locale
-    let trashMax = 0;
-    try {
-      const trashRows = await db.select<{ max_num: number | null }[]>(
-        "SELECT MAX(quote_number) as max_num FROM quotes_trash WHERE year = $1",
-        [year]
-      );
-      trashMax = trashRows[0]?.max_num ?? 0;
-    } catch (err) {
-      console.warn("[QuoteRepository] Lettura MAX quotes_trash:", err);
-    }
-
-    // 4. Leggi la sequenza remota da Supabase Cloud (se online)
-    let remoteMax = 0;
-    try {
-      remoteMax = await QuoteSyncService.getRemoteMaxQuoteNumber(year);
-    } catch (err) {
-      console.warn("[QuoteRepository] Lettura remoteMax da Supabase:", err);
-    }
-
-    const currentMax = Math.max(seqMax, quotesMax, trashMax, remoteMax, 0);
-    const nextNumber = currentMax + 1;
-
-    // Registra subito il nuovo numero nella sequenza locale persistente
-    try {
-      await db.execute(
-        `INSERT INTO quote_sequences (year, last_number) VALUES ($1, $2)
-         ON CONFLICT(year) DO UPDATE SET last_number = MAX(last_number, excluded.last_number)`,
-        [year, nextNumber]
-      );
-    } catch (err) {
-      console.warn("[QuoteRepository] Salvataggio locale quote_sequences:", err);
-    }
-
-    // Aggiorna la sequenza anche su Supabase Cloud (asincrono / non bloccante)
-    void QuoteSyncService.updateRemoteSequence(year, nextNumber);
-
-    return nextNumber;
+    const [row] = await db.select<{ last_number: number }[]>(
+      `INSERT INTO quote_sequences(year,last_number) VALUES ($1, MAX(
+        COALESCE((SELECT MAX(quote_number) FROM quotes WHERE year=$1),0),
+        COALESCE((SELECT MAX(quote_number) FROM quotes_trash WHERE year=$1),0)
+      )+1) ON CONFLICT(year) DO UPDATE SET last_number=MAX(quote_sequences.last_number+1,excluded.last_number)
+      RETURNING last_number`,
+      [year],
+    );
+    return row.last_number;
   }
 
-  private async ensureQuoteNumbersAssigned(): Promise<void> {
-    try {
-      const db = await getDatabase();
-      // Assegna solo a preventivi che non hanno ancora un numero. NON rinumerare o ricomprimere mai i numeri esistenti!
-      const missing = await db.select<{ id: string; year: number }[]>(
-        "SELECT id, year FROM quotes WHERE quote_number IS NULL AND deleted_at IS NULL ORDER BY year ASC, created_at ASC"
-      );
-
-      for (const r of missing) {
-        const nextSeq = await this.generateNextQuoteNumber(r.year);
-        await db.execute("UPDATE quotes SET quote_number = $1 WHERE id = $2", [nextSeq, r.id]);
-      }
-    } catch (err) {
-      console.warn("[QuoteRepository] Assegnazione automatica quote_number:", err);
-    }
+  private async resolveDraftNumber(year: number, existing: Quote | null, project: string | null): Promise<number | null> {
+    if (existing?.quote_number != null) return existing.quote_number;
+    // Connected installations keep offline drafts unnumbered until the cloud can reserve a unique number.
+    return project ? null : this.generateNextQuoteNumber(year);
   }
 
   public async saveDraft(input: QuoteDraftInput): Promise<Quote> {
     const existing = input.id ? await this.getQuoteById(input.id) : null;
     if (input.id && !existing) throw new Error("Preventivo da aggiornare non trovato.");
-    const year = input.year ?? (existing?.year ?? new Date().getFullYear());
-    let quoteNumber = existing?.quote_number ?? input.quote_number ?? null;
-    if (quoteNumber == null) {
-      quoteNumber = await this.generateUniqueQuoteNumber(year);
-    }
+    const year = existing?.quote_number != null ? existing.year : input.year ?? existing?.year ?? new Date().getFullYear();
+    const project = existing
+      ? existing.project_url ?? null
+      : normalizeSupabaseProjectUrl(getLastKnownSupabaseProjectUrl() ?? (await getSupabaseCredentials())?.projectUrl);
+    const quoteNumber = await this.resolveDraftNumber(year, existing, project);
     const inputWithNumber: QuoteDraftInput = {
       ...input,
       year,
@@ -222,18 +148,8 @@ export class QuoteRepository {
     };
     const now = new Date().toISOString();
     const quoteId = input.id || crypto.randomUUID();
-    const payload = buildQuoteSavePayload(inputWithNumber, existing, now, quoteId);
+    const payload = { ...buildQuoteSavePayload(inputWithNumber, existing, now, quoteId), project_url: project };
     await invoke("save_quote_transaction", { payload });
-    if (!existing) {
-      const activeProjectUrl = getLastKnownSupabaseProjectUrl();
-      if (activeProjectUrl) {
-        const db = await getDatabase();
-        await db.execute("UPDATE quotes SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
-          activeProjectUrl,
-          quoteId,
-        ]);
-      }
-    }
     const saved = await this.getQuoteById(quoteId);
     if (!saved) throw new Error("Errore recupero preventivo salvato.");
     try {
@@ -241,44 +157,34 @@ export class QuoteRepository {
     } catch (err) {
       console.warn("[QuoteRepository] Sync pushQuote su Supabase non riuscito:", err);
     }
-    return saved;
+    return await this.getQuoteById(quoteId, false) ?? saved;
   }
 
   public async convertToDdt(input: QuoteDraftInput) {
     const now = new Date().toISOString();
     const quoteId = input.id || crypto.randomUUID();
     const existing = input.id ? await this.getQuoteById(input.id) : null;
-    const year = input.year ?? (existing?.year ?? new Date().getFullYear());
-    let quoteNumber = existing?.quote_number ?? input.quote_number ?? null;
-    if (quoteNumber == null) {
-      quoteNumber = await this.generateUniqueQuoteNumber(year);
-    }
+    const year = existing?.quote_number != null ? existing.year : input.year ?? existing?.year ?? new Date().getFullYear();
+    const project = existing
+      ? existing.project_url ?? null
+      : normalizeSupabaseProjectUrl(getLastKnownSupabaseProjectUrl() ?? (await getSupabaseCredentials())?.projectUrl);
+    const quoteNumber = await this.resolveDraftNumber(year, existing, project);
     const activeItems = input.items.filter((item) => item.description.trim());
     if (!activeItems.length) throw new Error("Inserisci almeno una riga descrittiva prima di convertire il preventivo.");
     const inputWithNumber: QuoteDraftInput = { ...input, year, quote_number: quoteNumber };
-    const quotePayload = buildQuoteSavePayload(inputWithNumber, existing, now, quoteId);
+    const quotePayload = { ...buildQuoteSavePayload(inputWithNumber, existing, now, quoteId), project_url: project };
     const conversion = buildQuoteDdtConversion(inputWithNumber, crypto.randomUUID());
     await invoke<string>("convert_quote_to_ddt_transaction", {
       quotePayload, ddtPayload: conversion.payload,
     });
-    const activeProjectUrl = getLastKnownSupabaseProjectUrl();
-    const ddtProjectUrl = existing ? (existing.project_url ?? null) : activeProjectUrl;
-    if (activeProjectUrl || ddtProjectUrl) {
+    if (project) {
       const db = await getDatabase();
-      if (!existing && activeProjectUrl) {
-        await db.execute("UPDATE quotes SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
-          activeProjectUrl,
-          quoteId,
-        ]);
-      }
-      if (ddtProjectUrl) {
-        await db.execute("UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2", [
-          ddtProjectUrl,
-          conversion.payload.id,
-        ]);
-      }
+      await db.execute("UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2",
+        [project, conversion.payload.id]);
+      await QuoteSyncService.retryPendingChanges().catch(console.warn);
     }
-    return { quoteId, quoteNumber, ...conversion };
+    const saved = await this.getQuoteById(quoteId, false);
+    return { quoteId, quoteNumber: saved?.quote_number ?? quoteNumber, ...conversion };
   }
 
   /**

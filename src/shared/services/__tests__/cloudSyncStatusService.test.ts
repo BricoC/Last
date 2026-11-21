@@ -6,6 +6,8 @@ import {
 } from "../cloudSyncStatusService";
 import { ddtIncrementalSyncService } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
 import { priceListSyncService } from "@/features/price-lists/services/priceListSyncService";
+import { offersSyncService } from "@/features/offers/services/offersSyncService";
+import { clientSyncService } from "@/features/clients/services/clientSyncService";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -65,8 +67,14 @@ it("mantiene l'ultimo timestamp riuscito quando un modulo segnala un errore", as
   vi.spyOn(priceListSyncService, "syncIncrementalClientiFromSupabase").mockResolvedValue({
     updatedCount: 0, updatedRows: [],
   });
+  vi.spyOn(priceListSyncService, "retryPendingChanges").mockResolvedValue();
+  const offers = vi.spyOn(offersSyncService, "retryPendingChanges").mockRejectedValue(new Error("Offerta da verificare"));
+  const clients = vi.spyOn(clientSyncService, "syncPendingClientsToSupabase").mockResolvedValue({ pushed: 1, deleted: 0 });
   const result = await cloudSyncStatusService.executeFullSync();
   expect(result).toMatchObject({ success: false, genCount: 2, summary: expect.stringContaining("DDT: HTTP 503") });
+  expect(result.summary).toContain("Offerta da verificare");
+  expect(offers).toHaveBeenCalledOnce();
+  expect(clients).toHaveBeenCalledOnce();
   expect(storage.get("last_supabase_sync_timestamp")).toBe("2026-01-01T08:00:00Z");
   expect(storage.get("last_supabase_sync_failure")).toBe(result.summary);
 });

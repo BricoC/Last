@@ -409,6 +409,9 @@ export function parseInvoiceXmlAll(
       supplierName = `${nome} ${cognome}`.trim();
     }
     vatNumber = getTagText(cedenteEl, "IdCodice");
+    const vatCountry = getTagText(cedenteEl, "IdPaese").trim().toUpperCase();
+    if (vatNumber && vatCountry && vatCountry !== "IT" &&
+        !vatNumber.toUpperCase().startsWith(vatCountry)) vatNumber = vatCountry + vatNumber;
     fiscalCode = getTagText(cedenteEl, "CodiceFiscale");
   }
 

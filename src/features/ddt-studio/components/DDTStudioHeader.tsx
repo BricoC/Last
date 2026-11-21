@@ -1,24 +1,10 @@
-import React, { useState, useRef, useEffect } from "react";
-import {
-  FileSpreadsheet,
-  Plus,
-  Save,
-  Printer,
-  FileText,
-  Sparkles,
-  PanelLeftClose,
-  PanelLeft,
-  Copy,
-  Trash2,
-  ChevronDown,
-  Eye,
-  CheckCircle2,
-  AlertTriangle,
-} from "lucide-react";
+import React, { useRef, useEffect } from "react";
+import { Plus, Save, Printer, FileText, PanelLeftClose, PanelLeft, CheckCircle2, AlertTriangle, Trash2, Sparkles } from "lucide-react";
 import { DdtDocument } from "../models/ddt";
 import { cn } from "@/shared/utils/cn";
-import { DDTMonthlyReportModal } from "./DDTMonthlyReportModal";
 import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
+import { DDTStudioActionMenu } from "./DDTStudioActionMenu";
+import { DdtStudioViewSwitch } from "./DdtStudioViewSwitch";
 
 export interface DDTStudioHeaderProps {
   ddt: Partial<DdtDocument>;
@@ -78,12 +64,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   numberingStatus = null,
   onOpenGapModal,
 }) => {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Easter Egg Final Fantasy IX & Metal Slug
-  const { triggerFf9Moguo, triggerMetalSlug } = useEasterEggStore();
+  const { triggerFf9Moguo } = useEasterEggStore();
   const theOneClicksRef = useRef(0);
   const theOneClickResetTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -99,16 +80,6 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeView, setActiveView]);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const isConfirmed = ddt.status === "confermato" && ddt.doc_number !== null;
   const isTheOneDisabled = Boolean(isConfirmed || isSaving || isPrinting);
@@ -209,36 +180,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
         )}
       </div>
 
-      {/* Centro: Switcher Vista Editor vs Foglio A4 (con ESC key support!) */}
-      <div className="flex items-center bg-[var(--background)] p-0.5 rounded-lg border border-[var(--border)] shadow-inner shrink-0">
-        <button
-          type="button"
-          onClick={() => setActiveView("editor")}
-          className={cn(
-            "h-7 px-3 rounded-md text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-default",
-            activeView === "editor"
-              ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm border border-[var(--border)]"
-              : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-          )}
-        >
-          <FileSpreadsheet className="w-3.5 h-3.5 text-[var(--primary)]" />
-          <span>Editor</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveView(activeView === "a4" ? "editor" : "a4")}
-          className={cn(
-            "h-7 px-3 rounded-md text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-default",
-            activeView === "a4"
-              ? "bg-blue-600 text-white shadow-sm ring-1 ring-blue-400"
-              : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-          )}
-        >
-          <Eye className="w-3.5 h-3.5" />
-          <span>{activeView === "a4" ? "Foglio A4 ESC" : "Foglio A4"}</span>
-        </button>
-      </div>
-
+      <DdtStudioViewSwitch activeView={activeView} onChange={setActiveView} />
       {/* Spazio tra Editor/Foglio A4 e The One: Toast notifica salvataggio */}
       <div className="flex-1 flex items-center justify-center px-3 min-w-0">
         {toastMessage && (() => {
@@ -357,86 +299,14 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
           <span>{isExportingPdf ? "PDF..." : "PDF"}</span>
         </button>
 
-        {/* Altre Azioni */}
-        <div className="relative" ref={dropdownRef}>
-          <button
-            type="button"
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="h-7 px-2 rounded text-xs font-semibold bg-[var(--background)] border border-[var(--border)] hover:bg-[var(--card)] text-[var(--foreground)] flex items-center space-x-1 transition-colors cursor-default"
-          >
-            <span>Altre Azioni</span>
-            <ChevronDown className="w-3 h-3 text-[var(--muted-foreground)]" />
-          </button>
-
-          {dropdownOpen && (
-            <div className="absolute right-0 mt-1 w-52 rounded-md shadow-lg bg-[var(--card)] border border-[var(--border)] py-1 z-50">
-              <button
-                type="button"
-                onClick={() => {
-                  setDropdownOpen(false);
-                  setIsReportModalOpen(true);
-                }}
-                className="w-full text-left px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-500/10 flex items-center space-x-2 transition-colors"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Report Excel Mesi ({currentYear})</span>
-              </button>
-
-              <div className="my-1 border-t border-[var(--border)]" />
-
-              {onGenerateTest48 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDropdownOpen(false);
-                    onGenerateTest48();
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-500/10 flex items-center space-x-2"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Popola Test 48 Righe</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={(e) => {
-                  setDropdownOpen(false);
-                  if (e.shiftKey || e.altKey) {
-                    triggerMetalSlug();
-                  } else {
-                    onDuplicateDdt();
-                  }
-                }}
-                className="w-full text-left px-3 py-1.5 text-xs text-[var(--foreground)] hover:bg-[var(--background)] flex items-center space-x-2"
-                title="Shift+Click per Easter Egg Metal Slug"
-              >
-                <Copy className="w-3.5 h-3.5 text-blue-400" />
-                <span>Duplica DDT</span>
-              </button>
-              {ddt.id && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDropdownOpen(false);
-                    onDeleteDdt();
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 flex items-center space-x-2"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Elimina DDT</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <DDTStudioActionMenu
+          currentYear={currentYear}
+          documentId={ddt.id}
+          onGenerateTest48={onGenerateTest48}
+          onDuplicateDdt={onDuplicateDdt}
+          onDeleteDdt={onDeleteDdt}
+        />
       </div>
-
-      {/* Modale Report Excel Mesi */}
-      <DDTMonthlyReportModal
-        isOpen={isReportModalOpen}
-        onClose={() => setIsReportModalOpen(false)}
-        year={currentYear}
-      />
     </div>
   );
 };
