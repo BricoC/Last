@@ -168,6 +168,10 @@ export function App() {
           QuoteSyncService.retryPendingChanges()),
         import("@/features/or-numbers/services/orNumbersRepository").then(({ OrNumbersRepository }) =>
           OrNumbersRepository.retryPendingLogs()),
+        import("@/features/settings/companySettingsRepository").then(({ retryPendingCompanySettings }) =>
+          retryPendingCompanySettings()),
+        import("@/features/settings/emailSettingsRepository").then(({ retryPendingEmailSettings }) =>
+          retryPendingEmailSettings()),
       ];
       for (const task of tasks) void task.catch((error) => console.warn("[App] Operazione cloud in sospeso:", error));
     };

@@ -40,6 +40,23 @@ END $$;
 REVOKE ALL ON FUNCTION public.last_require_station_access() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.last_require_station_access() TO authenticated;
 
+CREATE TABLE IF NOT EXISTS public.company_settings (
+  id TEXT PRIMARY KEY,
+  business_name TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  postal_code TEXT DEFAULT '',
+  city TEXT DEFAULT '',
+  province TEXT DEFAULT '',
+  vat_number TEXT DEFAULT '',
+  fiscal_code TEXT DEFAULT '',
+  sdi_code TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  email TEXT DEFAULT '',
+  logo_data_url TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_by TEXT DEFAULT 'system'
+);
+
 DO $$
 DECLARE
   table_name text;

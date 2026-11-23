@@ -177,6 +177,8 @@ class CloudSyncStatusService {
       const [pending] = await db.select<{ count: number }[]>(`SELECT (
         EXISTS(SELECT 1 FROM listino_generale WHERE sync_revision IS NOT NULL)
         OR EXISTS(SELECT 1 FROM listini_clienti WHERE sync_revision IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM company_settings WHERE id = 'company_profile' AND deleted_at IS NULL AND sync_status = 'pending')
+        OR EXISTS(SELECT 1 FROM email_settings WHERE id = 'email_config' AND deleted_at IS NULL AND sync_status = 'pending')
         OR ($1 IS NOT NULL AND (
           EXISTS(SELECT 1 FROM ddt_documents WHERE sync_status = 'pending' AND status <> 'bozza' AND project_url = $1)
           OR EXISTS(SELECT 1 FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)
@@ -325,6 +327,8 @@ class CloudSyncStatusService {
       ordersModule,
       invoicesModule,
       orNumbersModule,
+      companySettingsModule,
+      emailSettingsModule,
     ] = await Promise.all([
       import("@/features/price-lists/services/priceListSyncService"),
       import("@/features/offers/services/offersSyncService"),
@@ -335,6 +339,8 @@ class CloudSyncStatusService {
       import("@/features/orders/services/orderSupabaseService"),
       import("@/features/invoices/services/electronicInvoicesService"),
       import("@/features/or-numbers/services/orNumbersRepository"),
+      import("@/features/settings/companySettingsRepository"),
+      import("@/features/settings/emailSettingsRepository"),
     ]);
     const { priceListSyncService } = priceListModule;
     const { offersSyncService } = offersModule;
@@ -345,6 +351,8 @@ class CloudSyncStatusService {
     const { orderSupabaseService } = ordersModule;
     const { electronicInvoicesService } = invoicesModule;
     const { OrNumbersRepository } = orNumbersModule;
+    const { retryPendingCompanySettings } = companySettingsModule;
+    const { retryPendingEmailSettings } = emailSettingsModule;
 
     const [
       priceWrites,
@@ -355,6 +363,8 @@ class CloudSyncStatusService {
       orderWrites,
       invoiceWrites,
       orLogWrites,
+      companySettingsWrites,
+      emailSettingsWrites,
     ] = await Promise.allSettled([
       priceListSyncService.retryPendingChanges(),
       offersSyncService.retryPendingChanges(),
@@ -364,6 +374,8 @@ class CloudSyncStatusService {
       orderSupabaseService.processOfflineQueue(),
       electronicInvoicesService.retryPendingUploads(),
       OrNumbersRepository.retryPendingLogs(),
+      retryPendingCompanySettings().then((ok) => { if (!ok) throw new Error("Invio dati aziendali non confermato"); }),
+      retryPendingEmailSettings().then((ok) => { if (!ok) throw new Error("Invio impostazioni email non confermato"); }),
     ]);
     const [ddt, general, clients] = await Promise.allSettled([
       ddtIncrementalSyncService.syncNewDdtsFromSupabase({ includePreviousYear: true, checkModifiedRecent: true }),
@@ -385,6 +397,8 @@ class CloudSyncStatusService {
       ["Ordini", orderWrites.status === "rejected" ? String(orderWrites.reason) : undefined],
       ["Fatture", invoiceWrites.status === "rejected" ? String(invoiceWrites.reason) : undefined],
       ["Log OR", orLogWrites.status === "rejected" ? String(orLogWrites.reason) : undefined],
+      ["Dati aziendali", companySettingsWrites.status === "rejected" ? String(companySettingsWrites.reason) : undefined],
+      ["Impostazioni email", emailSettingsWrites.status === "rejected" ? String(emailSettingsWrites.reason) : undefined],
       ["DDT", ddtResult.error],
       ["Listino generale", general.status === "fulfilled" ? general.value.error : String(general.reason)],
       ["Listini clienti", clients.status === "fulfilled" ? clients.value.error : String(clients.reason)],

@@ -22,10 +22,18 @@ function readGit(gitArgs) {
 }
 
 function runNpm(npmArgs) {
-  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-  const result = spawnSync(npmCmd, npmArgs, { stdio: "inherit", shell: false });
+  const npmExecPath = process.env.npm_execpath;
+  const result = npmExecPath
+    ? spawnSync(process.execPath, [npmExecPath, ...npmArgs], { stdio: "inherit", shell: false })
+    : spawnSync("npm", npmArgs, { stdio: "inherit", shell: process.platform === "win32" });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`npm ${npmArgs.join(" ")} terminato con codice ${result.status}`);
+}
+
+function runCargo(cargoArgs) {
+  const result = spawnSync("cargo", cargoArgs, { stdio: "inherit", shell: false });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`cargo ${cargoArgs.join(" ")} terminato con codice ${result.status}`);
 }
 
 if (!version) {
@@ -58,10 +66,13 @@ if (dirtyStatus) {
 }
 
 if (!skipChecks) {
-  console.log("\x1b[36m[PREFLIGHT] Esecuzione test e build prima del tag...\x1b[0m");
+  console.log("\x1b[36m[PREFLIGHT] Esecuzione test, build e controlli Rust prima del tag...\x1b[0m");
   runNpm(["test"]);
   runNpm(["run", "build"]);
   runNpm(["run", "check:bundle"]);
+  runCargo(["fmt", "--manifest-path", "src-tauri/Cargo.toml", "--check"]);
+  runCargo(["test", "--manifest-path", "src-tauri/Cargo.toml", "--locked"]);
+  runCargo(["clippy", "--manifest-path", "src-tauri/Cargo.toml", "--all-targets", "--all-features", "--locked", "--", "-D", "warnings"]);
 }
 
 console.log("\x1b[36m==========================================================\x1b[0m");

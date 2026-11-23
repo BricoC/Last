@@ -323,6 +323,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
       await loadData(true);
     } catch (err) {
       console.error("[OffersPage] Errore salvataggio offerta:", err);
+      throw err;
     }
   };
 

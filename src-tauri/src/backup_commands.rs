@@ -487,6 +487,15 @@ pub fn delete_backup_file(file_path: String) -> Result<(), String> {
         &["lastbackup", "json", "db"],
         "eliminazione backup",
     )?;
+    let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !is_managed_backup_file(fname, &ext) {
+        return Err("Il file indicato non è un backup gestito da Last".to_string());
+    }
     if path.exists() && path.is_file() {
         fs::remove_file(&path).map_err(|e| format!("Errore eliminazione file: {}", e))?;
     }
@@ -498,7 +507,8 @@ pub fn delete_backup_file(file_path: String) -> Result<(), String> {
 pub async fn inspect_sqlite_backup_file(
     file_path: String,
 ) -> Result<BackupInspectionResult, String> {
-    let path = Path::new(&file_path);
+    let path_buf = validate_file_path_with_extensions(&file_path, &["db"], "ispezione backup")?;
+    let path = path_buf.as_path();
     if !path.exists() {
         return Err(format!("File non trovato: {}", file_path));
     }

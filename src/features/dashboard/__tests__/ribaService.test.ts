@@ -10,6 +10,9 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@/features/settings/emailSettingsRepository", () => ({
   getEmailSettings: async () => ({ bank_to: "bank@example.test", bank_cc: "" }),
 }));
+vi.mock("@/features/settings/companySettingsRepository", () => ({
+  getCompanySettings: async () => ({ business_name: "Azienda Test S.r.l." }),
+}));
 
 describe("calculateNextRibaDeadline", () => {
   it("determina correttamente la scadenza del 10 del mese corrente quando siamo prima del 10", () => {

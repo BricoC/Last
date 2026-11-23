@@ -1,7 +1,7 @@
 import { pendingCloudWrite, flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { getDatabase } from "@/shared/data-layer/database";
-import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
+import { normalizeSupabaseProjectUrl, resolveActiveSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { OrRow, isActualOrderReference } from "../types/orNumbers";
 import { cleanDestinationName } from "@/features/ddt-studio/utils/destinationCleaner";
 import { invoke } from "@tauri-apps/api/core";
@@ -84,11 +84,12 @@ export class OrNumbersRepository {
   public static async updateLogsBatch(updates: Record<string, string>): Promise<void> {
     await this.ensureLogsTable();
     const timestamp = new Date().toISOString();
+    const projectUrl = await resolveActiveSupabaseProjectUrl();
     await applyLocalDatabaseBatch(Object.entries(updates).flatMap(([id, status]) => [
       { sql: `INSERT INTO ddt_logs (id,status,updated_at) VALUES ($1,$2,$3)
         ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at`,
         params: [id, status, timestamp] },
-      pendingCloudWrite("or_logs", id, "upsert", { id, status, updated_at: timestamp }),
+      pendingCloudWrite("or_logs", id, "upsert", { id, status, updated_at: timestamp }, projectUrl),
     ]));
     void this.retryPendingLogs().catch(console.warn);
   }

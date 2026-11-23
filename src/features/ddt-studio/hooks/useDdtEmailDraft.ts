@@ -63,14 +63,16 @@ export function useDdtEmailDraft(isOpen: boolean, selectedDdtIds: string[]) {
           setToEmail(destTo);
           setCcEmail(destCc);
           const docNumbers = loaded.map((doc) => `DDT ${doc.doc_number ?? "Bozza"}`).join(", ");
-          setSubject(`Invio ${docNumbers} — Brico Class`);
+          const companyName = (companySettings?.business_name || "").trim();
+          setSubject(companyName ? `Invio ${docNumbers} — ${companyName}` : `Invio ${docNumbers}`);
           const now = new Date();
           const timeValue = now.getHours() * 100 + now.getMinutes();
           const greeting = timeValue > 0 && timeValue <= 1230 ? "Buongiorno." : "Buonasera.";
           const ddtLines = loaded
             .map((doc) => `• DDT ${doc.doc_number ?? "Bozza"} del ${doc.doc_date || ""} ${doc.destination_address ? `(${doc.destination_address})` : ""}`)
             .join("\n");
-          setBodyText(`${greeting}\n\nIn allegato i seguenti DDT in formato PDF:\n${ddtLines}\n\nRestiamo a disposizione per qualsiasi chiarimento.\n\nCordiali saluti,\nBrico Class S.r.l.`);
+          const closing = companyName ? `Cordiali saluti,\n${companyName}` : "Cordiali saluti.";
+          setBodyText(`${greeting}\n\nIn allegato i seguenti DDT in formato PDF:\n${ddtLines}\n\nRestiamo a disposizione per qualsiasi chiarimento.\n\n${closing}`);
         }
       } catch (error) {
         if (!active) return;

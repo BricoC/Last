@@ -694,7 +694,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         localStorage.setItem("client_price_list_last_saved_time", now.toISOString());
       } catch {}
 
-      void priceListSyncService.pushClientBatchToSupabase(rowsToSave).catch((e) => {
+      void priceListSyncService.pushClientBatchToSupabase(rowsToSave.map((r) => ({ ...r }))).catch((e) => {
         console.warn("[CustomerPriceListPage] Push Supabase asincrono non riuscito:", e);
       });
     } catch (err: any) {

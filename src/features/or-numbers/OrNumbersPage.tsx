@@ -248,19 +248,25 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       return;
     }
 
-    const emailConfig = await getEmailSettings();
+    const [emailConfig, companySettings] = await Promise.all([
+      getEmailSettings(),
+      getCompanySettings().catch(() => null),
+    ]);
     if (!emailConfig.carrara_to) {
       showToast("Configura l'indirizzo email di Cartiere Carrara nelle Impostazioni.", "error");
       return;
     }
 
+    const sig = companySettings?.business_name?.trim()
+      ? `Saluti,<br>${companySettings.business_name.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`
+      : "Saluti.";
     const today = getTodayFormattedIt();
     const success = await sendEmailGroup(
       redRows,
       emailConfig.carrara_to,
       emailConfig.carrara_cc,
       "Invio DDT Multiplo (Nuovi)",
-      `${getGreeting()}<br><br>In allegato i nuovi DDT.<br><br>Saluti,<br>Brico Class`,
+      `${getGreeting()}<br><br>In allegato i nuovi DDT.<br><br>${sig}`,
       `Email Multipla ${today}`
     );
 
@@ -277,19 +283,25 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       return;
     }
 
-    const emailConfig = await getEmailSettings();
+    const [emailConfig, companySettings] = await Promise.all([
+      getEmailSettings(),
+      getCompanySettings().catch(() => null),
+    ]);
     if (!emailConfig.carrara_to) {
       showToast("Configura l'indirizzo email di Cartiere Carrara nelle Impostazioni.", "error");
       return;
     }
 
+    const sig = companySettings?.business_name?.trim()
+      ? `Saluti,<br>${companySettings.business_name.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`
+      : "Saluti.";
     const today = getTodayFormattedIt();
     const success = await sendEmailGroup(
       yellowRows,
       emailConfig.carrara_to,
       emailConfig.carrara_cc,
       "DDT in attesa di numero d'ordine",
-      `${getGreeting()}<br><br>In allegato i DDT ancora in attesa di numero d'ordine.<br><br>Saluti,<br>Brico Class`,
+      `${getGreeting()}<br><br>In allegato i DDT ancora in attesa di numero d'ordine.<br><br>${sig}`,
       `Email Multi Gialli ${today}`
     );
 
@@ -306,19 +318,25 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       return;
     }
 
-    const emailConfig = await getEmailSettings();
+    const [emailConfig, companySettings] = await Promise.all([
+      getEmailSettings(),
+      getCompanySettings().catch(() => null),
+    ]);
     if (!emailConfig.carrara_to) {
       showToast("Configura l'indirizzo email di Cartiere Carrara nelle Impostazioni.", "error");
       return;
     }
 
+    const sig = companySettings?.business_name?.trim()
+      ? `Saluti,<br>${companySettings.business_name.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`
+      : "Saluti.";
     const today = getTodayFormattedIt();
     const success = await sendEmailGroup(
       selected,
       emailConfig.carrara_to,
       emailConfig.carrara_cc,
       `Invio DDT Cartiere Carrara (${selected.length} documenti)`,
-      `${getGreeting()}<br><br>In allegato i DDT selezionati:<br><br>Saluti,<br>Brico Class`,
+      `${getGreeting()}<br><br>In allegato i DDT selezionati:<br><br>${sig}`,
       `Email Multipla ${today}`
     );
 
@@ -345,7 +363,13 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
         (!r.destination.toUpperCase().includes("SALANETTI") && !r.destination.toUpperCase().includes("RALLETTA"))
     );
 
-    const emailConfig = await getEmailSettings();
+    const [emailConfig, companySettings] = await Promise.all([
+      getEmailSettings(),
+      getCompanySettings().catch(() => null),
+    ]);
+    const sig = companySettings?.business_name?.trim()
+      ? `Saluti,<br>${companySettings.business_name.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`
+      : "Saluti.";
     const today = getTodayFormattedIt();
     let sentCount = 0;
 
@@ -355,7 +379,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
         emailConfig.wepa_salanetti_to,
         emailConfig.wepa_salanetti_cc,
         "DDT Wepa Salanetti",
-        `${getGreeting()}<br><br>In allegato i DDT richiesti:<br><br>Saluti,<br>Brico Class`,
+        `${getGreeting()}<br><br>In allegato i DDT richiesti:<br><br>${sig}`,
         `Email Multipla ${today}`
       );
       if (ok) sentCount += salanetti.length;
@@ -367,7 +391,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
         emailConfig.wepa_ralletta_to,
         emailConfig.wepa_ralletta_cc,
         "DDT Wepa Ralletta",
-        `${getGreeting()}<br><br>In allegato i DDT richiesti:<br><br>Saluti,<br>Brico Class`,
+        `${getGreeting()}<br><br>In allegato i DDT richiesti:<br><br>${sig}`,
         `Email Multipla ${today}`
       );
       if (ok) sentCount += ralletta.length;
@@ -393,32 +417,49 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       (r) => !r.destination.toUpperCase().includes("SALANETTI")
     );
 
-    const emailConfig = await getEmailSettings();
+    const [emailConfig, companySettings] = await Promise.all([
+      getEmailSettings(),
+      getCompanySettings().catch(() => null),
+    ]);
+    const sig = companySettings?.business_name?.trim()
+      ? `Saluti,<br>${companySettings.business_name.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`
+      : "Saluti.";
     const today = getTodayFormattedIt();
 
+    let okCount = 0;
+    let totalGroups = 0;
+
     if (salanetti.length > 0) {
-      await sendEmailGroup(
+      totalGroups++;
+      const ok = await sendEmailGroup(
         salanetti,
         emailConfig.wepa_salanetti_to,
         emailConfig.wepa_salanetti_cc,
         `DDT Wepa Salanetti (${salanetti.length} documenti)`,
-        `${getGreeting()}<br><br>In allegato i DDT Wepa selezionati:<br><br>Saluti,<br>Brico Class`,
+        `${getGreeting()}<br><br>In allegato i DDT Wepa selezionati:<br><br>${sig}`,
         `Email Multipla ${today}`
       );
+      if (ok) okCount++;
     }
 
     if (other.length > 0) {
-      await sendEmailGroup(
+      totalGroups++;
+      const ok = await sendEmailGroup(
         other,
         emailConfig.wepa_ralletta_to,
         emailConfig.wepa_ralletta_cc,
         `DDT Wepa (${other.length} documenti)`,
-        `${getGreeting()}<br><br>In allegato i DDT Wepa selezionati:<br><br>Saluti,<br>Brico Class`,
+        `${getGreeting()}<br><br>In allegato i DDT Wepa selezionati:<br><br>${sig}`,
         `Email Multipla ${today}`
       );
+      if (ok) okCount++;
     }
 
-    showToast(`Email Outlook predisposte per ${selected.length} DDT Wepa.`, "success");
+    if (okCount === totalGroups && totalGroups > 0) {
+      showToast(`Email Outlook predisposte per ${selected.length} DDT Wepa.`, "success");
+    } else if (okCount > 0) {
+      showToast(`Email predisposte solo parzialmente (${okCount}/${totalGroups} gruppi Wepa).`, "error");
+    }
     await loadData();
   };
 
@@ -453,8 +494,11 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
       }
     }
 
+    const sig = companySettings?.business_name?.trim()
+      ? `Saluti,<br>${companySettings.business_name.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`
+      : "Saluti.";
     const subject = `DDT ${row.docNumber ?? "Bozza"}`;
-    const body = `${getGreeting()}<br><br>In allegato DDT ${row.docNumber ?? "Bozza"} del ${row.date}<br><br>Saluti,<br>Brico Class`;
+    const body = `${getGreeting()}<br><br>In allegato DDT ${row.docNumber ?? "Bozza"} del ${row.date}<br><br>${sig}`;
 
     const today = getTodayFormattedIt();
     const ok = await sendEmailGroup(

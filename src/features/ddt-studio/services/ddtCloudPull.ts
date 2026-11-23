@@ -159,6 +159,7 @@ export async function pullDdtChanges(projectUrl: string, anonKey: string) {
 
   const saveChanges = async (changes: DdtChange[], nextRevision?: string) => {
     const writes: SqliteWrite[] = [];
+    const inPageDeletedIds = new Set<string>();
     for (const change of changes) {
       if (!change.id || (!change.document && !change.deletedAt)) throw new Error("Modifica DDT cloud incompleta");
       const doc = change.document;
@@ -170,7 +171,7 @@ export async function pullDdtChanges(projectUrl: string, anonKey: string) {
         [change.id, doc?.header.anno ?? null, doc?.header.numero ?? null],
       );
       const local = candidates.find((row) => row.id === change.id);
-      const other = candidates.find((row) => row.id !== change.id);
+      const other = candidates.find((row) => row.id !== change.id && !inPageDeletedIds.has(row.id));
       const isIdenticalLegacyRestored = Boolean(
         !local &&
         other &&
@@ -188,8 +189,15 @@ export async function pullDdtChanges(projectUrl: string, anonKey: string) {
           );
         })(),
       );
-      const blocked = Boolean((other && !isIdenticalLegacyRestored) || (local && (local.sync_status !== "synced" ||
-        (local.project_url && normalizeSupabaseProjectUrl(local.project_url) !== project))));
+      const isUnverifiedLegacyDelete = Boolean(
+        !doc && local && !local.deleted_at && !normalizeSupabaseProjectUrl(local.project_url),
+      );
+      const blocked = Boolean(
+        (other && !isIdenticalLegacyRestored) ||
+        isUnverifiedLegacyDelete ||
+        (local && (local.sync_status !== "synced" ||
+          (local.project_url && normalizeSupabaseProjectUrl(local.project_url) !== project))),
+      );
       if (!state.initialized && nextRevision) writes.push({
         sql: "INSERT OR IGNORE INTO ddt_pull_seen(project_url,id) VALUES ($1,$2)", params: [project, change.id],
       });
@@ -231,6 +239,7 @@ export async function pullDdtChanges(projectUrl: string, anonKey: string) {
         counts.lines += doc.lines.length;
       } else if (local && !local.deleted_at && normalizeSupabaseProjectUrl(local.project_url) === project) {
         writes.push(...deleteDdtWrites(local, change.deletedAt!));
+        inPageDeletedIds.add(local.id);
         counts.deleted++;
       }
       writes.push({ sql: "DELETE FROM ddt_pull_deferred WHERE project_url=$1 AND id=$2", params: [project, change.id] });

@@ -85,7 +85,7 @@ export const UserPasswordModal: React.FC<UserPasswordModalProps> = ({
             className="w-14 h-14 drop-shadow-[0_0_24px_rgba(59,130,246,0.35)] mb-2.5 transition-transform hover:scale-105"
           />
           <h1 className="text-xl font-black tracking-widest text-white uppercase">Last</h1>
-          <p className="text-xs text-slate-400 mt-0.5">Piattaforma Gestionale Brico Class</p>
+          <p className="text-xs text-slate-400 mt-0.5">Piattaforma Gestionale Aziendale</p>
         </div>
 
         <section className="w-full max-w-sm rounded-2xl border border-slate-700/60 bg-slate-900/95 p-6 text-slate-100 shadow-2xl backdrop-blur animate-in zoom-in-95 duration-150">

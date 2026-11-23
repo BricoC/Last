@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getCompanySettings,
   pullCompanySettingsFromSupabase,
@@ -15,33 +15,46 @@ export function CompanySettingsPanel() {
   const [values, setValues] = useState<CompanySettingsInput>(emptySettings);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
     let active = true;
     getCompanySettings()
       .then((settings) => {
-        if (active && settings) {
+        if (active && settings && !dirtyRef.current) {
           setValues({ ...settings, logo_data_url: settings.logo_data_url });
+        }
+        return pullCompanySettingsFromSupabase();
+      })
+      .then((remote) => {
+        if (active && remote && !dirtyRef.current) {
+          setValues({ ...remote, logo_data_url: remote.logo_data_url });
         }
       })
       .catch(() => {
         if (active) setMessage("Impossibile leggere i dati aziendali.");
       });
 
-    void pullCompanySettingsFromSupabase().then((remote) => {
-      if (active && remote) {
-        setValues({ ...remote, logo_data_url: remote.logo_data_url });
-      }
-    });
-
     return () => {
       active = false;
     };
   }, []);
 
-  const set = (field: keyof CompanySettingsInput, value: string | null) => setValues((current) => ({ ...current, [field]: value }));
+  const set = (field: keyof CompanySettingsInput, value: string | null) => {
+    dirtyRef.current = true;
+    setValues((current) => ({ ...current, [field]: value }));
+  };
   const loadLogo = (file?: File) => {
     if (!file) return;
+    const allowedTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+    if (!allowedTypes.includes(file.type)) {
+      setMessage("Formato logo non supportato. Usa PNG, JPEG, WebP o GIF.");
+      return;
+    }
+    if (file.size > 1_048_576) {
+      setMessage("Il file del logo supera 1 MB. Ridimensiona l'immagine prima di caricarla.");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => { if (typeof reader.result === "string") set("logo_data_url", reader.result); };
     reader.readAsDataURL(file);
@@ -50,6 +63,7 @@ export function CompanySettingsPanel() {
     setSaving(true); setMessage("");
     try {
       const result = await saveCompanySettings(values);
+      dirtyRef.current = false;
       setMessage(
         result.syncedCloud
           ? "Dati aziendali salvati e sincronizzati sul Cloud."

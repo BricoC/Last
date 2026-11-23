@@ -421,20 +421,20 @@ export class ClientRepository {
 
       const mergeProjectUrl = target.project_url ?? dup.project_url ?? null;
 
-      // Riassegna tutti i DDT del duplicato al cliente principale (solo dello stesso progetto)
+      // Riassegna tutti i DDT del duplicato al cliente principale (inclusi quelli nel cestino per evitare client_id orfani al ripristino)
       writes.push({
         sql: `UPDATE ddt_documents
-         SET client_name = $1, client_id = $2, sync_status = 'pending', updated_at = $3
-         WHERE deleted_at IS NULL AND (client_id = $5 OR (client_id IS NULL AND LOWER(TRIM(client_name)) = LOWER(TRIM($4))))
+         SET client_name = $1, client_id = $2, sync_status = CASE WHEN deleted_at IS NULL THEN 'pending' ELSE sync_status END, updated_at = $3
+         WHERE (client_id = $5 OR (client_id IS NULL AND LOWER(TRIM(client_name)) = LOWER(TRIM($4))))
            AND (($6 IS NULL AND project_url IS NULL) OR project_url = $6)`,
         params: [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl],
       });
 
-      // Riassegna eventuali preventivi del duplicato al cliente principale (solo dello stesso progetto)
+      // Riassegna eventuali preventivi del duplicato al cliente principale (inclusi quelli archiviati)
       writes.push({
         sql: `UPDATE quotes
-         SET client_name = $1, client_id = $2, sync_status = 'pending', updated_at = $3
-         WHERE deleted_at IS NULL AND (client_id = $5 OR (client_id IS NULL AND LOWER(TRIM(client_name)) = LOWER(TRIM($4))))
+         SET client_name = $1, client_id = $2, sync_status = CASE WHEN deleted_at IS NULL THEN 'pending' ELSE sync_status END, updated_at = $3
+         WHERE (client_id = $5 OR (client_id IS NULL AND LOWER(TRIM(client_name)) = LOWER(TRIM($4))))
            AND (($6 IS NULL AND project_url IS NULL) OR project_url = $6)`,
         params: [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl],
       });

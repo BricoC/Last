@@ -81,11 +81,16 @@ export function buildCustomerPriceListWorkbook(
         ? round5(item.perc_acquisto / 100)
         : null;
 
-    excelRow.getCell(1).value = item.fornitore || null;
-    excelRow.getCell(2).value = item.codice_articolo || null;
+    const safeText = (val?: string | null): string | null => {
+      if (!val) return null;
+      return /^[=+\-@\t\r]/.test(val) ? `'${val}` : val;
+    };
+
+    excelRow.getCell(1).value = safeText(item.fornitore);
+    excelRow.getCell(2).value = safeText(item.codice_articolo);
     excelRow.getCell(2).numFmt = "@";
-    excelRow.getCell(3).value = item.data_ref || null;
-    excelRow.getCell(4).value = item.descrizione || "";
+    excelRow.getCell(3).value = safeText(item.data_ref);
+    excelRow.getCell(4).value = safeText(item.descrizione) ?? "";
 
     if (acqEur != null && percAcqFrac != null) {
       const fallbackSale = round5(acqEur * (1 + percAcqFrac));
@@ -104,12 +109,12 @@ export function buildCustomerPriceListWorkbook(
     excelRow.getCell(7).value = acqEur ?? (item.acquisto_eur ?? null);
     excelRow.getCell(7).numFmt = "€ #,##0.00000";
 
-    excelRow.getCell(8).value = item.data_acquisto || null;
-    excelRow.getCell(9).value = item.acquisto_old || null;
+    excelRow.getCell(8).value = safeText(item.data_acquisto);
+    excelRow.getCell(9).value = safeText(item.acquisto_old);
     excelRow.getCell(10).value = item.ricarico != null && isFinite(item.ricarico) ? item.ricarico : null;
-    excelRow.getCell(11).value = item.note || null;
-    excelRow.getCell(12).value = item.note1 || null;
-    excelRow.getCell(13).value = item.note2 || null;
+    excelRow.getCell(11).value = safeText(item.note);
+    excelRow.getCell(12).value = safeText(item.note1);
+    excelRow.getCell(13).value = safeText(item.note2);
   });
 
   return wb;

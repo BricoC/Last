@@ -1155,6 +1155,9 @@ export async function uploadDdtToSupabase(
 ===================================================================== */
 
 export async function backupLocalSqliteTable(table: string = "listini_clienti"): Promise<number> {
+  if (!/^[a-zA-Z0-9_]+$/.test(table)) {
+    throw new Error(`Nome tabella non valido: ${table}`);
+  }
   const db = await getDatabase();
   // Crea o aggiorna una tabella di backup congelata
   await db.execute(`DROP TABLE IF EXISTS ${table}_migration_safety_backup;`);

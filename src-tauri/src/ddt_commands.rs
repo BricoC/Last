@@ -169,8 +169,9 @@ pub(crate) async fn persist_ddt(
              order_reference = $19, account_or_balance = $20, operator = $21, goods_appearance = $22,
              carriage_terms = $23, packages_count = $24, weight_kg = $25, carrier = $26, pickup_date_time = $27,
              internal_notes = $28, total_taxable_subunits = $29, total_vat_subunits = $30,
-             total_document_subunits = $31, updated_at = $32, updated_by = $33, sync_status = 'pending'
-             WHERE id = $34 AND deleted_at IS NULL",
+             total_document_subunits = $31, updated_at = $32, updated_by = $33, sync_status = 'pending',
+             project_url = COALESCE(project_url, $34)
+             WHERE id = $35 AND deleted_at IS NULL",
         )
         .bind(payload.doc_number)
         .bind(payload.year)
@@ -205,6 +206,7 @@ pub(crate) async fn persist_ddt(
         .bind(payload.total_document_subunits)
         .bind(&payload.updated_at)
         .bind(&payload.updated_by)
+        .bind(&payload.project_url)
         .bind(&payload.id)
         .execute(&mut *connection)
         .await
@@ -222,10 +224,10 @@ pub(crate) async fn persist_ddt(
              destination_address, destination_city, transport_reason, payment_method, order_reference,
              account_or_balance, operator, goods_appearance, carriage_terms, packages_count, weight_kg,
              carrier, pickup_date_time, internal_notes, total_taxable_subunits, total_vat_subunits,
-             total_document_subunits, created_at, updated_at, updated_by, sync_status
+             total_document_subunits, created_at, updated_at, updated_by, sync_status, project_url
              ) VALUES (
              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-             $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $33, $34, 'pending'
+             $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $33, $34, 'pending', $35
              )",
         )
         .bind(&payload.id)
@@ -262,6 +264,7 @@ pub(crate) async fn persist_ddt(
         .bind(payload.total_document_subunits)
         .bind(&payload.updated_at)
         .bind(&payload.updated_by)
+        .bind(&payload.project_url)
         .execute(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;

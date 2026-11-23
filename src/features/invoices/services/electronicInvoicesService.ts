@@ -519,9 +519,15 @@ export class ElectronicInvoicesService {
     try {
       onProgress?.("Invio su Supabase Cloud...", 75);
       await this.retryPendingUploads();
-      const pending = await db.select<Array<{ id: number }>>(
-        "SELECT id FROM supplier_invoices WHERE cloud_upload_pending = 1 LIMIT 1"
-      );
+      const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
+      const pending = activeProjectUrl
+        ? await db.select<Array<{ id: number }>>(
+            "SELECT id FROM supplier_invoices WHERE cloud_upload_pending = 1 AND project_url = $1 LIMIT 1",
+            [activeProjectUrl]
+          )
+        : await db.select<Array<{ id: number }>>(
+            "SELECT id FROM supplier_invoices WHERE cloud_upload_pending = 1 LIMIT 1"
+          );
       cloudSynced = pending.length === 0;
       if (!cloudSynced) cloudError = "Fatture salvate in locale. Invio cloud ancora in sospeso.";
     } catch (error) {

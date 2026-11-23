@@ -138,15 +138,22 @@ export function ClientListPage() {
 
   const saveClient = async (input: CreateClientInput & { id?: string }) => {
     const saved = await clientRepository.createOrUpdateClient(input);
-    // Sincronizza anche su Supabase Cloud (gestisce correttamente la rinomina senza duplicati)
-    void clientSyncService.syncPendingClientsToSupabase().catch(console.warn);
+    let syncedCloud = false;
+    try {
+      const syncRes = await clientSyncService.syncPendingClientsToSupabase();
+      syncedCloud = syncRes.pushed > 0;
+    } catch (err) {
+      console.warn("[ClientListPage] Sync cloud cliente non riuscita:", err);
+    }
 
     setFormOpen(false);
     setEditing(null);
     await reload(query);
     setFeedback({
       type: "success",
-      text: `Cliente “${saved.business_name}” salvato e sincronizzato sul Cloud.`,
+      text: syncedCloud
+        ? `Cliente “${saved.business_name}” salvato e sincronizzato sul Cloud.`
+        : `Cliente “${saved.business_name}” salvato in locale (sincronizzazione Cloud in sospeso).`,
     });
   };
 

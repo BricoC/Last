@@ -111,25 +111,33 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
     }
 
     setIsRunningImport(true);
+    setSaveStatusMessage(null);
     setImportProgress({
       stage: "ddt",
       message: "Avvio inizializzazione Cloud...",
       percent: 5,
     });
 
-    const res = await CloudFullSetupService.runFullCloudImport(
-      supabaseUrl,
-      supabaseKey,
-      (prog) => setImportProgress(prog)
-    );
+    try {
+      const res = await CloudFullSetupService.runFullCloudImport(
+        supabaseUrl.trim().replace(/\/$/, ""),
+        supabaseKey.trim(),
+        (prog) => setImportProgress(prog)
+      );
 
-    setIsRunningImport(false);
-    if (res.success) {
-      try {
-        localStorage.setItem("dashboard_setup_completed", "true");
-      } catch {}
-      void checkSetupStatus();
-      if (onSetupCompleted) onSetupCompleted();
+      if (res.success) {
+        try {
+          localStorage.setItem("dashboard_setup_completed", "true");
+        } catch {}
+        void checkSetupStatus();
+        if (onSetupCompleted) onSetupCompleted();
+      } else if (res.error) {
+        setSaveStatusMessage(res.error);
+      }
+    } catch (err) {
+      setSaveStatusMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsRunningImport(false);
     }
   };
 

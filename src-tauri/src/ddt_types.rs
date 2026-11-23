@@ -41,6 +41,8 @@ pub struct DdtSavePayload {
     pub(crate) total_taxable_subunits: i64,
     pub(crate) total_vat_subunits: i64,
     pub(crate) total_document_subunits: i64,
+    #[serde(default)]
+    pub(crate) project_url: Option<String>,
     pub(crate) items: Vec<DdtItemPayload>,
 }
 

@@ -15,10 +15,14 @@ export interface PendingCloudOperation {
 }
 
 const loadPendingOpConfig = createCachedSupabaseConfigLoader("pendingCloudOperations");
-let legacyOperationsWarningCount = 0;
+const legacyOperationsByScope = new Map<string, number>();
 
 export function getLegacyPendingOperationsCount(): number {
-  return legacyOperationsWarningCount;
+  let total = 0;
+  for (const count of legacyOperationsByScope.values()) {
+    total += count;
+  }
+  return total;
 }
 
 export function pendingCloudWrite(
@@ -76,7 +80,11 @@ export function flushPendingCloudOperations(
         console.warn(`[${scope}] Operazione cloud ancora in sospeso:`, error);
       }
     }
-    legacyOperationsWarningCount = legacyHeld;
+    if (legacyHeld > 0) {
+      legacyOperationsByScope.set(scope, legacyHeld);
+    } else {
+      legacyOperationsByScope.delete(scope);
+    }
     if (legacyHeld > 0) {
       console.warn(
         `[${scope}] Conservate ${legacyHeld} operazioni offline legacy prive di progetto di destinazione verificabile.`,

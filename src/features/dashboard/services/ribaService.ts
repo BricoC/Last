@@ -1,6 +1,7 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
+import { getCompanySettings } from "@/features/settings/companySettingsRepository";
 import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
 import { getDatabase } from "@/shared/data-layer/database";
 
@@ -129,12 +130,20 @@ export async function fetchRemoteRibaStatus(
 
 const LOCAL_RIBA_PREFIX = "riba_paid_status_v1_";
 
+function buildRibaStorageKey(deadlineKey: string, projectUrl?: string | null): string {
+  const normalizedProject = projectUrl?.trim().replace(/\/+$/, "").toLowerCase();
+  return normalizedProject
+    ? `${LOCAL_RIBA_PREFIX}${deadlineKey}__${normalizedProject}`
+    : `${LOCAL_RIBA_PREFIX}${deadlineKey}`;
+}
+
 export function getLocalRibaStatus(
-  deadlineKey: string
+  deadlineKey: string,
+  projectUrl?: string | null,
 ): { isPaid: boolean; sentAt?: string } | null {
   try {
     if (typeof localStorage === "undefined") return null;
-    const raw = localStorage.getItem(`${LOCAL_RIBA_PREFIX}${deadlineKey}`);
+    const raw = localStorage.getItem(buildRibaStorageKey(deadlineKey, projectUrl));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { isPaid?: boolean; sentAt?: string };
     if (parsed && parsed.isPaid) {
@@ -149,12 +158,13 @@ export function getLocalRibaStatus(
 export function saveLocalRibaPaid(
   deadlineKey: string,
   deadlineStr: string,
-  sentAt: string
+  sentAt: string,
+  projectUrl?: string | null,
 ): boolean {
   try {
     if (typeof localStorage === "undefined") return false;
     localStorage.setItem(
-      `${LOCAL_RIBA_PREFIX}${deadlineKey}`,
+      buildRibaStorageKey(deadlineKey, projectUrl),
       JSON.stringify({
         deadlineKey,
         deadlineStr,
@@ -169,13 +179,14 @@ export function saveLocalRibaPaid(
 }
 
 export async function getSqliteRibaStatus(
-  deadlineKey: string
+  deadlineKey: string,
+  projectUrl?: string | null,
 ): Promise<{ isPaid: boolean; sentAt?: string } | null> {
   try {
     const db = await getDatabase();
     const rows = await db.select<Array<{ value: string }>>(
       "SELECT value FROM app_preferences WHERE key = $1 LIMIT 1",
-      [`${LOCAL_RIBA_PREFIX}${deadlineKey}`]
+      [buildRibaStorageKey(deadlineKey, projectUrl)]
     );
     if (!rows.length || !rows[0]?.value) return null;
     const parsed = JSON.parse(rows[0].value) as { isPaid?: boolean; sentAt?: string };
@@ -191,7 +202,8 @@ export async function getSqliteRibaStatus(
 export async function saveSqliteRibaPaid(
   deadlineKey: string,
   deadlineStr: string,
-  sentAt: string
+  sentAt: string,
+  projectUrl?: string | null,
 ): Promise<boolean> {
   try {
     const db = await getDatabase();
@@ -206,7 +218,7 @@ export async function saveSqliteRibaPaid(
       `INSERT INTO app_preferences (key, value, updated_at)
        VALUES ($1, $2, $3)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      [`${LOCAL_RIBA_PREFIX}${deadlineKey}`, payload, now]
+      [buildRibaStorageKey(deadlineKey, projectUrl), payload, now]
     );
     return result.rowsAffected === 1;
   } catch {
@@ -259,10 +271,15 @@ export async function saveRemoteRibaPaid(
   }
 }
 
-export async function registerRibaPayment(deadlineKey: string, deadlineStr: string, sentAt: string) {
-  const cached = saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt);
+export async function registerRibaPayment(
+  deadlineKey: string,
+  deadlineStr: string,
+  sentAt: string,
+  projectUrl?: string | null,
+) {
+  const cached = saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl);
   const [sqlite, remote] = await Promise.all([
-    saveSqliteRibaPaid(deadlineKey, deadlineStr, sentAt),
+    saveSqliteRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl),
     saveRemoteRibaPaid(deadlineKey, deadlineStr, sentAt),
   ]);
   return { confirmed: cached || sqlite || remote, remote };
@@ -286,13 +303,22 @@ export async function openRibaEmailDraft(info: {
       };
     }
     const subject = `Autorizzazione pagamento Ri.Ba. scadenza ${info.deadlineStr}`;
+    const companySettings = await getCompanySettings().catch(() => null);
+    const companyName = (companySettings?.business_name || "").trim();
+    const safeCompanyName = companyName
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const signatureHtml = safeCompanyName
+      ? `<p>Cordiali saluti,<br/><strong>${safeCompanyName}</strong></p>`
+      : `<p>Cordiali saluti.</p>`;
 
     const bodyHtml = `
       <div style="font-family: Segoe UI, Arial, sans-serif; font-size: 14px; color: #1e293b; line-height: 1.5;">
         <p>Buongiorno,</p>
         <p>Si prega di autorizzare il pagamento delle <strong>Ri.Ba.</strong> in scadenza il <strong>${info.deadlineStr}</strong>.</p>
         <br/>
-        <p>Cordiali saluti,<br/><strong>Brico Class</strong></p>
+        ${signatureHtml}
       </div>
     `.trim();
 

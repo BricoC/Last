@@ -17,6 +17,9 @@ function readBerLength(bytes: Uint8Array, pos: number): { length: number | null;
   if (numBytes === 0) {
     return { length: null, nextPos: pos + 1 };
   }
+  if (numBytes > 4) {
+    return { length: 0, nextPos: bytes.length };
+  }
   let len = 0;
   for (let i = 0; i < numBytes && pos + 1 + i < bytes.length; i++) {
     len = len * 256 + bytes[pos + 1 + i];
@@ -24,12 +27,18 @@ function readBerLength(bytes: Uint8Array, pos: number): { length: number | null;
   return { length: len, nextPos: pos + 1 + numBytes };
 }
 
+const MAX_BER_RECURSION_DEPTH = 32;
+
 function collectOctetStringChunks(
   bytes: Uint8Array,
   start: number,
   limit: number,
-  chunks: Uint8Array[]
+  chunks: Uint8Array[],
+  depth = 0
 ): number {
+  if (depth > MAX_BER_RECURSION_DEPTH) {
+    return limit;
+  }
   let pos = start;
   while (pos < limit) {
     // End-of-contents (0x00 0x00) per lunghezza indefinita BER
@@ -45,7 +54,7 @@ function collectOctetStringChunks(
       chunks.push(bytes.subarray(pos, subLimit));
       pos = subLimit;
     } else if (tag === 0x24 || (tag & 0x20) !== 0) {
-      pos = collectOctetStringChunks(bytes, pos, subLimit, chunks);
+      pos = collectOctetStringChunks(bytes, pos, subLimit, chunks, depth + 1);
     } else {
       break;
     }

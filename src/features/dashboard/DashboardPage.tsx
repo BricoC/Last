@@ -204,8 +204,11 @@ export const DashboardPage: React.FC = () => {
     const checkRiba = async () => {
       const initial = calculateNextRibaDeadline();
       if (!mounted) return;
-      const localLs = getLocalRibaStatus(initial.deadlineKey);
-      const localDb = await getSqliteRibaStatus(initial.deadlineKey);
+      const { resolveActiveSupabaseProjectUrl } = await import("@/shared/services/supabaseConfigCache");
+      const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
+      if (!mounted) return;
+      const localLs = getLocalRibaStatus(initial.deadlineKey, activeProjectUrl);
+      const localDb = await getSqliteRibaStatus(initial.deadlineKey, activeProjectUrl);
       const local = localDb?.isPaid ? localDb : localLs;
       if (mounted && local?.isPaid) {
         setRibaInfo({
@@ -219,8 +222,8 @@ export const DashboardPage: React.FC = () => {
         if (!mounted) return;
         if (remote?.isPaid) {
           const sentAt = remote.sentAt || local?.sentAt || new Date().toISOString();
-          saveLocalRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
-          await saveSqliteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
+          saveLocalRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt, activeProjectUrl);
+          await saveSqliteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt, activeProjectUrl);
           setRibaInfo({
             ...initial,
             isPaid: true,
@@ -229,8 +232,8 @@ export const DashboardPage: React.FC = () => {
           });
         } else if (local?.isPaid) {
           const sentAt = local.sentAt || new Date().toISOString();
-          saveLocalRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
-          await saveSqliteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
+          saveLocalRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt, activeProjectUrl);
+          await saveSqliteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt, activeProjectUrl);
           setRibaInfo({
             ...initial,
             isPaid: true,

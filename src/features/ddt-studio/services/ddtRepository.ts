@@ -252,13 +252,13 @@ export class DdtRepository {
         [projectUrl, id]
       );
     }
-    // Tronca il cestino mantenendo rigorosamente le ultime 15 voci (FIFO)
-    await this.pruneTrash();
-
-    notifyDdtUpdated();
     if (shouldDeleteRemote) {
       await ddtCloudPushService.deleteRemoteDdt(id).catch(() => {});
     }
+    // Tronca il cestino mantenendo rigorosamente le ultime 15 voci (FIFO) solo dopo il tentativo di sync delete
+    await this.pruneTrash();
+
+    notifyDdtUpdated();
   }
 
   /**
@@ -306,31 +306,50 @@ export class DdtRepository {
 
   /**
    * Mantiene al massimo 15 elementi nel Cestino, eliminando definitivamente le voci eccedenti
+   * solo se già sincronizzate (o bozze locali non inviate al cloud) per non distruggere tombstone pending.
    */
   public async pruneTrash(): Promise<void> {
     try {
       const db = await getDatabase();
       const rows = await db.select<{ id: string }[]>(
-        "SELECT id FROM ddt_documents WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT -1 OFFSET 15"
+        `SELECT id FROM ddt_documents
+         WHERE deleted_at IS NOT NULL
+           AND NOT (sync_status = 'pending' AND status <> 'bozza' AND doc_number IS NOT NULL)
+         ORDER BY deleted_at DESC
+         LIMIT -1 OFFSET 15`
       );
-      for (const row of rows) {
-        await db.execute("DELETE FROM ddt_items WHERE ddt_id = $1", [row.id]);
-        await db.execute("DELETE FROM ddt_documents WHERE id = $1", [row.id]);
-      }
+      if (rows.length === 0) return;
+      await applyLocalDatabaseBatch(
+        rows.flatMap((row) => [
+          { sql: "DELETE FROM ddt_sync_snapshots WHERE ddt_id = $1", params: [row.id] },
+          { sql: "DELETE FROM ddt_items WHERE ddt_id = $1", params: [row.id] },
+          { sql: "DELETE FROM ddt_documents WHERE id = $1 AND deleted_at IS NOT NULL", params: [row.id] },
+        ])
+      );
     } catch (err) {
       console.warn("[ddtRepository] Errore pulizia FIFO cestino DDT:", err);
     }
   }
 
   /**
-   * Svuota completamente il Cestino eliminando in modo permanente tutti i record cancellati
+   * Svuota il Cestino eliminando in modo permanente i record già sincronizzati o bozze locali,
+   * preservando eventuali tombstone pending finché la cancellazione non raggiunge Supabase.
    */
   public async emptyTrash(): Promise<void> {
     const db = await getDatabase();
-    await db.execute(
-      "DELETE FROM ddt_items WHERE ddt_id IN (SELECT id FROM ddt_documents WHERE deleted_at IS NOT NULL)"
+    const rows = await db.select<{ id: string }[]>(
+      `SELECT id FROM ddt_documents
+       WHERE deleted_at IS NOT NULL
+         AND NOT (sync_status = 'pending' AND status <> 'bozza' AND doc_number IS NOT NULL)`
     );
-    await db.execute("DELETE FROM ddt_documents WHERE deleted_at IS NOT NULL");
+    if (rows.length === 0) return;
+    await applyLocalDatabaseBatch(
+      rows.flatMap((row) => [
+        { sql: "DELETE FROM ddt_sync_snapshots WHERE ddt_id = $1", params: [row.id] },
+        { sql: "DELETE FROM ddt_items WHERE ddt_id = $1", params: [row.id] },
+        { sql: "DELETE FROM ddt_documents WHERE id = $1 AND deleted_at IS NOT NULL", params: [row.id] },
+      ])
+    );
   }
 
   /**
@@ -617,6 +636,8 @@ export class DdtRepository {
       };
     });
 
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
+
     const payload = {
       id: docId,
       doc_number: docNumber,
@@ -653,19 +674,11 @@ export class DdtRepository {
       total_taxable_subunits: totals.totale_imponibile.toSubunits(),
       total_vat_subunits: totals.totale_iva.toSubunits(),
       total_document_subunits: totals.totale_documento.toSubunits(),
+      project_url: activeProjectUrl,
       items: itemPayloads,
     };
 
-    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
-
     await invoke("save_ddt_transaction", { payload });
-    if (activeProjectUrl) {
-      const db = await getDatabase();
-      await db.execute(
-        "UPDATE ddt_documents SET project_url = COALESCE(project_url, $1) WHERE id = $2",
-        [activeProjectUrl, docId]
-      );
-    }
 
     // Se è un DDT confermato/emesso, sincronizza subito su Supabase (con riallineamento numero su collisione in prima emissione)
     let cloudPushError: string | undefined;

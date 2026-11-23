@@ -6,6 +6,7 @@ import { DdtDocument } from "../models/ddt";
 import { DDTA4Document } from "../document/DDTA4Document";
 import { generatePdfBytesFromElements, formatDdtPdfFilename } from "../utils/ddtExportManager";
 import { waitForDomPaint } from "@/shared/utils/a4PdfCapture";
+import { getCompanySettings } from "@/features/settings/companySettingsRepository";
 import { useDdtEmailDraft } from "../hooks/useDdtEmailDraft";
 
 export interface DDTEmailSendModalProps {
@@ -46,6 +47,7 @@ export const DDTEmailSendModal: React.FC<DDTEmailSendModalProps> = ({
     setErrorMessage("");
 
     try {
+      await getCompanySettings().catch(() => {});
       const generatedPaths: string[] = [];
       const total = docs.length;
 

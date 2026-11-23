@@ -1,4 +1,5 @@
 import { pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
+import { resolveActiveSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import {
@@ -467,6 +468,7 @@ export class PriceListRepository {
   async moveToTrash(rows: ListinoGeneraleRow[], deletedBy?: string): Promise<void> {
     if (rows.length === 0) return;
     await getDatabase();
+    const projectUrl = await resolveActiveSupabaseProjectUrl();
     const writes: SqliteWrite[] = [];
     const now = new Date().toISOString();
     const op = deletedBy || "Operatore";
@@ -533,7 +535,7 @@ export class PriceListRepository {
 
       writes.push(
         { sql: "DELETE FROM listino_generale WHERE id = $1", params: [row.id], ...(row.id.startsWith("new_") ? {} : { expectedRows: 1 }) },
-        pendingCloudWrite("listino_generale", row.id, "trash", trashItem),
+        pendingCloudWrite("listino_generale", row.id, "trash", trashItem, projectUrl),
       );
     }
 
@@ -582,11 +584,12 @@ export class PriceListRepository {
     if (rows.length === 0) return null;
 
     const row = rows[0];
+    const projectUrl = await resolveActiveSupabaseProjectUrl();
     await applyLocalDatabaseBatch([
       { sql: "DELETE FROM listino_generale_cestino WHERE id = $1 AND deleted_at = $2",
         params: [id, row.deleted_at], expectedRows: 1 },
       ...this.buildGeneralWrites([row], "local"),
-      pendingCloudWrite("listino_generale", id, "restore", row),
+      pendingCloudWrite("listino_generale", id, "restore", row, projectUrl),
     ]);
 
     return row;
@@ -690,6 +693,7 @@ export class PriceListRepository {
   async moveToClientTrash(rows: ListinoClienteRow[], deletedBy?: string): Promise<TrashListinoClienteRow[]> {
     if (rows.length === 0) return [];
     await getDatabase();
+    const projectUrl = await resolveActiveSupabaseProjectUrl();
     const writes: SqliteWrite[] = [];
     const nowIso = new Date().toISOString();
     const operator = deletedBy || "Operatore";
@@ -739,7 +743,7 @@ export class PriceListRepository {
       // Rimuovi dalla tabella attiva
       writes.push(
         { sql: "DELETE FROM listini_clienti WHERE id = $1", params: [row.id], ...(row.id.startsWith("new_") ? {} : { expectedRows: 1 }) },
-        pendingCloudWrite("listini_clienti", row.id, "trash", trashItem),
+        pendingCloudWrite("listini_clienti", row.id, "trash", trashItem, projectUrl),
       );
     }
 
@@ -795,6 +799,7 @@ export class PriceListRepository {
 
     const localOnly = id.startsWith("new_");
     const row = localOnly ? trashed : await restoreCloud(trashed);
+    const projectUrl = await resolveActiveSupabaseProjectUrl();
     const writes: SqliteWrite[] = [
       {
         sql: "DELETE FROM listini_clienti_cestino WHERE id = $1 AND deleted_at = $2",
@@ -804,9 +809,9 @@ export class PriceListRepository {
       ...this.buildClientWrites([row], localOnly ? "local" : "cloud"),
     ];
     if (localOnly) {
-      writes.push(pendingCloudWrite("listini_clienti", id, "restore", row));
+      writes.push(pendingCloudWrite("listini_clienti", id, "restore", row, projectUrl));
     } else {
-      writes.push(pendingCloudWrite("listini_clienti", id, "cleanup", null), {
+      writes.push(pendingCloudWrite("listini_clienti", id, "cleanup", null, projectUrl), {
         sql: "UPDATE listini_clienti SET sync_confirmed_at = $1 WHERE id = $2",
         params: [new Date().toISOString(), row.id],
       });

@@ -124,10 +124,18 @@ export async function pullEmailSettingsFromSupabase(requireCloud = false): Promi
         accountant_cc: r.accountant_cc ?? "",
       };
 
-      // Aggiorna copia locale SQLite
+      // Aggiorna copia locale SQLite solo se non esistono modifiche locali pendenti
       const db = await getDatabase();
+      const localPending = await db.select<{ sync_status: string }[]>(
+        "SELECT sync_status FROM email_settings WHERE id = $1 AND deleted_at IS NULL LIMIT 1",
+        [SETTINGS_ID]
+      );
+      if (localPending[0]?.sync_status === "pending") {
+        return null;
+      }
+
       const now = new Date().toISOString();
-      await db.execute(
+      const writeResult = await db.execute(
         `INSERT INTO email_settings (
           id, carrara_to, carrara_cc, wepa_salanetti_to, wepa_salanetti_cc,
           wepa_ralletta_to, wepa_ralletta_cc, bank_to, bank_cc,
@@ -148,7 +156,8 @@ export async function pullEmailSettingsFromSupabase(requireCloud = false): Promi
           updated_at = excluded.updated_at,
           updated_by = excluded.updated_by,
           deleted_at = NULL,
-          sync_status = 'synced'`,
+          sync_status = 'synced'
+        WHERE email_settings.sync_status <> 'pending'`,
         [
           SETTINGS_ID,
           parsed.carrara_to,
@@ -164,6 +173,10 @@ export async function pullEmailSettingsFromSupabase(requireCloud = false): Promi
           now,
         ]
       );
+
+      if (writeResult.rowsAffected === 0) {
+        return null;
+      }
 
       return parsed;
     }
@@ -256,4 +269,26 @@ export async function saveEmailSettings(input: EmailSettingsInput): Promise<Save
   const syncedCloud = await pushEmailSettingsToSupabase(input);
 
   return { savedLocal: true, syncedCloud };
+}
+
+export async function retryPendingEmailSettings(): Promise<boolean> {
+  const db = await getDatabase();
+  const rows = await db.select<EmailSettings[]>(
+    "SELECT * FROM email_settings WHERE id = $1 AND deleted_at IS NULL AND sync_status = 'pending' LIMIT 1",
+    [SETTINGS_ID]
+  );
+  if (!rows[0]) return true;
+  const r = rows[0];
+  return pushEmailSettingsToSupabase({
+    carrara_to: r.carrara_to ?? "",
+    carrara_cc: r.carrara_cc ?? "",
+    wepa_salanetti_to: r.wepa_salanetti_to ?? "",
+    wepa_salanetti_cc: r.wepa_salanetti_cc ?? "",
+    wepa_ralletta_to: r.wepa_ralletta_to ?? "",
+    wepa_ralletta_cc: r.wepa_ralletta_cc ?? "",
+    bank_to: r.bank_to ?? "",
+    bank_cc: r.bank_cc ?? "",
+    accountant_to: r.accountant_to ?? "",
+    accountant_cc: r.accountant_cc ?? "",
+  });
 }

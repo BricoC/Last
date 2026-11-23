@@ -247,7 +247,6 @@ export const TopNavBar: React.FC = () => {
         // Evita loop infiniti di auto-sync se un record resta pendente dopo il tentativo automatico
         autoSyncPausedRef.current = true;
       }
-      await fetchCloudStatus(true);
     } catch (error) {
       if (isAuto) autoSyncPausedRef.current = true;
       console.warn("[TopNavBar] Sincronizzazione cloud:", error);
@@ -255,6 +254,7 @@ export const TopNavBar: React.FC = () => {
       isSyncingRef.current = false;
       setIsSyncing(false);
     }
+    await fetchCloudStatus(true);
   };
 
   useEffect(() => {
@@ -337,8 +337,13 @@ export const TopNavBar: React.FC = () => {
 
   useEffect(() => {
     const onDdtUpdated = () => {
-      const now = new Date();
-      setLastSyncTime(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
+      const stored = localStorage.getItem("last_supabase_sync_timestamp");
+      if (stored) {
+        const d = new Date(stored);
+        if (!isNaN(d.getTime())) {
+          setLastSyncTime(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+        }
+      }
     };
     window.addEventListener("ddt-data-updated", onDdtUpdated);
     return () => window.removeEventListener("ddt-data-updated", onDdtUpdated);

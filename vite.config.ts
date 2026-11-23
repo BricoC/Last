@@ -39,8 +39,8 @@ export default defineConfig(() => ({
       exclude: ["src/**/*.test.*", "src/**/*.spec.*", "src/**/__tests__/**", "src/**/*.d.ts"],
       reporter: ["text"],
       thresholds: {
-        lines: 16,
-        branches: 14,
+        lines: 17,
+        branches: 15,
       },
     },
   },

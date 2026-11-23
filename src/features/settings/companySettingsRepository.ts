@@ -150,7 +150,15 @@ export async function pullCompanySettingsFromSupabase(requireCloud = false): Pro
       };
 
       const db = await getDatabase();
-      await db.execute(
+      const localPending = await db.select<{ sync_status: string }[]>(
+        "SELECT sync_status FROM company_settings WHERE id = $1 AND deleted_at IS NULL LIMIT 1",
+        [SETTINGS_ID]
+      );
+      if (localPending[0]?.sync_status === "pending") {
+        return null;
+      }
+
+      const writeResult = await db.execute(
         `INSERT INTO company_settings (
           id, business_name, address, postal_code, city, province, vat_number, fiscal_code,
           sdi_code, phone, email, logo_data_url, created_at, updated_at, updated_by, deleted_at, sync_status
@@ -161,7 +169,8 @@ export async function pullCompanySettingsFromSupabase(requireCloud = false): Pro
           vat_number = excluded.vat_number, fiscal_code = excluded.fiscal_code,
           sdi_code = excluded.sdi_code, phone = excluded.phone, email = excluded.email,
           logo_data_url = excluded.logo_data_url, updated_at = excluded.updated_at,
-          updated_by = excluded.updated_by, deleted_at = NULL, sync_status = 'synced'`,
+          updated_by = excluded.updated_by, deleted_at = NULL, sync_status = 'synced'
+        WHERE company_settings.sync_status <> 'pending'`,
         [
           SETTINGS_ID,
           parsed.business_name,
@@ -179,6 +188,10 @@ export async function pullCompanySettingsFromSupabase(requireCloud = false): Pro
           parsed.updated_at,
         ]
       );
+
+      if (writeResult.rowsAffected === 0) {
+        return null;
+      }
 
       cachedCompanySettings = parsed;
       return parsed;
@@ -261,4 +274,27 @@ export async function saveCompanySettings(input: CompanySettingsInput): Promise<
 
   const syncedCloud = await pushCompanySettingsToSupabase(input);
   return { savedLocal: true, syncedCloud };
+}
+
+export async function retryPendingCompanySettings(): Promise<boolean> {
+  const db = await getDatabase();
+  const rows = await db.select<CompanySettings[]>(
+    "SELECT * FROM company_settings WHERE id = $1 AND deleted_at IS NULL AND sync_status = 'pending' LIMIT 1",
+    [SETTINGS_ID]
+  );
+  if (!rows[0]) return true;
+  const r = rows[0];
+  return pushCompanySettingsToSupabase({
+    business_name: r.business_name ?? "",
+    address: r.address ?? "",
+    postal_code: r.postal_code ?? "",
+    city: r.city ?? "",
+    province: r.province ?? "",
+    vat_number: r.vat_number ?? "",
+    fiscal_code: r.fiscal_code ?? "",
+    sdi_code: r.sdi_code ?? "",
+    phone: r.phone ?? "",
+    email: r.email ?? "",
+    logo_data_url: r.logo_data_url ?? null,
+  });
 }

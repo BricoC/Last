@@ -289,7 +289,7 @@ async function applyRemoteQuote(
           project_url = COALESCE(quotes.project_url, excluded.project_url)
         WHERE COALESCE(quotes.sync_status, '') <> 'pending'
           AND (quotes.project_url IS NULL OR excluded.project_url IS NULL OR quotes.project_url = excluded.project_url)
-          AND (julianday(quotes.updated_at) IS NULL OR julianday($38) >= julianday(quotes.updated_at))`,
+          AND (julianday(quotes.updated_at) IS NULL OR julianday($38) IS NULL OR julianday($38) >= julianday(quotes.updated_at))`,
     expectedRows: 1,
     params: [
           r.id,
@@ -406,8 +406,8 @@ export class QuoteSyncService {
         const quote = await quoteRepository.getArchivedQuoteForSync(row.id);
         if (quote?.deleted_at !== row.deleted_at) continue;
         const confirmed = row.in_trash
-          ? await this.pushTrashRow({ ...this.mapQuoteToSupabase(quote), deleted_by: quote.updated_by || "system" })
-          : await this.deleteQuote(row.id);
+          ? await this.pushTrashRow({ ...this.mapQuoteToSupabase(quote), deleted_by: quote.updated_by || "system" }, initialCreds ?? undefined)
+          : await this.deleteQuote(row.id, initialCreds ?? undefined);
         if (confirmed) await db.execute(
           "UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND deleted_at = $2",
           [row.id, row.deleted_at],
@@ -557,7 +557,18 @@ export class QuoteSyncService {
       });
 
       if (res.ok) {
-        await db.execute("UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2 AND quote_number IS $3", [quote.id, quote.updated_at, quote.quote_number]);
+        await applyLocalDatabaseBatch([
+          {
+            sql: "UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2 AND quote_number IS $3",
+            params: [quote.id, quote.updated_at, quote.quote_number],
+          },
+          {
+            sql: `UPDATE quote_items SET sync_status = 'synced' WHERE quote_id = $1 AND EXISTS (
+              SELECT 1 FROM quotes WHERE id = $1 AND updated_at = $2 AND quote_number IS $3 AND sync_status = 'synced'
+            )`,
+            params: [quote.id, quote.updated_at, quote.quote_number],
+          },
+        ]);
         return true;
       } else {
         const txt = await res.text();
@@ -572,9 +583,9 @@ export class QuoteSyncService {
   /**
    * Notifica a Supabase il soft delete di un preventivo
    */
-  public static async deleteQuote(id: string): Promise<boolean> {
+  public static async deleteQuote(id: string, overrideCreds?: CachedSupabaseConfig): Promise<boolean> {
     try {
-      const creds = await getSupabaseCredentials();
+      const creds = overrideCreds ?? (await getSupabaseCredentials());
       if (!creds) return false;
 
       const now = new Date().toISOString();
@@ -620,7 +631,16 @@ export class QuoteSyncService {
       if (!Array.isArray(rows)) throw new Error("Risposta preventivi non valida");
       if (!rows.length) return imported;
       for (const row of rows) {
-        if (await applyRemoteQuote(row, undefined, creds.projectUrl)) imported++;
+        try {
+          if (await applyRemoteQuote(row, undefined, creds.projectUrl)) imported++;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("dati locali sono cambiati")) {
+            console.warn("[QuoteSyncService] Preventivo saltato per modifica locale concorrente:", row?.id);
+            continue;
+          }
+          throw err;
+        }
       }
       offset += rows.length;
     }
@@ -672,7 +692,7 @@ export class QuoteSyncService {
       }
 
       // 2. Rimuovi dall'elenco preventivi attivi su Supabase
-      if (!await this.deleteQuote(String(trashRow.id))) return false;
+      if (!await this.deleteQuote(String(trashRow.id), creds)) return false;
 
       // 3. FIFO: Mantieni al massimo 5 elementi nel cestino remoto
       try {
@@ -746,10 +766,22 @@ export class QuoteSyncService {
 
       if (!res.ok) return 0;
       const remoteItems = await res.json();
-      if (!Array.isArray(remoteItems) || remoteItems.length === 0) return 0;
+      if (!Array.isArray(remoteItems)) return 0;
 
       const db = await getDatabase();
       const trashProjectUrl = normalizeSupabaseProjectUrl(creds.projectUrl);
+      if (remoteItems.length === 0) {
+        if (trashProjectUrl) {
+          await db.execute(
+            `DELETE FROM quotes_trash
+             WHERE project_url = $1 AND NOT EXISTS (
+               SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = quotes_trash.id
+             )`,
+            [trashProjectUrl]
+          );
+        }
+        return 0;
+      }
       for (const item of remoteItems) {
         await db.execute(
           `INSERT INTO quotes_trash (

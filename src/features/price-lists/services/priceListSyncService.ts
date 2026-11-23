@@ -964,11 +964,11 @@ export class PriceListSyncService {
       const whereSource = sourceTableFilter ? " AND source_table = $1" : "";
       const countParams = sourceTableFilter ? [sourceTableFilter] : [];
       const [localCountRow] = await db.select<{ cnt: number }[]>(
-        `SELECT COUNT(*) as cnt FROM ${localTable} WHERE sync_revision IS NULL AND id LIKE '${idPrefix}%'${whereSource}`,
+        `SELECT COUNT(*) as cnt FROM ${localTable} WHERE id LIKE '${idPrefix}%'${whereSource}`,
         countParams,
       );
-      const localSyncedCount = Number(localCountRow?.cnt ?? 0);
-      if (localSyncedCount <= remoteTotal) return 0;
+      const localCloudPrefixedCount = Number(localCountRow?.cnt ?? 0);
+      if (localCloudPrefixedCount <= remoteTotal) return 0;
 
       const remoteIds = new Set<string>();
       const PAGE_SIZE = 1000;

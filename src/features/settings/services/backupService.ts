@@ -164,7 +164,7 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
   {
     id: "clients",
     label: "Clienti e Destinazioni",
-    description: "Anagrafica completa clienti Brico Class e sedi operative di consegna.",
+    description: "Anagrafica completa clienti e sedi operative di consegna.",
     tables: ["clients"],
   },
   {

@@ -94,13 +94,18 @@ export function buildGeneralPriceListWorkbook(rows: ListinoGeneraleRow[]): Excel
     const r1Calc = hasCost ? calculateR1(acq, aumFrac) : item.r1;
     const r2Calc = hasCost && r1Calc != null ? calculateR2(r1Calc, magaFrac) : item.r2;
 
-    excelRow.getCell(1).value = item.cat || null;
-    excelRow.getCell(2).value = item.fornitore || null;
-    excelRow.getCell(3).value = item.codice_articolo || null;
+    const safeText = (val?: string | null): string | null => {
+      if (!val) return null;
+      return /^[=+\-@\t\r]/.test(val) ? `'${val}` : val;
+    };
+
+    excelRow.getCell(1).value = safeText(item.cat);
+    excelRow.getCell(2).value = safeText(item.fornitore);
+    excelRow.getCell(3).value = safeText(item.codice_articolo);
     excelRow.getCell(3).numFmt = "@";
-    excelRow.getCell(4).value = item.data_ref || null;
-    excelRow.getCell(5).value = item.descrizione || "";
-    excelRow.getCell(6).value = item.um || "NR.";
+    excelRow.getCell(4).value = safeText(item.data_ref);
+    excelRow.getCell(5).value = safeText(item.descrizione) ?? "";
+    excelRow.getCell(6).value = safeText(item.um) ?? "NR.";
 
     excelRow.getCell(7).value = riPubFrac;
     excelRow.getCell(7).numFmt = "0.0%";

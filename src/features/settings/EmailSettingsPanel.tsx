@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   getEmailSettings,
   saveEmailSettings,
@@ -27,6 +27,7 @@ export const EmailSettingsPanel: React.FC = () => {
     text: string;
     type: "success" | "error" | "info";
   } | null>(null);
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -34,13 +35,13 @@ export const EmailSettingsPanel: React.FC = () => {
     getEmailSettings()
       .then((settings) => {
         if (mounted) {
-          setValues(settings);
+          if (!dirtyRef.current) setValues(settings);
           setLoading(false);
         }
         // 2. Prova a verificare se c'è un aggiornamento su Supabase Cloud
         pullEmailSettingsFromSupabase()
           .then((remote) => {
-            if (remote && mounted) {
+            if (remote && mounted && !dirtyRef.current) {
               setValues(remote);
             }
           })
@@ -61,6 +62,7 @@ export const EmailSettingsPanel: React.FC = () => {
   }, []);
 
   const handleChange = (field: keyof EmailSettingsInput, val: string) => {
+    dirtyRef.current = true;
     setValues((prev) => ({ ...prev, [field]: val }));
     if (statusMessage) setStatusMessage(null);
   };
@@ -71,6 +73,7 @@ export const EmailSettingsPanel: React.FC = () => {
     setStatusMessage(null);
     try {
       const res = await saveEmailSettings(values);
+      dirtyRef.current = false;
       if (res.syncedCloud) {
         setStatusMessage({
           text: "Configurazione email salvata in SQLite locale e sincronizzata su Supabase Cloud con successo.",

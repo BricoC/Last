@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { OrderItem, Supplier } from "../types/order";
 import { orderSupabaseService } from "./orderSupabaseService";
+import { getCompanySettings } from "@/features/settings/companySettingsRepository";
 
 export interface SendOrderEmailParams {
   supplierName: string;
@@ -22,7 +23,7 @@ function escapeHtml(value: unknown): string {
 function sanitizeLogoSrc(src?: string): string {
   const trimmed = (src || "").trim();
   if (!trimmed) return "";
-  if (/^(https?:\/\/|data:image\/[a-zA-Z0-9.+-]+;base64,)/i.test(trimmed)) {
+  if (/^(https?:\/\/|data:image\/(png|jpeg|jpg|gif|webp);base64,)/i.test(trimmed)) {
     return escapeHtml(trimmed);
   }
   return "";
@@ -63,6 +64,13 @@ export class OrderEmailService {
       .join('');
 
     const safeLogoSrc = sanitizeLogoSrc(logoUrlOrPath);
+    const companySettings = await getCompanySettings().catch(() => null);
+    const companyName = (companySettings?.business_name || "").trim();
+    const safeCompanyName = escapeHtml(companyName);
+    const signatureHtml = safeCompanyName
+      ? `Cordiali saluti,<br><strong>${safeCompanyName}</strong>`
+      : "Cordiali saluti.";
+    const safeLogoAlt = safeCompanyName || "Logo aziendale";
 
     const bodyHtml = `
       <div style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; color: #1f2937; line-height: 1.5;">
@@ -92,10 +100,9 @@ export class OrderEmailService {
         </div>
 
         <p style="margin-top: 24px; margin-bottom: 8px;">
-          Cordiali saluti,<br>
-          <strong>Brico Class S.r.l.</strong>
+          ${signatureHtml}
         </p>
-        ${safeLogoSrc ? `<img src="${safeLogoSrc}" alt="Brico Class" style="max-width: 220px; height: auto; margin-top: 8px;" />` : ''}
+        ${safeLogoSrc ? `<img src="${safeLogoSrc}" alt="${safeLogoAlt}" style="max-width: 220px; height: auto; margin-top: 8px;" />` : ''}
       </div>
     `;
 

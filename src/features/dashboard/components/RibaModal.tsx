@@ -133,7 +133,7 @@ export const RibaModal: React.FC<RibaModalProps> = ({
                 Scadenza Ri.Ba.
               </h2>
               <p className="text-[11px] font-semibold text-[var(--muted-foreground)]">
-                Autorizzazione Pagamento Banca BCC
+                Autorizzazione Pagamento Banca
               </p>
             </div>
           </div>

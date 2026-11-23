@@ -10,7 +10,112 @@ permissions:
   contents: write
 
 jobs:
+  verify-supabase-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: last_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Fresh Install & v0.3.5 -> HEAD Upgrade in PostgreSQL
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+
+          init_supabase_stubs() {
+            local db_name="$1"
+            psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${db_name};"
+            psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${db_name};"
+            psql -h 127.0.0.1 -U postgres -d "${db_name}" -v ON_ERROR_STOP=1 <<'SQL'
+              CREATE EXTENSION IF NOT EXISTS pgcrypto;
+              DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN CREATE ROLE service_role NOLOGIN; END IF;
+              END $$;
+              CREATE SCHEMA IF NOT EXISTS auth;
+              CREATE TABLE IF NOT EXISTS auth.users (id uuid PRIMARY KEY);
+              CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT NULL::uuid; $$;
+              CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$ SELECT '{}'::jsonb; $$;
+              CREATE SCHEMA IF NOT EXISTS realtime;
+              CREATE TABLE IF NOT EXISTS realtime.messages (
+                id bigserial PRIMARY KEY,
+                extension text,
+                topic text,
+                payload jsonb
+              );
+              CREATE OR REPLACE FUNCTION realtime.topic() RETURNS text LANGUAGE sql STABLE AS $$ SELECT ''::text; $$;
+              CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, is_private boolean)
+              RETURNS void LANGUAGE sql AS $$ SELECT NULL::void; $$;
+              DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+                  CREATE PUBLICATION supabase_realtime;
+                END IF;
+              END $$;
+          SQL
+          }
+
+          node --input-type=module <<'EOF'
+            import fs from "node:fs";
+            import { execFileSync } from "node:child_process";
+            const baseDir = "src/features/settings/data-import";
+            const readSource = (ref, file) => ref
+              ? execFileSync("git", ["show", `${ref}:${baseDir}/${file}`], { encoding: "utf8" })
+              : fs.readFileSync(`${baseDir}/${file}`, "utf8");
+            const buildFullSchema = (ref) => {
+              const ts = readSource(ref, "supabaseSchemaSql.ts");
+              const start = ts.indexOf("export const FULL_SUPABASE_SCHEMA_SQL = `");
+              const end = ts.indexOf("` + SUPABASE_OFFLINE_WRITES_SQL");
+              if (start < 0 || end < 0) throw new Error(`Impossibile estrarre FULL_SUPABASE_SCHEMA_SQL (${ref || "HEAD"})`);
+              const baseSql = ts.slice(start + "export const FULL_SUPABASE_SCHEMA_SQL = `".length, end);
+              const stripTx = (s) => s.replace(/^(?:BEGIN|COMMIT);\r?$/gm, "");
+              return baseSql
+                + stripTx(readSource(ref, "supabaseOfflineWrites.sql"))
+                + stripTx(readSource(ref, "supabaseStationAccess.sql"))
+                + stripTx(readSource(ref, "supabaseDdtConsistency.sql"))
+                + stripTx(readSource(ref, "supabaseQuoteNumbering.sql"))
+                + stripTx(readSource(ref, "supabasePriceListRevisions.sql"))
+                + readSource(ref, "supabaseInvoiceIdentity.sql").replace(/^BEGIN;\r?$/m, "");
+            };
+            fs.writeFileSync("/tmp/schema_head.sql", buildFullSchema(null), "utf8");
+            fs.writeFileSync("/tmp/schema_v035.sql", buildFullSchema("v0.3.5"), "utf8");
+          EOF
+
+          # 1. Fresh install + idempotency on clean DB
+          init_supabase_stubs last_fresh
+          psql -h 127.0.0.1 -U postgres -d last_fresh -v ON_ERROR_STOP=1 -f /tmp/schema_head.sql
+          psql -h 127.0.0.1 -U postgres -d last_fresh -v ON_ERROR_STOP=1 -f /tmp/schema_head.sql
+
+          # 2. Real v0.3.5 -> HEAD upgrade on a separate clean DB
+          init_supabase_stubs last_upgrade_v035
+          psql -h 127.0.0.1 -U postgres -d last_upgrade_v035 -v ON_ERROR_STOP=1 -f /tmp/schema_v035.sql
+          psql -h 127.0.0.1 -U postgres -d last_upgrade_v035 -v ON_ERROR_STOP=1 -f src/features/settings/data-import/supabaseStationAccess.sql
+          psql -h 127.0.0.1 -U postgres -d last_upgrade_v035 -v ON_ERROR_STOP=1 -f /tmp/schema_head.sql
+
   publish-tauri:
+    needs: [verify-supabase-migrations]
     permissions:
       contents: write
     runs-on: windows-latest
@@ -36,6 +141,9 @@ jobs:
       - name: Install Node Dependencies
         run: npm ci
 
+      - name: Run npm Security Audit
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Run TypeScript Tests & Coverage
         run: npm run test:coverage
 
@@ -54,7 +162,14 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: Run Cargo Security Audit
+        run: cargo audit -f src-tauri/Cargo.lock
+
       - name: Build & Publish Release with Tauri Action
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

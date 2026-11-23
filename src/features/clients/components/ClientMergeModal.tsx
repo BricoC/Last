@@ -52,12 +52,16 @@ export const ClientMergeModal: React.FC<ClientMergeModalProps> = ({
         group.canonical.id,
         group.duplicates.map((d) => d.id)
       );
-      await clientSyncService.syncMergedClientToSupabase(merged);
+      const synced = await clientSyncService.syncMergedClientToSupabase(merged);
       // Ricarica i gruppi rimanenti
       const remaining = groups.filter((g) => g.canonical.id !== group.canonical.id);
       setGroups(remaining);
       onMerged();
-      setStatusMessage(`Unito e sincronizzato con successo: ${group.canonical.business_name}`);
+      setStatusMessage(
+        synced
+          ? `Unito e sincronizzato con successo: ${group.canonical.business_name}`
+          : `Unito in locale (sincronizzazione Cloud in sospeso): ${group.canonical.business_name}`
+      );
     } catch (err: unknown) {
       setStatusMessage(err instanceof Error ? err.message : "Errore durante l'unione.");
     } finally {
@@ -70,16 +74,22 @@ export const ClientMergeModal: React.FC<ClientMergeModalProps> = ({
     setMerging(true);
     setStatusMessage("Unione di tutti i duplicati in corso...");
     try {
+      let allSynced = true;
       for (const group of groups) {
         const merged = await clientRepository.mergeClients(
           group.canonical.id,
           group.duplicates.map((d) => d.id)
         );
-        await clientSyncService.syncMergedClientToSupabase(merged);
+        const synced = await clientSyncService.syncMergedClientToSupabase(merged);
+        if (!synced) allSynced = false;
       }
       setGroups([]);
       onMerged();
-      setStatusMessage("Tutti i duplicati sono stati uniti e sincronizzati sul Cloud!");
+      setStatusMessage(
+        allSynced
+          ? "Tutti i duplicati sono stati uniti e sincronizzati sul Cloud!"
+          : "Tutti i duplicati sono stati uniti in locale (sincronizzazione Cloud parziale o in sospeso)."
+      );
       setTimeout(() => {
         onClose();
       }, 1000);

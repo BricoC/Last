@@ -2,6 +2,7 @@ import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
 import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
+import { buildSnapshotFromCloud } from "@/features/ddt-studio/services/ddtSnapshotBuilders";
 
 interface LocalDdtKey {
   id: string;
@@ -174,10 +175,7 @@ export async function importAllReadableSupabaseDdts(projectUrl: string, anonKey:
   if (anonKey.startsWith("sb_secret_") || anonKey.toLowerCase().includes("service_role")) {
     throw new Error("L’importazione accetta solo la chiave anon/pubblica.");
   }
-  const [{ readDdtChangePage }, { buildSnapshotFromCloud }] = await Promise.all([
-    import("@/features/ddt-studio/services/ddtCloudPull"),
-    import("@/features/ddt-studio/services/ddtSnapshotBuilders"),
-  ]);
+  const { readDdtChangePage } = await import("@/features/ddt-studio/services/ddtCloudPull");
   const changeById = new Map<string, { header: CloudHeader; lines: CloudLine[] }>();
   let cursor = "0";
   for (;;) {

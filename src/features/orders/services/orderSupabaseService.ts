@@ -6,6 +6,7 @@ import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSessio
 import {
   getLastKnownSupabaseProjectUrl,
   normalizeSupabaseProjectUrl,
+  resolveActiveSupabaseProjectUrl,
   setLastKnownSupabaseProjectUrl,
 } from "@/shared/services/supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
@@ -357,6 +358,7 @@ export class OrderSupabaseService {
     }
 
     // Modalità Offline: Salva localmente e accoda per l'invio quando torna online
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
     const offlineItem: OrderItem = {
       ...order,
       id: localId,
@@ -372,6 +374,7 @@ export class OrderSupabaseService {
       remoteId,
       payload: remotePayload,
       timestamp: nowIso,
+      ...(activeProjectUrl ? { projectUrl: activeProjectUrl } : {}),
     });
 
     await this.cacheSingleOrderToSqlite(offlineItem);

@@ -347,6 +347,10 @@ export const GeneralPriceListEmbeddedSection = forwardRef<
 
         // Aggiorna la cache globale condivisa in memoria
         setCachedGeneralList(items);
+
+        void import("../services/priceListSyncService")
+          .then(({ priceListSyncService }) => priceListSyncService.pushGeneralBatchToSupabase(rowsToSave.map((r) => ({ ...r }))))
+          .catch((e) => console.warn("[GeneralPriceListEmbedded] Push Supabase asincrono non riuscito:", e));
       } catch (err) {
         console.error("[GeneralPriceListEmbedded] Errore salvataggio:", err);
       } finally {

@@ -63,8 +63,15 @@ async function fetchWithTimeout(
 
 class DdtCloudPushService {
   private activePushPromise: Promise<DdtBatchPushResult> | null = null;
+  private writeQueue: Promise<unknown> = Promise.resolve();
   private pendingRepush = false;
   private recentlyDeletedIds = new Map<string, number>();
+
+  private serializeWrite<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.writeQueue.then(task, task);
+    this.writeQueue = next.then(() => undefined, () => undefined);
+    return next;
+  }
 
   private async getCredentials(): Promise<SupabaseConfig | null> {
     try {
@@ -540,7 +547,14 @@ class DdtCloudPushService {
     };
   }
 
-  public async resolveMergeConflict(
+  public resolveMergeConflict(
+    docId: string,
+    resolution: "keep-local" | "use-remote"
+  ): Promise<DdtPushResult> {
+    return this.serializeWrite(() => this.resolveMergeConflictInternal(docId, resolution));
+  }
+
+  private async resolveMergeConflictInternal(
     docId: string,
     resolution: "keep-local" | "use-remote"
   ): Promise<DdtPushResult> {
@@ -587,7 +601,11 @@ class DdtCloudPushService {
     return { success: true, docNumber: remoteSnap.header.doc_number };
   }
 
-  public async deleteRemoteDdt(id: string, knownProjectUrl?: string | null): Promise<boolean> {
+  public deleteRemoteDdt(id: string, knownProjectUrl?: string | null): Promise<boolean> {
+    return this.serializeWrite(() => this.deleteRemoteDdtInternal(id, knownProjectUrl));
+  }
+
+  private async deleteRemoteDdtInternal(id: string, knownProjectUrl?: string | null): Promise<boolean> {
     this.markRecentlyDeleted(id);
     const creds = await this.getCredentials();
     if (!creds) return false;
@@ -636,7 +654,14 @@ class DdtCloudPushService {
     }
   }
 
-  public async pushDdtById(
+  public pushDdtById(
+    id: string,
+    options?: { reassignNumberOnConflict?: boolean }
+  ): Promise<DdtPushResult> {
+    return this.serializeWrite(() => this.pushDdtByIdInternal(id, options));
+  }
+
+  private async pushDdtByIdInternal(
     id: string,
     options?: { reassignNumberOnConflict?: boolean }
   ): Promise<DdtPushResult> {
@@ -659,7 +684,7 @@ class DdtCloudPushService {
       }
       if (doc.deleted_at) {
         if (doc.doc_number !== null && doc.status !== "bozza") {
-          const ok = await this.deleteRemoteDdt(doc.id, doc.project_url ?? null);
+          const ok = await this.deleteRemoteDdtInternal(doc.id, doc.project_url ?? null);
           return { success: ok, docNumber: doc.doc_number };
         }
         return { success: true, docNumber: doc.doc_number };
@@ -696,7 +721,7 @@ class DdtCloudPushService {
 
       do {
         this.pendingRepush = false;
-        const batch = await this.executeSingleBatchPush();
+        const batch = await this.serializeWrite(() => this.executeSingleBatchPush());
         totalPushed += batch.pushed;
         totalDeleted += batch.deleted;
         totalErrors += batch.errors;
@@ -738,7 +763,7 @@ class DdtCloudPushService {
           continue;
         }
         if (doc.deleted_at) {
-          const ok = await this.deleteRemoteDdt(doc.id, doc.project_url ?? null);
+          const ok = await this.deleteRemoteDdtInternal(doc.id, doc.project_url ?? null);
           if (ok) deleted++;
           else errors++;
         } else {

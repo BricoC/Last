@@ -316,7 +316,7 @@ for ($copyIdx = 1; $copyIdx -le $copies; $copyIdx++) {{
         param($sender, $e)
         if ($script:pageIndex -lt $imagePaths.Count) {{
             $imgPath = $imagePaths[$script:pageIndex]
-            if (Test-Path $imgPath) {{
+            if (Test-Path -LiteralPath $imgPath) {{
                 $img = [System.Drawing.Image]::FromFile($imgPath)
                 $hX = $e.PageSettings.HardMarginX
                 $hY = $e.PageSettings.HardMarginY
@@ -464,7 +464,7 @@ fn send_email_with_attachments(
             if ($attJson) {{
                 $attList = ConvertFrom-Json $attJson
                 foreach ($p in $attList) {{
-                    if (Test-Path $p) {{
+                    if (Test-Path -LiteralPath $p) {{
                         $mail.Attachments.Add($p) | Out-Null
                     }}
                 }}
@@ -517,8 +517,8 @@ fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
                 $list = ConvertFrom-Json $pathsJson
                 $valid = @()
                 foreach ($p in $list) {{
-                    if (Test-Path $p) {{
-                        $valid += (Resolve-Path $p).Path
+                    if (Test-Path -LiteralPath $p) {{
+                        $valid += (Resolve-Path -LiteralPath $p).Path
                     }}
                 }}
                 if ($valid.Count -gt 0) {{

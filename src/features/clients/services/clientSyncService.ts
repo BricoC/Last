@@ -245,15 +245,25 @@ export class ClientSyncService {
   /**
    * Dopo l'unione di duplicati, rimuove dal Cloud i nomi duplicati archiviati e aggiorna il cliente principale.
    */
-  public async syncMergedClientToSupabase(mergedClient: Client): Promise<void> {
+  public async syncMergedClientToSupabase(mergedClient: Client): Promise<boolean> {
     await this.syncPendingDeletionsToSupabase().catch(() => 0);
-    await this.pushClientToSupabase(mergedClient);
+    return this.pushClientToSupabase(mergedClient);
   }
+
+  private activeFullSyncPromise: Promise<SyncClientsResult> | null = null;
 
   /**
    * Sincronizza e scarica tutti i clienti da Supabase nel database locale
    */
-  public async syncAllFromSupabase(): Promise<SyncClientsResult> {
+  public syncAllFromSupabase(): Promise<SyncClientsResult> {
+    if (this.activeFullSyncPromise) return this.activeFullSyncPromise;
+    this.activeFullSyncPromise = this.executeFullSyncFromSupabase().finally(() => {
+      this.activeFullSyncPromise = null;
+    });
+    return this.activeFullSyncPromise;
+  }
+
+  private async executeFullSyncFromSupabase(): Promise<SyncClientsResult> {
     // Prima di scaricare da Supabase, propaga eventuali modifiche ed eliminazioni locali pendenti
     await this.syncPendingClientsToSupabase();
 
@@ -857,9 +867,9 @@ export class ClientSyncService {
         added++;
       }
 
-    // Sincronizza in background su Supabase Cloud dopo il salvataggio locale
-    for (const saved of savedClients) {
-      void this.pushClientToSupabase(saved);
+    // Sincronizza in modo serializzato su Supabase Cloud dopo il salvataggio locale
+    if (savedClients.length > 0) {
+      void this.syncPendingClientsToSupabase().catch(console.warn);
     }
 
     return { added };

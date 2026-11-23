@@ -130,13 +130,14 @@ export const OneDriveListiniImportPage: React.FC = () => {
     setFeedback(null);
     try {
       const res = await importOneDriveGeneralDiffItems(toImport);
-      setFeedback({
-        type: res.cloudSynced ? "ok" : "warn",
+      const importFeedback = {
+        type: res.cloudSynced ? ("ok" as const) : ("warn" as const),
         text: res.cloudSynced
           ? `Importate ${res.imported} voci nel Listino Generale e sincronizzate su Supabase.`
           : `Importate ${res.imported} voci in locale, sync Supabase in attesa: ${res.cloudError}`,
-      });
+      };
       await handleAnalyze();
+      setFeedback(importFeedback);
     } catch (err) {
       setFeedback({
         type: "err",
@@ -158,13 +159,14 @@ export const OneDriveListiniImportPage: React.FC = () => {
     setFeedback(null);
     try {
       const res = await importOneDriveClientDiffItems(toImport);
-      setFeedback({
-        type: res.cloudSynced ? "ok" : "warn",
+      const importFeedback = {
+        type: res.cloudSynced ? ("ok" as const) : ("warn" as const),
         text: res.cloudSynced
           ? `Importate ${res.imported} voci nei Listini Clienti e sincronizzate su Supabase.`
           : `Importate ${res.imported} voci in locale, sync Supabase in attesa: ${res.cloudError}`,
-      });
+      };
       await handleAnalyze();
+      setFeedback(importFeedback);
     } catch (err) {
       setFeedback({
         type: "err",
