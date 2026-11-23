@@ -1,6 +1,6 @@
 [package]
 name = "last"
-version = "0.3.7"
+version = "0.3.8"
 description = "Last — Gestionale Desktop BricoClass"
 authors = ["BricoC"]
 edition = "2021"
