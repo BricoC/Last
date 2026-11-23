@@ -2,7 +2,7 @@ import { pendingCloudWrite, flushPendingCloudOperations } from "@/shared/data-la
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { getDatabase } from "@/shared/data-layer/database";
 import { normalizeSupabaseProjectUrl, resolveActiveSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
-import { OrRow, isActualOrderReference } from "../types/orNumbers";
+import { OrRow, getOrStatus, isActualOrderReference } from "../types/orNumbers";
 import { cleanDestinationName } from "@/features/ddt-studio/utils/destinationCleaner";
 import { invoke } from "@tauri-apps/api/core";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
@@ -204,6 +204,30 @@ export class OrNumbersRepository {
         AND status <> 'bozza'
         AND ${clientCondition}
         AND doc_date >= $1 AND doc_date <= $2
+        AND EXISTS (
+          SELECT 1 FROM ddt_items i
+          WHERE i.ddt_id = ddt_documents.id
+            AND i.deleted_at IS NULL
+            AND COALESCE(i.row_kind, 'item') <> 'note'
+            AND COALESCE(i.unit_price_subunits, 0) > 0
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM ddt_items i
+          WHERE i.ddt_id = ddt_documents.id
+            AND i.deleted_at IS NULL
+            AND COALESCE(i.row_kind, 'item') <> 'note'
+            AND (
+              TRIM(COALESCE(i.description, '')) <> ''
+              OR TRIM(COALESCE(i.quantity, '')) <> ''
+            )
+            AND NOT (
+              COALESCE(i.unit_price_subunits, 0) = 0
+              AND COALESCE(i.net_amount_subunits, 0) = 0
+              AND TRIM(COALESCE(i.quantity, '')) = ''
+              AND TRIM(COALESCE(i.unit, '')) = ''
+            )
+            AND COALESCE(i.unit_price_subunits, 0) <= 0
+        )
       ORDER BY 
         doc_number ASC,
         doc_date ASC
@@ -224,42 +248,45 @@ export class OrNumbersRepository {
       this.getLogsMap(),
     ]);
 
-    return rows.map((r) => {
-      const formattedDateIt = r.doc_date.split("-").reverse().join(".");
-      const formattedDateSlash = r.doc_date.split("-").reverse().join("/");
-      const keyDot = `${r.doc_number}_${formattedDateIt}`;
-      const keySlash = `${r.doc_number}_${formattedDateSlash}`;
-      const keyId = r.id;
+    const statusPriority = { red: 0, yellow: 1, green: 2 } as const;
+    return rows
+      .map((r) => {
+        const formattedDateIt = r.doc_date.split("-").reverse().join(".");
+        const formattedDateSlash = r.doc_date.split("-").reverse().join("/");
+        const keyDot = `${r.doc_number}_${formattedDateIt}`;
+        const keySlash = `${r.doc_number}_${formattedDateSlash}`;
+        const keyId = r.id;
 
-      const logStatus = logsMap[keyDot] || logsMap[keySlash] || logsMap[keyId] || "";
+        const logStatus = logsMap[keyDot] || logsMap[keySlash] || logsMap[keyId] || "";
 
-      // Destinazione pulita dal nome del cliente
-      const rawDest = r.destination_name || r.destination_address || r.destination_city || "";
-      let cleanDest = cleanDestinationName(rawDest, r.client_name);
+        // Destinazione pulita dal nome del cliente
+        const rawDest = r.destination_name || r.destination_address || r.destination_city || "";
+        let cleanDest = cleanDestinationName(rawDest, r.client_name);
 
-      // Normalizzazione speciale stile noManV1 per Wepa
-      if (clientType === "WEPA") {
-        if (cleanDest.toUpperCase().includes("SALANETTI")) {
-          cleanDest = "Localita' Salanetti";
-        } else if (cleanDest.toUpperCase().includes("RALLETTA")) {
-          cleanDest = "F.sso Ralletta";
+        // Normalizzazione speciale stile noManV1 per Wepa
+        if (clientType === "WEPA") {
+          if (cleanDest.toUpperCase().includes("SALANETTI")) {
+            cleanDest = "Localita' Salanetti";
+          } else if (cleanDest.toUpperCase().includes("RALLETTA")) {
+            cleanDest = "F.sso Ralletta";
+          }
         }
-      }
 
-      const rawOrderRef = (r.order_reference || "").trim();
-      const effectiveOrderRef = isActualOrderReference(rawOrderRef) ? rawOrderRef : "";
+        const rawOrderRef = (r.order_reference || "").trim();
+        const effectiveOrderRef = isActualOrderReference(rawOrderRef) ? rawOrderRef : "";
 
-      return {
-        id: r.id,
-        docNumber: r.doc_number,
-        series: r.series || "",
-        date: r.doc_date,
-        client: r.client_name,
-        destination: cleanDest || rawDest || "—",
-        orderReference: effectiveOrderRef,
-        statusLog: logStatus,
-      };
-    });
+        return {
+          id: r.id,
+          docNumber: r.doc_number,
+          series: r.series || "",
+          date: r.doc_date,
+          client: r.client_name,
+          destination: cleanDest || rawDest || "—",
+          orderReference: effectiveOrderRef,
+          statusLog: logStatus,
+        };
+      })
+      .sort((a, b) => statusPriority[getOrStatus(a)] - statusPriority[getOrStatus(b)]);
   }
 
   public static async assignOrderReference(

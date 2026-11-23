@@ -5,7 +5,7 @@ import { applyLocalDatabaseBatch } from "@/shared/data-layer/localDatabaseBatch"
 import { resolveActiveSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { DdtItem, DdtDocument, DdtArchiveEntry } from "../models/ddt";
-import { calculateDdtTotals, calculateRowAmounts } from "../utils/ddtCalculations";
+import { calculateDdtTotals, calculateRowAmounts, normalizeDiscountString } from "../utils/ddtCalculations";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { ddtCloudPushService } from "./ddtCloudPushService";
 import { buildDdtSavePayloadFromImported } from "./ddtImportNormalization";
@@ -605,7 +605,7 @@ export class DdtRepository {
       const q = isNote ? "" : (hasExplicitQty ? String(it.quantity).trim() : "1");
       const hasExplicitDisc =
         it.discount_pct !== undefined && it.discount_pct !== null && String(it.discount_pct).trim() !== "";
-      const disc = isNote ? "" : (hasExplicitDisc ? String(it.discount_pct).trim() : "0");
+      const disc = isNote ? "" : (hasExplicitDisc ? normalizeDiscountString(it.discount_pct) : "0");
       const vatR = !isNote && it.vat_rate !== undefined && it.vat_rate !== null && String(it.vat_rate).trim() !== ""
         ? parseFloat(String(it.vat_rate).replace(",", "."))
         : 0;
@@ -785,7 +785,7 @@ export class DdtRepository {
       unit: isNote ? "" : row.unit || "NR",
       quantity: isNote ? "" : String(row.quantity ?? "1"),
       unit_price: MonetaryValue.fromSubunits(row.unit_price_subunits || 0),
-      discount_pct: isNote ? "" : String(row.discount_pct ?? "0"),
+      discount_pct: isNote ? "" : normalizeDiscountString(row.discount_pct ?? "0"),
       net_amount: MonetaryValue.fromSubunits(row.net_amount_subunits || 0),
       vat_rate:
         isNote || row.vat_rate === null || row.vat_rate === undefined || Number(row.vat_rate) === 0

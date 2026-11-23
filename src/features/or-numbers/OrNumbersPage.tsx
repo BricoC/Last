@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import {
   RotateCw,
-  Plus,
   Hash,
   Loader2,
   CheckCircle2,
@@ -634,20 +633,6 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
             <span className="font-bold">{totalRed}</span>
           </div>
         </div>
-
-        {/* Pulsante Assegna OR & Sconto (solo se abilitato) */}
-        {canEditOrNumbers && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleOpenAssign()}
-              className="px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-500/40 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Assegna OR & Sconto</span>
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Area Notifiche o Toast */}

@@ -137,6 +137,9 @@ jobs:
 
       - name: Setup Rust Cache
         uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          shared-key: "last-windows"
 
       - name: Install Node Dependencies
         run: npm ci

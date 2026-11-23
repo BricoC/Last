@@ -55,15 +55,15 @@ export async function generateDdtMonthlyExcelReport(
 
   const rTax = wsRecap.addRow(["Totale Imponibile (€)", metrics.totalTaxable]);
   rTax.font = { size: 10 };
-  rTax.getCell(2).numFmt = "€ #,##0.00";
+  rTax.getCell(2).numFmt = "€ #,##0.00000";
 
   const rVat = wsRecap.addRow(["Totale IVA Imposta (€)", metrics.totalVat]);
   rVat.font = { size: 10 };
-  rVat.getCell(2).numFmt = "€ #,##0.00";
+  rVat.getCell(2).numFmt = "€ #,##0.00000";
 
   const rDoc = wsRecap.addRow(["Totale Documento / Fatturato (€)", metrics.totalDocument]);
   rDoc.font = { bold: true, size: 11 };
-  rDoc.getCell(2).numFmt = "€ #,##0.00";
+  rDoc.getCell(2).numFmt = "€ #,##0.00000";
 
   wsRecap.addRow([]); // riga 10 vuota
 
@@ -96,9 +96,9 @@ export async function generateDdtMonthlyExcelReport(
       c.sharePercent,
     ]);
     row.font = { size: 10 };
-    row.getCell(5).numFmt = "€ #,##0.00";
-    row.getCell(6).numFmt = "€ #,##0.00";
-    row.getCell(7).numFmt = "€ #,##0.00";
+    row.getCell(5).numFmt = "€ #,##0.00000";
+    row.getCell(6).numFmt = "€ #,##0.00000";
+    row.getCell(7).numFmt = "€ #,##0.00000";
   }
 
   // -------------------------------------------------------------------------
@@ -177,9 +177,9 @@ export async function generateDdtMonthlyExcelReport(
       art.internalNotes,
     ]);
     row.font = { size: 10 };
-    row.getCell(15).numFmt = "€ #,##0.00";
-    row.getCell(17).numFmt = "€ #,##0.00";
-    row.getCell(18).numFmt = "€ #,##0.00";
+    row.getCell(15).numFmt = "€ #,##0.00000";
+    row.getCell(17).numFmt = "€ #,##0.00000";
+    row.getCell(18).numFmt = "€ #,##0.00000";
   }
 
   // -------------------------------------------------------------------------
@@ -243,9 +243,9 @@ export async function generateDdtMonthlyExcelReport(
       d.notes,
     ]);
     row.font = { size: 10 };
-    row.getCell(8).numFmt = "€ #,##0.00";
-    row.getCell(9).numFmt = "€ #,##0.00";
-    row.getCell(10).numFmt = "€ #,##0.00";
+    row.getCell(8).numFmt = "€ #,##0.00000";
+    row.getCell(9).numFmt = "€ #,##0.00000";
+    row.getCell(10).numFmt = "€ #,##0.00000";
   }
 
   // Riga Finale Totale Mese
@@ -267,9 +267,9 @@ export async function generateDdtMonthlyExcelReport(
     null,
   ]);
   totalRow.font = { bold: true, size: 10 };
-  totalRow.getCell(8).numFmt = "€ #,##0.00";
-  totalRow.getCell(9).numFmt = "€ #,##0.00";
-  totalRow.getCell(10).numFmt = "€ #,##0.00";
+  totalRow.getCell(8).numFmt = "€ #,##0.00000";
+  totalRow.getCell(9).numFmt = "€ #,##0.00000";
+  totalRow.getCell(10).numFmt = "€ #,##0.00000";
 
   // Esportazione Buffer binario
   const buffer = await wb.xlsx.writeBuffer();

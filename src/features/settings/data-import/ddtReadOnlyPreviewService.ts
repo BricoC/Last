@@ -156,7 +156,7 @@ export function mapLineForLocal(line: CloudLine, cloudHeaderId: string | null, f
     description: line.descrizione || "", rowKind: isNote ? "note" : "item",
     unit: isNote ? "" : line.um || "NR", quantity: isNote ? "" : quantity || "1",
     unitPriceSubunits: isNote ? 0 : subunits(line.prezzo),
-    discountPct: isNote ? "" : String(validAmount(line.sconto_pct) * 100),
+    discountPct: isNote ? "" : String(Math.round(validAmount(line.sconto_pct) * 1e8) / 1e6),
     netAmountSubunits,
     vatRate: Math.round(vatRate), vatAmountSubunits: isNote ? 0 : Math.round(netAmountSubunits * vatRate / 100),
     purchasePriceSubunits: isNote ? 0 : subunits(line.prezzo_acquisto),

@@ -129,12 +129,38 @@ export function parseCascadeDiscounts(raw?: string | number | null): number[] {
 }
 
 /**
+ * Normalizza una stringa di sconto rimuovendo rumore floating-point IEEE-754
+ * (es. "7.000000000000001" -> "7", "28.999999999999996" -> "29").
+ */
+export function normalizeDiscountString(raw?: string | number | null): string {
+  if (raw === null || raw === undefined || raw === "") return "";
+  const clean = String(raw).trim().replace(/[()%]/g, "");
+  if (!clean) return "";
+
+  if (clean.includes("+")) {
+    const parts = clean
+      .split("+")
+      .map((p) => {
+        const trimmed = p.trim();
+        const n = parseFloat(trimmed.replace(",", "."));
+        return isNaN(n) ? trimmed : String(Math.round(n * 1e6) / 1e6);
+      })
+      .filter(Boolean);
+    return parts.join("+");
+  }
+
+  const n = parseFloat(clean.replace(",", "."));
+  if (isNaN(n)) return clean;
+  return String(Math.round(n * 1e6) / 1e6);
+}
+
+/**
  * Formatta la stringa di sconto per la visualizzazione nella griglia e nel documento cartaceo/PDF.
  * Mantiene la dicitura inserita dall'utente aggiungendo il simbolo '%' finale (es. "10 + 3%").
  */
 export function formatCascadeDiscountDisplay(raw?: string | number | null): string {
   if (raw === null || raw === undefined || raw === "") return "";
-  const clean = String(raw).trim().replace(/[()%]/g, "");
+  const clean = normalizeDiscountString(raw);
   if (!clean) return "";
 
   if (clean.includes("+")) {
@@ -144,7 +170,7 @@ export function formatCascadeDiscountDisplay(raw?: string | number | null): stri
 
   const n = parseFloat(clean.replace(",", "."));
   if (isNaN(n) || n <= 0) return "";
-  return `${n}%`;
+  return `${Math.round(n * 1e6) / 1e6}%`;
 }
 
 /**

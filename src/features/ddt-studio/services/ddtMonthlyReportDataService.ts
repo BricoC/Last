@@ -1,4 +1,5 @@
 import { parseDdtQuantity } from "../utils/ddtQuantity";
+import { normalizeDiscountString } from "../utils/ddtCalculations";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
 import { ITALIAN_MONTH_NAMES } from "../utils/italianMonthNames";
@@ -152,7 +153,7 @@ export async function getDdtMonthlyReportData(
     // Se il totale documento sorgente è 0 o vuoto ma imponibile o imposta sono disponibili, calcola imponibile + imposta
     let totalDoc = subunitsToEuro(row.total_document_subunits);
     if ((totalDoc === 0 || !row.total_document_subunits) && (taxable !== 0 || vat !== 0)) {
-      totalDoc = Number((taxable + vat).toFixed(2));
+      totalDoc = Number((taxable + vat).toFixed(5));
     }
 
     sumTaxable += taxable;
@@ -237,7 +238,7 @@ export async function getDdtMonthlyReportData(
       unit: row.unit || "NR.",
       quantity: row.quantity || "1",
       unitPrice,
-      discountPct: row.discount_pct ? `${row.discount_pct}%` : "",
+      discountPct: row.discount_pct ? `${normalizeDiscountString(row.discount_pct)}%` : "",
       netPrice,
       rowTotal: netAmount,
       vatRate: `${row.vat_rate}%`,
