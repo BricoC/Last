@@ -132,7 +132,7 @@ describe("priceListExcelExportService", () => {
         perc_acquisto: null,
         data_acquisto: null,
         acquisto_old: "10 net",
-        ricarico: 25,
+        ricarico: "25%",
         note: null,
         note1: null,
         note2: null,

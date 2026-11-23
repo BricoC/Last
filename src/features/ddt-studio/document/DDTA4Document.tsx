@@ -63,7 +63,7 @@ export const DDT_CONFIG = {
     altezzaHeader: "23px",
     fontSizeHeader: "9.5px",
     paddingTopHeader: "5px",
-    altezzaRiga: "26px",
+    altezzaRiga: "25px",
     fontSizeDescrizione: "11px",
     fontSizePrezzo: "10.5px",
     fontSizeScontoIva: "10px",
@@ -188,8 +188,8 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         loading="eager"
                         decoding="sync"
                         style={{
-                          maxHeight: "110px",
-                          maxWidth: "430px",
+                          maxHeight: "135px",
+                          maxWidth: "480px",
                           objectFit: "contain",
                           display: "block",
                         }}
@@ -306,9 +306,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                 </div>
               </div>
 
-              {/* SE PAGINA 1: DATI CLIENTE COMPLETI & DETTAGLI COMMERCIALE */}
-              {p.isFirst && (
-                <>
+              {/* DATI CLIENTE COMPLETI & DETTAGLI COMMERCIALE (UGUALI SU TUTTE LE PAGINE) */}
                   {/* Grid 2 colonne: Spettabile ditta + Luogo destinazione */}
                   <div
                     style={{
@@ -604,32 +602,6 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                       </div>
                     </div>
                   </div>
-                </>
-              )}
-
-              {/* RIEPILOGO TESTATA SE PAGINA 2 O SUCCESSIVA */}
-              {!p.isFirst && (
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: "9.5px",
-                    borderBottom: "1px solid #000",
-                    paddingBottom: "4px",
-                    marginBottom: "6px",
-                  }}
-                >
-                  <div>
-                    <span style={{ fontStyle: "italic", marginRight: "4px" }}>Cliente:</span>
-                    <span style={{ textTransform: "uppercase" }}>{ddt.client_name}</span>
-                  </div>
-                  <div>
-                    DDT {ddt.doc_number !== null
-                      ? `#${ddt.series ? `${ddt.series}/` : ""}${ddt.doc_number}`
-                      : "(Bozza)"} del {toDateIT(ddt.doc_date)}
-                  </div>
-                </div>
-              )}
 
               {/* TABELLA RIGHE ARTICOLI CON HEADER #DCDCDC E GRIGLIA A LINEE CONTINUE */}
               <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -872,7 +844,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
 
             {/* ZONA INFERIORE: FOOTER TOTALI E LOGISTICA IDENTICO ALL'ORIGINALE (SOLO ULTIMA PAGINA) */}
             {p.isLast ? (
-              <div style={{ paddingTop: "4px", flexShrink: 0 }}>
+              <div style={{ paddingTop: "8px", flexShrink: 0 }}>
                 <table
                   style={{
                     width: "100%",

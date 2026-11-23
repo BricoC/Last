@@ -422,8 +422,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
         }
 
         case "ricarico": {
-          const newRic = parsePriceListNumber(rawValue);
-          updated.ricarico = newRic;
+          updated.ricarico = rawValue != null && String(rawValue).trim() !== "" ? String(rawValue).trim() : null;
           break;
         }
 
@@ -1536,8 +1535,8 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
                   )}
 
                   {isVisible("ricarico") && (
-                    <td className="px-2.5 py-1.5 text-right border-r border-[var(--border)]/30 text-[var(--muted-foreground)]">
-                      {formatPercent(item.ricarico)}
+                    <td className="px-2.5 py-1.5 text-right border-r border-[var(--border)]/30 text-[var(--muted-foreground)] text-xs truncate max-w-[140px]">
+                      {item.ricarico != null && String(item.ricarico).trim() !== "" ? String(item.ricarico) : "—"}
                     </td>
                   )}
 

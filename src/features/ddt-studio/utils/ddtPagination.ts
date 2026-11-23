@@ -1,11 +1,11 @@
 import { money, MonetaryValue } from "@/shared/domain/monetaryValue";
 import { DdtItem } from "../models/ddt";
 import { isRowFilled } from "./ddtCalculations";
-export const ROWS_PER_PAGE = 25;
-export const SINGLE_PAGE_SLOTS = 25;
-export const FIRST_PAGE_MULTI_SLOTS = 25;
-export const MIDDLE_PAGE_SLOTS = 25;
-export const LAST_PAGE_MULTI_SLOTS = 25;
+export const ROWS_PER_PAGE = 23;
+export const SINGLE_PAGE_SLOTS = 23;
+export const FIRST_PAGE_MULTI_SLOTS = 27;
+export const MIDDLE_PAGE_SLOTS = 27;
+export const LAST_PAGE_MULTI_SLOTS = 23;
 
 export interface DdtPageData {
   pageNum: number;

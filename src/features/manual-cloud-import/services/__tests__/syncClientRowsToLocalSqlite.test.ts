@@ -32,7 +32,7 @@ function makeRow(idx: number): ParsedListinoClienteRow {
     prezzo_fattura: 10 + idx,
     prezzo_acquisto: 5,
     acquisto_old: "5 net",
-    ricarico: 50,
+    ricarico: "50%",
     note: null,
     note1: null,
     note2: null,

@@ -216,7 +216,7 @@ export interface ParsedListinoClienteRow {
   prezzo_fattura?: number;
   prezzo_acquisto?: number;
   acquisto_old: string;
-  ricarico?: number;
+  ricarico?: string | null;
   note?: string | null;
   note1?: string | null;
   note2?: string | null;
@@ -272,7 +272,11 @@ export function parseCustomerPriceListExcelRow(
   const acquistoOldText = purchase == null ? "" : String(purchase).trim();
   const hasText = typeof purchase === "string" && /[a-zA-Z]/.test(acquistoOldText);
   const prezzoAcquisto = hasText ? undefined : optionalImportNumber(purchase);
-  const ricarico = optionalImportNumber(normalized.RICARICO);
+  const ricaricoRaw = normalized.RICARICO;
+  const ricarico =
+    ricaricoRaw == null
+      ? undefined
+      : String(ricaricoRaw).trim() || undefined;
 
   return {
     cliente: clienteWithPrefix,
@@ -334,13 +338,23 @@ export async function scanAndParseClientPriceLists(
 
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+      const formattedData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
 
       const clientNameOnly = file.filename.replace(/\.(xls|xlsx)$/i, "").trim();
       const clienteWithPrefix = "LIST_" + clientNameOnly;
       clientsSet.add(clienteWithPrefix);
 
-      for (const r of rawData) {
-        const parsedRow = parseCustomerPriceListExcelRow(r, clienteWithPrefix, file.filename);
+      for (let idx = 0; idx < rawData.length; idx++) {
+        const r = rawData[idx];
+        const fmt = formattedData[idx] || {};
+        // Preserva il testo formattato Excel per RICARICO (es. "50%" o "100% 18*") invece del decimale grezzo
+        const mergedRow: Record<string, unknown> = { ...r };
+        for (const [k, v] of Object.entries(fmt)) {
+          if (k.trim().toUpperCase() === "RICARICO" && String(v ?? "").trim() !== "") {
+            mergedRow[k] = String(v).trim();
+          }
+        }
+        const parsedRow = parseCustomerPriceListExcelRow(mergedRow, clienteWithPrefix, file.filename);
         if (!parsedRow) continue;
         if (parsedRow.hasTextAcquisto) textAcquistoCount++;
         allRows.push(parsedRow);

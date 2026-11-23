@@ -144,7 +144,7 @@ it("shows price-list trash changes waiting to upload even when remote downloads 
     ? Response.json("0") : Response.json([]));
   await expect(cloudSyncStatusService.getStatus(true)).resolves.toMatchObject({
     hasPendingLocalChanges: true, hasPendingRemoteChanges: false, canAutoSync: true,
-    alignmentMessage: "Modifiche locali da inviare",
+    alignmentMessage: expect.stringContaining("Operazioni in coda"),
   });
   sqlite.exec("DELETE FROM pending_cloud_operations WHERE record_id='old-price'; DELETE FROM ddt_pull_state;");
 });

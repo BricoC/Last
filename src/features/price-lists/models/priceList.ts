@@ -39,7 +39,7 @@ export interface ListinoClienteRow {
   perc_acquisto?: number | null;
   data_acquisto?: string | null;
   acquisto_old?: string | null;
-  ricarico: number | null;
+  ricarico: string | null;
   data_ref?: string | null;
   note: string | null;
   note1: string | null;

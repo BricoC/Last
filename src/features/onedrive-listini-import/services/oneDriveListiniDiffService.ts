@@ -321,7 +321,8 @@ export async function analyzeOneDriveClientLists(
       /^[+-]?[\d.,]+(\s*€)?$/.test(p.acquisto_old.trim());
     const acqNumDiff = isPureNumericAcquisto && numChanged(p.prezzo_acquisto, existing.prezzo_acquisto);
     const acqOldDiff = strChanged(p.acquisto_old, existing.acquisto_old);
-    const changed = fattDiff || acqNumDiff || acqOldDiff;
+    const ricaricoDiff = strChanged(p.ricarico ?? null, existing.ricarico != null ? String(existing.ricarico) : null);
+    const changed = fattDiff || acqNumDiff || acqOldDiff || ricaricoDiff;
 
     if (changed) {
       updatedCount++;
@@ -344,6 +345,12 @@ export async function analyzeOneDriveClientLists(
         const newVal = p.acquisto_old || "—";
         diffs.push(`AcqOld: ${oldVal}`);
         changeBadges.push(`Acquisto: ${oldVal} → ${newVal}`);
+      }
+      if (ricaricoDiff) {
+        const oldVal = existing.ricarico != null && String(existing.ricarico).trim() !== "" ? String(existing.ricarico) : "—";
+        const newVal = p.ricarico || "—";
+        diffs.push(`Ric: ${oldVal}`);
+        changeBadges.push(`Ricarico: ${oldVal} → ${newVal}`);
       }
       diffItems.push({
         key,
@@ -407,7 +414,7 @@ export async function importOneDriveClientDiffItems(
       perc_acquisto: ex?.perc_acquisto ?? null,
       data_acquisto: ex?.data_acquisto ?? null,
       acquisto_old: p.acquisto_old || null,
-      ricarico: ex?.ricarico ?? (p.ricarico ?? null),
+      ricarico: p.ricarico ?? (ex?.ricarico != null ? String(ex.ricarico) : null),
       data_ref: ex?.data_ref ?? null,
       note: p.note ?? ex?.note ?? null,
       note1: p.note1 ?? ex?.note1 ?? null,

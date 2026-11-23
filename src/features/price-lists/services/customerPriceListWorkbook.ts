@@ -111,7 +111,7 @@ export function buildCustomerPriceListWorkbook(
 
     excelRow.getCell(8).value = safeText(item.data_acquisto);
     excelRow.getCell(9).value = safeText(item.acquisto_old);
-    excelRow.getCell(10).value = item.ricarico != null && isFinite(item.ricarico) ? item.ricarico : null;
+    excelRow.getCell(10).value = safeText(item.ricarico != null ? String(item.ricarico) : null);
     excelRow.getCell(11).value = safeText(item.note);
     excelRow.getCell(12).value = safeText(item.note1);
     excelRow.getCell(13).value = safeText(item.note2);

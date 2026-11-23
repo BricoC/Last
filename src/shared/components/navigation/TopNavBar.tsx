@@ -160,7 +160,7 @@ export const TopNavBar: React.FC = () => {
   const hoverTimeoutRef = useRef<number | null>(null);
   const lastAutoSyncAtRef = useRef<number>(0);
   const autoSyncTimerRef = useRef<number | null>(null);
-  const autoSyncPausedRef = useRef<boolean>(false);
+  const autoSyncFailuresRef = useRef<number>(0);
   const isSyncingRef = useRef<boolean>(false);
 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
@@ -187,9 +187,9 @@ export const TopNavBar: React.FC = () => {
       }
 
       // Auto-sync silenzioso a basso consumo (Supabase Free):
-      // aggiorna automaticamente in background solo quando ci sono dati pendenti, con cooldown 120s.
-      // Se dopo un auto-sync restano ancora dati pendenti non inviabili, mette in pausa l'auto-retry
-      // per evitare loop continui finché non arriva una nuova modifica o un click manuale.
+      // aggiorna automaticamente in background solo quando ci sono dati pendenti.
+      // Cooldown rapido (15s) per modifiche locali da inviare, 120s per soli aggiornamenti remoti,
+      // e backoff a 5 minuti in caso di errori ripetuti per evitare loop/consumo eccessivo.
       const now = Date.now();
       const activeSessionEmail = getSupabaseSessionEmail();
       if (autoSyncTimerRef.current !== null) {
@@ -198,9 +198,15 @@ export const TopNavBar: React.FC = () => {
       }
       const hasPending = Boolean(s.hasPendingRemoteChanges || s.hasPendingLocalChanges);
       if (!hasPending) {
-        autoSyncPausedRef.current = false;
-      } else if (s.canAutoSync && activeSessionEmail && !autoSyncPausedRef.current) {
-        const wait = Math.max(0, 120_000 - (now - lastAutoSyncAtRef.current));
+        autoSyncFailuresRef.current = 0;
+      } else if (s.canAutoSync && activeSessionEmail) {
+        const cooldownMs =
+          autoSyncFailuresRef.current > 0
+            ? 300_000
+            : s.hasPendingLocalChanges
+            ? 15_000
+            : 120_000;
+        const wait = Math.max(0, cooldownMs - (now - lastAutoSyncAtRef.current));
         if (wait || isSyncingRef.current) {
           autoSyncTimerRef.current = window.setTimeout(() => void fetchCloudStatus(true), Math.max(2000, wait));
         } else {
@@ -230,7 +236,7 @@ export const TopNavBar: React.FC = () => {
 
   const handleManualSync = async (isAuto = false) => {
     if (isSyncingRef.current) return;
-    if (!isAuto) autoSyncPausedRef.current = false;
+    if (!isAuto) autoSyncFailuresRef.current = 0;
     isSyncingRef.current = true;
     setIsSyncing(true);
     try {
@@ -244,11 +250,14 @@ export const TopNavBar: React.FC = () => {
         setGapWarning(null);
       }
       if (isAuto) {
-        // Evita loop infiniti di auto-sync se un record resta pendente dopo il tentativo automatico
-        autoSyncPausedRef.current = true;
+        if (!res.success) {
+          autoSyncFailuresRef.current += 1;
+        } else {
+          autoSyncFailuresRef.current = 0;
+        }
       }
     } catch (error) {
-      if (isAuto) autoSyncPausedRef.current = true;
+      if (isAuto) autoSyncFailuresRef.current += 1;
       console.warn("[TopNavBar] Sincronizzazione cloud:", error);
     } finally {
       isSyncingRef.current = false;
@@ -261,7 +270,7 @@ export const TopNavBar: React.FC = () => {
     void fetchCloudStatus(false);
     const onSyncStatusUpdated = () => void fetchCloudStatus(true);
     const onReconnectOrEdit = () => {
-      autoSyncPausedRef.current = false;
+      autoSyncFailuresRef.current = 0;
       void fetchCloudStatus(true);
     };
     window.addEventListener("cloud-sync-status-updated", onSyncStatusUpdated);

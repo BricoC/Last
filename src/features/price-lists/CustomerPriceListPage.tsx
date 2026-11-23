@@ -135,18 +135,10 @@ function formatEuro(val: number | null | undefined): string {
   })}`;
 }
 
-function formatPercent(val: number | null | undefined): string {
-  if (val == null || isNaN(val)) return "—";
-  return `${val.toLocaleString("it-IT", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}%`;
-}
-
 function getFormattedInitValue(val: any, col: string, char?: string): string {
   if (char !== undefined) return char;
   if (val == null) return "";
-  if (col === "perc_acquisto" || col === "ricarico") {
+  if (col === "perc_acquisto") {
     return `${val}%`;
   }
   return String(val);
@@ -588,7 +580,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         }
 
         case "ricarico":
-          updated.ricarico = parsePriceListNumber(rawValue);
+          updated.ricarico = rawValue != null && String(rawValue).trim() !== "" ? String(rawValue).trim() : null;
           break;
 
         default:
@@ -1931,11 +1923,11 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
                   {isVisible("ricarico") && (
                     <td
                       onMouseDown={() => selectCell(item.id, "descrizione")}
-                      className={`px-2.5 py-1.5 text-right border-r border-[var(--border)]/30 cursor-pointer ${
+                      className={`px-2.5 py-1.5 text-right border-r border-[var(--border)]/30 cursor-pointer text-xs truncate max-w-[140px] ${
                         isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
                       }`}
                     >
-                      {formatPercent(item.ricarico)}
+                      {item.ricarico != null && String(item.ricarico).trim() !== "" ? String(item.ricarico) : "—"}
                     </td>
                   )}
                   {isVisible("note") && (

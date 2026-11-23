@@ -81,7 +81,7 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
   it("paginazione A4 riempie le righe mancanti per toccare la griglia continua", () => {
     const pages = paginateDdtRows([]);
     expect(pages.length).toBe(1);
-    expect(pages[0].rows.length).toBe(25);
+    expect(pages[0].rows.length).toBe(23);
     expect(pages[0].isFirst).toBe(true);
     expect(pages[0].isLast).toBe(true);
   });
@@ -95,11 +95,11 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
     ];
     const pages = paginateDdtRows(items);
     expect(pages.length).toBe(1);
-    // 3 articoli reali occupano 4 slot (1 + 2 + 1 = 4). Riempito con 21 righe vuote = 24 elementi totali, 25 slot esatti
-    expect(pages[0].rows.length).toBe(24);
+    // 3 articoli reali occupano 4 slot (1 + 2 + 1 = 4). Riempito con 19 righe vuote = 22 elementi totali, 23 slot esatti
+    expect(pages[0].rows.length).toBe(22);
   });
 
-  it("gestisce la paginazione multipagina con 25 righe e altezza aumentata per pagina", () => {
+  it("gestisce la paginazione multipagina con 27 righe senza footer e 23 sull'ultima pagina", () => {
     // 35 articoli singoli
     const items: DdtItem[] = Array.from({ length: 35 }, (_, i) => ({
       id: `${i + 1}`,
@@ -121,12 +121,12 @@ describe("ddtCalculations (Riproduzione Esatta PDF BricoClass)", () => {
     }));
     const pages = paginateDdtRows(items);
     expect(pages.length).toBe(2);
-    // Pagina 1: 25 articoli -> 25 righe piene
-    expect(pages[0].rows.length).toBe(25);
+    // Pagina 1 (senza footer): 27 articoli -> 27 righe piene
+    expect(pages[0].rows.length).toBe(27);
     expect(pages[0].isFirst).toBe(true);
     expect(pages[0].isLast).toBe(false);
-    // Pagina 2: 10 articoli rimanenti + 15 righe vuote -> 25 righe totali
-    expect(pages[1].rows.length).toBe(25);
+    // Pagina 2 (con footer): 8 articoli rimanenti + 15 righe vuote -> 23 righe totali
+    expect(pages[1].rows.length).toBe(23);
     expect(pages[1].isFirst).toBe(false);
     expect(pages[1].isLast).toBe(true);
   });

@@ -1165,7 +1165,7 @@ export const ManualCloudImportPage: React.FC = () => {
                           <span className="text-[var(--foreground)]">{r.acquisto_old || "—"}</span>
                         )}
                       </td>
-                      <td className="py-1 px-3 text-right text-sky-400">{r.ricarico != null ? r.ricarico.toFixed(1) + "%" : "—"}</td>
+                      <td className="py-1 px-3 text-right text-sky-400">{r.ricarico || "—"}</td>
                     </tr>
                   ))
                 )}

@@ -62,7 +62,7 @@ function mapSupabaseClientRow(r: any): ListinoClienteRow {
     perc_acquisto: r.perc_acquisto != null ? Number(r.perc_acquisto) : null,
     data_acquisto: r.data_acquisto ?? null,
     acquisto_old: r.acquisto_old ?? null,
-    ricarico: r.ricarico != null ? Number(r.ricarico) : null,
+    ricarico: r.ricarico != null && String(r.ricarico).trim() !== "" ? String(r.ricarico).trim() : null,
     data_ref: r.data_ref ?? null,
     note: r.note ?? null,
     note1: r.note1 ?? null,

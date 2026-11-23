@@ -22,7 +22,7 @@ describe("manualPriceListImportService - parseCustomerPriceListExcelRow", () => 
     expect(standard?.prezzo_fattura).toBe(12.5);
     expect(standard?.acquisto_old).toBe("10 net");
     expect(standard?.hasTextAcquisto).toBe(true);
-    expect(standard?.ricarico).toBe(25);
+    expect(standard?.ricarico).toBe("25%");
 
     const vendita = parseCustomerPriceListExcelRow(
       { DESCRIZIONE: "ABR. STEARATA MT", VENDITA: 2.1, ACQUISTO: "", RICARICO: "25" },
@@ -37,6 +37,7 @@ describe("manualPriceListImportService - parseCustomerPriceListExcelRow", () => 
       "NUTINI.xls"
     );
     expect(spaced?.prezzo_fattura).toBe(4.583);
+    expect(spaced?.ricarico).toBe("57.114% 08");
 
     const venditaFattura = parseCustomerPriceListExcelRow(
       { DESCRIZIONE: "ABRASIVA 100", "VENDITA FATTURA": 1.15, ACQUISTO: "", RICARICO: "08-" },
@@ -94,7 +95,7 @@ describe("Import cloud manuale", () => {
     await expect(uploadClientPriceListsToSupabase([first, second], project, "test"))
       .resolves.toEqual({ inserted: 0, updated: 1, failed: 0 });
     const [record] = JSON.parse(String(fetch.mock.calls[2][1]?.body));
-    expect(record).toMatchObject({ id: 14, acquisto_old: "10 netto", ricarico: 0 });
+    expect(record).toMatchObject({ id: 14, acquisto_old: "10 netto", ricarico: "0" });
     expect(record).not.toHaveProperty("prezzo_fattura");
     expect(record).not.toHaveProperty("prezzo_acquisto");
   });

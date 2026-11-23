@@ -19,7 +19,7 @@ pub struct ClientPriceListSyncRow {
     #[serde(default)]
     pub acquisto_old: String,
     #[serde(default)]
-    pub ricarico: Option<f64>,
+    pub ricarico: Option<String>,
     #[serde(default)]
     pub note: Option<String>,
     #[serde(default)]
@@ -129,6 +129,7 @@ async fn sync_rows(
         for (idx, r) in rows.iter().enumerate() {
             let key = normalize_key(&r.cliente, &r.descrizione);
             let acquisto_old_opt = non_empty_opt(&r.acquisto_old);
+            let ricarico_opt = r.ricarico.as_deref().and_then(non_empty_opt);
 
             if let Some(ids) = existing_by_key.get(&key) {
                 for id in ids {
@@ -147,7 +148,7 @@ async fn sync_rows(
                     .bind(r.prezzo_fattura)
                     .bind(r.prezzo_acquisto)
                     .bind(acquisto_old_opt)
-                    .bind(r.ricarico)
+                    .bind(ricarico_opt)
                     .bind(r.note.as_deref())
                     .bind(r.note1.as_deref())
                     .bind(r.note2.as_deref())
@@ -187,7 +188,7 @@ async fn sync_rows(
                 .bind(r.prezzo_fattura)
                 .bind(r.prezzo_acquisto)
                 .bind(acquisto_old_opt)
-                .bind(r.ricarico)
+                .bind(ricarico_opt)
                 .bind(r.note.as_deref())
                 .bind(r.note1.as_deref())
                 .bind(r.note2.as_deref())
@@ -231,10 +232,10 @@ mod tests {
             sqlx::raw_sql(
                 "CREATE TABLE listini_clienti (
                    id TEXT PRIMARY KEY, cliente TEXT, descrizione TEXT, prezzo_fattura REAL,
-                   prezzo_acquisto REAL, acquisto_old TEXT, ricarico REAL, note TEXT, note1 TEXT,
+                   prezzo_acquisto REAL, acquisto_old TEXT, ricarico TEXT, note TEXT, note1 TEXT,
                    note2 TEXT, created_at TEXT, updated_at TEXT, sync_revision TEXT
                 ); INSERT INTO listini_clienti (id, cliente, descrizione, acquisto_old, prezzo_acquisto, ricarico)
-                   VALUES ('cli_1', 'ACME', 'Articolo', '25 netto', 25, 18);",
+                   VALUES ('cli_1', 'ACME', 'Articolo', '25 netto', 25, '100% 18*');",
             )
             .execute(&mut db)
             .await
@@ -243,12 +244,12 @@ mod tests {
                 "cliente": "ACME", "descrizione": "Articolo", "acquisto_old": "  ", "prezzo_fattura": 0
             })).unwrap();
             assert_eq!(sync_rows(&mut db, vec![row]).await.unwrap().updated, 1);
-            let values: (String, f64, f64, f64) =
+            let values: (String, f64, f64, String) =
                 sqlx::query_as("SELECT acquisto_old, prezzo_fattura, prezzo_acquisto, ricarico FROM listini_clienti")
                     .fetch_one(&mut db)
                     .await
                     .unwrap();
-            assert_eq!(values, ("25 netto".into(), 0.0, 25.0, 18.0));
+            assert_eq!(values, ("25 netto".into(), 0.0, 25.0, "100% 18*".into()));
         });
     }
 }

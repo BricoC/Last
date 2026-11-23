@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS public.listini_clienti (
   perc_acquisto NUMERIC,
   data_acquisto TEXT,
   acquisto_old TEXT,
-  ricarico NUMERIC,
+  ricarico TEXT,
   data_ref TEXT,
   note TEXT,
   note1 TEXT,
@@ -211,12 +211,31 @@ CREATE TABLE IF NOT EXISTS public.listini_clienti_cestino (
   perc_acquisto NUMERIC,
   data_acquisto TEXT,
   acquisto_old TEXT,
-  ricarico NUMERIC,
+  ricarico TEXT,
   data_ref TEXT,
   note TEXT,
   note1 TEXT,
   note2 TEXT
 );
+
+-- Conversione sicura e idempotente di listini_clienti.ricarico e listini_clienti_cestino.ricarico a TEXT
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'listini_clienti'
+      AND column_name = 'ricarico' AND data_type <> 'text'
+  ) THEN
+    ALTER TABLE public.listini_clienti ALTER COLUMN ricarico TYPE TEXT USING ricarico::text;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'listini_clienti_cestino'
+      AND column_name = 'ricarico' AND data_type <> 'text'
+  ) THEN
+    ALTER TABLE public.listini_clienti_cestino ALTER COLUMN ricarico TYPE TEXT USING ricarico::text;
+  END IF;
+END $$;
 
 -- 4. PREVENTIVI, CESTINO E SEQUENZA
 CREATE TABLE IF NOT EXISTS public.preventivi (

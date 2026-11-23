@@ -30,7 +30,7 @@ export async function migrateCustomerPriceListUpgradeV22(db: MigrationDatabase):
       perc_acquisto REAL,
       data_acquisto TEXT,
       acquisto_old TEXT,
-      ricarico REAL,
+      ricarico TEXT,
       data_ref TEXT,
       note TEXT,
       note1 TEXT,

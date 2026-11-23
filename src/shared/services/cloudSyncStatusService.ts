@@ -135,6 +135,7 @@ class CloudSyncStatusService {
     let localLatestDdt: CloudSyncStatusInfo["localLatestDdt"] = null;
     let localLatestListino: CloudSyncStatusInfo["localLatestListino"] = null;
     let hasPendingLocalChanges = false;
+    let pendingLocalLabels: string[] = [];
     let localError: string | null = null;
 
     try {
@@ -174,24 +175,48 @@ class CloudSyncStatusService {
         };
       }
       const activeProjectUrl = normalizeSupabaseProjectUrl(cfgStatus?.config?.projectUrl ?? "");
-      const [pending] = await db.select<{ count: number }[]>(`SELECT (
-        EXISTS(SELECT 1 FROM listino_generale WHERE sync_revision IS NOT NULL)
-        OR EXISTS(SELECT 1 FROM listini_clienti WHERE sync_revision IS NOT NULL)
-        OR EXISTS(SELECT 1 FROM company_settings WHERE id = 'company_profile' AND deleted_at IS NULL AND sync_status = 'pending')
-        OR EXISTS(SELECT 1 FROM email_settings WHERE id = 'email_config' AND deleted_at IS NULL AND sync_status = 'pending')
-        OR ($1 IS NOT NULL AND (
-          EXISTS(SELECT 1 FROM ddt_documents WHERE sync_status = 'pending' AND status <> 'bozza' AND project_url = $1)
-          OR EXISTS(SELECT 1 FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)
-          OR EXISTS(SELECT 1 FROM clients WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)
-          OR EXISTS(SELECT 1 FROM offers WHERE sync_status = 'pending' AND project_url = $1)
-          OR EXISTS(SELECT 1 FROM notes WHERE sync_status = 'pending' AND project_url = $1)
-          OR EXISTS(SELECT 1 FROM note_deletions WHERE project_url = $1)
-          OR EXISTS(SELECT 1 FROM supplier_invoices WHERE cloud_upload_pending = 1 AND project_url = $1)
-          OR EXISTS(SELECT 1 FROM orders WHERE sync_status = 'pending' AND project_url = $1)
-          OR EXISTS(SELECT 1 FROM pending_cloud_operations WHERE project_url = $1)
-        ))
-      ) AS count`, [activeProjectUrl]);
-      hasPendingLocalChanges = Boolean(pending?.count);
+      const [pending] = await db.select<{
+        priceLists: number;
+        companySettings: number;
+        emailSettings: number;
+        ddt: number;
+        quotes: number;
+        clients: number;
+        offers: number;
+        notes: number;
+        invoices: number;
+        orders: number;
+        queue: number;
+      }[]>(`SELECT
+        (EXISTS(SELECT 1 FROM listino_generale WHERE sync_revision IS NOT NULL)
+         OR EXISTS(SELECT 1 FROM listini_clienti WHERE sync_revision IS NOT NULL)) AS priceLists,
+        EXISTS(SELECT 1 FROM company_settings WHERE id = 'company_profile' AND deleted_at IS NULL AND sync_status = 'pending') AS companySettings,
+        EXISTS(SELECT 1 FROM email_settings WHERE id = 'email_config' AND deleted_at IS NULL AND sync_status = 'pending') AS emailSettings,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM ddt_documents WHERE sync_status = 'pending' AND status <> 'bozza' AND project_url = $1)) AS ddt,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)) AS quotes,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM clients WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)) AS clients,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM offers WHERE sync_status = 'pending' AND project_url = $1)) AS offers,
+        ($1 IS NOT NULL AND (EXISTS(SELECT 1 FROM notes WHERE sync_status = 'pending' AND project_url = $1)
+         OR EXISTS(SELECT 1 FROM note_deletions WHERE project_url = $1))) AS notes,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM supplier_invoices WHERE cloud_upload_pending = 1 AND project_url = $1)) AS invoices,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM orders WHERE sync_status = 'pending' AND project_url = $1)) AS orders,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM pending_cloud_operations WHERE project_url = $1)) AS queue`,
+        [activeProjectUrl]
+      );
+      if (pending) {
+        if (pending.ddt) pendingLocalLabels.push("DDT");
+        if (pending.priceLists) pendingLocalLabels.push("Listini");
+        if (pending.clients) pendingLocalLabels.push("Clienti");
+        if (pending.quotes) pendingLocalLabels.push("Preventivi");
+        if (pending.offers) pendingLocalLabels.push("Offerte");
+        if (pending.orders) pendingLocalLabels.push("Ordini");
+        if (pending.invoices) pendingLocalLabels.push("Fatture");
+        if (pending.notes) pendingLocalLabels.push("Note");
+        if (pending.companySettings) pendingLocalLabels.push("Dati aziendali");
+        if (pending.emailSettings) pendingLocalLabels.push("Impostazioni email");
+        if (pending.queue) pendingLocalLabels.push("Operazioni in coda");
+      }
+      hasPendingLocalChanges = pendingLocalLabels.length > 0;
     } catch (err) {
       console.warn("[CloudSyncStatus] Errore lettura dati locali SQLite:", err);
       localError = "Verifica dei dati locali incompleta";
@@ -284,7 +309,9 @@ class CloudSyncStatusService {
     const lastFailure = localStorage.getItem("last_supabase_sync_failure");
     const alignmentMessage = remoteError ?? localError ?? lastFailure ?? (
       hasPendingRemoteChanges ? "Modifiche remote da scaricare" :
-      hasPendingLocalChanges ? "Modifiche locali da inviare" : "Programma allineato a Supabase"
+      hasPendingLocalChanges
+        ? (pendingLocalLabels.length > 0 ? `In attesa di invio: ${pendingLocalLabels.join(", ")}` : "Modifiche locali da inviare")
+        : "Programma allineato a Supabase"
     );
 
     return {
