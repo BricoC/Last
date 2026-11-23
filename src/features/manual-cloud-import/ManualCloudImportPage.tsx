@@ -47,6 +47,11 @@ export interface LogItem {
   detail?: string;
 }
 
+import {
+  getOfflineGeneraleFilePath,
+  loadFolderPathsConfig,
+} from "@/features/settings/services/folderPathsSettings";
+
 export const ManualCloudImportPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ImportTab>("confronto");
 
@@ -54,12 +59,13 @@ export const ManualCloudImportPage: React.FC = () => {
   const [appDbCounts, setAppDbCounts] = useState<CurrentAppDbCounts | null>(null);
   const [isLoadingDbCounts, setIsLoadingDbCounts] = useState<boolean>(false);
 
-  // Percorsi file e cartelle NoManV1
-  const [clientiFolder, setClientiFolder] = useState("D:\\BricoClassFiles\\Offline\\ListiniClienti");
-  const [generalFile, setGeneralFile] = useState("D:\\BricoClassFiles\\Offline\\Listini\\Listini Generali\\LISTINO GENERALE.xlsm");
-  const [variFolder, setVariFolder] = useState("D:\\BricoClassFiles\\Offline\\Listini\\Listini Generali");
-  const [ddtDatiFolder, setDdtDatiFolder] = useState("D:\\BricoClassFiles\\Offline\\Database\\DDTDati");
-  const [ddtArticoliFolder, setDdtArticoliFolder] = useState("D:\\BricoClassFiles\\Offline\\Database\\DDTArticoli");
+  // Percorsi file e cartelle configurabili da Impostazioni -> Parametri Generali
+  const initialPaths = loadFolderPathsConfig();
+  const [clientiFolder, setClientiFolder] = useState(initialPaths.offlineClientiDir);
+  const [generalFile, setGeneralFile] = useState(getOfflineGeneraleFilePath(initialPaths));
+  const [variFolder, setVariFolder] = useState(initialPaths.offlineGeneraliDir);
+  const [ddtDatiFolder, setDdtDatiFolder] = useState(initialPaths.offlineDdtDatiDir);
+  const [ddtArticoliFolder, setDdtArticoliFolder] = useState(initialPaths.offlineDdtArticoliDir);
 
   // Opzioni
   const [ignoreOneDriveConflicts, setIgnoreOneDriveConflicts] = useState(true);

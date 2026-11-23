@@ -2,6 +2,7 @@ use crate::ddt_commands::persist_ddt;
 use crate::ddt_types::DdtSavePayload;
 use crate::quote_persistence::persist_quote;
 use crate::quote_types::QuoteSavePayload;
+use sqlx::{Connection, Sqlite, Transaction};
 use tauri::State;
 use tauri_plugin_sql::DbInstances;
 
@@ -11,14 +12,14 @@ pub async fn save_quote_transaction(
     payload: QuoteSavePayload,
 ) -> Result<(), String> {
     let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+    let mut transaction = connection
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| format!("Impossibile avviare la transazione preventivo: {error}"))?;
 
-    match persist_quote(&mut connection, payload).await {
-        Ok(()) => commit(&mut connection, "preventivo").await,
-        Err(error) => rollback(&mut connection, error, "preventivo").await,
+    match persist_quote(&mut transaction, payload).await {
+        Ok(()) => commit(transaction, "preventivo").await,
+        Err(error) => rollback(transaction, error, "preventivo").await,
     }
 }
 
@@ -30,8 +31,8 @@ pub async fn soft_delete_quote_transaction(
     updated_by: String,
 ) -> Result<(), String> {
     let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+    let mut transaction = connection
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| format!("Impossibile avviare l'archiviazione preventivo: {error}"))?;
 
@@ -43,7 +44,7 @@ pub async fn soft_delete_quote_transaction(
         .bind(&deleted_at)
         .bind(&updated_by)
         .bind(&id)
-        .execute(&mut *connection)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
         if updated.rows_affected() == 0 {
@@ -56,7 +57,7 @@ pub async fn soft_delete_quote_transaction(
         .bind(&deleted_at)
         .bind(&updated_by)
         .bind(&id)
-        .execute(&mut *connection)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
         Ok::<(), String>(())
@@ -64,8 +65,8 @@ pub async fn soft_delete_quote_transaction(
     .await;
 
     match result {
-        Ok(()) => commit(&mut connection, "archiviazione preventivo").await,
-        Err(error) => rollback(&mut connection, error, "archiviazione preventivo").await,
+        Ok(()) => commit(transaction, "archiviazione preventivo").await,
+        Err(error) => rollback(transaction, error, "archiviazione preventivo").await,
     }
 }
 
@@ -83,14 +84,14 @@ pub async fn convert_quote_to_ddt_transaction(
     let updated_at = ddt_payload.updated_at.clone();
     let updated_by = ddt_payload.updated_by.clone();
     let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+    let mut transaction = connection
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| format!("Impossibile avviare la conversione preventivo-DDT: {error}"))?;
 
     let result = async {
-        persist_quote(&mut connection, quote_payload).await?;
-        persist_ddt(&mut connection, ddt_payload).await?;
+        persist_quote(&mut transaction, quote_payload).await?;
+        persist_ddt(&mut transaction, ddt_payload).await?;
         let updated = sqlx::query(
             "UPDATE quotes SET status = 'confermato', converted_ddt_id = ?, updated_at = ?, updated_by = ?, sync_status = 'pending'
              WHERE id = ? AND deleted_at IS NULL",
@@ -99,7 +100,7 @@ pub async fn convert_quote_to_ddt_transaction(
         .bind(&updated_at)
         .bind(&updated_by)
         .bind(&quote_id)
-        .execute(&mut *connection)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
         if updated.rows_affected() == 0 {
@@ -111,37 +112,29 @@ pub async fn convert_quote_to_ddt_transaction(
 
     match result {
         Ok(()) => {
-            commit(&mut connection, "conversione preventivo-DDT").await?;
+            commit(transaction, "conversione preventivo-DDT").await?;
             Ok(ddt_id)
         }
-        Err(error) => rollback(&mut connection, error, "conversione preventivo-DDT")
+        Err(error) => rollback(transaction, error, "conversione preventivo-DDT")
             .await
             .map(|()| ddt_id),
     }
 }
 
-async fn commit(connection: &mut sqlx::SqliteConnection, label: &str) -> Result<(), String> {
-    match sqlx::query("COMMIT").execute(&mut *connection).await {
-        Ok(_) => Ok(()),
-        Err(error) => {
-            let rollback_result = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-            match rollback_result {
-                Ok(_) => Err(format!("Impossibile confermare {label}: {error}")),
-                Err(rollback_error) => Err(format!(
-                    "Impossibile confermare {label}: {error}; rollback fallito: {rollback_error}"
-                )),
-            }
-        }
-    }
+async fn commit(transaction: Transaction<'_, Sqlite>, label: &str) -> Result<(), String> {
+    transaction
+        .commit()
+        .await
+        .map_err(|error| format!("Impossibile confermare {label}: {error}"))
 }
 
 async fn rollback(
-    connection: &mut sqlx::SqliteConnection,
+    transaction: Transaction<'_, Sqlite>,
     error: String,
     label: &str,
 ) -> Result<(), String> {
-    match sqlx::query("ROLLBACK").execute(&mut *connection).await {
-        Ok(_) => Err(error),
+    match transaction.rollback().await {
+        Ok(()) => Err(error),
         Err(rollback_error) => Err(format!(
             "{error}; rollback della {label} fallito: {rollback_error}"
         )),

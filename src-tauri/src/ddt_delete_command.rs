@@ -1,3 +1,4 @@
+use sqlx::Connection;
 use tauri::State;
 use tauri_plugin_sql::DbInstances;
 
@@ -8,8 +9,8 @@ pub async fn soft_delete_ddt_transaction(
     deleted_at: String,
 ) -> Result<(), String> {
     let mut connection = crate::sqlite_utils::acquire_configured_connection(&db_instances).await?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+    let mut transaction = connection
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| format!("Impossibile avviare la transazione DDT: {error}"))?;
 
@@ -20,7 +21,7 @@ pub async fn soft_delete_ddt_transaction(
         )
         .bind(&deleted_at)
         .bind(&id)
-        .execute(&mut *connection)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
 
@@ -34,7 +35,7 @@ pub async fn soft_delete_ddt_transaction(
         )
         .bind(&deleted_at)
         .bind(&id)
-        .execute(&mut *connection)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
 
@@ -43,26 +44,15 @@ pub async fn soft_delete_ddt_transaction(
     .await;
 
     match result {
-        Ok(()) => match sqlx::query("COMMIT").execute(&mut *connection).await {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                let rollback = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-                match rollback {
-                    Ok(_) => Err(format!("Impossibile confermare la transazione DDT: {error}")),
-                    Err(rollback_error) => Err(format!(
-                        "Impossibile confermare la transazione DDT: {error}; rollback fallito: {rollback_error}"
-                    )),
-                }
-            }
+        Ok(()) => transaction
+            .commit()
+            .await
+            .map_err(|error| format!("Impossibile confermare la transazione DDT: {error}")),
+        Err(error) => match transaction.rollback().await {
+            Ok(()) => Err(error),
+            Err(rollback_error) => Err(format!(
+                "{error}; anche il rollback della transazione DDT è fallito: {rollback_error}"
+            )),
         },
-        Err(error) => {
-            let rollback = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-            match rollback {
-                Ok(_) => Err(error),
-                Err(rollback_error) => Err(format!(
-                    "{error}; anche il rollback della transazione DDT è fallito: {rollback_error}"
-                )),
-            }
-        }
     }
 }

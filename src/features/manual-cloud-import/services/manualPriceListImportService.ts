@@ -290,7 +290,7 @@ export function parseCustomerPriceListExcelRow(
 }
 
 export async function scanAndParseClientPriceLists(
-  folderPath: string = "D:\\BricoClassFiles\\Offline\\ListiniClienti",
+  folderPath: string = "",
   ignoreOneDriveConflicts: boolean = true,
   onProgress?: (current: number, total: number, filename: string) => void
 ): Promise<ClientListAnalysisResult> {
@@ -528,8 +528,8 @@ export interface GeneralListAnalysisResult {
 }
 
 export async function scanAndParseGeneralPriceLists(
-  generalFilePath: string = "D:\\BricoClassFiles\\Offline\\Listini\\Listini Generali\\LISTINO GENERALE.xlsm",
-  variFolderPath: string = "D:\\BricoClassFiles\\Offline\\Listini\\Listini Generali",
+  generalFilePath: string = "",
+  variFolderPath: string = "",
   onProgress?: (stage: string, current: number, total: number) => void
 ): Promise<GeneralListAnalysisResult> {
   const rowsGenerale: ParsedListinoGeneraleRow[] = [];
@@ -754,8 +754,8 @@ export interface DdtAnalysisResult {
 }
 
 export async function scanAndParseLocalDdt(
-  datiFolderPath: string = "D:\\BricoClassFiles\\Offline\\Database\\DDTDati",
-  articoliFolderPath: string = "D:\\BricoClassFiles\\Offline\\Database\\DDTArticoli",
+  datiFolderPath: string = "",
+  articoliFolderPath: string = "",
   onProgress?: (stage: string, current: number, total: number) => void
 ): Promise<DdtAnalysisResult> {
   const headerMap = new Map<string, ParsedDdtHeader>();
@@ -833,13 +833,16 @@ export async function scanAndParseLocalDdt(
     errors.push(`Errore cartella DDTDati: ${msg}`);
   }
 
-  // 2. Lettura File Singoli 2026\DDTDati (Aggiorna gli ultimi DDT emessi)
+  // 2. Lettura File Singoli 2026\DDTDati (derivata dalla cartella padre di datiFolderPath)
   try {
-    const dati2026Folder = "D:\\BricoClassFiles\\Offline\\Database\\2026\\DDTDati";
-    const files2026 = await invoke<FileItemInfo[]>("list_files_in_folder", {
-      folderPath: dati2026Folder,
-      extensions: ["csv"],
-    }).catch(() => [] as FileItemInfo[]);
+    const datiParent = datiFolderPath.trim().replace(/[\\/]+$/, "").replace(/[\\/][^\\/]+$/, "");
+    const dati2026Folder = datiParent ? `${datiParent}\\2026\\DDTDati` : "";
+    const files2026 = dati2026Folder
+      ? await invoke<FileItemInfo[]>("list_files_in_folder", {
+          folderPath: dati2026Folder,
+          extensions: ["csv"],
+        }).catch(() => [] as FileItemInfo[])
+      : [];
 
     if (files2026.length > 0) {
       if (onProgress) onProgress("Scansione DDT Recenti 2026", 1, files2026.length);
@@ -958,13 +961,16 @@ export async function scanAndParseLocalDdt(
     errors.push(`Errore cartella DDTArticoli: ${msg}`);
   }
 
-  // 4. Lettura Righe Singole 2026\DDTArticoli (ultimi DDT emessi)
+  // 4. Lettura Righe Singole 2026\DDTArticoli (derivata dalla cartella padre di articoliFolderPath)
   try {
-    const art2026Folder = "D:\\BricoClassFiles\\Offline\\Database\\2026\\DDTArticoli";
-    const filesArt2026 = await invoke<FileItemInfo[]>("list_files_in_folder", {
-      folderPath: art2026Folder,
-      extensions: ["csv"],
-    }).catch(() => [] as FileItemInfo[]);
+    const artParent = articoliFolderPath.trim().replace(/[\\/]+$/, "").replace(/[\\/][^\\/]+$/, "");
+    const art2026Folder = artParent ? `${artParent}\\2026\\DDTArticoli` : "";
+    const filesArt2026 = art2026Folder
+      ? await invoke<FileItemInfo[]>("list_files_in_folder", {
+          folderPath: art2026Folder,
+          extensions: ["csv"],
+        }).catch(() => [] as FileItemInfo[])
+      : [];
 
     if (filesArt2026.length > 0) {
       if (onProgress) onProgress("Scansione Righe Recenti 2026", 1, filesArt2026.length);

@@ -208,11 +208,45 @@ fn list_excel_files_in_folder(folder_path: Option<String>) -> Result<Vec<ExcelFi
     )
 }
 
+fn validate_allowed_file_path(
+    file_path: &str,
+    allowed_extensions: &[&str],
+    label: &str,
+) -> Result<std::path::PathBuf, String> {
+    let trimmed = file_path.trim();
+    if trimmed.is_empty() {
+        return Err(format!("Percorso {label} vuoto non valido"));
+    }
+    let path = std::path::Path::new(trimmed);
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(format!("Percorso {label} con '..' non consentito"));
+        }
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !allowed_extensions.iter().any(|allowed| *allowed == ext) {
+        return Err(format!("Estensione non consentita per {label}: .{ext}"));
+    }
+    if !path.exists() || !path.is_file() {
+        return Err(format!("File {label} non trovato: {trimmed}"));
+    }
+    Ok(path.to_path_buf())
+}
+
 #[tauri::command]
 fn read_single_excel_file_base64(file_path: String) -> Result<String, String> {
     use base64::prelude::*;
+    let path = validate_allowed_file_path(
+        &file_path,
+        &["xls", "xlsx", "xlsm", "csv", "ods"],
+        "Excel/listino",
+    )?;
     let bytes =
-        fs::read(&file_path).map_err(|e| format!("Errore lettura file '{}': {}", file_path, e))?;
+        fs::read(&path).map_err(|e| format!("Errore lettura file '{}': {}", file_path, e))?;
     Ok(BASE64_STANDARD.encode(&bytes))
 }
 
@@ -246,17 +280,21 @@ fn print_ddt_silent(images_bytes: Vec<Vec<u8>>, copies: u32) -> Result<(), Strin
 
     #[cfg(target_os = "windows")]
     {
-        let paths_formatted = file_paths
+        use base64::{engine::general_purpose, Engine as _};
+        let paths_strings: Vec<String> = file_paths
             .iter()
-            .map(|p| format!("'{}'", p.to_string_lossy().replace('\'', "''")))
-            .collect::<Vec<_>>()
-            .join(", ");
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        let paths_json = serde_json::to_string(&paths_strings)
+            .map_err(|e| format!("Errore serializzazione percorsi stampa: {}", e))?;
+        let paths_b64 = general_purpose::STANDARD.encode(&paths_json);
 
         let ps_script = format!(
             r#"
+function _d($s) {{ [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($s)) }}
 Add-Type -AssemblyName System.Drawing
 
-$imagePaths = @({paths_formatted})
+$imagePaths = @(ConvertFrom-Json (_d '{paths_b64}'))
 $copies = {actual_copies}
 
 for ($copyIdx = 1; $copyIdx -le $copies; $copyIdx++) {{
@@ -389,6 +427,18 @@ fn send_email_with_attachments(
     body: String,
     attachments: Vec<String>,
 ) -> Result<(), String> {
+    let mut validated_attachments = Vec::with_capacity(attachments.len());
+    for raw in &attachments {
+        let valid = validate_allowed_file_path(
+            raw,
+            &[
+                "pdf", "xlsx", "xlsm", "xls", "csv", "png", "jpg", "jpeg", "txt", "xml", "p7m",
+            ],
+            "allegato email",
+        )?;
+        validated_attachments.push(valid.to_string_lossy().to_string());
+    }
+
     #[cfg(target_os = "windows")]
     {
         use base64::{engine::general_purpose, Engine as _};
@@ -396,7 +446,7 @@ fn send_email_with_attachments(
         let cc_b64 = general_purpose::STANDARD.encode(cc.unwrap_or_default());
         let subj_b64 = general_purpose::STANDARD.encode(&subject);
         let body_b64 = general_purpose::STANDARD.encode(&body);
-        let att_json = serde_json::to_string(&attachments).unwrap_or_default();
+        let att_json = serde_json::to_string(&validated_attachments).unwrap_or_default();
         let att_b64 = general_purpose::STANDARD.encode(&att_json);
 
         let ps_script = format!(
@@ -581,5 +631,17 @@ mod tests {
 
         let ok = sanitize_safe_output_path(&base, "DDT 12.pdf").expect("valid filename");
         assert_eq!(ok, base.join("DDT 12.pdf"));
+    }
+
+    #[test]
+    fn validate_allowed_file_path_blocks_traversal_and_disallowed_extensions() {
+        assert!(super::validate_allowed_file_path("", &["xlsx"], "test").is_err());
+        assert!(
+            super::validate_allowed_file_path("C:\\tmp\\..\\secret.xlsx", &["xlsx"], "test")
+                .is_err()
+        );
+        assert!(
+            super::validate_allowed_file_path("C:\\tmp\\payload.exe", &["xlsx"], "test").is_err()
+        );
     }
 }

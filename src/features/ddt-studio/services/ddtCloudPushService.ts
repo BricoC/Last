@@ -419,7 +419,7 @@ class DdtCloudPushService {
         if (!baseSnap && JSON.stringify(localSnap) !== JSON.stringify(remoteSnap)) {
           if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("ddt-merge-conflict", {
-              detail: { docId: currentDoc.id, year: currentDoc.year, docNumber: currentDoc.doc_number, conflicts: [] },
+              detail: { docId: currentDoc.id, year: currentDoc.year, docNumber: currentDoc.doc_number, conflicts: [], missingBaseSnapshot: true },
             }));
           }
           return { success: false, docNumber: currentDoc.doc_number, error: "Versione di base DDT assente. Scegli la versione da mantenere." };

@@ -540,6 +540,53 @@ const MIGRATIONS: Migration[] = [
       await db.execute("CREATE TABLE IF NOT EXISTS app_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)");
     },
   },
+  {
+    version: 43, name: "ensure_lazy_backup_and_pull_state_tables",
+    up: async db => {
+      await db.execute(`CREATE TABLE IF NOT EXISTS ddt_logs (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS ddt_sync_snapshots (
+        ddt_id TEXT PRIMARY KEY,
+        remote_ultima_modifica TEXT,
+        snapshot_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS app_users (
+        id TEXT PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        station_name TEXT NOT NULL DEFAULT '',
+        can_access_settings INTEGER NOT NULL DEFAULT 1,
+        can_access_ddt INTEGER NOT NULL DEFAULT 1,
+        can_access_price_lists INTEGER NOT NULL DEFAULT 1,
+        can_edit_price_lists INTEGER NOT NULL DEFAULT 0,
+        can_edit_or_numbers INTEGER NOT NULL DEFAULT 0,
+        is_admin INTEGER NOT NULL DEFAULT 0,
+        allowed_pages TEXT,
+        theme_preset TEXT DEFAULT 'grigio',
+        theme_brightness INTEGER DEFAULT 4,
+        password_hash TEXT DEFAULT '',
+        require_password INTEGER NOT NULL DEFAULT 0,
+        topbar_order TEXT DEFAULT '',
+        created_at TEXT NOT NULL
+      )`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS ddt_pull_state (
+        project_url TEXT PRIMARY KEY, revision TEXT NOT NULL, initialized INTEGER NOT NULL DEFAULT 0
+      )`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS ddt_pull_seen (
+        project_url TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(project_url, id)
+      )`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS ddt_pull_deferred (
+        project_url TEXT NOT NULL, id TEXT NOT NULL, change_json TEXT NOT NULL, PRIMARY KEY(project_url, id)
+      )`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS price_list_pull_state (
+        project_url TEXT NOT NULL, table_name TEXT NOT NULL, revision TEXT NOT NULL,
+        PRIMARY KEY (project_url, table_name)
+      )`);
+    },
+  },
 ];
 
 const BUSY_RETRY_DELAYS_MS = [150, 300, 600, 1200, 2000];

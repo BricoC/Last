@@ -78,8 +78,8 @@ afterAll(() => sqlite.close());
 
 it("keeps one canonical price-list row and downloads revisions older than the local push", async () => {
   sqlite.exec(`
-    CREATE TABLE price_list_pull_state(project_url TEXT,table_name TEXT,revision TEXT,PRIMARY KEY(project_url,table_name));
-    INSERT INTO price_list_pull_state VALUES ('${project}','listino_generale','10'),('${project}','listini_vari','3');
+    CREATE TABLE IF NOT EXISTS price_list_pull_state(project_url TEXT,table_name TEXT,revision TEXT,PRIMARY KEY(project_url,table_name));
+    INSERT OR REPLACE INTO price_list_pull_state VALUES ('${project}','listino_generale','10'),('${project}','listini_vari','3');
     INSERT INTO listino_generale(id,descrizione,sync_revision) VALUES ('local-uuid','Edited locally','a'),('gen_77','Duplicate','');
     UPDATE listino_generale SET sync_revision=NULL WHERE id='gen_77';
   `);
@@ -111,8 +111,8 @@ it("keeps one canonical price-list row and downloads revisions older than the lo
 it("flags missing remote rows even with newer local pending prices", async () => {
   vi.stubGlobal("localStorage", { getItem: () => null });
   sqlite.exec(`
-    CREATE TABLE ddt_pull_state(project_url TEXT PRIMARY KEY,revision TEXT NOT NULL,initialized INTEGER NOT NULL DEFAULT 0);
-    INSERT INTO ddt_pull_state VALUES ('${project}','0',1);
+    CREATE TABLE IF NOT EXISTS ddt_pull_state(project_url TEXT PRIMARY KEY,revision TEXT NOT NULL,initialized INTEGER NOT NULL DEFAULT 0);
+    INSERT OR REPLACE INTO ddt_pull_state VALUES ('${project}','0',1);
     INSERT INTO listino_generale(id,descrizione,updated_at,sync_revision) VALUES('unconfirmed','Pending','2099-01-01','r');
   `);
   fetch.mockImplementation(async (target: string | URL) => {

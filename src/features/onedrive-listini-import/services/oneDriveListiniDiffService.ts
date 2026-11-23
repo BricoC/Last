@@ -12,12 +12,22 @@ import type {
   ListinoClienteRow,
   ListinoGeneraleRow,
 } from "@/features/price-lists/models/priceList";
+import {
+  getOneDriveGeneraleFilePath,
+  loadFolderPathsConfig,
+} from "@/features/settings/services/folderPathsSettings";
 
-export const ONEDRIVE_CLIENTI_DIR = "D:\\BricoClassFiles\\OneDrive\\ListiniClienti";
-export const ONEDRIVE_GENERALE_FILE =
-  "D:\\BricoClassFiles\\OneDrive\\Listini\\Listini Generali\\LISTINO GENERALE.xlsm";
-export const ONEDRIVE_GENERALI_DIR =
-  "D:\\BricoClassFiles\\OneDrive\\Listini\\Listini Generali";
+export function getOneDriveClientiDir(): string {
+  return loadFolderPathsConfig().oneDriveClientiDir;
+}
+
+export function getOneDriveGeneraliDir(): string {
+  return loadFolderPathsConfig().oneDriveGeneraliDir;
+}
+
+export function getOneDriveGeneraleFile(): string {
+  return getOneDriveGeneraleFilePath();
+}
 
 export type DiffStatus = "new" | "updated";
 
@@ -106,9 +116,14 @@ function buildGeneralFallbackKey(
 export async function analyzeOneDriveGeneralLists(
   onProgress?: (stage: string, current: number, total: number) => void
 ): Promise<GeneralOneDriveAnalysis> {
+  const generaleFile = getOneDriveGeneraleFile();
+  const generaliDir = getOneDriveGeneraliDir();
+  if (!generaliDir) {
+    throw new Error("Percorso Cartella Listini Generali non configurato. Impostalo in Impostazioni → Parametri Generali.");
+  }
   const parsedRes = await scanAndParseGeneralPriceLists(
-    ONEDRIVE_GENERALE_FILE,
-    ONEDRIVE_GENERALI_DIR,
+    generaleFile,
+    generaliDir,
     onProgress
   );
 
@@ -257,8 +272,12 @@ function buildClientKey(cliente: string, descrizione: string): string {
 export async function analyzeOneDriveClientLists(
   onProgress?: (current: number, total: number, filename: string) => void
 ): Promise<ClientOneDriveAnalysis> {
+  const clientiDir = getOneDriveClientiDir();
+  if (!clientiDir) {
+    throw new Error("Percorso Cartella Listini Clienti non configurato. Impostalo in Impostazioni → Parametri Generali.");
+  }
   const parsedRes = await scanAndParseClientPriceLists(
-    ONEDRIVE_CLIENTI_DIR,
+    clientiDir,
     true,
     onProgress
   );

@@ -359,14 +359,19 @@ export class AppUserService {
       return rows.map((r) => {
         const isAdmin = Boolean(r.is_admin);
         let allowedPages: string[] = [];
+        let hasExplicitAllowedPages = false;
         try {
-          if (r.allowed_pages) {
-            allowedPages = JSON.parse(r.allowed_pages);
+          if (typeof r.allowed_pages === "string" && r.allowed_pages.trim() !== "") {
+            const parsed = JSON.parse(r.allowed_pages);
+            if (Array.isArray(parsed)) {
+              allowedPages = parsed;
+              hasExplicitAllowedPages = true;
+            }
           }
         } catch {
           allowedPages = [];
         }
-        if (isAdmin || !Array.isArray(allowedPages) || allowedPages.length === 0) {
+        if (isAdmin || !hasExplicitAllowedPages) {
           allowedPages = DEFAULT_ALLOWED_PAGES;
         }
 

@@ -225,6 +225,7 @@ export const DashboardPage: React.FC = () => {
             ...initial,
             isPaid: true,
             sentAt,
+            remoteSynced: true,
           });
         } else if (local?.isPaid) {
           const sentAt = local.sentAt || new Date().toISOString();
@@ -234,8 +235,13 @@ export const DashboardPage: React.FC = () => {
             ...initial,
             isPaid: true,
             sentAt,
+            remoteSynced: false,
           });
-          void saveRemoteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt);
+          void saveRemoteRibaPaid(initial.deadlineKey, initial.deadlineStr, sentAt).then((synced) => {
+            if (mounted && synced) {
+              setRibaInfo((prev) => (prev ? { ...prev, remoteSynced: true } : prev));
+            }
+          });
         } else {
           setRibaInfo({
             ...initial,
@@ -249,9 +255,11 @@ export const DashboardPage: React.FC = () => {
     void checkRiba();
     const onSessionUpdated = () => void checkRiba();
     window.addEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
+    window.addEventListener("online", onSessionUpdated);
     return () => {
       mounted = false;
       window.removeEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
+      window.removeEventListener("online", onSessionUpdated);
     };
   }, []);
 

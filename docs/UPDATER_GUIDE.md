@@ -50,10 +50,10 @@ Tauri 2 utilizza una coppia di chiavi crittografiche asimmetriche (Minisign Ed25
 
 ### B. Chiave Privata (sul tuo PC master)
 - È il "timbro segreto" indispensabile per firmare i pacchetti prima della pubblicazione.
-- **Percorso file sul tuo PC**:
-  `C:\Users\Brico Class\.tauri\last_updater.key`
+- **Percorso file sul tuo PC master**:
+  `%USERPROFILE%\.tauri\last_updater.key`
 - **File della chiave pubblica locale**:
-  `C:\Users\Brico Class\.tauri\last_updater.key.pub`
+  `%USERPROFILE%\.tauri\last_updater.key.pub`
 
 > [!CAUTION]
 > **Non condividere mai la chiave privata e non caricarla sul repository pubblico.**
@@ -71,8 +71,7 @@ La distribuzione degli aggiornamenti è automatizzata al 100% tramite GitHub Act
 3. Clicca su **New repository secret**.
 4. Nome: `SHAK_SIGNING_PRIVATE_KEY` (oppure `TAURI_SIGNING_PRIVATE_KEY`)
 5. Valore: copia e incolla l'intero testo contenuto nel file della tua chiave privata:
-   `D:\BricoClassFiles\OneDrive\Last\File vari\1. Chiavi Firma Updater\last_updater.key`
-   *(oppure da `C:\Users\Brico Class\.tauri\last_updater.key`)*
+   `%USERPROFILE%\.tauri\last_updater.key` (o dalla tua copia sicura aziendale).
 6. Clicca su **Add secret**. Fatto!
 
 ### Procedura per Rilasciare un Nuovo Aggiornamento a Tutti i PC

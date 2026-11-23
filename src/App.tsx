@@ -95,6 +95,15 @@ export function App() {
   useEffect(() => {
     // Applica le variabili CSS del tema Grigio L4 all'avvio dell'applicazione
     applyToDom();
+    // Pre-popola la cache sincrona di project_url all'avvio e dopo ogni aggiornamento config
+    const warmProjectUrl = () => {
+      void import("@/shared/services/supabaseConfigCache")
+        .then(({ resolveActiveSupabaseProjectUrl }) => resolveActiveSupabaseProjectUrl())
+        .catch(() => {});
+    };
+    warmProjectUrl();
+    window.addEventListener("supabase-config-updated", warmProjectUrl);
+    return () => window.removeEventListener("supabase-config-updated", warmProjectUrl);
   }, [applyToDom]);
 
   useEffect(() => {
@@ -146,7 +155,7 @@ export function App() {
         import("@/features/clients/services/clientSyncService").then(({ clientSyncService }) =>
           clientSyncService.syncPendingClientsToSupabase()),
         import("@/features/notes/services/notesSyncService").then(({ notesSyncService }) =>
-          notesSyncService.retryPendingDeletions()),
+          notesSyncService.sync()),
         import("@/features/orders/services/orderSupabaseService").then(({ orderSupabaseService }) =>
           orderSupabaseService.processOfflineQueue()),
         import("@/features/offers/services/offersSyncService").then(({ offersSyncService }) =>

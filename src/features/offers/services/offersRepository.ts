@@ -439,14 +439,15 @@ export class OffersRepository {
    */
   public async deleteOffer(id: string): Promise<void> {
     const db = await getDatabase();
-    const [existing] = await db.select<OfferRecord[]>(
-      "SELECT supabase_id FROM offers WHERE id = $1 UNION ALL SELECT supabase_id FROM offers_trash WHERE id = $1 LIMIT 1", [id],
+    const [existing] = await db.select<Array<{ supabase_id?: number | null; project_url?: string | null }>>(
+      "SELECT supabase_id, project_url FROM offers WHERE id = $1 UNION ALL SELECT supabase_id, project_url FROM offers_trash WHERE id = $1 LIMIT 1", [id],
     );
     if (!existing) return;
+    const projectUrl = existing.project_url ?? getLastKnownSupabaseProjectUrl();
     await applyLocalDatabaseBatch([
       { sql: "DELETE FROM offers WHERE id = $1", params: [id] },
       { sql: "DELETE FROM offers_trash WHERE id = $1", params: [id] },
-      pendingCloudWrite("offers", id, "delete", { remoteId: existing.supabase_id ?? null }),
+      pendingCloudWrite("offers", id, "delete", { remoteId: existing.supabase_id ?? null }, projectUrl),
     ]);
     notifyOffersChanged();
     void offersSyncService.sync().catch(console.warn);

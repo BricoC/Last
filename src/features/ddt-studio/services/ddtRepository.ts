@@ -1,7 +1,8 @@
 import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
-import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
+import { applyLocalDatabaseBatch } from "@/shared/data-layer/localDatabaseBatch";
+import { resolveActiveSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
 import { DdtItem, DdtDocument, DdtArchiveEntry } from "../models/ddt";
 import { calculateDdtTotals, calculateRowAmounts } from "../utils/ddtCalculations";
@@ -239,7 +240,7 @@ export class DdtRepository {
       id,
       deletedAt: new Date().toISOString(),
     });
-    const projectUrl = getLastKnownSupabaseProjectUrl();
+    const projectUrl = await resolveActiveSupabaseProjectUrl();
     if (projectUrl) {
       await db.execute(
         `UPDATE ddt_documents
@@ -361,28 +362,34 @@ export class DdtRepository {
 
     // 1. Ripristino forzato come Bozza
     if (mode === "draft" || doc.doc_number == null || doc.status === "bozza") {
-      await db.execute(
-        `UPDATE ddt_documents SET doc_number = NULL, status = 'bozza', deleted_at = NULL, updated_at = $1, cloud_restore_requested = 1, sync_status = 'pending' WHERE id = $2`,
-        [now, id]
-      );
-      await db.execute(
-        `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2`,
-        [now, id]
-      );
+      await applyLocalDatabaseBatch([
+        {
+          sql: `UPDATE ddt_documents SET doc_number = NULL, status = 'bozza', deleted_at = NULL, updated_at = $1, cloud_restore_requested = 1, sync_status = 'pending' WHERE id = $2 AND deleted_at = $3`,
+          params: [now, id, doc.deleted_at],
+          expectedRows: 1,
+        },
+        {
+          sql: `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2 AND deleted_at = $3`,
+          params: [now, id, doc.deleted_at],
+        },
+      ]);
       return { success: true, restoredAs: "bozza", docNumber: null, year: doc.year };
     }
 
     // 2. Ripristino forzato con Assegnazione Nuovo Numero
     if (mode === "new_number") {
       const nextNum = await this.getNextDocNumberWithCloud(doc.year);
-      await db.execute(
-        `UPDATE ddt_documents SET doc_number = $1, status = 'confermato', deleted_at = NULL, updated_at = $2, cloud_restore_requested = 1, sync_status = 'pending' WHERE id = $3`,
-        [nextNum, now, id]
-      );
-      await db.execute(
-        `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2`,
-        [now, id]
-      );
+      await applyLocalDatabaseBatch([
+        {
+          sql: `UPDATE ddt_documents SET doc_number = $1, status = 'confermato', deleted_at = NULL, updated_at = $2, cloud_restore_requested = 1, sync_status = 'pending' WHERE id = $3 AND deleted_at = $4`,
+          params: [nextNum, now, id, doc.deleted_at],
+          expectedRows: 1,
+        },
+        {
+          sql: `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2 AND deleted_at = $3`,
+          params: [now, id, doc.deleted_at],
+        },
+      ]);
       notifyDdtUpdated();
       void ddtCloudPushService.pushDdtById(id, { reassignNumberOnConflict: true }).catch(() => {});
       return { success: true, restoredAs: "new_number", docNumber: nextNum, year: doc.year };
@@ -407,14 +414,17 @@ export class DdtRepository {
     }
 
     // Numero originale libero: ripristina normalmente
-    await db.execute(
-      `UPDATE ddt_documents SET deleted_at = NULL, updated_at = $1, cloud_restore_requested = 1, sync_status = 'pending' WHERE id = $2`,
-      [now, id]
-    );
-    await db.execute(
-      `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2`,
-      [now, id]
-    );
+    await applyLocalDatabaseBatch([
+      {
+        sql: `UPDATE ddt_documents SET deleted_at = NULL, updated_at = $1, cloud_restore_requested = 1, sync_status = 'pending' WHERE id = $2 AND deleted_at = $3`,
+        params: [now, id, doc.deleted_at],
+        expectedRows: 1,
+      },
+      {
+        sql: `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2 AND deleted_at = $3`,
+        params: [now, id, doc.deleted_at],
+      },
+    ]);
     notifyDdtUpdated();
     void ddtCloudPushService.pushDdtById(id, { reassignNumberOnConflict: false }).catch(() => {});
     return { success: true, restoredAs: "original", docNumber: doc.doc_number, year: doc.year };
@@ -646,7 +656,7 @@ export class DdtRepository {
       items: itemPayloads,
     };
 
-    const activeProjectUrl = getLastKnownSupabaseProjectUrl();
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
 
     await invoke("save_ddt_transaction", { payload });
     if (activeProjectUrl) {

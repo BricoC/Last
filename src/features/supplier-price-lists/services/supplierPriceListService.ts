@@ -26,16 +26,16 @@ export interface SyncProgressCallback {
   }): void;
 }
 
-const STORAGE_KEY_FOLDER = "last_supplier_price_list_folder";
-const DEFAULT_FOLDER = "D:\\BricoClassFiles\\OneDrive\\Last\\Listini Fornitori";
+import { loadFolderPathsConfig, saveFolderPathsConfig } from "@/features/settings/services/folderPathsSettings";
 
 export class SupplierPriceListService {
   public static getFolderPath(): string {
-    return localStorage.getItem(STORAGE_KEY_FOLDER) || DEFAULT_FOLDER;
+    return loadFolderPathsConfig().supplierPriceListsDir;
   }
 
   public static setFolderPath(path: string): void {
-    localStorage.setItem(STORAGE_KEY_FOLDER, path.trim());
+    const current = loadFolderPathsConfig();
+    saveFolderPathsConfig({ ...current, supplierPriceListsDir: path.trim() });
   }
 
   /**
@@ -132,11 +132,7 @@ export class SupplierPriceListService {
       return !fn.startsWith("~$") && !fn.startsWith(".") && fn.length > 5;
     });
 
-    if (validFiles.length === 0) {
-      return { updatedFiles: 0, totalItems: 0, skippedFiles: 0, deletedFiles: 0 };
-    }
-
-    // Recupera file già indicizzati nel DB SQLite
+    // Recupera file già indicizzati nel DB SQLite (eseguiamo la pulizia anche se la cartella è stata svuotata)
     const existingDbFiles = await db.select<SupplierPriceListFile[]>(
       "SELECT id, filename, file_size, last_modified_ms FROM supplier_price_list_files"
     );

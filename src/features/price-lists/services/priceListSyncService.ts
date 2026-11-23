@@ -562,7 +562,7 @@ export class PriceListSyncService {
       for (const r of rows) {
         const localId = r.id;
         const revision = r.sync_revision;
-        const isNew = localId.startsWith("new_");
+        const isNew = localId.startsWith("new_") || !/^cli_\d+$/.test(localId);
         const updatedAt = new Date().toISOString();
         const payload = clientPriceListPayload(r, updatedAt);
 
@@ -791,7 +791,13 @@ export class PriceListSyncService {
       ]);
 
       if ((!rawGen || rawGen.length === 0) && (!rawVar || rawVar.length === 0)) {
-        return { updatedCount: 0, updatedRows: [] };
+        const removedGen = await this.reconcileRemotePriceListDeletions(
+          creds, db, "listino_generale", "listino_generale", "gen_", "listino_generale"
+        );
+        const removedVar = await this.reconcileRemotePriceListDeletions(
+          creds, db, "listini_vari", "listino_generale", "var_", "listini_vari"
+        );
+        return { updatedCount: removedGen + removedVar, updatedRows: [] };
       }
 
       const rowsToUpsert: ListinoGeneraleRow[] = [
@@ -859,11 +865,18 @@ export class PriceListSyncService {
         ...priceListPullWrites(creds.projectUrl, [["listino_generale", rawGen], ["listini_vari", rawVar]]),
       ]);
 
+      const removedGen = await this.reconcileRemotePriceListDeletions(
+        creds, db, "listino_generale", "listino_generale", "gen_", "listino_generale"
+      );
+      const removedVar = await this.reconcileRemotePriceListDeletions(
+        creds, db, "listini_vari", "listino_generale", "var_", "listini_vari"
+      );
+
       const updatedRows = await db.select<ListinoGeneraleRow[]>(
         "SELECT * FROM listino_generale WHERE id IN (SELECT value FROM json_each($1))",
         [JSON.stringify(rowsToUpsert.map((row) => row.id))]
       );
-      return { updatedCount: updatedRows.length, updatedRows };
+      return { updatedCount: updatedRows.length + removedGen + removedVar, updatedRows };
     } catch (err: any) {
       console.warn("[PriceListSyncService] Sincronizzazione incrementale non riuscita (modalità offline):", err);
       return { updatedCount: 0, updatedRows: [], error: err?.message || String(err) };
@@ -892,7 +905,10 @@ export class PriceListSyncService {
       );
 
       if (!rawClienti || rawClienti.length === 0) {
-        return { updatedCount: 0, updatedRows: [] };
+        const removedCli = await this.reconcileRemotePriceListDeletions(
+          creds, db, "listini_clienti", "listini_clienti", "cli_"
+        );
+        return { updatedCount: removedCli, updatedRows: [] };
       }
 
       const rowsToUpsert: ListinoClienteRow[] = rawClienti.map(mapSupabaseClientRow);
@@ -904,14 +920,89 @@ export class PriceListSyncService {
         ...priceListPullWrites(creds.projectUrl, [["listini_clienti", rawClienti]]),
       ]);
 
+      const removedCli = await this.reconcileRemotePriceListDeletions(
+        creds, db, "listini_clienti", "listini_clienti", "cli_"
+      );
+
       const updatedRows = await db.select<ListinoClienteRow[]>(
         "SELECT * FROM listini_clienti WHERE id IN (SELECT value FROM json_each($1))",
         [JSON.stringify(rowsToUpsert.map((row) => row.id))]
       );
-      return { updatedCount: updatedRows.length, updatedRows };
+      return { updatedCount: updatedRows.length + removedCli, updatedRows };
     } catch (err: any) {
       console.warn("[PriceListSyncService] Sincronizzazione incrementale clienti fallita:", err);
       return { updatedCount: 0, updatedRows: [], error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Riconciliazione leggera delle eliminazioni remote sui listini:
+   * - Esegue una query 1-riga con `Prefer: count=exact` (~100 byte).
+   * - Solo se il DB locale ha più righe sincronizzate rispetto al conteggio cloud, scarica i soli `id`
+   *   e rimuove le righe `sync_revision IS NULL` non più presenti su Supabase.
+   */
+  private async reconcileRemotePriceListDeletions(
+    creds: { projectUrl: string; anonKey: string },
+    db: Awaited<ReturnType<typeof getDatabase>>,
+    cloudTable: "listino_generale" | "listini_vari" | "listini_clienti",
+    localTable: "listino_generale" | "listini_clienti",
+    idPrefix: "gen_" | "var_" | "cli_",
+    sourceTableFilter?: "listino_generale" | "listini_vari",
+  ): Promise<number> {
+    try {
+      const countRes = await supabaseFetch(
+        `${creds.projectUrl}/rest/v1/${cloudTable}?select=id&limit=1`,
+        { headers: buildAuthHeaders(creds.anonKey, { Prefer: "count=exact" }) },
+      );
+      if (!countRes.ok) return 0;
+      const rangeHeader = countRes.headers.get("content-range");
+      const totalMatch = rangeHeader?.match(/\/(\d+)$/);
+      if (!totalMatch) return 0;
+      const remoteTotal = Number(totalMatch[1]);
+      if (!Number.isFinite(remoteTotal)) return 0;
+
+      const whereSource = sourceTableFilter ? " AND source_table = $1" : "";
+      const countParams = sourceTableFilter ? [sourceTableFilter] : [];
+      const [localCountRow] = await db.select<{ cnt: number }[]>(
+        `SELECT COUNT(*) as cnt FROM ${localTable} WHERE sync_revision IS NULL AND id LIKE '${idPrefix}%'${whereSource}`,
+        countParams,
+      );
+      const localSyncedCount = Number(localCountRow?.cnt ?? 0);
+      if (localSyncedCount <= remoteTotal) return 0;
+
+      const remoteIds = new Set<string>();
+      const PAGE_SIZE = 1000;
+      for (let offset = 0; ; offset += PAGE_SIZE) {
+        const res = await supabaseFetch(
+          `${creds.projectUrl}/rest/v1/${cloudTable}?select=id&order=id.asc&limit=${PAGE_SIZE}&offset=${offset}`,
+          { headers: buildAuthHeaders(creds.anonKey) },
+        );
+        if (!res.ok) return 0;
+        const page = (await res.json()) as Array<{ id: number | string }>;
+        if (!Array.isArray(page) || page.length === 0) break;
+        for (const r of page) {
+          if (r?.id != null) remoteIds.add(`${idPrefix}${r.id}`);
+        }
+        if (page.length < PAGE_SIZE) break;
+      }
+      if (remoteIds.size !== remoteTotal) return 0;
+
+      const localRows = await db.select<{ id: string }[]>(
+        `SELECT id FROM ${localTable} WHERE sync_revision IS NULL AND id LIKE '${idPrefix}%'${whereSource}`,
+        countParams,
+      );
+      const staleIds = localRows.map((r) => r.id).filter((id) => !remoteIds.has(id));
+      if (staleIds.length === 0) return 0;
+
+      await applyLocalDatabaseBatch(
+        staleIds.map((id) => ({
+          sql: `DELETE FROM ${localTable} WHERE id = $1 AND sync_revision IS NULL`,
+          params: [id],
+        })),
+      );
+      return staleIds.length;
+    } catch {
+      return 0;
     }
   }
 }

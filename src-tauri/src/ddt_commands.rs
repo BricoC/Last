@@ -161,7 +161,7 @@ pub(crate) async fn persist_ddt(
     };
 
     if existing {
-        sqlx::query(
+        let updated = sqlx::query(
             "UPDATE ddt_documents SET doc_number = $1, year = $2, series = $3, doc_date = $4, status = $5,
              client_id = $6, client_name = $7, client_address = $8, client_city = $9, client_vat = $10,
              client_fiscal_code = $11, client_sdi = $12, client_phones_json = $13, destination_name = $14,
@@ -170,7 +170,7 @@ pub(crate) async fn persist_ddt(
              carriage_terms = $23, packages_count = $24, weight_kg = $25, carrier = $26, pickup_date_time = $27,
              internal_notes = $28, total_taxable_subunits = $29, total_vat_subunits = $30,
              total_document_subunits = $31, updated_at = $32, updated_by = $33, sync_status = 'pending'
-             WHERE id = $34",
+             WHERE id = $34 AND deleted_at IS NULL",
         )
         .bind(payload.doc_number)
         .bind(payload.year)
@@ -209,6 +209,11 @@ pub(crate) async fn persist_ddt(
         .execute(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
+        if updated.rows_affected() == 0 {
+            return Err(
+                "Il DDT risulta eliminato nel cestino e non può essere salvato.".to_string(),
+            );
+        }
     } else {
         sqlx::query(
             "INSERT INTO ddt_documents (

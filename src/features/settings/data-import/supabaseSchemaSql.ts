@@ -54,17 +54,15 @@ CREATE TABLE IF NOT EXISTS public.ddt (
   prezzo_acquisto_totale NUMERIC DEFAULT 0,
   ricavo NUMERIC DEFAULT 0,
   ricarico_totale NUMERIC DEFAULT 0,
-  sconto_totale NUMERIC DEFAULT 0
+  sconto_totale NUMERIC DEFAULT 0,
+  deleted_at TIMESTAMPTZ
 );
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'ddt_anno_numero_uniq'
-  ) THEN
-    ALTER TABLE public.ddt ADD CONSTRAINT ddt_anno_numero_uniq UNIQUE (anno, numero);
-  END IF;
-END $$;
+ALTER TABLE public.ddt ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE public.ddt DROP CONSTRAINT IF EXISTS ddt_anno_numero_uniq;
+CREATE UNIQUE INDEX IF NOT EXISTS ddt_anno_numero_active_uniq
+  ON public.ddt (anno, numero)
+  WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_ddt_anno_numero ON public.ddt (anno, numero);
 CREATE INDEX IF NOT EXISTS idx_ddt_ultima_modifica ON public.ddt (ultima_modifica);

@@ -65,28 +65,60 @@ pub fn get_default_desktop_folder() -> Result<String, String> {
     Ok(String::new())
 }
 
+fn validate_file_path_with_extensions(
+    file_path: &str,
+    allowed_extensions: &[&str],
+    label: &str,
+) -> Result<std::path::PathBuf, String> {
+    let trimmed = file_path.trim();
+    if trimmed.is_empty() {
+        return Err(format!("Percorso {label} vuoto non valido"));
+    }
+    let path = Path::new(trimmed);
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(format!(
+                "Percorso {label} con traversal '..' non consentito"
+            ));
+        }
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !allowed_extensions.iter().any(|allowed| *allowed == ext) {
+        return Err(format!(
+            "Estensione file non consentita per {label}: .{ext}"
+        ));
+    }
+    Ok(path.to_path_buf())
+}
+
 /// Apre la finestra di dialogo nativa Windows per selezionare una cartella
 #[tauri::command]
 pub fn select_folder_dialog(default_path: Option<String>) -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
     {
-        let initial_folder = default_path.unwrap_or_default().replace('\'', "''");
+        use base64::{engine::general_purpose, Engine as _};
+        let initial_b64 = general_purpose::STANDARD.encode(default_path.unwrap_or_default());
         let ps_script = format!(
             r#"
+            function _d($s) {{ [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($s)) }}
             Add-Type -AssemblyName System.Windows.Forms
             $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
             $dialog.Description = "Seleziona la cartella per i backup di Last"
             $dialog.ShowNewFolderButton = $true
-            if ('{}' -ne '' -and (Test-Path '{}')) {{
-                $dialog.SelectedPath = '{}'
+            $initialFolder = _d '{initial_b64}'
+            if ($initialFolder -ne '' -and (Test-Path -LiteralPath $initialFolder -PathType Container)) {{
+                $dialog.SelectedPath = $initialFolder
             }}
             $res = $dialog.ShowDialog()
             if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
                 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
                 Write-Output $dialog.SelectedPath
             }}
-            "#,
-            initial_folder, initial_folder, initial_folder
+            "#
         );
 
         let mut cmd = Command::new("powershell");
@@ -167,15 +199,21 @@ pub fn open_folder_in_explorer(folder_path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let path = Path::new(&folder_path);
-        if !path.exists() {
+        if !path.exists() || !path.is_dir() {
             return Err(format!(
-                "La cartella specificata non esiste: {}",
+                "La cartella specificata non esiste o non è una directory: {}",
                 folder_path
             ));
         }
 
+        let canonical =
+            fs::canonicalize(path).map_err(|e| format!("Percorso cartella non valido: {}", e))?;
+        if !canonical.is_dir() {
+            return Err("Il percorso indicato non è una directory valida.".to_string());
+        }
+
         let mut cmd = Command::new("explorer");
-        cmd.arg(&folder_path);
+        cmd.arg(&canonical);
         cmd.spawn()
             .map_err(|e| format!("Impossibile aprire Esplora Risorse: {}", e))?;
         Ok(())
@@ -189,39 +227,43 @@ pub fn open_folder_in_explorer(folder_path: String) -> Result<(), String> {
 /// Scrive un pacchetto di backup testuale (JSON / .lastbackup)
 #[tauri::command]
 pub fn write_backup_file(file_path: String, content: String) -> Result<u64, String> {
-    let path = Path::new(&file_path);
+    let path = validate_file_path_with_extensions(&file_path, &["lastbackup", "json"], "backup")?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Errore creazione cartella di destinazione: {}", e))?;
     }
-    fs::write(path, content.as_bytes())
+    fs::write(&path, content.as_bytes())
         .map_err(|e| format!("Errore scrittura file backup: {}", e))?;
-    let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let len = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
 }
 
 /// Scrive un file binario (es. Excel .xlsx) nella cartella scelta dall'utente
 #[tauri::command]
 pub fn write_binary_file(file_path: String, bytes: Vec<u8>) -> Result<u64, String> {
-    let path = Path::new(&file_path);
+    let path = validate_file_path_with_extensions(
+        &file_path,
+        &["xlsx", "xlsm", "xls", "pdf", "csv"],
+        "esportazione",
+    )?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Errore creazione cartella di destinazione: {}", e))?;
     }
-    fs::write(path, &bytes).map_err(|e| format!("Errore scrittura file binario: {}", e))?;
-    let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    fs::write(&path, &bytes).map_err(|e| format!("Errore scrittura file binario: {}", e))?;
+    let len = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
 }
 
 /// Legge il contenuto testuale di un file di backup
 #[tauri::command]
 pub fn read_backup_file(file_path: String) -> Result<String, String> {
-    let path = Path::new(&file_path);
-    if !path.exists() {
+    let path = validate_file_path_with_extensions(&file_path, &["lastbackup", "json"], "backup")?;
+    if !path.exists() || !path.is_file() {
         return Err(format!("File non trovato: {}", file_path));
     }
     let content =
-        fs::read_to_string(path).map_err(|e| format!("Errore lettura file di backup: {}", e))?;
+        fs::read_to_string(&path).map_err(|e| format!("Errore lettura file di backup: {}", e))?;
     Ok(content)
 }
 
@@ -440,9 +482,13 @@ pub fn clean_old_backups(folder_path: String, keep_count: usize) -> Result<usize
 /// Elimina un singolo file di backup
 #[tauri::command]
 pub fn delete_backup_file(file_path: String) -> Result<(), String> {
-    let path = Path::new(&file_path);
+    let path = validate_file_path_with_extensions(
+        &file_path,
+        &["lastbackup", "json", "db"],
+        "eliminazione backup",
+    )?;
     if path.exists() && path.is_file() {
-        fs::remove_file(path).map_err(|e| format!("Errore eliminazione file: {}", e))?;
+        fs::remove_file(&path).map_err(|e| format!("Errore eliminazione file: {}", e))?;
     }
     Ok(())
 }

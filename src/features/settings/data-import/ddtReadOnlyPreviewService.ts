@@ -113,7 +113,13 @@ export function mapHeaderForLocal(header: CloudHeader): LocalImportHeader {
   }).filter((phone) => phone.numero.trim());
   return {
     id: header.id, docNumber: Number(header.numero), year: Number(header.anno), series: "",
-    docDate: header.data || `${header.anno}-01-01`, status: (header.stato || "").toLowerCase() === "confermato" ? "confermato" : "bozza",
+    docDate: header.data || `${header.anno}-01-01`,
+    status: (() => {
+      const s = (header.stato || "").trim().toLowerCase();
+      if (s === "confermato") return "confermato";
+      if (s === "annullato") return "annullato";
+      return "bozza";
+    })(),
     clientName: header.cliente?.trim() || "Cliente", clientAddress: header.indirizzo || null, clientCity: header.citta || null,
     clientVat: header.piva || null, clientFiscalCode: header.cod_fiscale || null, clientSdi: header.sdi || null,
     clientPhonesJson: JSON.stringify(clientPhones), destinationName: header.destinazione || null,

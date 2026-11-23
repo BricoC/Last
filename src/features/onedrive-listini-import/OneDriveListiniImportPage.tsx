@@ -11,9 +11,9 @@ import {
   Users,
 } from "lucide-react";
 import {
-  ONEDRIVE_CLIENTI_DIR,
-  ONEDRIVE_GENERALE_FILE,
-  ONEDRIVE_GENERALI_DIR,
+  getOneDriveClientiDir,
+  getOneDriveGeneraleFile,
+  getOneDriveGeneraliDir,
   analyzeOneDriveClientLists,
   analyzeOneDriveGeneralLists,
   importOneDriveClientDiffItems,
@@ -256,12 +256,21 @@ export const OneDriveListiniImportPage: React.FC = () => {
         <div className="text-[var(--muted-foreground)] truncate">
           {activeTab === "generale" ? (
             <span>
-              Sorgente (sola lettura): <code className="text-[var(--foreground)]">{ONEDRIVE_GENERALE_FILE}</code> +{" "}
-              <code className="text-[var(--foreground)]">{ONEDRIVE_GENERALI_DIR}</code>
+              Sorgente (sola lettura):{" "}
+              <code className="text-[var(--foreground)]">
+                {getOneDriveGeneraleFile() || "Non configurato (Impostazioni → Parametri Generali)"}
+              </code>{" "}
+              +{" "}
+              <code className="text-[var(--foreground)]">
+                {getOneDriveGeneraliDir() || "Non configurato"}
+              </code>
             </span>
           ) : (
             <span>
-              Sorgente (sola lettura): <code className="text-[var(--foreground)]">{ONEDRIVE_CLIENTI_DIR}</code>
+              Sorgente (sola lettura):{" "}
+              <code className="text-[var(--foreground)]">
+                {getOneDriveClientiDir() || "Non configurato (Impostazioni → Parametri Generali)"}
+              </code>
             </span>
           )}
         </div>

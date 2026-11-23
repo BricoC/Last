@@ -420,7 +420,6 @@ export class OrderSupabaseService {
     } as const;
     for (const targetId of targets) {
       const hasRemoteOrInsert = this.cleanId(targetId) !== null || this.hasQueuedOrder(targetId);
-      if (hasRemoteOrInsert) this.enqueueOffline({ id: crypto.randomUUID(), targetId, action, payload, timestamp });
       const storedId = targetId.startsWith("ord_") ? targetId : `ord_${targetId}`;
       if (action === "permanent_delete") {
         await db.execute("DELETE FROM orders WHERE id IN ($1,$2) OR supabase_id = $1", [targetId, storedId]);
@@ -432,6 +431,7 @@ export class OrderSupabaseService {
           [value, timestamp, targetId, storedId],
         );
       }
+      if (hasRemoteOrInsert) this.enqueueOffline({ id: crypto.randomUUID(), targetId, action, payload, timestamp });
     }
     if (targets.size) await this.processOfflineQueue();
     return true;
@@ -967,11 +967,12 @@ export class OrderSupabaseService {
       writes.push({ sql: "DELETE FROM orders WHERE id = $1", params: [previousLocalId] });
     }
 
+    const orderProjectUrl = getLastKnownSupabaseProjectUrl();
     writes.push({ sql: `INSERT INTO orders (
         id, supabase_id, order_date, supplier_name, article_code, description,
         quantity, price, ordered_date, notes, user_name, is_archived, is_deleted,
-        highlights, created_at, updated_at, sync_status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        highlights, created_at, updated_at, sync_status, project_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       ON CONFLICT(id) DO UPDATE SET
         supabase_id = excluded.supabase_id,
         order_date = excluded.order_date,
@@ -987,7 +988,8 @@ export class OrderSupabaseService {
         is_deleted = excluded.is_deleted,
         highlights = excluded.highlights,
         updated_at = excluded.updated_at,
-        sync_status = excluded.sync_status`,
+        sync_status = excluded.sync_status,
+        project_url = COALESCE(orders.project_url, excluded.project_url)`,
       params: [
         localId,
         item.supabase_id ? String(item.supabase_id) : null,
@@ -1006,6 +1008,7 @@ export class OrderSupabaseService {
         item.created_at || now,
         item.updated_at || now,
         item.sync_status || "synced",
+        orderProjectUrl,
       ],
     });
     await applyLocalDatabaseBatch(writes);
@@ -1143,7 +1146,7 @@ export class OrderSupabaseService {
       try {
         const fallbackQueries = [
           "SELECT DISTINCT supplier_name as name FROM orders WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != ''",
-          "SELECT DISTINCT fornitore as name FROM listino_articoli WHERE fornitore IS NOT NULL AND TRIM(fornitore) != ''",
+          "SELECT DISTINCT fornitore as name FROM listino_generale WHERE fornitore IS NOT NULL AND TRIM(fornitore) != ''",
           "SELECT DISTINCT supplier_name as name FROM supplier_invoices WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != ''",
         ];
         for (const q of fallbackQueries) {

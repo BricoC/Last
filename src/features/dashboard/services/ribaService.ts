@@ -11,6 +11,7 @@ export interface RibaDeadlineInfo {
   daysToDeadline: number;
   isPaid: boolean;
   sentAt?: string;
+  remoteSynced?: boolean;
 }
 
 export interface SupabaseConfig {

@@ -4,9 +4,9 @@ import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/l
 import { invoke } from "@tauri-apps/api/core";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
 import {
-  getLastKnownSupabaseProjectUrl,
   matchesActiveSupabaseProject,
   normalizeSupabaseProjectUrl,
+  resolveActiveSupabaseProjectUrl,
 } from "@/shared/services/supabaseConfigCache";
 import { parseInvoiceXmlAll, ParsedInvoiceResult } from "./invoiceXmlParser";
 
@@ -476,7 +476,7 @@ export class ElectronicInvoicesService {
           invoice.bank_name || null,
           invoice.file_name || null,
           invoice.notes || null,
-          getLastKnownSupabaseProjectUrl(),
+          await resolveActiveSupabaseProjectUrl(),
           issuer,
         ],
       });

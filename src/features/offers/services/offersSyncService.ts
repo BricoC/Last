@@ -253,24 +253,36 @@ export class OffersSyncService {
         pushed++;
       }
 
-      // 2. PULL: Scarica le offerte remote e aggiorna la copia locale
-      const pullUrl = new URL(
-        `/rest/v1/offerte?select=*&order=id.desc&limit=${REMOTE_PULL_LIMIT}`,
-        creds.projectUrl
-      );
-      const pullRes = await supabaseFetch(pullUrl.toString(), {
-        headers: {
-          apikey: creds.anonKey,
-          Prefer: "count=exact",
-        },
-      });
+      // 2. PULL: Scarica tutte le offerte remote con paginazione completa
+      const remoteList: RemoteOfferRow[] = [];
+      let expectedRemoteTotal: number | null = null;
+      for (let offset = 0; ; offset += REMOTE_PULL_LIMIT) {
+        const pullUrl = new URL(
+          `/rest/v1/offerte?select=*&order=id.asc&limit=${REMOTE_PULL_LIMIT}&offset=${offset}`,
+          creds.projectUrl
+        );
+        const pullRes = await supabaseFetch(pullUrl.toString(), {
+          headers: {
+            apikey: creds.anonKey,
+            Prefer: "count=exact",
+          },
+        });
 
-      if (!pullRes.ok) {
-        const errBody = (await pullRes.json().catch(() => ({}))) as { message?: string };
-        throw new Error(`Errore lettura Supabase: ${errBody?.message || pullRes.statusText || pullRes.status}`);
+        if (!pullRes.ok) {
+          const errBody = (await pullRes.json().catch(() => ({}))) as { message?: string };
+          throw new Error(`Errore lettura Supabase: ${errBody?.message || pullRes.statusText || pullRes.status}`);
+        }
+
+        const rangeHeader = pullRes.headers.get("content-range");
+        const parsedTotal = rangeHeader ? Number(rangeHeader.split("/").pop()) : NaN;
+        if (Number.isFinite(parsedTotal)) expectedRemoteTotal = parsedTotal;
+
+        const page = (await pullRes.json()) as RemoteOfferRow[];
+        if (!Array.isArray(page) || page.length === 0) break;
+        remoteList.push(...page);
+        if (page.length < REMOTE_PULL_LIMIT) break;
+        if (expectedRemoteTotal !== null && remoteList.length >= expectedRemoteTotal) break;
       }
-
-      const remoteList = (await pullRes.json()) as RemoteOfferRow[];
 
       if (Array.isArray(remoteList)) {
         const remoteIds = new Set<number>();
@@ -352,8 +364,7 @@ export class OffersSyncService {
         }
 
         // Se abbiamo ricevuto l'elenco completo, rimuovi localmente i record synced eliminati da altri PC
-        const total = pullRes.headers.get("content-range")?.match(/\/(\d+)$/)?.[1];
-        if (total !== undefined && Number(total) === remoteList.length && remoteIds.size === remoteList.length) {
+        if (expectedRemoteTotal !== null && expectedRemoteTotal === remoteList.length && remoteIds.size === remoteList.length) {
           const localSynced = await db.select<{ id: string; supabase_id: number | null }[]>(
             `SELECT id, supabase_id FROM offers WHERE supabase_id IS NOT NULL AND sync_status = 'synced' AND project_url = $1`,
             [activeProjectUrl]

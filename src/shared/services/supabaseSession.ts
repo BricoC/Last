@@ -120,11 +120,10 @@ function createSessionConnection(projectUrl: string, anonKey: string, email: str
 async function persistStationSession(
   projectUrl: string,
   email: string,
-  password: string,
   refreshToken: string,
 ): Promise<void> {
   await invoke("save_supabase_station_session", {
-    session: { projectUrl, email, password, refreshToken },
+    session: { projectUrl, email, password: "", refreshToken },
   }).catch(() => {});
 }
 
@@ -132,7 +131,6 @@ async function activateConnection(
   connection: Connection,
   session: Session,
   resolvedEmail: string,
-  password: string,
   attempt: number,
   shouldPersist: boolean,
 ): Promise<void> {
@@ -141,13 +139,11 @@ async function activateConnection(
   connection.email = resolvedEmail;
   connected = connection;
 
-  let latestPassword = password;
   const { data: { subscription } } = connection.client.auth.onAuthStateChange((event, nextSession) => {
     if (event === "TOKEN_REFRESHED" && nextSession?.refresh_token && connected === connection) {
       void persistStationSession(
         connection.projectUrl,
         connection.email,
-        latestPassword,
         nextSession.refresh_token,
       );
     }
@@ -169,7 +165,6 @@ async function activateConnection(
     await persistStationSession(
       connection.projectUrl,
       resolvedEmail,
-      password,
       session.refresh_token ?? "",
     );
   }
@@ -192,7 +187,6 @@ export async function connectSupabase(email: string, password: string) {
       connection,
       data.session,
       data.user.email ?? email,
-      password,
       attempt,
       true,
     );
@@ -222,7 +216,7 @@ export async function restoreSupabaseSession(): Promise<boolean> {
     try {
       let session: Session | null = null;
       let resolvedEmail = saved.email;
-      let shouldPersistRefresh = false;
+      let shouldPersistRefresh = Boolean(saved.password);
 
       if (saved.refreshToken && typeof connection.client.auth.refreshSession === "function") {
         const refreshed = await connection.client.auth
@@ -231,12 +225,13 @@ export async function restoreSupabaseSession(): Promise<boolean> {
         if (refreshed && !refreshed.error && refreshed.data?.session && !refreshed.data.user?.is_anonymous) {
           session = refreshed.data.session;
           resolvedEmail = refreshed.data.user?.email ?? saved.email;
-          shouldPersistRefresh = Boolean(
+          shouldPersistRefresh = shouldPersistRefresh || Boolean(
             session.refresh_token && session.refresh_token !== saved.refreshToken,
           );
         }
       }
 
+      // Migrazione one-shot da blob legacy v0.3.5: se esiste ancora la password, usa un ultimo login e poi rimuovila dal disco.
       if (!session && saved.password) {
         const signedIn = await connection.client.auth.signInWithPassword({
           email: saved.email,
@@ -258,7 +253,6 @@ export async function restoreSupabaseSession(): Promise<boolean> {
         connection,
         session,
         resolvedEmail,
-        saved.password,
         attempt,
         shouldPersistRefresh,
       );

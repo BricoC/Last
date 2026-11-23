@@ -119,6 +119,7 @@ export class OrNumbersRepository {
       const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
       if (!configRes?.config?.projectUrl || !configRes?.config?.anonKey) return;
 
+      const activeProjectUrl = normalizeSupabaseProjectUrl(configRes.config.projectUrl);
       const url = new URL("/rest/v1/ddt", configRes.config.projectUrl.replace(/\/$/, ""));
       url.searchParams.set("anno", `eq.${year}`);
       if (month !== undefined) {
@@ -131,32 +132,36 @@ export class OrNumbersRepository {
       }
       url.searchParams.set("nr_vs_ordine", "not.is.null");
       url.searchParams.set("select", "id,numero,anno,nr_vs_ordine");
+      url.searchParams.set("order", "numero.asc,id.asc");
       url.searchParams.set("limit", "1000");
 
-      const res = await supabaseFetch(url.toString(), {
-        headers: {
-          apikey: configRes.config.anonKey,
-        },
-      });
-
-      if (res.ok) {
+      const db = await getDatabase();
+      for (let offset = 0; ; offset += 1000) {
+        url.searchParams.set("offset", String(offset));
+        const res = await supabaseFetch(url.toString(), {
+          headers: {
+            apikey: configRes.config.anonKey,
+          },
+        });
+        if (!res.ok) break;
         const remoteDdts = (await res.json()) as Array<{ id: string; numero: number; anno: number; nr_vs_ordine: string | null }>;
-        if (Array.isArray(remoteDdts) && remoteDdts.length > 0) {
-          const db = await getDatabase();
-          for (const d of remoteDdts) {
-            const ord = (d.nr_vs_ordine || "").trim();
-            if (ord) {
-              await db.execute(
-                `UPDATE ddt_documents 
-                 SET order_reference = $1 
-                 WHERE (id = $2 OR (doc_number = $3 AND year = $4))
-                   AND deleted_at IS NULL AND COALESCE(sync_status, '') <> 'pending'
-                   AND (order_reference IS NULL OR TRIM(order_reference) = '' OR TRIM(order_reference) <> $1)`,
-                [ord, d.id, d.numero, d.anno]
-              );
-            }
+        if (!Array.isArray(remoteDdts) || remoteDdts.length === 0) break;
+
+        for (const d of remoteDdts) {
+          const ord = (d.nr_vs_ordine || "").trim();
+          if (ord) {
+            await db.execute(
+              `UPDATE ddt_documents 
+               SET order_reference = $1 
+               WHERE (id = $2 OR (doc_number = $3 AND year = $4))
+                 AND (project_url = $5 OR project_url IS NULL)
+                 AND deleted_at IS NULL AND COALESCE(sync_status, '') <> 'pending'
+                 AND (order_reference IS NULL OR TRIM(order_reference) = '' OR TRIM(order_reference) <> $1)`,
+              [ord, d.id, d.numero, d.anno, activeProjectUrl]
+            );
           }
         }
+        if (remoteDdts.length < 1000) break;
       }
     } catch (e) {
       console.warn("[OrNumbersRepository] Sync orders da Supabase warning:", e);

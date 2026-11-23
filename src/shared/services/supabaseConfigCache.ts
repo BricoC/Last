@@ -34,6 +34,31 @@ export function setLastKnownSupabaseProjectUrl(url: string | null): void {
   lastKnownProjectUrl = normalizeSupabaseProjectUrl(url);
 }
 
+let pendingProjectUrlResolve: Promise<string | null> | null = null;
+
+/**
+ * Risolve in modo asincrono il `project_url` Supabase attivo popolando anche la cache sincrona
+ * quando questa è ancora fredda (es. primo avvio o subito dopo `supabase-config-updated`).
+ */
+export async function resolveActiveSupabaseProjectUrl(): Promise<string | null> {
+  if (lastKnownProjectUrl) return lastKnownProjectUrl;
+  if (pendingProjectUrlResolve) return pendingProjectUrlResolve;
+  const startGen = generation;
+  pendingProjectUrlResolve = invoke<ConfigStatus>("load_supabase_config")
+    .then((status) => {
+      const normalized = normalizeSupabaseProjectUrl(status?.config?.projectUrl);
+      if (normalized && startGen === generation) {
+        lastKnownProjectUrl = normalized;
+      }
+      return normalized;
+    })
+    .catch(() => null)
+    .finally(() => {
+      pendingProjectUrlResolve = null;
+    });
+  return pendingProjectUrlResolve;
+}
+
 export function invalidateSupabaseConfigCache(): void {
   generation++;
   lastKnownProjectUrl = null;

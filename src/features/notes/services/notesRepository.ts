@@ -2,10 +2,9 @@ import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import type { NoteRecord, TrashNoteRow } from "../types/note";
 import { notesSyncService } from "./notesSyncService";
-import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
+import { resolveActiveSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 
-function queueNoteDeletion(id: string, deletedAt: string): SqliteWrite {
-  const projectUrl = getLastKnownSupabaseProjectUrl();
+function queueNoteDeletion(id: string, deletedAt: string, projectUrl: string | null): SqliteWrite {
   return {
     sql: `INSERT INTO note_deletions (id, supabase_id, deleted_at, project_url)
           SELECT id, supabase_id, $2,
@@ -52,7 +51,7 @@ export class NotesRepository {
     const createdBy = params?.created_by || "Operatore";
     const color = params?.color || "default";
 
-    const projectUrl = getLastKnownSupabaseProjectUrl();
+    const projectUrl = await resolveActiveSupabaseProjectUrl();
 
     await db.execute(
       `INSERT INTO notes (
@@ -138,6 +137,7 @@ export class NotesRepository {
   public async moveToTrash(id: string, deletedBy?: string): Promise<void> {
     await getDatabase();
     const now = new Date().toISOString();
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
     await applyLocalDatabaseBatch([
       {
         sql: `INSERT INTO notes_trash (
@@ -147,9 +147,9 @@ export class NotesRepository {
           created_by, updated_by, created_at, updated_at, $2, $3,
           CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $4 ELSE NULL END
         FROM notes WHERE id = $1`,
-        params: [id, now, deletedBy || "Operatore", getLastKnownSupabaseProjectUrl()],
+        params: [id, now, deletedBy || "Operatore", activeProjectUrl],
       },
-      queueNoteDeletion(id, now),
+      queueNoteDeletion(id, now, activeProjectUrl),
       { sql: "DELETE FROM notes WHERE id = $1", params: [id] },
       {
         sql: `DELETE FROM notes_trash WHERE id NOT IN (
@@ -195,6 +195,7 @@ export class NotesRepository {
 
     const item = rows[0];
     const nowIso = new Date().toISOString();
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
 
     await applyLocalDatabaseBatch([
       {
@@ -205,7 +206,7 @@ export class NotesRepository {
           created_by, updated_by, created_at, $2, 'pending',
           CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $3 ELSE NULL END
           FROM notes_trash WHERE id = $1`,
-        params: [id, nowIso, getLastKnownSupabaseProjectUrl()],
+        params: [id, nowIso, activeProjectUrl],
         expectedRows: 1,
       },
       { sql: "DELETE FROM note_deletions WHERE id = $1", params: [id] },
@@ -235,8 +236,9 @@ export class NotesRepository {
    */
   public async deleteNote(id: string): Promise<void> {
     await getDatabase();
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
     await applyLocalDatabaseBatch([
-      queueNoteDeletion(id, new Date().toISOString()),
+      queueNoteDeletion(id, new Date().toISOString(), activeProjectUrl),
       { sql: "DELETE FROM notes WHERE id = $1", params: [id] },
       { sql: "DELETE FROM notes_trash WHERE id = $1", params: [id] },
     ]);

@@ -10,6 +10,24 @@ export interface SendOrderEmailParams {
   logoUrlOrPath?: string;
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeLogoSrc(src?: string): string {
+  const trimmed = (src || "").trim();
+  if (!trimmed) return "";
+  if (/^(https?:\/\/|data:image\/[a-zA-Z0-9.+-]+;base64,)/i.test(trimmed)) {
+    return escapeHtml(trimmed);
+  }
+  return "";
+}
+
 export class OrderEmailService {
   /**
    * Genera il template HTML dell'ordine e apre la finestra Outlook di anteprima
@@ -34,15 +52,17 @@ export class OrderEmailService {
       .map(
         (r) => `
         <tr>
-          <td style="padding: 7px 10px; border: 1px solid #d1d5db; font-size: 13px; font-weight: 600;">${r.article_code || '-'}</td>
-          <td style="padding: 7px 10px; border: 1px solid #d1d5db; font-size: 13px;">${r.description || '-'}</td>
-          <td style="padding: 7px 10px; border: 1px solid #d1d5db; text-align: center; font-size: 13px; font-weight: 600;">${r.quantity || '-'}</td>
-          <td style="padding: 7px 10px; border: 1px solid #d1d5db; text-align: right; font-size: 13px;">${r.price ? '€ ' + r.price : '-'}</td>
-          <td style="padding: 7px 10px; border: 1px solid #d1d5db; font-size: 12px; color: #4b5563;">${r.notes || ''}</td>
+          <td style="padding: 7px 10px; border: 1px solid #d1d5db; font-size: 13px; font-weight: 600;">${escapeHtml(r.article_code || '-')}</td>
+          <td style="padding: 7px 10px; border: 1px solid #d1d5db; font-size: 13px;">${escapeHtml(r.description || '-')}</td>
+          <td style="padding: 7px 10px; border: 1px solid #d1d5db; text-align: center; font-size: 13px; font-weight: 600;">${escapeHtml(r.quantity || '-')}</td>
+          <td style="padding: 7px 10px; border: 1px solid #d1d5db; text-align: right; font-size: 13px;">${r.price ? '€ ' + escapeHtml(r.price) : '-'}</td>
+          <td style="padding: 7px 10px; border: 1px solid #d1d5db; font-size: 12px; color: #4b5563;">${escapeHtml(r.notes || '')}</td>
         </tr>
       `
       )
       .join('');
+
+    const safeLogoSrc = sanitizeLogoSrc(logoUrlOrPath);
 
     const bodyHtml = `
       <div style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; color: #1f2937; line-height: 1.5;">
@@ -75,7 +95,7 @@ export class OrderEmailService {
           Cordiali saluti,<br>
           <strong>Brico Class S.r.l.</strong>
         </p>
-        ${logoUrlOrPath ? `<img src="${logoUrlOrPath}" alt="Brico Class" style="max-width: 220px; height: auto; margin-top: 8px;" />` : ''}
+        ${safeLogoSrc ? `<img src="${safeLogoSrc}" alt="Brico Class" style="max-width: 220px; height: auto; margin-top: 8px;" />` : ''}
       </div>
     `;
 

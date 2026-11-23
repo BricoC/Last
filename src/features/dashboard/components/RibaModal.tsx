@@ -96,7 +96,7 @@ export const RibaModal: React.FC<RibaModalProps> = ({
         setError("Pagamento non registrato. Verifica lo spazio disponibile o la connessione e riprova.");
         return;
       }
-      onStatusUpdated({ isPaid: true, sentAt });
+      onStatusUpdated({ isPaid: true, sentAt, remoteSynced: result.remote });
       setSuccessMsg(
         result.remote
           ? "Pagamento registrato."
@@ -206,8 +206,10 @@ export const RibaModal: React.FC<RibaModalProps> = ({
                     <span>Registrato il <strong className="text-emerald-200">{recordedAt}</strong></span>
                   </div>
                 )}
-                <div className="text-[10px] text-emerald-400/60 font-semibold uppercase tracking-wider">
-                  ☁️ Sincronizzato con Supabase
+                <div className="text-[10px] text-emerald-400/70 font-semibold uppercase tracking-wider">
+                  {ribaInfo.remoteSynced === false
+                    ? "⏳ Salvato in locale — sincronizzazione Cloud in attesa"
+                    : "☁️ Sincronizzato con Supabase"}
                 </div>
               </div>
             ) : isUrgent ? (

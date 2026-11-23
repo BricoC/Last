@@ -1,6 +1,6 @@
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { getDatabase } from "@/shared/data-layer/database";
-import { getLastKnownSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
+import { resolveActiveSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { Client, ClientPhone, CreateClientInput } from "../models/client";
 import { rankClientsBySearch, normalizeClientCanonicalKey } from "../utils/clientSearchUtils";
 import { deduplicateDestinations } from "../utils/destinationUtils";
@@ -34,7 +34,7 @@ export class ClientRepository {
     const priceListsJson = JSON.stringify(input.price_lists || []);
 
     const projectUrl =
-      input.project_url !== undefined ? input.project_url : getLastKnownSupabaseProjectUrl();
+      input.project_url !== undefined ? input.project_url : await resolveActiveSupabaseProjectUrl();
     if (input.id) {
       const { sql, params } = this.clientUpdate(input, id, now);
       await db.execute(sql, params);

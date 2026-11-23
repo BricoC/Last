@@ -2,6 +2,10 @@ BEGIN;
 
 ALTER TABLE public.ddt ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 ALTER TABLE public.ddt_righe ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE public.ddt DROP CONSTRAINT IF EXISTS ddt_anno_numero_uniq;
+CREATE UNIQUE INDEX IF NOT EXISTS ddt_anno_numero_active_uniq
+  ON public.ddt (anno, numero)
+  WHERE deleted_at IS NULL;
 
 DROP POLICY IF EXISTS "Last active DDT" ON public.ddt;
 CREATE POLICY "Last active DDT" ON public.ddt AS RESTRICTIVE FOR SELECT TO authenticated

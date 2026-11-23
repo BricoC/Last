@@ -176,9 +176,16 @@ class CloudSyncStatusService {
       const [pending] = await db.select<{ count: number }[]>(`SELECT (
         EXISTS(SELECT 1 FROM listino_generale WHERE sync_revision IS NOT NULL)
         OR EXISTS(SELECT 1 FROM listini_clienti WHERE sync_revision IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM ddt_documents WHERE sync_status = 'pending' AND status <> 'bozza')
+        OR EXISTS(SELECT 1 FROM quotes WHERE sync_status = 'pending')
+        OR EXISTS(SELECT 1 FROM clients WHERE sync_status = 'pending')
+        OR EXISTS(SELECT 1 FROM offers WHERE sync_status = 'pending')
+        OR EXISTS(SELECT 1 FROM notes WHERE sync_status = 'pending')
+        OR EXISTS(SELECT 1 FROM note_deletions)
+        OR EXISTS(SELECT 1 FROM supplier_invoices WHERE cloud_upload_pending = 1)
+        OR EXISTS(SELECT 1 FROM orders WHERE sync_status = 'pending')
         OR EXISTS(SELECT 1 FROM pending_cloud_operations
-          WHERE scope IN ('listino_generale', 'listini_clienti')
-            AND (project_url IS NULL OR project_url = $1))
+          WHERE project_url IS NULL OR project_url = $1)
       ) AS count`, [normalizeSupabaseProjectUrl(cfgStatus?.config?.projectUrl ?? "")]);
       hasPendingLocalChanges = Boolean(pending?.count);
     } catch (err) {
@@ -306,20 +313,55 @@ class CloudSyncStatusService {
     summary: string;
     success: boolean;
   }> {
-    const [priceListModule, offersModule, clientModule, ddtModule] = await Promise.all([
+    const [
+      priceListModule,
+      offersModule,
+      clientModule,
+      ddtModule,
+      quotesModule,
+      notesModule,
+      ordersModule,
+      invoicesModule,
+      orNumbersModule,
+    ] = await Promise.all([
       import("@/features/price-lists/services/priceListSyncService"),
       import("@/features/offers/services/offersSyncService"),
       import("@/features/clients/services/clientSyncService"),
       import("@/features/ddt-studio/services/ddtIncrementalSyncService"),
+      import("@/features/quotes/services/quoteSyncService"),
+      import("@/features/notes/services/notesSyncService"),
+      import("@/features/orders/services/orderSupabaseService"),
+      import("@/features/invoices/services/electronicInvoicesService"),
+      import("@/features/or-numbers/services/orNumbersRepository"),
     ]);
     const { priceListSyncService } = priceListModule;
     const { offersSyncService } = offersModule;
     const { clientSyncService } = clientModule;
     const { ddtIncrementalSyncService } = ddtModule;
-    const [priceWrites, offerWrites, clientWrites] = await Promise.allSettled([
+    const { QuoteSyncService } = quotesModule;
+    const { notesSyncService } = notesModule;
+    const { orderSupabaseService } = ordersModule;
+    const { electronicInvoicesService } = invoicesModule;
+    const { OrNumbersRepository } = orNumbersModule;
+
+    const [
+      priceWrites,
+      offerWrites,
+      clientWrites,
+      quoteWrites,
+      noteWrites,
+      orderWrites,
+      invoiceWrites,
+      orLogWrites,
+    ] = await Promise.allSettled([
       priceListSyncService.retryPendingChanges(),
       offersSyncService.retryPendingChanges(),
       clientSyncService.syncPendingClientsToSupabase(),
+      QuoteSyncService.retryPendingChanges(),
+      notesSyncService.sync(),
+      orderSupabaseService.processOfflineQueue(),
+      electronicInvoicesService.retryPendingUploads(),
+      OrNumbersRepository.retryPendingLogs(),
     ]);
     const [ddt, general, clients] = await Promise.allSettled([
       ddtIncrementalSyncService.syncNewDdtsFromSupabase({ includePreviousYear: true, checkModifiedRecent: true }),
@@ -336,6 +378,11 @@ class CloudSyncStatusService {
       ["Invio listini", priceWrites.status === "rejected" ? String(priceWrites.reason) : undefined],
       ["Offerte", offerWrites.status === "rejected" ? String(offerWrites.reason) : undefined],
       ["Clienti", clientWrites.status === "rejected" ? String(clientWrites.reason) : undefined],
+      ["Preventivi", quoteWrites.status === "rejected" ? String(quoteWrites.reason) : undefined],
+      ["Note", noteWrites.status === "rejected" ? String(noteWrites.reason) : undefined],
+      ["Ordini", orderWrites.status === "rejected" ? String(orderWrites.reason) : undefined],
+      ["Fatture", invoiceWrites.status === "rejected" ? String(invoiceWrites.reason) : undefined],
+      ["Log OR", orLogWrites.status === "rejected" ? String(orLogWrites.reason) : undefined],
       ["DDT", ddtResult.error],
       ["Listino generale", general.status === "fulfilled" ? general.value.error : String(general.reason)],
       ["Listini clienti", clients.status === "fulfilled" ? clients.value.error : String(clients.reason)],

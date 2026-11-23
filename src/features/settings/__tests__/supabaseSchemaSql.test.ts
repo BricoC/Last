@@ -20,7 +20,8 @@ describe("supabaseSchemaSql", () => {
   it("includes all core tables and constraints in FULL_SUPABASE_SCHEMA_SQL", () => {
     const required = [
       "public.ddt",
-      "ddt_anno_numero_uniq",
+      "ddt_anno_numero_active_uniq",
+      "WHERE deleted_at IS NULL",
       "public.ddt_righe",
       "public.ddt_logs",
       "public.clienti",

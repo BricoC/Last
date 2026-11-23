@@ -101,7 +101,7 @@ describe("Sessione cloud Supabase", () => {
     expect(savedSession).toEqual({
       projectUrl,
       email,
-      password: "test-password",
+      password: "",
       refreshToken: "rt-1",
     });
 
@@ -118,7 +118,6 @@ describe("Sessione cloud Supabase", () => {
     // Se il ripristino fallisce per assenza di rete, NON cancella le credenziali salvate
     disconnectSupabase();
     refreshSession.mockRejectedValueOnce(new TypeError("Network error"));
-    signIn.mockRejectedValueOnce(new TypeError("Network error"));
     expect(await restoreSupabaseSession()).toBe(false);
     expect(savedSession).not.toBeNull();
 

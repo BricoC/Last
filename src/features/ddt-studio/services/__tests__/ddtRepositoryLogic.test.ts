@@ -332,7 +332,8 @@ describe("DdtRepository Logic & Life-cycle", () => {
         }),
       })
     );
-    const savedPayload = mockInvoke.mock.calls[0][1].payload;
+    const saveCall = mockInvoke.mock.calls.find(([cmd]) => cmd === "save_ddt_transaction");
+    const savedPayload = saveCall![1].payload;
     expect(savedPayload.items[0].net_amount_subunits).toBe(8730000);
     expect(savedPayload.items[1].quantity).toBe("0");
     expect(savedPayload.items[1].net_amount_subunits).toBe(0);

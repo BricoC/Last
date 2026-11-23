@@ -279,18 +279,22 @@ export class QuoteRepository {
     const [trash] = await db.select<TrashQuoteRow[]>("SELECT * FROM quotes_trash WHERE id = $1", [id]);
     if (!trash) return null;
     const now = new Date().toISOString();
-    const [local] = await db.select<Array<{ id: string; project_url?: string | null }>>("SELECT id, project_url FROM quotes WHERE id = $1", [id]);
+    const [local] = await db.select<Array<{ id: string; deleted_at?: string | null; project_url?: string | null }>>(
+      "SELECT id, deleted_at, project_url FROM quotes WHERE id = $1",
+      [id]
+    );
     const originProjectUrl = local?.project_url ?? trash.project_url ?? null;
     const finish = [
       { sql: "DELETE FROM quotes_trash WHERE id = $1 AND deleted_at = $2", params: [id, trash.deleted_at], expectedRows: 1 },
       pendingCloudWrite("quotes", id, "restore", null, originProjectUrl),
     ];
     if (local) {
+      const docDeletedAt = local.deleted_at ?? trash.deleted_at;
       await applyLocalDatabaseBatch([
         { sql: "UPDATE quotes SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE id = $2",
           params: [now, id], expectedRows: 1 },
-        { sql: "UPDATE quote_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE quote_id = $2",
-          params: [now, id] },
+        { sql: "UPDATE quote_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE quote_id = $2 AND deleted_at = $3",
+          params: [now, id, docDeletedAt] },
         ...finish,
       ]);
     } else {

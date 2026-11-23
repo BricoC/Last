@@ -234,8 +234,9 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
       try {
         while (pending.current) {
           const draft = pending.current;
+          const cleanHtml = DOMPurify.sanitize(draft.html);
           const div = document.createElement("div");
-          div.innerHTML = draft.html;
+          div.innerHTML = cleanHtml;
           const text = (div.innerText || div.textContent || "").trim();
           let id = activeNoteIdRef.current;
           if (id || draft.title.trim() || text) {
@@ -248,10 +249,10 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
               setActiveNoteId(id);
               setNotes(prev => [note, ...prev]);
             }
-            await notesRepository.saveNote({ id, title: name, content_html: draft.html,
+            await notesRepository.saveNote({ id, title: name, content_html: cleanHtml,
               content_text: text, updated_by: currentUser });
             setNotes(prev => prev.map(note => note.id === id ? { ...note, title: name,
-              content_html: draft.html, content_text: text, updated_at: new Date().toISOString() } : note));
+              content_html: cleanHtml, content_text: text, updated_at: new Date().toISOString() } : note));
           }
           if (pending.current === draft) pending.current = null;
         }

@@ -1,7 +1,7 @@
 import { SupabaseConnectionFields } from "./data-import/SupabaseConnectionFields";
 import React, { useEffect, useState } from "react";
 import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
-import { Palette, Sliders, Mail, Database, Shield, Lock, Save, RotateCcw, Check, Building2, Users, HardDrive, DownloadCloud, Activity, FileSpreadsheet } from "lucide-react";
+import { Palette, Sliders, Mail, Database, Shield, RotateCcw, Check, Building2, Users, HardDrive, DownloadCloud, Activity, FileSpreadsheet } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { CompanySettingsPanel } from "./CompanySettingsPanel";
 import { EmailSettingsPanel } from "./EmailSettingsPanel";
@@ -10,6 +10,7 @@ import { BackupSettingsPanel } from "./BackupSettingsPanel";
 import { PriceListExcelExportPanel } from "./PriceListExcelExportPanel";
 import { SoftwareUpdateSettingsPanel } from "./SoftwareUpdateSettingsPanel";
 import { CloudMonitorPanel } from "./CloudMonitorPanel";
+import { FolderPathsSettingsPanel } from "./FolderPathsSettingsPanel";
 
 import { UserManagementPanel } from "./UserManagementPanel";
 
@@ -27,7 +28,6 @@ export const SettingsPage: React.FC = () => {
     window.addEventListener("open-settings-tab", onOpenSettingsTab);
     return () => window.removeEventListener("open-settings-tab", onOpenSettingsTab);
   }, []);
-  const [editEnabled, setEditEnabled] = useState(true);
   const [autoSaveMinutes, setAutoSaveMinutes] = useState<number>(() => {
     const saved = localStorage.getItem("price_list_autosave_minutes");
     return saved ? Math.max(1, parseInt(saved, 10)) : 30;
@@ -94,26 +94,6 @@ export const SettingsPage: React.FC = () => {
           <p className="text-xs text-[var(--muted-foreground)] mt-1">
             Gestione parametri di sistema, macro email, database e temi
           </p>
-        </div>
-        <div className="flex items-center space-x-3">
-          <button
-            type="button"
-            onClick={() => setEditEnabled(!editEnabled)}
-            className={cn(
-              "flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer",
-              editEnabled ? "bg-red-600 text-white" : "bg-slate-700 text-slate-300"
-            )}
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>{editEnabled ? "MODIFICHE ABILITATE" : "MODIFICHE BLOCCATE"}</span>
-          </button>
-          <button
-            type="button"
-            className="flex items-center space-x-1.5 px-4 py-1.5 rounded-md bg-[var(--primary)] text-white font-semibold text-xs hover:opacity-90 transition-opacity cursor-pointer"
-          >
-            <Save className="w-3.5 h-3.5" />
-            <span>Salva</span>
-          </button>
         </div>
       </div>
 
@@ -215,6 +195,7 @@ export const SettingsPage: React.FC = () => {
                 <span className="text-xs text-[var(--muted-foreground)]">minuti (predefinito: 30 minuti)</span>
               </div>
             </div>
+            <FolderPathsSettingsPanel />
             <DatabaseQuerySettingsPanel />
           </div>
         ) : (

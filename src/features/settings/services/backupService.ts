@@ -207,6 +207,7 @@ export const BACKUP_CATEGORIES: BackupCategoryMeta[] = [
 
 const CATEGORY_PENDING_SCOPES: Record<string, string[]> = {
   price_lists: ["listino_generale", "listini_clienti"],
+  ddt: ["or_logs"],
   offers: ["offers"],
   quotes: ["quotes"],
 };
@@ -869,6 +870,18 @@ export async function restoreModularBackup(
     const referenceTables = Object.keys(restoredCounts).filter((table) =>
       mode === "replace" || restoredCounts[table] > 0,
     );
+    if (mode === "replace") {
+      if (categoriesToRestore.includes("ddt")) {
+        writes.push(
+          { sql: "DELETE FROM ddt_pull_state", params: [] },
+          { sql: "DELETE FROM ddt_pull_seen", params: [] },
+          { sql: "DELETE FROM ddt_pull_deferred", params: [] },
+        );
+      }
+      if (categoriesToRestore.includes("price_lists")) {
+        writes.push({ sql: "DELETE FROM price_list_pull_state", params: [] });
+      }
+    }
     const importQueue = categoriesToRestore.includes("orders") && pkg.orderQueue !== undefined;
     if (importQueue) writes.push({
       sql: "INSERT OR REPLACE INTO order_queue_restore(id,payload,merge_queue) VALUES(1,$1,$2)",

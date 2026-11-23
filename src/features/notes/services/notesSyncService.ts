@@ -145,22 +145,48 @@ export class NotesSyncService {
         };
 
         if (item.supabase_id) {
-          // PATCH su riga già esistente su Supabase
+          // PATCH su riga già esistente su Supabase (return=representation per rilevare righe eliminate da altri PC)
           const url = new URL(`/rest/v1/note?id=eq.${item.supabase_id}`, creds.projectUrl);
           const res = await supabaseFetch(url.toString(), {
             method: "PATCH",
             headers: {
               apikey: creds.anonKey,
               "Content-Type": "application/json",
+              Prefer: "return=representation",
             },
             body: JSON.stringify(payload),
           });
 
           if (res.ok) {
-            await db.execute(
-              `UPDATE notes SET sync_status = 'synced', project_url = $3 WHERE id = $1 AND updated_at = $2`,
-              [item.id, item.updated_at, activeProjectUrl]
-            );
+            const updatedRows = await res.json().catch(() => null);
+            if (Array.isArray(updatedRows) && updatedRows.length === 0) {
+              // La nota non esiste più sul cloud (es. eliminata da altro PC): ricreala via upsert per non perdere la modifica locale
+              const upsertUrl = new URL("/rest/v1/note?on_conflict=local_id", creds.projectUrl);
+              const upsertRes = await supabaseFetch(upsertUrl.toString(), {
+                method: "POST",
+                headers: {
+                  apikey: creds.anonKey,
+                  "Content-Type": "application/json",
+                  Prefer: "resolution=merge-duplicates,return=representation",
+                },
+                body: JSON.stringify(payload),
+              });
+              if (!upsertRes.ok) {
+                const errBody = (await upsertRes.json().catch(() => ({}))) as { message?: string };
+                throw new Error(`Errore reinserimento nota Supabase: ${errBody?.message || upsertRes.statusText || upsertRes.status}`);
+              }
+              const inserted = await upsertRes.json().catch(() => []);
+              const newRemoteId = Array.isArray(inserted) && inserted[0]?.id ? Number(inserted[0].id) : item.supabase_id;
+              await db.execute(
+                `UPDATE notes SET supabase_id = $1, sync_status = 'synced', project_url = $4 WHERE id = $2 AND updated_at = $3`,
+                [newRemoteId, item.id, item.updated_at, activeProjectUrl]
+              );
+            } else {
+              await db.execute(
+                `UPDATE notes SET sync_status = 'synced', project_url = $3 WHERE id = $1 AND updated_at = $2`,
+                [item.id, item.updated_at, activeProjectUrl]
+              );
+            }
             pushed++;
           } else {
             const errBody = (await res.json().catch(() => ({}))) as { message?: string; hint?: string };
@@ -337,6 +363,20 @@ export class NotesSyncService {
                   rem.updated_at || nowIso,
                   existing[0].id,
                 ]
+              );
+            }
+          }
+
+          // Riconcilia le note synced eliminate da un altro PC
+          const localSynced = await db.select<Array<{ id: string; supabase_id: number | null }>>(
+            `SELECT id, supabase_id FROM notes WHERE supabase_id IS NOT NULL AND sync_status = 'synced' AND project_url = $1`,
+            [activeProjectUrl]
+          );
+          for (const loc of Array.isArray(localSynced) ? localSynced : []) {
+            if (loc.supabase_id !== null && !remoteById.has(Number(loc.supabase_id))) {
+              await db.execute(
+                `DELETE FROM notes WHERE id = $1 AND sync_status = 'synced' AND supabase_id = $2`,
+                [loc.id, loc.supabase_id]
               );
             }
           }

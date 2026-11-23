@@ -91,8 +91,24 @@ fn read_mgmt_config(app: &AppHandle) -> Result<SupabaseManagementConfig, String>
                     return Err("Impossibile leggere la configurazione token Management".into())
                 }
             };
-            serde_json::from_reader(file)
-                .map_err(|_| "Configurazione token Management non valida".to_string())
+            let config: SupabaseManagementConfig = serde_json::from_reader(file)
+                .map_err(|_| "Configurazione token Management non valida".to_string())?;
+            if let Ok(plain) = serde_json::to_vec(&config) {
+                if let Ok(protected) = crate::supabase_session_store::dpapi::protect(&plain) {
+                    if let Some(parent) = path.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let tmp_path = path.with_extension("bin.tmp");
+                    if fs::write(&tmp_path, &protected).is_ok()
+                        && fs::rename(&tmp_path, &path).is_ok()
+                    {
+                        let _ = fs::remove_file(&legacy_path);
+                    } else {
+                        let _ = fs::remove_file(&tmp_path);
+                    }
+                }
+            }
+            Ok(config)
         }
         Err(_) => Err("Impossibile leggere la configurazione token Management".into()),
     }

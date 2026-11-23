@@ -130,9 +130,15 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         year: number;
         docNumber: number | null;
         conflicts: DdtFieldConflict[];
+        missingBaseSnapshot?: boolean;
       }>).detail;
-      if (detail?.docId && detail.conflicts?.length > 0) {
-        setMergeConflict(detail);
+      if (detail?.docId && ((detail.conflicts?.length ?? 0) > 0 || detail.missingBaseSnapshot)) {
+        setMergeConflict({
+          docId: detail.docId,
+          year: detail.year,
+          docNumber: detail.docNumber,
+          conflicts: detail.conflicts ?? [],
+        });
       }
     };
     window.addEventListener("ddt-conflict-detected", handleConflict);
@@ -1609,17 +1615,21 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
               Conflitto di modifica sul DDT #{mergeConflict.docNumber}/{mergeConflict.year}
             </h3>
             <p className="text-slate-300">
-              Due postazioni hanno modificato contemporaneamente lo stesso campo. Scegli quale versione mantenere:
+              {mergeConflict.conflicts.length > 0
+                ? "Due postazioni hanno modificato contemporaneamente lo stesso campo. Scegli quale versione mantenere:"
+                : "Versione di base del DDT assente su questa postazione: non è possibile unire automaticamente i singoli campi. Scegli quale versione mantenere:"}
             </p>
-            <div className="max-h-52 overflow-y-auto space-y-2 rounded border border-slate-700 bg-[#14161c] p-2.5">
-              {mergeConflict.conflicts.map((c, idx) => (
-                <div key={`${c.scope}-${c.field}-${idx}`} className="border-b border-slate-800 pb-1.5 last:border-b-0 last:pb-0">
-                  <div className="font-semibold text-white">{c.label}</div>
-                  <div className="text-sky-300">Questo PC: {c.localValue}</div>
-                  <div className="text-emerald-300">Altra postazione (Cloud): {c.remoteValue}</div>
-                </div>
-              ))}
-            </div>
+            {mergeConflict.conflicts.length > 0 && (
+              <div className="max-h-52 overflow-y-auto space-y-2 rounded border border-slate-700 bg-[#14161c] p-2.5">
+                {mergeConflict.conflicts.map((c, idx) => (
+                  <div key={`${c.scope}-${c.field}-${idx}`} className="border-b border-slate-800 pb-1.5 last:border-b-0 last:pb-0">
+                    <div className="font-semibold text-white">{c.label}</div>
+                    <div className="text-sky-300">Questo PC: {c.localValue}</div>
+                    <div className="text-emerald-300">Altra postazione (Cloud): {c.remoteValue}</div>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 type="button"
