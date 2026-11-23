@@ -202,13 +202,13 @@ export const EmailSettingsPanel: React.FC = () => {
           <EmailField
             label="Email Principale (A / TO)"
             value={values.carrara_to}
-            placeholder="es. alessio.piccinini@cartierecarrara.com"
+            placeholder="es. destinatario@azienda.it"
             onChange={(val) => handleChange("carrara_to", val)}
           />
           <EmailField
             label="Email in Copia Conoscenza (CC)"
             value={values.carrara_cc}
-            placeholder="es. federica.bianchi@cartierecarrara.com"
+            placeholder="es. copia@azienda.it"
             onChange={(val) => handleChange("carrara_cc", val)}
           />
         </div>
@@ -235,13 +235,13 @@ export const EmailSettingsPanel: React.FC = () => {
               <EmailField
                 label="Email Salanetti (A / TO)"
                 value={values.wepa_salanetti_to}
-                placeholder="es. Roberto.Lazzareschi@wepa.eu"
+                placeholder="es. destinatario@azienda.it"
                 onChange={(val) => handleChange("wepa_salanetti_to", val)}
               />
               <EmailField
                 label="Email Salanetti (CC)"
                 value={values.wepa_salanetti_cc}
-                placeholder="es. Massimiliano.Giusti@wepa.eu"
+                placeholder="es. copia@azienda.it"
                 onChange={(val) => handleChange("wepa_salanetti_cc", val)}
               />
             </div>
@@ -255,13 +255,13 @@ export const EmailSettingsPanel: React.FC = () => {
               <EmailField
                 label="Email Ralletta (A / TO)"
                 value={values.wepa_ralletta_to}
-                placeholder="es. Davide.Petrucci@wepa.eu"
+                placeholder="es. destinatario@azienda.it"
                 onChange={(val) => handleChange("wepa_ralletta_to", val)}
               />
               <EmailField
                 label="Email Ralletta (CC)"
                 value={values.wepa_ralletta_cc}
-                placeholder="es. Massimiliano.Giusti@wepa.eu"
+                placeholder="es. copia@azienda.it"
                 onChange={(val) => handleChange("wepa_ralletta_cc", val)}
               />
             </div>
@@ -293,13 +293,13 @@ export const EmailSettingsPanel: React.FC = () => {
               <EmailField
                 label="Email Banca Principale (A / TO)"
                 value={values.bank_to}
-                placeholder="es. rachele.neri@bpc.bcc.it"
+                placeholder="es. banca@istituto.it"
                 onChange={(val) => handleChange("bank_to", val)}
               />
               <EmailField
                 label="Email Referente / Filiale (CC)"
                 value={values.bank_cc}
-                placeholder="es. capannori@bpc.bcc.it"
+                placeholder="es. filiale@istituto.it"
                 onChange={(val) => handleChange("bank_cc", val)}
               />
             </div>
@@ -316,13 +316,13 @@ export const EmailSettingsPanel: React.FC = () => {
               <EmailField
                 label="Email Studio Commercialista (A / TO)"
                 value={values.accountant_to}
-                placeholder="es. contabilita@studiotaddeucci.it"
+                placeholder="es. studio@commercialista.it"
                 onChange={(val) => handleChange("accountant_to", val)}
               />
               <EmailField
                 label="Email Collaboratore / CC"
                 value={values.accountant_cc}
-                placeholder="es. fiscale@studiocommercialista.it"
+                placeholder="es. collaboratore@commercialista.it"
                 onChange={(val) => handleChange("accountant_cc", val)}
               />
             </div>

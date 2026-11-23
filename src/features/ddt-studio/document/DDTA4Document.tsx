@@ -16,7 +16,6 @@ import {
   resolveDestinazioneDisplay,
 } from "../utils/ddtCalculations";
 import { paginateDdtRows } from "../utils/ddtPagination";
-import bricoLogo from "@/assets/logo_brico_class.jpg";
 
 export const DDT_CONFIG = {
   // 1. Riquadro Numero documento & Data documento (in alto a destra)
@@ -182,18 +181,32 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
               <div className="pb-1 mb-2">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center">
-                    <img
-                      src={bricoLogo}
-                      alt="Ferramenta Brico Class S.A.S."
-                      loading="eager"
-                      decoding="sync"
-                      style={{
-                        maxHeight: "110px",
-                        maxWidth: "430px",
-                        objectFit: "contain",
-                        display: "block",
-                      }}
-                    />
+                    {companySettings?.logo_data_url ? (
+                      <img
+                        src={companySettings.logo_data_url}
+                        alt={companySettings.business_name || "Logo aziendale"}
+                        loading="eager"
+                        decoding="sync"
+                        style={{
+                          maxHeight: "110px",
+                          maxWidth: "430px",
+                          objectFit: "contain",
+                          display: "block",
+                        }}
+                      />
+                    ) : companySettings?.business_name?.trim() ? (
+                      <div
+                        style={{
+                          fontSize: "20px",
+                          fontWeight: "bold",
+                          color: "#000000",
+                          maxWidth: "430px",
+                          lineHeight: "1.2",
+                        }}
+                      >
+                        {companySettings.business_name.trim()}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="flex flex-col items-center ml-auto">

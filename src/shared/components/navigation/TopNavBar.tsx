@@ -160,6 +160,7 @@ export const TopNavBar: React.FC = () => {
   const hoverTimeoutRef = useRef<number | null>(null);
   const lastAutoSyncAtRef = useRef<number>(0);
   const autoSyncTimerRef = useRef<number | null>(null);
+  const autoSyncPausedRef = useRef<boolean>(false);
   const isSyncingRef = useRef<boolean>(false);
 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
@@ -185,21 +186,26 @@ export const TopNavBar: React.FC = () => {
         setLastSyncTime(null);
       }
 
-      // Auto-sync intelligente: scarica automaticamente solo quando ci sono effettivamente nuovi dati
-      // sul Cloud (nessun polling continuo), con cooldown di 60s per non consumare quota Supabase.
+      // Auto-sync silenzioso a basso consumo (Supabase Free):
+      // aggiorna automaticamente in background solo quando ci sono dati pendenti, con cooldown 120s.
+      // Se dopo un auto-sync restano ancora dati pendenti non inviabili, mette in pausa l'auto-retry
+      // per evitare loop continui finché non arriva una nuova modifica o un click manuale.
       const now = Date.now();
       const activeSessionEmail = getSupabaseSessionEmail();
       if (autoSyncTimerRef.current !== null) {
         window.clearTimeout(autoSyncTimerRef.current);
         autoSyncTimerRef.current = null;
       }
-      if ((s.hasPendingRemoteChanges || s.hasPendingLocalChanges) && s.canAutoSync && activeSessionEmail) {
-        const wait = Math.max(0, 60_000 - (now - lastAutoSyncAtRef.current));
+      const hasPending = Boolean(s.hasPendingRemoteChanges || s.hasPendingLocalChanges);
+      if (!hasPending) {
+        autoSyncPausedRef.current = false;
+      } else if (s.canAutoSync && activeSessionEmail && !autoSyncPausedRef.current) {
+        const wait = Math.max(0, 120_000 - (now - lastAutoSyncAtRef.current));
         if (wait || isSyncingRef.current) {
-          autoSyncTimerRef.current = window.setTimeout(() => void fetchCloudStatus(true), Math.max(1000, wait));
+          autoSyncTimerRef.current = window.setTimeout(() => void fetchCloudStatus(true), Math.max(2000, wait));
         } else {
           lastAutoSyncAtRef.current = now;
-          void handleManualSync();
+          void handleManualSync(true);
         }
       }
     } finally {
@@ -222,8 +228,9 @@ export const TopNavBar: React.FC = () => {
     }, 250);
   };
 
-  const handleManualSync = async () => {
+  const handleManualSync = async (isAuto = false) => {
     if (isSyncingRef.current) return;
+    if (!isAuto) autoSyncPausedRef.current = false;
     isSyncingRef.current = true;
     setIsSyncing(true);
     try {
@@ -236,8 +243,13 @@ export const TopNavBar: React.FC = () => {
       } else {
         setGapWarning(null);
       }
+      if (isAuto) {
+        // Evita loop infiniti di auto-sync se un record resta pendente dopo il tentativo automatico
+        autoSyncPausedRef.current = true;
+      }
       await fetchCloudStatus(true);
     } catch (error) {
+      if (isAuto) autoSyncPausedRef.current = true;
       console.warn("[TopNavBar] Sincronizzazione cloud:", error);
     } finally {
       isSyncingRef.current = false;
@@ -248,16 +260,20 @@ export const TopNavBar: React.FC = () => {
   useEffect(() => {
     void fetchCloudStatus(false);
     const onSyncStatusUpdated = () => void fetchCloudStatus(true);
+    const onReconnectOrEdit = () => {
+      autoSyncPausedRef.current = false;
+      void fetchCloudStatus(true);
+    };
     window.addEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
-    window.addEventListener("online", onSyncStatusUpdated);
+    window.addEventListener("online", onReconnectOrEdit);
     const onSessionUpdated = () => {
       setShowCloudLogin(false);
-      onSyncStatusUpdated();
+      onReconnectOrEdit();
     };
     window.addEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
     return () => {
       window.removeEventListener("cloud-sync-status-updated", onSyncStatusUpdated);
-      window.removeEventListener("online", onSyncStatusUpdated);
+      window.removeEventListener("online", onReconnectOrEdit);
       window.removeEventListener(SUPABASE_SESSION_UPDATED, onSessionUpdated);
       if (autoSyncTimerRef.current !== null) window.clearTimeout(autoSyncTimerRef.current);
     };
@@ -739,13 +755,13 @@ export const TopNavBar: React.FC = () => {
         >
           <button
             type="button"
-            onClick={sessionEmail ? handleManualSync : () => setShowCloudLogin((open) => !open)}
+            onClick={sessionEmail ? () => void handleManualSync(false) : () => setShowCloudLogin((open) => !open)}
             aria-expanded={sessionEmail ? undefined : showCloudLogin}
             disabled={isSyncing}
             className={cn(
               "flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all cursor-pointer",
               isSyncing
-                ? "bg-amber-500/15 border-amber-500/40 text-amber-300 animate-pulse"
+                ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
                 : gapWarning
                 ? "bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25"
                 : cloudStatus?.error || cloudStatus?.hasPendingRemoteChanges || cloudStatus?.hasPendingLocalChanges
@@ -761,13 +777,7 @@ export const TopNavBar: React.FC = () => {
             ) : gapWarning || cloudStatus?.error ? (
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
             ) : cloudStatus?.hasPendingRemoteChanges || cloudStatus?.hasPendingLocalChanges ? (
-              <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-                <Cloud className="w-3.5 h-3.5 text-amber-400" />
-                <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                </span>
-              </span>
+              <Cloud className="w-3.5 h-3.5 text-amber-400" />
             ) : (
               <Cloud className="w-3.5 h-3.5 text-emerald-400" />
             )}

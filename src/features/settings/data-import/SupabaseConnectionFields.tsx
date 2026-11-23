@@ -42,6 +42,7 @@ const PUBLIC_TABLES = [
   "ordini",
   "note",
   "offerte",
+  "company_settings",
   "email_settings",
   "backup_settings",
   "riba_pagamenti",

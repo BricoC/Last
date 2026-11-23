@@ -384,6 +384,23 @@ CREATE TABLE IF NOT EXISTS public.offerte (
 );
 
 -- 8. IMPOSTAZIONI CLOUD E SCADENZE RI.BA.
+CREATE TABLE IF NOT EXISTS public.company_settings (
+  id TEXT PRIMARY KEY,
+  business_name TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  postal_code TEXT DEFAULT '',
+  city TEXT DEFAULT '',
+  province TEXT DEFAULT '',
+  vat_number TEXT DEFAULT '',
+  fiscal_code TEXT DEFAULT '',
+  sdi_code TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  email TEXT DEFAULT '',
+  logo_data_url TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_by TEXT DEFAULT 'system'
+);
+
 CREATE TABLE IF NOT EXISTS public.email_settings (
   id TEXT PRIMARY KEY,
   carrara_to TEXT DEFAULT '',

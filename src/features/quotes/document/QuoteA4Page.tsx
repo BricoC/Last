@@ -1,4 +1,3 @@
-import bricoLogo from "@/assets/logo_brico_class.jpg";
 import type { CompanySettings } from "@/features/settings/companySettingsRepository";
 import { formatQuoteCode, type QuoteDraft } from "../models/quoteDraft";
 import type { PreparedQuoteItem } from "./quotePrintModel";
@@ -11,13 +10,21 @@ export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages,
   const footer = [company?.address, company?.postal_code, company?.city, company?.province,
     company?.phone, company?.email, company?.vat_number && `P.IVA ${company.vat_number}`]
     .filter(Boolean).join(" · ");
-  const logo = company?.logo_data_url || bricoLogo;
+  const logo = company?.logo_data_url || null;
   const date = formatDate(draft.quote_date);
   return <article className="quote-a4-page relative flex h-[297mm] min-h-[297mm] w-[210mm] flex-col justify-between overflow-hidden bg-white px-[14mm] py-[12mm] text-[11px] leading-tight text-slate-900 shadow-2xl" style={{ boxSizing: "border-box", fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif" }}>
     <div>
       <header className="mb-3 flex min-h-[25mm] items-start justify-between border-b border-slate-200 pb-3">
-        <div className="flex items-center"><img src={logo} alt="Ferramenta Brico Class" className="max-h-[75px] max-w-[300px] object-contain" />
-          {company?.business_name && <span className="sr-only">{company.business_name}</span>}</div>
+        <div className="flex items-center">
+          {logo ? (
+            <>
+              <img src={logo} alt={company?.business_name || "Logo aziendale"} className="max-h-[75px] max-w-[300px] object-contain" />
+              {company?.business_name && <span className="sr-only">{company.business_name}</span>}
+            </>
+          ) : company?.business_name?.trim() ? (
+            <div className="text-[16px] font-black tracking-tight text-slate-900">{company.business_name.trim()}</div>
+          ) : null}
+        </div>
         <div className="flex flex-col items-end text-right">
           <h1 className="mb-1 text-[15px] font-black tracking-wider uppercase">OFFERTA PREVENTIVO</h1>
           <div className="text-[11px] font-semibold text-slate-600">Data: <strong className="text-slate-900">{date}</strong></div>
@@ -42,7 +49,9 @@ export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages,
       </section>}
 
       <div className="relative">
-        <img src={logo} alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 m-auto w-3/4 max-w-[420px] select-none object-contain opacity-[0.045]" />
+        {logo && (
+          <img src={logo} alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 m-auto w-3/4 max-w-[420px] select-none object-contain opacity-[0.045]" />
+        )}
         <table className="relative z-[1] w-full border-collapse border text-[10.5px]" style={{ borderColor: "var(--document-table-border)" }}>
           <thead><tr className="border-b text-[9px] font-black tracking-wider text-slate-600 uppercase" style={{ backgroundColor: "var(--document-table-header)", borderColor: "var(--document-table-border)" }}>
             <th className="w-[7%] border-r px-2 py-1.5 text-center" style={{ borderColor: "var(--document-table-border)" }}>U.M.</th>
@@ -93,7 +102,9 @@ export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages,
         </div>
       </section>}
       <footer className="flex flex-col items-center border-t border-slate-300 pt-2 text-center">
-        <div className="text-[8.5px] tracking-tight text-slate-600 italic" style={{ fontFamily: "'Times New Roman', Times, serif" }}>{footer || "Via di Carraia, 218 - 55061 Carraia - Capannori (LU) Tel. 0583.980126 - Email: Bricoclass@live.it Cod. Univoco: M5UXCR1 - P.IVA e C.F: 01601690462"}</div>
+        {footer && (
+          <div className="text-[8.5px] tracking-tight text-slate-600 italic" style={{ fontFamily: "'Times New Roman', Times, serif" }}>{footer}</div>
+        )}
         <div className="mt-0.5 text-[8px] font-semibold text-slate-400">Pagina {pageNum} di {totalPages}</div>
       </footer>
     </div>

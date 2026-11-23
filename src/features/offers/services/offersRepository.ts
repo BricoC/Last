@@ -5,6 +5,7 @@ import { getDatabase } from "@/shared/data-layer/database";
 import {
   getLastKnownSupabaseProjectUrl,
   normalizeSupabaseProjectUrl,
+  resolveActiveSupabaseProjectUrl,
   setLastKnownSupabaseProjectUrl,
 } from "@/shared/services/supabaseConfigCache";
 import type { OfferRecord, OfferStatus, TrashOfferRow } from "../types/offer";
@@ -158,6 +159,7 @@ export class OffersRepository {
     const is_urgent = updates.is_urgent !== undefined ? (updates.is_urgent ? 1 : 0) : cur.is_urgent;
     const updated_by = updates.updated_by || "Operatore";
 
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
     await db.execute(
       `UPDATE offers SET 
         offer_date = $1,
@@ -168,9 +170,10 @@ export class OffersRepository {
         is_urgent = $6,
         updated_by = $7,
         updated_at = $8,
-        sync_status = 'pending'
+        sync_status = 'pending',
+        project_url = COALESCE(project_url, $10)
        WHERE id = $9`,
-      [offer_date, requester, contact, items_text, status, is_urgent, updated_by, nowIso, id]
+      [offer_date, requester, contact, items_text, status, is_urgent, updated_by, nowIso, id, activeProjectUrl]
     );
 
     // Notifica la UI e sincronizza immediatamente
@@ -185,15 +188,17 @@ export class OffersRepository {
     const db = await getDatabase();
     const nowIso = new Date().toISOString();
     const user = updated_by || "Operatore";
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
 
     await db.execute(
       `UPDATE offers SET 
         status = $1,
         updated_by = $2,
         updated_at = $3,
-        sync_status = 'pending'
+        sync_status = 'pending',
+        project_url = COALESCE(project_url, $5)
        WHERE id = $4`,
-      [status, user, nowIso, id]
+      [status, user, nowIso, id, activeProjectUrl]
     );
 
     notifyOffersChanged();
@@ -207,15 +212,17 @@ export class OffersRepository {
     const db = await getDatabase();
     const nowIso = new Date().toISOString();
     const user = updated_by || "Operatore";
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
 
     await db.execute(
       `UPDATE offers SET 
         is_urgent = $1,
         updated_by = $2,
         updated_at = $3,
-        sync_status = 'pending'
+        sync_status = 'pending',
+        project_url = COALESCE(project_url, $5)
        WHERE id = $4`,
-      [is_urgent ? 1 : 0, user, nowIso, id]
+      [is_urgent ? 1 : 0, user, nowIso, id, activeProjectUrl]
     );
 
     notifyOffersChanged();
@@ -229,15 +236,17 @@ export class OffersRepository {
     const db = await getDatabase();
     const nowIso = new Date().toISOString();
     const user = updated_by || "Operatore";
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
 
     await db.execute(
       `UPDATE offers SET 
         is_archived = $1,
         updated_by = $2,
         updated_at = $3,
-        sync_status = 'pending'
+        sync_status = 'pending',
+        project_url = COALESCE(project_url, $5)
        WHERE id = $4`,
-      [isArchived ? 1 : 0, user, nowIso, id]
+      [isArchived ? 1 : 0, user, nowIso, id, activeProjectUrl]
     );
 
     notifyOffersChanged();
@@ -251,15 +260,17 @@ export class OffersRepository {
     const db = await getDatabase();
     const nowIso = new Date().toISOString();
     const user = updated_by || "Operatore";
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
 
     const res = await db.execute(
       `UPDATE offers SET 
         is_archived = 1,
         updated_by = $1,
         updated_at = $2,
-        sync_status = 'pending'
+        sync_status = 'pending',
+        project_url = COALESCE(project_url, $3)
        WHERE is_archived = 0 AND status = 'Inviata'`,
-      [user, nowIso]
+      [user, nowIso, activeProjectUrl]
     );
 
     notifyOffersChanged();

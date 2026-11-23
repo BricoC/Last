@@ -173,20 +173,22 @@ class CloudSyncStatusService {
           updatedAt: listinoRows[0].updated_at || null,
         };
       }
+      const activeProjectUrl = normalizeSupabaseProjectUrl(cfgStatus?.config?.projectUrl ?? "");
       const [pending] = await db.select<{ count: number }[]>(`SELECT (
         EXISTS(SELECT 1 FROM listino_generale WHERE sync_revision IS NOT NULL)
         OR EXISTS(SELECT 1 FROM listini_clienti WHERE sync_revision IS NOT NULL)
-        OR EXISTS(SELECT 1 FROM ddt_documents WHERE sync_status = 'pending' AND status <> 'bozza')
-        OR EXISTS(SELECT 1 FROM quotes WHERE sync_status = 'pending')
-        OR EXISTS(SELECT 1 FROM clients WHERE sync_status = 'pending')
-        OR EXISTS(SELECT 1 FROM offers WHERE sync_status = 'pending')
-        OR EXISTS(SELECT 1 FROM notes WHERE sync_status = 'pending')
-        OR EXISTS(SELECT 1 FROM note_deletions)
-        OR EXISTS(SELECT 1 FROM supplier_invoices WHERE cloud_upload_pending = 1)
-        OR EXISTS(SELECT 1 FROM orders WHERE sync_status = 'pending')
-        OR EXISTS(SELECT 1 FROM pending_cloud_operations
-          WHERE project_url IS NULL OR project_url = $1)
-      ) AS count`, [normalizeSupabaseProjectUrl(cfgStatus?.config?.projectUrl ?? "")]);
+        OR ($1 IS NOT NULL AND (
+          EXISTS(SELECT 1 FROM ddt_documents WHERE sync_status = 'pending' AND status <> 'bozza' AND project_url = $1)
+          OR EXISTS(SELECT 1 FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)
+          OR EXISTS(SELECT 1 FROM clients WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)
+          OR EXISTS(SELECT 1 FROM offers WHERE sync_status = 'pending' AND project_url = $1)
+          OR EXISTS(SELECT 1 FROM notes WHERE sync_status = 'pending' AND project_url = $1)
+          OR EXISTS(SELECT 1 FROM note_deletions WHERE project_url = $1)
+          OR EXISTS(SELECT 1 FROM supplier_invoices WHERE cloud_upload_pending = 1 AND project_url = $1)
+          OR EXISTS(SELECT 1 FROM orders WHERE sync_status = 'pending' AND project_url = $1)
+          OR EXISTS(SELECT 1 FROM pending_cloud_operations WHERE project_url = $1)
+        ))
+      ) AS count`, [activeProjectUrl]);
       hasPendingLocalChanges = Boolean(pending?.count);
     } catch (err) {
       console.warn("[CloudSyncStatus] Errore lettura dati locali SQLite:", err);

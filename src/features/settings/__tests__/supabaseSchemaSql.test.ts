@@ -36,6 +36,7 @@ describe("supabaseSchemaSql", () => {
       "public.note",
       "public.offerte",
       "public.app_users",
+      "public.company_settings",
       "public.email_settings",
       "public.backup_settings",
       "public.riba_pagamenti",

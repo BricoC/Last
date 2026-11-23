@@ -296,7 +296,7 @@ export const DashboardFirstSetupWidget: React.FC<Props> = ({ onSetupCompleted })
                 Inizializzazione Completa da Supabase (DDT Storico + Listini)
               </h4>
               <p className="text-[11px] text-[var(--muted-foreground)] mt-0.5">
-                Scarica in un colpo solo tutti i DDT (2023, 2024, 2025, 2026), gli 8.849 articoli del Listino Generale e i 18.558 Listini Clienti direttamente dal Cloud.
+                Scarica tutti i DDT, il Listino Generale e i Listini Clienti direttamente dal Cloud.
               </p>
             </div>
 

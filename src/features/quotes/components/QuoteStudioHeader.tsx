@@ -133,9 +133,16 @@ export function QuoteStudioHeader(props: {
           </button>
         </div>
 
-        <Button size="sm" variant={props.alexMode ? "secondary" : "outline"} onClick={props.onAlexToggle} className="h-8">
-          ✦ Alex
-        </Button>
+        <button
+          type="button"
+          onClick={props.onAlexToggle}
+          className={cn(
+            "h-8 px-3 rounded-lg text-xs font-extrabold text-white flex items-center gap-1.5 bg-gradient-to-r from-purple-600 via-fuchsia-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 shadow-md shadow-purple-900/30 active:scale-95 transition-all cursor-pointer border border-purple-400/40",
+            props.alexMode && "ring-2 ring-purple-300/80 ring-offset-1 ring-offset-[var(--card)]"
+          )}
+        >
+          <span className="tracking-wide">✦ Magic</span>
+        </button>
 
         <Button size="sm" variant="outline" onClick={props.onArchive} className="h-8">
           <Archive className="mr-1 h-3.5 w-3.5" />

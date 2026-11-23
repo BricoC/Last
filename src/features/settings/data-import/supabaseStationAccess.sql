@@ -51,7 +51,7 @@ DECLARE
     'preventivi', 'preventivi_cestino', 'preventivi_sequenza',
     'fatture_elettroniche_testate', 'fatture_elettroniche_righe',
     'fornitori', 'ordini', 'note', 'offerte',
-    'app_users', 'email_settings', 'backup_settings', 'riba_pagamenti'
+    'app_users', 'company_settings', 'email_settings', 'backup_settings', 'riba_pagamenti'
   ];
 BEGIN
   FOREACH table_name IN ARRAY managed_tables LOOP

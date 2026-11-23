@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { getCompanySettings, saveCompanySettings, type CompanySettingsInput } from "./companySettingsRepository";
+import {
+  getCompanySettings,
+  pullCompanySettingsFromSupabase,
+  saveCompanySettings,
+  type CompanySettingsInput,
+} from "./companySettingsRepository";
 
 const emptySettings: CompanySettingsInput = {
   business_name: "", address: "", postal_code: "", city: "", province: "",
@@ -10,9 +15,29 @@ export function CompanySettingsPanel() {
   const [values, setValues] = useState<CompanySettingsInput>(emptySettings);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
-  useEffect(() => { getCompanySettings().then((settings) => {
-    if (settings) setValues({ ...settings, logo_data_url: settings.logo_data_url });
-  }).catch(() => setMessage("Impossibile leggere i dati aziendali.")); }, []);
+
+  useEffect(() => {
+    let active = true;
+    getCompanySettings()
+      .then((settings) => {
+        if (active && settings) {
+          setValues({ ...settings, logo_data_url: settings.logo_data_url });
+        }
+      })
+      .catch(() => {
+        if (active) setMessage("Impossibile leggere i dati aziendali.");
+      });
+
+    void pullCompanySettingsFromSupabase().then((remote) => {
+      if (active && remote) {
+        setValues({ ...remote, logo_data_url: remote.logo_data_url });
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const set = (field: keyof CompanySettingsInput, value: string | null) => setValues((current) => ({ ...current, [field]: value }));
   const loadLogo = (file?: File) => {
@@ -23,14 +48,23 @@ export function CompanySettingsPanel() {
   };
   const save = async () => {
     setSaving(true); setMessage("");
-    try { await saveCompanySettings(values); setMessage("Dati aziendali salvati."); }
-    catch { setMessage("Salvataggio dei dati aziendali non riuscito."); }
-    finally { setSaving(false); }
+    try {
+      const result = await saveCompanySettings(values);
+      setMessage(
+        result.syncedCloud
+          ? "Dati aziendali salvati e sincronizzati sul Cloud."
+          : "Dati aziendali salvati in locale (sincronizzazione Cloud non disponibile)."
+      );
+    } catch {
+      setMessage("Salvataggio dei dati aziendali non riuscito.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return <section className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
     <div><h2 className="text-sm font-semibold">Dati aziendali</h2>
-      <p className="mt-1 text-xs text-[var(--muted-foreground)]">Queste informazioni compaiono nell’intestazione dei preventivi stampati.</p></div>
+      <p className="mt-1 text-xs text-[var(--muted-foreground)]">Queste informazioni e il logo compaiono nell’intestazione di DDT e preventivi stampati (sincronizzati sul Cloud).</p></div>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <Field label="Ragione sociale" value={values.business_name} onChange={(value) => set("business_name", value)} />
       <Field label="Indirizzo" value={values.address} onChange={(value) => set("address", value)} />
@@ -47,7 +81,18 @@ export function CompanySettingsPanel() {
           className="mt-1 block w-full text-sm text-[var(--foreground)]" />
       </label>
     </div>
-    {values.logo_data_url && <img src={values.logo_data_url} alt="Anteprima logo" className="max-h-16 max-w-48 object-contain" />}
+    {values.logo_data_url && (
+      <div className="flex items-center gap-3">
+        <img src={values.logo_data_url} alt="Anteprima logo" className="max-h-16 max-w-48 object-contain" />
+        <button
+          type="button"
+          onClick={() => set("logo_data_url", null)}
+          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+        >
+          Rimuovi logo
+        </button>
+      </div>
+    )}
     <div className="flex items-center gap-3"><button type="button" disabled={saving} onClick={() => void save()}
       className="rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-60">{saving ? "Salvataggio…" : "Salva dati aziendali"}</button>
       {message && <span role="status" className="text-sm text-[var(--muted-foreground)]">{message}</span>}</div>

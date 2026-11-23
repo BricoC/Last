@@ -410,7 +410,7 @@ const MIGRATIONS: Migration[] = [
     version: 28,
     name: "add_sdi_code_to_company_settings",
     up: async (db: MigrationDatabase) => {
-      await db.addColumnIfMissing("company_settings", "sdi_code", "TEXT NOT NULL DEFAULT 'M5UXCR1'");
+      await db.addColumnIfMissing("company_settings", "sdi_code", "TEXT NOT NULL DEFAULT ''");
     },
   },
   {
@@ -493,7 +493,7 @@ const MIGRATIONS: Migration[] = [
       await migrateQuoteTrashSchemaV21(db);
       await migrateNotesSchemaV24(db);
       await migrateSupplierPriceListsSchemaV27(db);
-      await db.addColumnIfMissing("company_settings", "sdi_code", "TEXT NOT NULL DEFAULT 'M5UXCR1'");
+      await db.addColumnIfMissing("company_settings", "sdi_code", "TEXT NOT NULL DEFAULT ''");
     },
   },
   {

@@ -111,15 +111,15 @@ export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
           </div>
         </div>
 
-        {/* Tasto + Alex (Pill Gradiente Viola / Rosa esattamente identico alla foto!) */}
+        {/* Tasto + Magic (Pill Gradiente Viola / Rosa) */}
         <button
           type="button"
           onClick={onOpenAlexModal || onOpenSearchModal}
           className="flex items-center space-x-1.5 text-xs px-3.5 py-2 rounded-lg bg-gradient-to-r from-purple-600 via-fuchsia-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 text-white font-extrabold shadow-md shadow-purple-900/30 active:scale-95 transition-all cursor-default border border-purple-400/40"
-          title="Apri Ricerca Alex (Listino Generale, Clienti, Storico Prezzi DDT)"
+          title="Apri Ricerca Magic (Listino Generale, Clienti, Storico Prezzi DDT)"
         >
           <Plus className="w-3.5 h-3.5 stroke-[3]" />
-          <span className="tracking-wide">Alex</span>
+          <span className="tracking-wide">Magic</span>
         </button>
       </div>
 

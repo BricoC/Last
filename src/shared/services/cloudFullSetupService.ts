@@ -15,6 +15,7 @@ import {
   loadBackupConfig,
   pullBackupSettingsFromSupabase,
 } from "@/features/settings/services/backupService";
+import { pullCompanySettingsFromSupabase } from "@/features/settings/companySettingsRepository";
 import { pullEmailSettingsFromSupabase } from "@/features/settings/emailSettingsRepository";
 
 export interface SetupStatus {
@@ -192,11 +193,12 @@ export class CloudFullSetupService {
       // 5. FASE 4: Impostazioni Cloud
       onProgress({
         stage: "settings",
-        message: "Sincronizzazione email e configurazione backup...",
+        message: "Sincronizzazione dati aziendali, email e configurazione backup...",
         percent: 94,
       });
 
       await Promise.all([
+        step("Dati aziendali", () => pullCompanySettingsFromSupabase(false)),
         step("Impostazioni email", () => pullEmailSettingsFromSupabase(true)),
         step("Impostazioni backup", () => pullBackupSettingsFromSupabase(true)),
       ]);
