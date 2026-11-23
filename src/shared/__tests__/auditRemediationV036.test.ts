@@ -318,10 +318,12 @@ describe("Audit Remediation v0.3.6 (AUD-01 .. AUD-07, AUD-10)", () => {
     expect(sqliteRef.db!.prepare("SELECT ddt_id FROM ddt_sync_snapshots WHERE ddt_id='ddt-synced-del'").get()).toBeUndefined();
   });
 
-  it("AUD-04: pullDdtChanges defers cloud deletions for legacy project_url=NULL DDTs instead of dropping them", async () => {
+  it("AUD-04: pullDdtChanges soft-deletes synced legacy project_url=NULL DDTs without deadlocking, while protecting other projects", async () => {
     sqliteRef.db!.exec(`
       INSERT INTO ddt_documents (id, doc_number, year, doc_date, status, client_name, created_at, updated_at, deleted_at, sync_status, project_url)
-      VALUES ('ddt-legacy', 5, 2026, '2026-01-10', 'confermato', 'Legacy', '2026-01-10T00:00:00Z', '2026-01-10T00:00:00Z', NULL, 'synced', NULL);
+      VALUES
+        ('ddt-legacy', 5, 2026, '2026-01-10', 'confermato', 'Legacy', '2026-01-10T00:00:00Z', '2026-01-10T00:00:00Z', NULL, 'synced', NULL),
+        ('ddt-other-proj', 6, 2026, '2026-01-11', 'confermato', 'Other', '2026-01-11T00:00:00Z', '2026-01-11T00:00:00Z', NULL, 'synced', 'https://other.supabase.co');
       CREATE TABLE ddt_pull_state (project_url TEXT PRIMARY KEY, revision TEXT NOT NULL, initialized INTEGER NOT NULL DEFAULT 0);
       INSERT INTO ddt_pull_state VALUES ('https://demo.supabase.co', '10', 1);
     `);
@@ -330,20 +332,31 @@ describe("Audit Remediation v0.3.6 (AUD-01 .. AUD-07, AUD-10)", () => {
     mockSupabaseFetch.mockImplementation(async () => {
       call++;
       if (call === 1) {
-        return new Response(JSON.stringify([{
-          id: "ddt-legacy",
-          revision: "11",
-          deletedAt: "2026-11-23T10:00:00Z",
-          document: null,
-        }]), { status: 200 });
+        return new Response(JSON.stringify([
+          {
+            id: "ddt-legacy",
+            revision: "11",
+            deletedAt: "2026-11-23T10:00:00Z",
+            document: null,
+          },
+          {
+            id: "ddt-other-proj",
+            revision: "12",
+            deletedAt: "2026-11-23T10:01:00Z",
+            document: null,
+          },
+        ]), { status: 200 });
       }
       return new Response(JSON.stringify([]), { status: 200 });
     });
 
     const pullRes = await pullDdtChanges("https://demo.supabase.co", "sb_publishable_test");
+    expect(pullRes.deleted).toBe(1);
     expect(pullRes.deferred).toBe(1);
-    const deferred = sqliteRef.db!.prepare("SELECT id FROM ddt_pull_deferred WHERE id='ddt-legacy'").get();
-    expect(deferred).toEqual({ id: "ddt-legacy" });
+    const legacyRow = sqliteRef.db!.prepare("SELECT deleted_at FROM ddt_documents WHERE id='ddt-legacy'").get() as { deleted_at: string | null };
+    expect(legacyRow.deleted_at).toBe("2026-11-23T10:00:00Z");
+    const otherRow = sqliteRef.db!.prepare("SELECT deleted_at FROM ddt_documents WHERE id='ddt-other-proj'").get() as { deleted_at: string | null };
+    expect(otherRow.deleted_at).toBeNull();
   });
 
   it("AUD-05: reconcileRemotePriceListDeletions removes ghost row even when another local row is pending", async () => {

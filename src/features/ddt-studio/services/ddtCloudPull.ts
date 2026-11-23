@@ -189,12 +189,8 @@ export async function pullDdtChanges(projectUrl: string, anonKey: string) {
           );
         })(),
       );
-      const isUnverifiedLegacyDelete = Boolean(
-        !doc && local && !local.deleted_at && !normalizeSupabaseProjectUrl(local.project_url),
-      );
       const blocked = Boolean(
         (other && !isIdenticalLegacyRestored) ||
-        isUnverifiedLegacyDelete ||
         (local && (local.sync_status !== "synced" ||
           (local.project_url && normalizeSupabaseProjectUrl(local.project_url) !== project))),
       );
@@ -237,7 +233,7 @@ export async function pullDdtChanges(projectUrl: string, anonKey: string) {
         if ((local && !local.deleted_at) || isIdenticalLegacyRestored) counts.updated++;
         else counts.added++;
         counts.lines += doc.lines.length;
-      } else if (local && !local.deleted_at && normalizeSupabaseProjectUrl(local.project_url) === project) {
+      } else if (local && !local.deleted_at && (!local.project_url || normalizeSupabaseProjectUrl(local.project_url) === project)) {
         writes.push(...deleteDdtWrites(local, change.deletedAt!));
         inPageDeletedIds.add(local.id);
         counts.deleted++;

@@ -237,7 +237,7 @@ export class OffersSyncService {
       );
 
       for (const item of pendings) {
-        const itemProjectUrl = item.project_url;
+        const itemProjectUrl = item.project_url || activeProjectUrl;
         if (!itemProjectUrl || !matchesActiveSupabaseProject(itemProjectUrl, activeProjectUrl)) continue;
         const remoteId = await writeRemoteOffer(creds, item);
         if (remoteId === null && item.supabase_id) {
@@ -246,8 +246,9 @@ export class OffersSyncService {
         }
         await db.execute(
           `UPDATE offers SET supabase_id = $1,
+             project_url = COALESCE(project_url, $4),
              sync_status = CASE WHEN updated_at = $3 THEN 'synced' ELSE sync_status END
-           WHERE id = $2 AND project_url = $4 AND supabase_id IS $5 AND sync_status = 'pending'`,
+           WHERE id = $2 AND (project_url = $4 OR project_url IS NULL) AND supabase_id IS $5 AND sync_status = 'pending'`,
           [remoteId, item.id, item.updated_at, itemProjectUrl, item.supabase_id ?? null],
         );
         pushed++;
