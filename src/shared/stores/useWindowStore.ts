@@ -3,6 +3,7 @@ import { create } from "zustand";
 export interface WindowItem {
   id: string;
   title: string;
+  baseTitle?: string;
   componentId: string;
   iconName?: string;
   x: number;
@@ -147,6 +148,7 @@ interface WindowState {
     id: string,
     bounds: Partial<Pick<WindowItem, "x" | "y" | "width" | "height" | "isMaximized">>
   ) => void;
+  updateWindowTitle: (id: string, title: string | null) => void;
 
   setDraggingWindowId: (id: string | null) => void;
   setSnapFlyoutVisible: (visible: boolean) => void;
@@ -213,6 +215,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     const newWindow: WindowItem = {
       id: item.id,
       title: item.title,
+      baseTitle: item.title,
       componentId: item.componentId,
       iconName: item.iconName,
       x: offset,
@@ -295,7 +298,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
 
     // Calcola il numero progressivo di istanze per questo modulo
     const count = windows.filter((w) => w.componentId === target.componentId).length + 1;
-    const cleanBaseTitle = target.title.replace(/\s*\(\d+\)$/, "");
+    const cleanBaseTitle = (target.baseTitle || target.title).replace(/\s*\(\d+\)$/, "");
     const newTitle = `${cleanBaseTitle} (${count})`;
     const newId = `${target.componentId}-${Date.now().toString(36)}`;
 
@@ -304,6 +307,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     const newWindow: WindowItem = {
       id: newId,
       title: newTitle,
+      baseTitle: newTitle,
       componentId: target.componentId,
       iconName: target.iconName,
       x: offset,
@@ -326,6 +330,17 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   updateWindowBounds: (id, bounds) => {
     set((state) => ({
       windows: state.windows.map((w) => (w.id === id ? { ...w, ...bounds } : w)),
+    }));
+  },
+
+  updateWindowTitle: (id, title) => {
+    set((state) => ({
+      windows: state.windows.map((w) => {
+        if (w.id !== id) return w;
+        const nextTitle = title && title.trim() ? title.trim() : (w.baseTitle || w.title);
+        if (nextTitle === w.title) return w;
+        return { ...w, title: nextTitle };
+      }),
     }));
   },
 

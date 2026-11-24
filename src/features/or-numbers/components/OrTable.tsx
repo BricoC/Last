@@ -41,9 +41,11 @@ export const OrTable: React.FC<OrTableProps> = ({
   const redCount = rows.filter((r) => getOrStatus(r) === "red").length;
   const yellowCount = rows.filter((r) => getOrStatus(r) === "yellow").length;
   const greenCount = rows.filter((r) => getOrStatus(r) === "green").length;
+  const unpricedCount = rows.filter((r) => getOrStatus(r) === "unpriced").length;
 
-  const currentTableSelectedCount = rows.filter((r) => selectedIds.has(r.id)).length;
-  const isAllSelected = rows.length > 0 && currentTableSelectedCount === rows.length;
+  const selectableRows = rows.filter((r) => !r.hasMissingPrices);
+  const currentTableSelectedCount = selectableRows.filter((r) => selectedIds.has(r.id)).length;
+  const isAllSelected = selectableRows.length > 0 && currentTableSelectedCount === selectableRows.length;
 
   const formatDateDisplay = (dateStr: string) => {
     if (!dateStr) return "—";
@@ -84,6 +86,15 @@ export const OrTable: React.FC<OrTableProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               {greenCount} Conclusi
             </span>
+            {unpricedCount > 0 && (
+              <span
+                className="px-1.5 py-0.5 rounded-full bg-slate-500/15 text-slate-400 border border-slate-500/30 flex items-center gap-1"
+                title="DDT senza prezzi di vendita (non inviabili)"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                {unpricedCount} Da prezzare
+              </span>
+            )}
           </div>
         </div>
 
@@ -154,9 +165,9 @@ export const OrTable: React.FC<OrTableProps> = ({
                   type="checkbox"
                   checked={isAllSelected}
                   onChange={onToggleSelectAll}
-                  disabled={rows.length === 0}
-                  className="rounded border-[var(--border)] text-blue-600 focus:ring-0 cursor-pointer scale-90"
-                  title="Seleziona tutti i DDT di questa tabella"
+                  disabled={selectableRows.length === 0}
+                  className="rounded border-[var(--border)] text-blue-600 focus:ring-0 cursor-pointer scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Seleziona tutti i DDT inviabili di questa tabella"
                 />
               </th>
               <th className="py-1 px-1.5 w-18 text-center text-[10px]">Data</th>
@@ -180,14 +191,16 @@ export const OrTable: React.FC<OrTableProps> = ({
             ) : (
               rows.map((row) => {
                 const status = getOrStatus(row);
-                const isChecked = selectedIds.has(row.id);
+                const isUnpriced = status === "unpriced";
+                const isChecked = !isUnpriced && selectedIds.has(row.id);
 
                 return (
                   <tr
                     key={row.id}
                     className={cn(
                       "h-[25px] hover:bg-[var(--accent)]/10 transition-colors group",
-                      isChecked && "bg-blue-500/10"
+                      isChecked && "bg-blue-500/10",
+                      isUnpriced && "opacity-60 bg-slate-500/5"
                     )}
                   >
                     {/* Checkbox */}
@@ -195,8 +208,14 @@ export const OrTable: React.FC<OrTableProps> = ({
                       <input
                         type="checkbox"
                         checked={isChecked}
+                        disabled={isUnpriced}
                         onChange={() => onToggleSelectRow(row.id)}
-                        className="rounded border-[var(--border)] text-blue-600 focus:ring-0 cursor-pointer scale-90"
+                        className="rounded border-[var(--border)] text-blue-600 focus:ring-0 cursor-pointer scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title={
+                          isUnpriced
+                            ? "DDT senza prezzi di vendita: non selezionabile né inviabile"
+                            : "Seleziona DDT"
+                        }
                       />
                     </td>
 
@@ -217,14 +236,22 @@ export const OrTable: React.FC<OrTableProps> = ({
                           status === "yellow" &&
                             "bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25",
                           status === "red" &&
-                            "bg-red-500/15 text-red-400 border border-red-500/40 hover:bg-red-500/25"
+                            "bg-red-500/15 text-red-400 border border-red-500/40 hover:bg-red-500/25",
+                          status === "unpriced" &&
+                            "bg-slate-500/15 text-slate-400 border border-slate-500/40 hover:bg-slate-500/25"
                         )}
-                        title={`DDT ${row.docNumber ?? "Bozza"} (Clicca per aprire in DDT Studio)`}
+                        title={
+                          isUnpriced
+                            ? `DDT ${row.docNumber ?? "Bozza"} — Mancano i prezzi di vendita (non inviabile). Clicca per aprire e completare i prezzi.`
+                            : `DDT ${row.docNumber ?? "Bozza"} (Clicca per aprire in DDT Studio)`
+                        }
                       >
                         {status === "green" ? (
                           <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
                         ) : status === "yellow" ? (
                           <Clock className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                        ) : status === "unpriced" ? (
+                          <AlertCircle className="w-2.5 h-2.5 text-slate-400 shrink-0" />
                         ) : (
                           <AlertCircle className="w-2.5 h-2.5 text-red-400 shrink-0" />
                         )}
@@ -247,6 +274,13 @@ export const OrTable: React.FC<OrTableProps> = ({
                       {row.statusLog ? (
                         <span className="px-1.5 py-0.2 rounded bg-[var(--background)] border border-[var(--border)] text-[10px]">
                           {row.statusLog}
+                        </span>
+                      ) : isUnpriced ? (
+                        <span
+                          className="px-1.5 py-0.2 rounded bg-slate-500/15 border border-slate-500/30 text-slate-400 text-[10px] font-sans font-semibold"
+                          title="Uno o più articoli di questo DDT non hanno prezzo di vendita"
+                        >
+                          Senza prezzi
                         </span>
                       ) : (
                         <span className="text-slate-600">—</span>
@@ -282,9 +316,18 @@ export const OrTable: React.FC<OrTableProps> = ({
                         <button
                           type="button"
                           onClick={() => onSendSingle(row)}
-                          disabled={isSendingEmail}
-                          className="p-1 rounded text-[var(--muted-foreground)] hover:text-blue-400 hover:bg-blue-500/10 transition-colors cursor-pointer"
-                          title="Invia questo singolo DDT via email (Outlook)"
+                          disabled={isSendingEmail || isUnpriced}
+                          className={cn(
+                            "p-1 rounded transition-colors",
+                            isUnpriced
+                              ? "text-slate-500 opacity-30 cursor-not-allowed"
+                              : "text-[var(--muted-foreground)] hover:text-blue-400 hover:bg-blue-500/10 cursor-pointer"
+                          )}
+                          title={
+                            isUnpriced
+                              ? "Non inviabile: mancano i prezzi di vendita"
+                              : "Invia questo singolo DDT via email (Outlook)"
+                          }
                         >
                           <Mail className="w-3 h-3" />
                         </button>

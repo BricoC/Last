@@ -29,7 +29,7 @@ import { priceListSyncService } from "./services/priceListSyncService";
 import { orderRepository } from "@/features/orders/services/orderRepository";
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { useUserStore } from "@/shared/stores/useUserStore";
-import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
+import { registerWindowCloseGuard, registerDirtyCheck, useWindowStore } from "@/shared/stores/useWindowStore";
 import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
 import { CustomerPriceListTrashModal } from "./components/CustomerPriceListTrashModal";
 import { useClientColumnVisibility } from "./hooks/useColumnVisibility";
@@ -181,6 +181,15 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const [orderSuppliers, setOrderSuppliers] = useState<string[]>([]);
   const [selectedClientFilter, setSelectedClientFilter] = useState<string>("TUTTI");
   const [activeTab, setActiveTab] = useState<ClientTab>("tutti");
+
+  useEffect(() => {
+    if (!windowId) return;
+    const nextTitle =
+      selectedClientFilter && selectedClientFilter !== "TUTTI"
+        ? selectedClientFilter
+        : null;
+    useWindowStore.getState().updateWindowTitle(windowId, nextTitle);
+  }, [windowId, selectedClientFilter]);
 
   // Dropdown Clienti personalizzato (tema scuro coordinato e ricerca)
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);

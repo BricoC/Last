@@ -13,7 +13,9 @@ import {
   ArrowUpDown, 
   Calendar,
   ListFilter,
-  BarChart3
+  BarChart3,
+  Copy,
+  Check
 } from "lucide-react";
 import { getClientArticleHistory, getDdtClientNames, getClientAvailableYears, type ClientArticleHistoryRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtNumber, formatDdtPercent, formatDdtViewDate } from "../services/ddtViewFormatting";
@@ -80,6 +82,18 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
   const [selectedYear, setSelectedYear] = useState<string>(initialYear ? String(initialYear) : "all");
   const [viewMode, setViewMode] = useState<HistoryViewMode>("movements");
   const [mergeVariants, setMergeVariants] = useState<boolean>(true);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const handleCopyText = (key: string, text: string) => {
+    const clean = (text || "").trim();
+    if (!clean) return;
+    void navigator.clipboard.writeText(clean).then(() => {
+      setCopiedKey(key);
+      window.setTimeout(() => {
+        setCopiedKey((prev) => (prev === key ? null : prev));
+      }, 1500);
+    }).catch(() => {});
+  };
 
   // Se l'utente torna a visualizzare un singolo cliente mentre era in Resoconto Clienti, reimposta a Resoconto Articoli
   useEffect(() => {
@@ -394,9 +408,33 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold tracking-tight">Storico Articolo</h2>
                 {searchTerm && (
-                  <span className="rounded bg-[var(--primary)]/15 px-2 py-0.5 font-sans text-xs font-semibold text-[var(--primary)] max-w-md truncate">
-                    {searchTerm}
-                  </span>
+                  <div className="inline-flex items-center gap-1.5">
+                    <span className="rounded bg-[var(--primary)]/15 px-2 py-0.5 font-sans text-xs font-semibold text-[var(--primary)] max-w-md truncate select-text">
+                      {searchTerm}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText("header", searchTerm)}
+                      className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer border ${
+                        copiedKey === "header"
+                          ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                          : "bg-[var(--card)] border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
+                      }`}
+                      title="Copia descrizione negli appunti"
+                    >
+                      {copiedKey === "header" ? (
+                        <>
+                          <Check className="h-3 w-3" />
+                          <span>Copiato</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3 w-3" />
+                          <span>Copia</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 )}
                 {articleCode && (
                   <span className="rounded bg-[var(--primary)]/20 px-2 py-0.5 font-mono text-xs font-semibold text-[var(--primary)]">
@@ -914,10 +952,30 @@ export const DDTClientArticleHistoryModal: React.FC<DDTClientArticleHistoryModal
 
                       {/* Descrizione (tra Quantità e Prezzo Listino) */}
                       <td
-                        className="px-3 py-2 font-sans font-medium text-[var(--foreground)] truncate max-w-[300px]"
+                        className="px-3 py-2 font-sans font-medium text-[var(--foreground)] max-w-[320px] group/rowdesc"
                         title={row.description || ""}
                       >
-                        {row.description}
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="truncate select-text">{row.description}</span>
+                          {row.description?.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => handleCopyText(`row-${row.ddtId}-${idx}`, row.description)}
+                              className={`shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-sans font-medium transition-colors cursor-pointer ${
+                                copiedKey === `row-${row.ddtId}-${idx}`
+                                  ? "bg-emerald-500/20 text-emerald-300 opacity-100"
+                                  : "opacity-0 group-hover/rowdesc:opacity-100 bg-[var(--background)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]/60"
+                              }`}
+                              title="Copia descrizione negli appunti"
+                            >
+                              {copiedKey === `row-${row.ddtId}-${idx}` ? (
+                                <Check className="h-3 w-3" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                       {/* Prezzo Listino */}

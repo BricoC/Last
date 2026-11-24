@@ -311,7 +311,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   };
 
   const handleSendCarraraSelected = async () => {
-    const selected = carraraRows.filter((r) => selectedCarraraIds.has(r.id));
+    const selected = carraraRows.filter((r) => selectedCarraraIds.has(r.id) && !r.hasMissingPrices);
     if (selected.length === 0) {
       showToast("Seleziona prima almeno un DDT da inviare.", "info");
       return;
@@ -403,7 +403,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   };
 
   const handleSendWepaSelected = async () => {
-    const selected = wepaRows.filter((r) => selectedWepaIds.has(r.id));
+    const selected = wepaRows.filter((r) => selectedWepaIds.has(r.id) && !r.hasMissingPrices);
     if (selected.length === 0) {
       showToast("Seleziona prima almeno un DDT Wepa da inviare.", "info");
       return;
@@ -464,6 +464,10 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
 
   // Invio singolo DDT
   const handleSendSingle = async (row: OrRow) => {
+    if (row.hasMissingPrices) {
+      showToast("Impossibile inviare: questo DDT ha articoli senza prezzo di vendita.", "error");
+      return;
+    }
     const [emailConfig, companySettings] = await Promise.all([
       getEmailSettings(),
       getCompanySettings(),
@@ -517,6 +521,8 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
 
   // Master checkbox selection
   const handleToggleSelectRowCarrara = (id: string) => {
+    const row = carraraRows.find((r) => r.id === id);
+    if (row?.hasMissingPrices) return;
     setSelectedCarraraIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -526,14 +532,17 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   };
 
   const handleToggleSelectAllCarrara = () => {
-    if (selectedCarraraIds.size === carraraRows.length) {
+    const selectable = carraraRows.filter((r) => !r.hasMissingPrices);
+    if (selectable.length > 0 && selectedCarraraIds.size === selectable.length) {
       setSelectedCarraraIds(new Set());
     } else {
-      setSelectedCarraraIds(new Set(carraraRows.map((r) => r.id)));
+      setSelectedCarraraIds(new Set(selectable.map((r) => r.id)));
     }
   };
 
   const handleToggleSelectRowWepa = (id: string) => {
+    const row = wepaRows.find((r) => r.id === id);
+    if (row?.hasMissingPrices) return;
     setSelectedWepaIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -543,10 +552,11 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   };
 
   const handleToggleSelectAllWepa = () => {
-    if (selectedWepaIds.size === wepaRows.length) {
+    const selectable = wepaRows.filter((r) => !r.hasMissingPrices);
+    if (selectable.length > 0 && selectedWepaIds.size === selectable.length) {
       setSelectedWepaIds(new Set());
     } else {
-      setSelectedWepaIds(new Set(wepaRows.map((r) => r.id)));
+      setSelectedWepaIds(new Set(selectable.map((r) => r.id)));
     }
   };
 
@@ -556,6 +566,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   const totalGreen = allRows.filter((r) => getOrStatus(r) === "green").length;
   const totalYellow = allRows.filter((r) => getOrStatus(r) === "yellow").length;
   const totalRed = allRows.filter((r) => getOrStatus(r) === "red").length;
+  const totalUnpriced = allRows.filter((r) => getOrStatus(r) === "unpriced").length;
 
   return (
     <div className="flex flex-col h-full w-full bg-[var(--background)] text-[var(--foreground)] p-4 select-none overflow-hidden">
@@ -632,6 +643,16 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
             <span>Da richiedere:</span>
             <span className="font-bold">{totalRed}</span>
           </div>
+          {totalUnpriced > 0 && (
+            <div
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-500/10 border border-slate-500/30 text-slate-400"
+              title="DDT con uno o più articoli senza prezzo di vendita (non inviabili)"
+            >
+              <span className="w-2 h-2 rounded-full bg-slate-400" />
+              <span>Senza prezzi:</span>
+              <span className="font-bold">{totalUnpriced}</span>
+            </div>
+          )}
         </div>
       </div>
 

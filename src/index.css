@@ -255,6 +255,200 @@ button, a, [role="button"], .cursor-pointer {
   }
 }
 
+/* ─── TEMA BIANCO AVORIO: fix leggibilità mirati (ZERO impatto su Grigio / Nero OLED) ─── */
+html[data-theme="avorio"] .avorio-ink {
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] .avorio-ink-hover:hover {
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] .group:hover .avorio-sticky-cell {
+  background-color: #f3f0e6 !important;
+}
+
+html[data-theme="avorio"] .avorio-amber-col {
+  background-color: #fef3c7 !important;
+  color: #92400e !important;
+  border-color: #f59e0b !important;
+}
+
+html[data-theme="avorio"] .avorio-sky-col {
+  background-color: #e0f2fe !important;
+  color: #0c4a6e !important;
+  border-color: #7dd3fc !important;
+}
+
+html[data-theme="avorio"] .avorio-sky-soft {
+  background-color: #f0f9ff !important;
+  color: #334155 !important;
+}
+
+html[data-theme="avorio"] .avorio-emerald-hint {
+  color: #065f46 !important;
+}
+
+html[data-theme="avorio"] .avorio-amber-text {
+  color: #b45309 !important;
+}
+
+html[data-theme="avorio"] .avorio-amber-btn {
+  background-color: #fef3c7 !important;
+  color: #92400e !important;
+  border-color: #f59e0b !important;
+}
+
+html[data-theme="avorio"] .avorio-amber-btn:hover {
+  background-color: #fde68a !important;
+  color: #78350f !important;
+}
+
+html[data-theme="avorio"] .avorio-note-card {
+  background-color: #ffffff !important;
+  border-color: #d6d1c5 !important;
+  color: #1f2937 !important;
+}
+
+html[data-theme="avorio"] .avorio-note-card:hover {
+  background-color: #f3f0e6 !important;
+  border-color: #bdb6a5 !important;
+}
+
+html[data-theme="avorio"] .avorio-note-card-title {
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] .avorio-note-card-preview {
+  color: #374151 !important;
+}
+
+html[data-theme="avorio"] .avorio-note-card-date {
+  color: #6b7280 !important;
+}
+
+html[data-theme="avorio"] .avorio-note-filter {
+  color: #4b5563 !important;
+}
+
+html[data-theme="avorio"] .avorio-note-filter:hover {
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] .avorio-note-filter-active {
+  background-color: #e5e1d4 !important;
+  color: #111827 !important;
+}
+
+/* Dashboard modali (Dettaglio Giornaliero, DDT Emessi, Rendimento Mensile, Matrice Clienti) in Avorio */
+html[data-theme="avorio"] [data-avorio-modal] .text-white,
+html[data-theme="avorio"] [data-avorio-modal] .text-slate-200 {
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-modal] .text-slate-300 {
+  color: #374151 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-modal] .hover\:text-white:hover {
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-modal] [class*="hover:bg-[var(--primary)]"]:hover {
+  color: #ffffff !important;
+}
+
+html[data-theme="avorio"] [data-avorio-modal] option {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+/* Note: editor foglio Word + toolbar + ricerca + card attiva in tono Avorio */
+html[data-theme="avorio"] .avorio-note-card-active {
+  background-color: #fef3c7 !important;
+  border-color: #d97706 !important;
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] .avorio-note-card-active-title {
+  color: #92400e !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-search] {
+  background-color: #ffffff !important;
+  border-color: #d6d1c5 !important;
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-search]::placeholder {
+  color: #6b7280 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-editor] {
+  background-color: #ece8dc !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] {
+  background-color: #f7f5ef !important;
+  border-color: #d6d1c5 !important;
+  color: #1f2937 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] button {
+  color: #374151 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] button:hover {
+  background-color: #e5e1d4 !important;
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] select {
+  background-color: #ffffff !important;
+  border-color: #d6d1c5 !important;
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] .bg-slate-700 {
+  background-color: #d6d1c5 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] .bg-slate-900 {
+  background-color: #ffffff !important;
+  border-color: #d6d1c5 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] .text-emerald-300 {
+  color: #047857 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] .text-amber-300 {
+  color: #b45309 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-toolbar] .text-red-400 {
+  color: #dc2626 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-sheet] {
+  background-color: #fdfcf8 !important;
+  border-color: #d6d1c5 !important;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08) !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-title] {
+  color: #111827 !important;
+  border-color: #d6d1c5 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-title]::placeholder {
+  color: #9ca3af !important;
+}
+
+html[data-theme="avorio"] [data-avorio-notes-body] {
+  color: #1f2937 !important;
+}
+
 
 
 

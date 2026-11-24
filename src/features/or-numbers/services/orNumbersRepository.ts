@@ -197,37 +197,41 @@ export class OrNumbersRepository {
       SELECT 
         id, doc_number, series, doc_date, client_name, 
         destination_name, destination_address, destination_city, 
-        order_reference
+        order_reference,
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM ddt_items i
+            WHERE i.ddt_id = ddt_documents.id
+              AND i.deleted_at IS NULL
+              AND COALESCE(i.row_kind, 'item') <> 'note'
+              AND COALESCE(i.unit_price_subunits, 0) > 0
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM ddt_items i
+            WHERE i.ddt_id = ddt_documents.id
+              AND i.deleted_at IS NULL
+              AND COALESCE(i.row_kind, 'item') <> 'note'
+              AND (
+                TRIM(COALESCE(i.description, '')) <> ''
+                OR TRIM(COALESCE(i.quantity, '')) <> ''
+              )
+              AND NOT (
+                COALESCE(i.unit_price_subunits, 0) = 0
+                AND COALESCE(i.net_amount_subunits, 0) = 0
+                AND TRIM(COALESCE(i.quantity, '')) = ''
+                AND TRIM(COALESCE(i.unit, '')) = ''
+              )
+              AND COALESCE(i.unit_price_subunits, 0) <= 0
+          )
+          THEN 0
+          ELSE 1
+        END AS has_missing_prices
       FROM ddt_documents
       WHERE deleted_at IS NULL
         AND doc_number IS NOT NULL
         AND status <> 'bozza'
         AND ${clientCondition}
         AND doc_date >= $1 AND doc_date <= $2
-        AND EXISTS (
-          SELECT 1 FROM ddt_items i
-          WHERE i.ddt_id = ddt_documents.id
-            AND i.deleted_at IS NULL
-            AND COALESCE(i.row_kind, 'item') <> 'note'
-            AND COALESCE(i.unit_price_subunits, 0) > 0
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM ddt_items i
-          WHERE i.ddt_id = ddt_documents.id
-            AND i.deleted_at IS NULL
-            AND COALESCE(i.row_kind, 'item') <> 'note'
-            AND (
-              TRIM(COALESCE(i.description, '')) <> ''
-              OR TRIM(COALESCE(i.quantity, '')) <> ''
-            )
-            AND NOT (
-              COALESCE(i.unit_price_subunits, 0) = 0
-              AND COALESCE(i.net_amount_subunits, 0) = 0
-              AND TRIM(COALESCE(i.quantity, '')) = ''
-              AND TRIM(COALESCE(i.unit, '')) = ''
-            )
-            AND COALESCE(i.unit_price_subunits, 0) <= 0
-        )
       ORDER BY 
         doc_number ASC,
         doc_date ASC
@@ -244,11 +248,12 @@ export class OrNumbersRepository {
         destination_address: string | null;
         destination_city: string | null;
         order_reference: string | null;
+        has_missing_prices: number;
       }>>(query, [startDate, endDate]),
       this.getLogsMap(),
     ]);
 
-    const statusPriority = { red: 0, yellow: 1, green: 2 } as const;
+    const statusPriority = { unpriced: 0, red: 1, yellow: 2, green: 3 } as const;
     return rows
       .map((r) => {
         const formattedDateIt = r.doc_date.split("-").reverse().join(".");
@@ -284,6 +289,7 @@ export class OrNumbersRepository {
           destination: cleanDest || rawDest || "—",
           orderReference: effectiveOrderRef,
           statusLog: logStatus,
+          hasMissingPrices: Boolean(r.has_missing_prices),
         };
       })
       .sort((a, b) => statusPriority[getOrStatus(a)] - statusPriority[getOrStatus(b)]);

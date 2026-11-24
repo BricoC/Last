@@ -71,5 +71,20 @@ describe("orNumbers getOrStatus", () => {
     };
     expect(getOrStatus(row)).toBe("yellow");
   });
+
+  it("restituisce 'unpriced' se mancano i prezzi di vendita", () => {
+    const row: OrRow = {
+      id: "6",
+      docNumber: 105,
+      series: "A",
+      date: "2026-11-20",
+      client: "CARTIERE CARRARA",
+      destination: "CV7",
+      orderReference: "",
+      statusLog: "",
+      hasMissingPrices: true,
+    };
+    expect(getOrStatus(row)).toBe("unpriced");
+  });
 });
 

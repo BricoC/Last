@@ -86,7 +86,7 @@ export const WindowTabBar: React.FC = () => {
                 {renderIcon(win.componentId)}
               </span>
 
-              <span className="truncate max-w-[130px]">{win.title}</span>
+              <span className="truncate max-w-[130px]" title={win.title}>{win.title}</span>
 
               {/* Indicatore visivo se la finestra è ridotta a icona */}
               {win.isMinimized && (

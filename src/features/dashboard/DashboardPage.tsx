@@ -667,7 +667,7 @@ export const DashboardPage: React.FC = () => {
             <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
               Fatturato {currentYearNum}:
             </span>
-            <span className="font-extrabold text-white font-mono">
+            <span className="font-extrabold text-white avorio-ink font-mono">
               {data ? formatEur(data.kpis.currentYearTurnover) : "..."}
             </span>
             {data?.kpis.ytd && data.kpis.ytd.deltaPercentVsPrevYear !== null && (
@@ -968,7 +968,7 @@ export const DashboardPage: React.FC = () => {
             <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
               Mese Corrente ({MONTH_NAMES[new Date().getMonth()]}):
             </span>
-            <span className="font-extrabold text-white font-mono">
+            <span className="font-extrabold text-white avorio-ink font-mono">
               {data ? formatEur(data.kpis.ytd.currentMonthMtdTurnover) : "..."}
             </span>
             {data?.kpis.ytd && data.kpis.ytd.monthMtdTurnoverDeltaVsPrev !== null && (
@@ -1269,7 +1269,7 @@ export const DashboardPage: React.FC = () => {
             <span className="text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
               DDT {currentYearNum} Emessi:
             </span>
-            <span className="font-extrabold text-white font-mono">
+            <span className="font-extrabold text-white avorio-ink font-mono">
               {data ? data.kpis.ytd.currentYearDdtCount.toLocaleString("it-IT") : "..."}
             </span>
 
@@ -1404,7 +1404,7 @@ export const DashboardPage: React.FC = () => {
           <button
             type="button"
             onClick={() => handleOpenArticleHistory("")}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--card)] hover:bg-[var(--primary)] text-slate-200 hover:text-white border border-[var(--border)] hover:border-[var(--primary)] text-xs font-bold transition-all cursor-pointer shadow-xs group"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--card)] hover:bg-[var(--primary)] text-slate-200 avorio-ink hover:text-white border border-[var(--border)] hover:border-[var(--primary)] text-xs font-bold transition-all cursor-pointer shadow-xs group"
             title="Apri lo Storico e Resoconto Articoli a tutto schermo"
           >
             <Package className="w-3.5 h-3.5 text-sky-400 group-hover:text-white transition-colors" />
@@ -1601,7 +1601,7 @@ export const DashboardPage: React.FC = () => {
                       <span key={yr} className="flex items-center gap-1 shrink-0">
                         <span className={cn("w-1.5 h-1.5 rounded-full", style.bg)} />
                         <span className={cn("font-bold", style.text)}>{yr}:</span>
-                        <span className="font-semibold text-white">
+                        <span className="font-semibold text-white avorio-ink">
                           {chartMetric === "ddtCount" ? `${val} DDT` : formatEur(val)}
                         </span>
                       </span>
@@ -1836,7 +1836,7 @@ export const DashboardPage: React.FC = () => {
                         </td>
 
                         {/* Fatturato */}
-                        <td className="py-1.5 px-2 text-right font-extrabold text-white whitespace-nowrap">
+                        <td className="py-1.5 px-2 text-right font-extrabold text-white avorio-ink whitespace-nowrap">
                           {formatEur(m.turnover)}
                         </td>
 
@@ -1881,10 +1881,10 @@ export const DashboardPage: React.FC = () => {
                 {perfTotals && (
                   <tfoot className="bg-[var(--card)] border-t-2 border-[var(--border)] font-mono text-[11px] font-bold sticky bottom-0 z-10 select-none">
                     <tr>
-                      <td className="py-1.5 px-2 font-sans uppercase text-[10px] text-white">
+                      <td className="py-1.5 px-2 font-sans uppercase text-[10px] text-white avorio-ink">
                         Totale
                       </td>
-                      <td className="py-1.5 px-2 text-right text-white">
+                      <td className="py-1.5 px-2 text-right text-white avorio-ink">
                         {formatEur(perfTotals.totTurnover)}
                       </td>
                       <td className="py-1.5 px-1.5 text-center font-sans">
@@ -1996,7 +1996,7 @@ export const DashboardPage: React.FC = () => {
                       )}
                     >
                       <div className={cn("font-extrabold", clientSortField === yr && "underline")}>{yr}</div>
-                      <div className="text-[10px] font-mono font-bold text-white mt-0.5 tracking-normal">
+                      <div className="text-[10px] font-mono font-bold text-white avorio-ink mt-0.5 tracking-normal">
                         {formatEur(clientYearTotals[yr] || 0)}
                       </div>
                     </th>
@@ -2004,12 +2004,12 @@ export const DashboardPage: React.FC = () => {
                   <th
                     onClick={() => setClientSortField("total")}
                     className={cn(
-                      "p-2 text-right cursor-pointer hover:text-white transition-colors align-bottom sticky right-0 bg-[var(--card)] z-30 min-w-[95px] shadow-[-2px_0_4px_-1px_rgba(0,0,0,0.5)]",
+                      "p-2 text-right cursor-pointer hover:text-white avorio-ink-hover transition-colors align-bottom sticky right-0 bg-[var(--card)] z-30 min-w-[95px] shadow-[-2px_0_4px_-1px_rgba(0,0,0,0.5)]",
                       clientSortField === "total" && "text-[var(--primary)]"
                     )}
                   >
                     <div className={cn("font-extrabold", clientSortField === "total" && "underline")}>Totale</div>
-                    <div className="text-[10px] font-mono font-bold text-white mt-0.5 tracking-normal">
+                    <div className="text-[10px] font-mono font-bold text-white avorio-ink mt-0.5 tracking-normal">
                       {formatEur(grandTotalTurnover)}
                     </div>
                   </th>
@@ -2023,7 +2023,7 @@ export const DashboardPage: React.FC = () => {
                     className="hover:bg-[var(--card)]/80 transition-colors cursor-pointer group"
                     title={`Clicca per vedere il resoconto articoli di ${cli.clientName}`}
                   >
-                    <td className="p-2 font-sans font-semibold text-[var(--foreground)] truncate max-w-[160px] group-hover:text-[var(--primary)] sticky left-0 bg-[var(--card)] group-hover:bg-[#1a202c] z-10 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.5)]">
+                    <td className="p-2 font-sans font-semibold text-[var(--foreground)] truncate max-w-[160px] group-hover:text-[var(--primary)] sticky left-0 bg-[var(--card)] group-hover:bg-[#1a202c] avorio-sticky-cell z-10 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.5)]">
                       {cli.clientName}
                     </td>
                     {(data?.availableYears || [2026, 2025, 2024, 2023]).map((yr) => {
@@ -2034,7 +2034,7 @@ export const DashboardPage: React.FC = () => {
                         </td>
                       );
                     })}
-                    <td className="p-2 text-right font-bold text-white sticky right-0 bg-[var(--card)] group-hover:bg-[#1a202c] z-10 shadow-[-2px_0_4px_-1px_rgba(0,0,0,0.5)] min-w-[95px]">
+                    <td className="p-2 text-right font-bold text-white avorio-ink sticky right-0 bg-[var(--card)] group-hover:bg-[#1a202c] avorio-sticky-cell z-10 shadow-[-2px_0_4px_-1px_rgba(0,0,0,0.5)] min-w-[95px]">
                       {formatEur(cli.totalTurnover)}
                     </td>
                   </tr>
@@ -2150,7 +2150,7 @@ export const DashboardPage: React.FC = () => {
                       <span className="font-mono text-[11px] font-extrabold text-[var(--primary)] shrink-0">
                         N° {label}
                       </span>
-                      <span className="text-xs font-semibold truncate text-[var(--foreground)] group-hover:text-white shrink-0 max-w-[190px]" title={doc.clientName}>
+                      <span className="text-xs font-semibold truncate text-[var(--foreground)] group-hover:text-white avorio-ink shrink-0 max-w-[190px]" title={doc.clientName}>
                         {doc.clientName}
                       </span>
                       {doc.destination && (
@@ -2168,7 +2168,7 @@ export const DashboardPage: React.FC = () => {
                       <span className="text-[10px] font-mono text-[var(--muted-foreground)]">
                         {doc.docDate}
                       </span>
-                      <span className="font-mono text-xs font-bold text-white">
+                      <span className="font-mono text-xs font-bold text-white avorio-ink">
                         {formatEur(doc.totalDocument)}
                       </span>
                       <span
@@ -2218,6 +2218,7 @@ export const DashboardPage: React.FC = () => {
       {/* ============================================================== */}
       {isClientMatrixModalOpen && (
         <div
+          data-avorio-modal
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-3 backdrop-blur-xs select-none"
           role="dialog"
           aria-modal="true"

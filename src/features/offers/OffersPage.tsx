@@ -506,7 +506,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-sm font-black text-white tracking-wide uppercase">
+              <h1 className="text-sm font-black text-white avorio-ink tracking-wide uppercase">
                 Offerte & Richieste Clienti
               </h1>
               {counts.pendingSyncCount > 0 ? (
@@ -537,8 +537,8 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer",
                 currentTab === "active"
-                  ? "bg-[var(--card)] text-white shadow-xs"
-                  : "text-[var(--muted-foreground)] hover:text-white"
+                  ? "bg-[var(--card)] text-white avorio-ink shadow-xs"
+                  : "text-[var(--muted-foreground)] hover:text-white avorio-ink-hover"
               )}
             >
               <span>Attive</span>
@@ -559,8 +559,8 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer",
                 currentTab === "archived"
-                  ? "bg-[var(--card)] text-white shadow-xs"
-                  : "text-[var(--muted-foreground)] hover:text-white"
+                  ? "bg-[var(--card)] text-white avorio-ink shadow-xs"
+                  : "text-[var(--muted-foreground)] hover:text-white avorio-ink-hover"
               )}
             >
               <Archive className="w-3 h-3" />
@@ -660,7 +660,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
                   stopMgsAlert();
                 }
               }}
-              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-lg border border-[var(--border)] bg-[var(--background)] text-white focus:outline-hidden focus:border-blue-500"
+              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-lg border border-[var(--border)] bg-[var(--background)] text-white avorio-ink focus:outline-hidden focus:border-blue-500"
             />
             {searchQuery && (
               <button
@@ -679,7 +679,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
             <select
               value={selectedStatusFilter}
               onChange={(e) => setSelectedStatusFilter(e.target.value)}
-              className="py-1 px-2 text-xs rounded-lg border border-[var(--border)] bg-[var(--background)] text-white focus:outline-hidden cursor-pointer"
+              className="py-1 px-2 text-xs rounded-lg border border-[var(--border)] bg-[var(--background)] text-white avorio-ink focus:outline-hidden cursor-pointer"
             >
               <option value="ALL">Tutti gli stati</option>
               {OFFER_STATUSES.map((st) => (
@@ -700,7 +700,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
               className={cn(
                 "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all",
                 sentActiveCount > 0 && !archivingSent
-                  ? "border-amber-500/40 bg-amber-950/30 hover:bg-amber-900/50 text-amber-300 hover:text-amber-200 cursor-pointer active:scale-95"
+                  ? "border-amber-500/40 bg-amber-950/30 hover:bg-amber-900/50 text-amber-300 hover:text-amber-200 avorio-amber-btn cursor-pointer active:scale-95"
                   : "border-[var(--border)]/60 bg-[var(--background)]/40 text-[var(--muted-foreground)]/50 cursor-not-allowed"
               )}
               title={
@@ -736,7 +736,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
         ) : filteredOffers.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-center p-6 space-y-3">
             <ClipboardList className="w-10 h-10 text-[var(--muted-foreground)]/40" />
-            <h3 className="text-sm font-bold text-white">Nessuna offerta trovata</h3>
+            <h3 className="text-sm font-bold text-white avorio-ink">Nessuna offerta trovata</h3>
             <p className="text-xs text-[var(--muted-foreground)] max-w-sm">
               {searchQuery
                 ? "Nessuna offerta corrisponde ai termini di ricerca inseriti."
@@ -787,7 +787,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-[var(--border)]/40">
                   <div className="flex flex-wrap items-center gap-2">
                     {/* Data Creazione e Autore */}
-                    <span className="inline-flex items-center gap-1 font-mono text-[11px] font-bold text-white bg-[var(--background)] px-2 py-0.5 rounded border border-[var(--border)]">
+                    <span className="inline-flex items-center gap-1 font-mono text-[11px] font-bold text-white avorio-ink bg-[var(--background)] px-2 py-0.5 rounded border border-[var(--border)]">
                       <Calendar className="w-3 h-3 text-blue-400" />
                       <span>{formatDateTimeDisplay(item.created_at || item.offer_date)}</span>
                       <span className="text-blue-300 font-sans font-semibold ml-0.5">
@@ -796,7 +796,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
                     </span>
 
                     {/* Nome Richiedente */}
-                    <strong className="text-sm font-black text-white tracking-wide">
+                    <strong className="text-sm font-black text-white avorio-ink tracking-wide">
                       {item.requester}
                     </strong>
 
@@ -878,7 +878,7 @@ export const OffersPage: React.FC<{ windowId?: string }> = ({ windowId }) => {
                       <span className="inline-flex items-center gap-1 text-[10px] text-[var(--muted-foreground)] font-mono">
                         <Clock className="w-2.5 h-2.5 text-amber-400" />
                         <span>Mod: {formatDateTimeDisplay(item.updated_at)}</span>
-                        <span className="text-amber-300 font-sans">({item.updated_by || "Operatore"})</span>
+                        <span className="text-amber-300 avorio-amber-text font-sans">({item.updated_by || "Operatore"})</span>
                       </span>
                     )}
 

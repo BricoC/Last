@@ -412,7 +412,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
                 <StickyNote className="w-4 h-4" />
               </div>
               <div>
-                <h2 className="text-sm font-bold text-white tracking-wide">Note</h2>
+                <h2 className="text-sm font-bold text-white avorio-ink tracking-wide">Note</h2>
                 <span className="text-[10.5px] text-[var(--muted-foreground)]">
                   {notes.filter((n) => n.is_archived === 0).length} note attive
                 </span>
@@ -457,6 +457,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
+              data-avorio-notes-search
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -483,8 +484,8 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
               className={cn(
                 "px-2 py-0.5 rounded transition-colors",
                 filterMode === "all"
-                  ? "bg-slate-800 text-white font-semibold"
-                  : "text-slate-400 hover:text-white"
+                  ? "bg-slate-800 text-white avorio-note-filter-active font-semibold"
+                  : "text-slate-400 hover:text-white avorio-note-filter"
               )}
             >
               Tutte
@@ -495,8 +496,8 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
               className={cn(
                 "px-2 py-0.5 rounded transition-colors flex items-center space-x-1",
                 filterMode === "pinned"
-                  ? "bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30"
-                  : "text-slate-400 hover:text-white"
+                  ? "bg-amber-500/20 text-amber-300 avorio-amber-btn font-semibold border border-amber-500/30"
+                  : "text-slate-400 hover:text-white avorio-note-filter"
               )}
             >
               <Pin className="w-3 h-3" />
@@ -508,8 +509,8 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
               className={cn(
                 "px-2 py-0.5 rounded transition-colors flex items-center space-x-1",
                 filterMode === "archived"
-                  ? "bg-slate-800 text-slate-300 font-semibold"
-                  : "text-slate-400 hover:text-white"
+                  ? "bg-slate-800 text-slate-300 avorio-note-filter-active font-semibold"
+                  : "text-slate-400 hover:text-white avorio-note-filter"
               )}
             >
               <Archive className="w-3 h-3" />
@@ -541,15 +542,15 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
                   className={cn(
                     "p-2.5 rounded-lg text-left transition-all group relative cursor-pointer border",
                     isActive
-                      ? "bg-[#1e293b] border-amber-500/50 shadow-sm"
-                      : "bg-slate-900/40 hover:bg-slate-900/80 border-transparent text-slate-300"
+                      ? "bg-[#1e293b] border-amber-500/50 shadow-sm avorio-note-card-active"
+                      : "bg-slate-900/40 hover:bg-slate-900/80 border-transparent text-slate-300 avorio-note-card"
                   )}
                 >
                   <div className="flex items-start justify-between gap-1 mb-1">
                     <span
                       className={cn(
                         "text-xs font-bold truncate flex-1",
-                        isActive ? "text-amber-300" : "text-slate-200"
+                        isActive ? "text-amber-300 avorio-note-card-active-title" : "text-slate-200 avorio-note-card-title"
                       )}
                     >
                       {note.title || "Senza titolo"}
@@ -565,11 +566,11 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
                   </div>
 
                   {/* Anteprima Testo */}
-                  <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed mb-1.5 font-normal">
+                  <p className="text-[11px] text-slate-400 avorio-note-card-preview line-clamp-2 leading-relaxed mb-1.5 font-normal">
                     {note.content_text || "Nota vuota"}
                   </p>
 
-                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 avorio-note-card-date font-mono">
                     <span>{formatDateLabel(note.updated_at)}</span>
 
                     {/* Azioni rapide al passaggio del mouse */}
@@ -606,7 +607,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
       </div>
 
       {/* ─── 2. AREA LAVORO FOGLIO WORD (Pannello Centrale / Destro) ─── */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-950/70">
+      <div data-avorio-notes-editor className="flex-1 flex flex-col h-full overflow-hidden bg-slate-950/70">
         {/* Banner se la tabella Supabase manca */}
         {isSupabaseTableMissing && (
           <div className="bg-amber-950/80 border-b border-amber-500/40 px-3 py-1.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-2 shrink-0 animate-in fade-in">
@@ -631,7 +632,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
         )}
 
         {/* ─── BARRA DEGLI STRUMENTI IN STILE WORD (Top Toolbar) ─── */}
-        <div className="shrink-0 border-b border-slate-800 bg-[#0f172a] p-2 flex flex-wrap items-center justify-between gap-2 shadow-sm text-xs">
+        <div data-avorio-notes-toolbar className="shrink-0 border-b border-slate-800 bg-[#0f172a] p-2 flex flex-wrap items-center justify-between gap-2 shadow-sm text-xs">
               {/* Gruppo Stili e Formattazione */}
               <div className="flex items-center flex-wrap gap-1">
                 {/* Undo / Redo */}
@@ -951,9 +952,10 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
 
             {/* ─── FOGLIO WORD (Document Page) ─── */}
             <div className="flex-1 overflow-y-auto p-6 flex justify-center custom-scrollbar">
-              <div className="w-full max-w-3xl min-h-[840px] bg-[#1e293b] border border-slate-700/80 rounded-xl shadow-2xl p-8 flex flex-col space-y-4 select-text">
+              <div data-avorio-notes-sheet className="w-full max-w-3xl min-h-[840px] bg-[#1e293b] border border-slate-700/80 rounded-xl shadow-2xl p-8 flex flex-col space-y-4 select-text">
                 {/* Titolo Documento */}
                 <input
+                  data-avorio-notes-title
                   ref={titleInputRef}
                   type="text"
                   value={title}
@@ -970,6 +972,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ windowId }) => {
 
                 {/* Area di Scrittura Word ContentEditable */}
                 <div
+                  data-avorio-notes-body
                   ref={editorRef}
                   contentEditable={true}
                   suppressContentEditableWarning={true}

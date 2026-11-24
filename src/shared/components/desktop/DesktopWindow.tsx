@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { WindowItem, useWindowStore, SnapSlotType, requestWindowClose } from "@/shared/stores/useWindowStore";
-import { Minus, Square, Copy, X, Plus, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users, Hash, ClipboardList, StickyNote } from "lucide-react";
+import { Minus, Square, Copy, X, Plus, Grid2X2, LayoutGrid, FileText, ShoppingCart, Tag, Calculator, Settings as SettingsIcon, Package, Users, Hash, ClipboardList, StickyNote } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 
 type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -40,6 +40,35 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
   const isFocused = activeWindowId === win.id;
   const [isDragging, setIsDragging] = useState(false);
   const [activeResizeDir, setActiveResizeDir] = useState<ResizeDirection | null>(null);
+  const [isSnapMenuOpen, setIsSnapMenuOpen] = useState(false);
+  const snapMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isSnapMenuOpen) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (snapMenuRef.current && !snapMenuRef.current.contains(e.target as Node)) {
+        setIsSnapMenuOpen(false);
+        setHoveredSnapSlot(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsSnapMenuOpen(false);
+        setHoveredSnapSlot(null);
+      }
+    };
+    window.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isSnapMenuOpen, setHoveredSnapSlot]);
+
+  const handleQuickSnap = (slot: SnapSlotType) => {
+    snapWindowToSlot(win.id, slot);
+    setIsSnapMenuOpen(false);
+  };
 
   const pendingSnapRef = useRef<SnapSlotType | "maximize" | null>(null);
   const winWidthRef = useRef<number>(win.width || 960);
@@ -299,6 +328,119 @@ export const DesktopWindow: React.FC<DesktopWindowProps> = ({ window: win, rende
 
         {/* Pulsanti Finestra Windows */}
         <div className="flex items-center space-x-1">
+          {/* Posizionamento rapido finestra (Sopra / Sotto / Sinistra / Destra / Quadranti) */}
+          <div ref={snapMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                focusWindow(win.id);
+                setIsSnapMenuOpen((prev) => {
+                  if (prev) setHoveredSnapSlot(null);
+                  return !prev;
+                });
+              }}
+              className={cn(
+                "w-7 h-6 flex items-center justify-center rounded transition-colors cursor-default",
+                isSnapMenuOpen
+                  ? "bg-[var(--primary)]/20 text-[var(--primary)]"
+                  : "hover:bg-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              )}
+              title="Posiziona finestra (Sopra, Sotto, Sinistra, Destra, Quadranti)"
+            >
+              <Grid2X2 className="w-3.5 h-3.5" />
+            </button>
+
+            {isSnapMenuOpen && (
+              <div
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute right-0 top-full mt-1 z-[9995] bg-[#1e2128]/98 backdrop-blur-xl border border-[#3e4350] rounded-xl shadow-[0_12px_32px_rgba(0,0,0,0.75)] p-2.5 select-none"
+              >
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2 px-0.5 whitespace-nowrap">
+                  Posiziona finestra
+                </div>
+                <div className="flex items-center space-x-2">
+                  {/* Sopra / Sotto */}
+                  <div className="w-[64px] h-[46px] p-1 rounded-lg border border-[#444957] bg-[#282a31] flex flex-col space-y-1">
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredSnapSlot("top-half")}
+                      onMouseLeave={() => setHoveredSnapSlot(null)}
+                      onClick={() => handleQuickSnap("top-half")}
+                      title="Metà Superiore (50%)"
+                      className="w-full flex-1 rounded border bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-colors cursor-default"
+                    />
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredSnapSlot("bottom-half")}
+                      onMouseLeave={() => setHoveredSnapSlot(null)}
+                      onClick={() => handleQuickSnap("bottom-half")}
+                      title="Metà Inferiore (50%)"
+                      className="w-full flex-1 rounded border bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-colors cursor-default"
+                    />
+                  </div>
+
+                  {/* Sinistra / Destra */}
+                  <div className="w-[64px] h-[46px] p-1 rounded-lg border border-[#444957] bg-[#282a31] flex space-x-1">
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredSnapSlot("left-half")}
+                      onMouseLeave={() => setHoveredSnapSlot(null)}
+                      onClick={() => handleQuickSnap("left-half")}
+                      title="Metà Sinistra (50%)"
+                      className="flex-1 h-full rounded border bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-colors cursor-default"
+                    />
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredSnapSlot("right-half")}
+                      onMouseLeave={() => setHoveredSnapSlot(null)}
+                      onClick={() => handleQuickSnap("right-half")}
+                      title="Metà Destra (50%)"
+                      className="flex-1 h-full rounded border bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-colors cursor-default"
+                    />
+                  </div>
+
+                  {/* 4 Quadranti */}
+                  <div className="w-[64px] h-[46px] p-1 rounded-lg border border-[#444957] bg-[#282a31] grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredSnapSlot("top-left")}
+                      onMouseLeave={() => setHoveredSnapSlot(null)}
+                      onClick={() => handleQuickSnap("top-left")}
+                      title="In alto a sinistra"
+                      className="h-full rounded border bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-colors cursor-default"
+                    />
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredSnapSlot("top-right")}
+                      onMouseLeave={() => setHoveredSnapSlot(null)}
+                      onClick={() => handleQuickSnap("top-right")}
+                      title="In alto a destra"
+                      className="h-full rounded border bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-colors cursor-default"
+                    />
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredSnapSlot("bottom-left")}
+                      onMouseLeave={() => setHoveredSnapSlot(null)}
+                      onClick={() => handleQuickSnap("bottom-left")}
+                      title="In basso a sinistra"
+                      className="h-full rounded border bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-colors cursor-default"
+                    />
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredSnapSlot("bottom-right")}
+                      onMouseLeave={() => setHoveredSnapSlot(null)}
+                      onClick={() => handleQuickSnap("bottom-right")}
+                      title="In basso a destra"
+                      className="h-full rounded border bg-[#383b45] border-[#4e5362] hover:bg-[#0078d4] hover:border-sky-300 transition-colors cursor-default"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Sdoppia / Duplica Finestra (nuova istanza dello stesso modulo) */}
           <button
             type="button"

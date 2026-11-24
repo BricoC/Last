@@ -591,7 +591,6 @@ export class DdtRepository {
     );
     const itemPayloads = validItems.map((it, index) => {
       const isNote = it.row_kind === "note" || (
-        it.row_kind !== "item" &&
         Boolean(it.description?.trim()) &&
         !isPositivePrice(it.unit_price) &&
         (!it.purchase_price || !isPositivePrice(it.purchase_price)) &&
@@ -761,8 +760,7 @@ export class DdtRepository {
   private mapRowToItem(row: any): DdtItem {
     const isNote =
       row.row_kind === "note" ||
-      (row.row_kind !== "item" &&
-        Boolean(row.description?.trim()) &&
+      (Boolean(row.description?.trim()) &&
         (row.unit_price_subunits ?? 0) === 0 &&
         (row.net_amount_subunits ?? 0) === 0 &&
         (!row.purchase_price_subunits || row.purchase_price_subunits === 0) &&

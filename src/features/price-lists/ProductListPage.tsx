@@ -1678,7 +1678,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
 
               {visibleColumns.prezzo_fattura !== false && (
                 <th
-                  className="px-3 py-2 text-right w-28 bg-amber-500/20 text-amber-300 font-bold border-x border-amber-500/30 cursor-pointer"
+                  className="px-3 py-2 text-right w-28 bg-amber-500/20 text-amber-300 avorio-amber-col font-bold border-x border-amber-500/30 cursor-pointer"
                   onClick={() => handleToggleSort("prezzo_fattura")}
                 >
                   FATTURA
@@ -1688,7 +1688,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
               {/* ACQUISTO BASE (posizionato tra FATTURA ed IVA) */}
               {visibleColumns.prezzo_acquisto !== false && (
                 <th
-                  className="px-3 py-2 text-right w-28 cursor-pointer hover:text-[var(--foreground)] bg-sky-950/30 text-sky-200 font-semibold border-x border-sky-500/30"
+                  className="px-3 py-2 text-right w-28 cursor-pointer hover:text-[var(--foreground)] bg-sky-950/30 text-sky-200 avorio-sky-col font-semibold border-x border-sky-500/30"
                   onClick={() => handleToggleSort("prezzo_acquisto")}
                 >
                   <div className="flex items-center justify-end space-x-1">
@@ -1705,16 +1705,16 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
 
               {/* Colonne create posizionate DOPO IVA */}
               {visibleColumns.aumento !== false && (
-                <th className="px-2.5 py-2 text-right w-16 bg-sky-950/20">AUMENTO %</th>
+                <th className="px-2.5 py-2 text-right w-16 bg-sky-950/20 avorio-sky-soft">AUMENTO %</th>
               )}
 
               {visibleColumns.maga !== false && (
-                <th className="px-2.5 py-2 text-right w-16 bg-sky-950/20">MAGAZZINO %</th>
+                <th className="px-2.5 py-2 text-right w-16 bg-sky-950/20 avorio-sky-soft">MAGAZZINO %</th>
               )}
 
               {visibleColumns.costo_maggiorato !== false && (
                 <th
-                  className="px-3 py-2 text-right w-28 bg-sky-900/40 text-sky-300 font-bold border-x border-sky-500/30 cursor-pointer"
+                  className="px-3 py-2 text-right w-28 bg-sky-900/40 text-sky-300 avorio-sky-col font-bold border-x border-sky-500/30 cursor-pointer"
                   onClick={() => handleToggleSort("costo_maggiorato")}
                   title="Costo base + Aumento% + Magazzino% (Riferimento per tutti i prezzi)"
                 >
@@ -1767,7 +1767,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
                     onKeyDown={handleCellKeyDown}
-                    className="italic text-emerald-200/70"
+                    className="italic text-emerald-200/70 avorio-emerald-hint"
                   />
                 )}
 
@@ -1787,7 +1787,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
                     onKeyDown={handleCellKeyDown}
-                    className="italic text-emerald-200/70"
+                    className="italic text-emerald-200/70 avorio-emerald-hint"
                   />
                 )}
 
@@ -1846,7 +1846,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
                     onCommit={commitCellEdit}
                     onCancel={cancelCellEdit}
                     onKeyDown={handleCellKeyDown}
-                    className="italic text-emerald-200/80 font-medium"
+                    className="italic text-emerald-200/80 avorio-emerald-hint font-medium"
                   />
                 )}
 
@@ -2575,7 +2575,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             className={`font-bold border-x ${
               isHighlighted
                 ? "bg-[#fef08a] text-slate-950 font-black border-amber-300 shadow-sm"
-                : "bg-amber-500/15 text-amber-200 border-amber-500/20"
+                : "bg-amber-500/15 text-amber-200 avorio-amber-col border-amber-500/20"
             }`}
           />
         )}
@@ -2601,7 +2601,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             className={`font-bold border-x ${
               isHighlighted
                 ? "bg-sky-800/60 text-white font-black border-sky-400/40"
-                : "text-sky-200 font-semibold bg-sky-950/20 border-sky-500/20"
+                : "text-sky-200 font-semibold bg-sky-950/20 avorio-sky-col border-sky-500/20"
             }`}
           />
         )}
@@ -2685,7 +2685,7 @@ const MemoizedProductRow = memo<MemoizedProductRowProps>(
             className={`px-3 py-1 text-right font-bold border-x ${
               isHighlighted
                 ? "bg-sky-800/60 text-white font-black border-sky-400/40"
-                : "bg-sky-900/20 text-sky-200 border-sky-500/20"
+                : "bg-sky-900/20 text-sky-200 avorio-sky-col border-sky-500/20"
             }`}
             title="Prezzo acquisto base maggiorato da aumento e magazzino"
           >

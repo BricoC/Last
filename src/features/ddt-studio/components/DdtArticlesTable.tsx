@@ -1,5 +1,5 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from "react";
-import { FileText, LoaderCircle } from "lucide-react";
+import { useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { Check, Copy, FileText, LoaderCircle } from "lucide-react";
 import type { DdtArticleViewRow } from "../services/ddtReadModelsRepository";
 import { formatDdtMoney, formatDdtNumber, formatDdtViewDate } from "../services/ddtViewFormatting";
 import type { DdtArticleSortField } from "../hooks/useDdtArticlesModel";
@@ -25,6 +25,20 @@ export function DdtArticlesTable(props: Props) {
     activeRowId, setActiveRowId, activeRowElementRef, isKeyboardNavRef, handleSort,
     renderSortIndicator, setSelectedDdtId, setSelectedArticleForHistory,
   } = props;
+  const [copiedRowId, setCopiedRowId] = useState<string | null>(null);
+
+  const handleCopyDescription = (e: React.MouseEvent, rowId: string, description: string) => {
+    e.stopPropagation();
+    const text = (description || "").trim();
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopiedRowId(rowId);
+      window.setTimeout(() => {
+        setCopiedRowId((prev) => (prev === rowId ? null : prev));
+      }, 1500);
+    }).catch(() => {});
+  };
+
   return (
     <>
       {/* Tabella con stile dei popup (colorata, pulita e reattiva) */}
@@ -193,32 +207,60 @@ export function DdtArticlesTable(props: Props) {
                       {informational ? "" : row.quantity}
                     </td>
 
-                    {/* DESCRIZIONE (Link al popup storico articolo del cliente) */}
+                    {/* DESCRIZIONE (Link al popup storico articolo del cliente + Copia rapida) */}
                     <td className="px-3 py-2 font-sans">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedArticleForHistory(row);
-                        }}
-                        className={`group text-left w-full cursor-pointer inline-flex items-center justify-between gap-2 ${
-                          isActive ? "text-white" : "hover:text-[var(--primary)]"
-                        }`}
-                        title="Clicca per aprire lo storico acquisti di questo articolo"
-                      >
-                        <span className={`truncate group-hover:underline font-semibold ${
-                          isActive ? "text-white" : "text-[var(--foreground)]"
-                        }`}>
-                          {row.description}
-                        </span>
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-sans shrink-0 font-semibold ${
-                          isActive
-                            ? "bg-white/20 text-white opacity-90 group-hover:opacity-100"
-                            : "opacity-0 group-hover:opacity-100 bg-[var(--primary)]/20 text-[var(--primary)]"
-                        }`}>
-                          Storico ↗
-                        </span>
-                      </button>
+                      <div className="flex items-center justify-between gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedArticleForHistory(row);
+                          }}
+                          className={`group/desc text-left min-w-0 flex-1 cursor-pointer inline-flex items-center justify-between gap-2 ${
+                            isActive ? "text-white" : "hover:text-[var(--primary)]"
+                          }`}
+                          title="Clicca per aprire lo storico acquisti di questo articolo"
+                        >
+                          <span className={`truncate group-hover/desc:underline font-semibold select-text ${
+                            isActive ? "text-white" : "text-[var(--foreground)]"
+                          }`}>
+                            {row.description}
+                          </span>
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-sans shrink-0 font-semibold ${
+                            isActive
+                              ? "bg-white/20 text-white opacity-90 group-hover/desc:opacity-100"
+                              : "opacity-0 group-hover:opacity-100 bg-[var(--primary)]/20 text-[var(--primary)]"
+                          }`}>
+                            Storico ↗
+                          </span>
+                        </button>
+                        {row.description?.trim() && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleCopyDescription(e, row.id, row.description)}
+                            className={`shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-sans font-semibold transition-colors cursor-pointer ${
+                              copiedRowId === row.id
+                                ? "bg-emerald-500/25 text-emerald-300 opacity-100"
+                                : isActive
+                                ? "bg-white/15 text-white hover:bg-white/25 opacity-90 hover:opacity-100"
+                                : "opacity-0 group-hover:opacity-100 bg-[var(--background)]/80 text-[var(--muted-foreground)] hover:text-[var(--foreground)] border border-[var(--border)]/60"
+                            }`}
+                            title="Copia descrizione negli appunti"
+                          >
+                            {copiedRowId === row.id ? (
+                              <>
+                                <Check className="h-3 w-3" />
+                                <span>Copiato</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3 w-3" />
+                                <span>Copia</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </td>
 
                     {/* PREZZO UNIT. */}

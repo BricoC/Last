@@ -8,9 +8,10 @@ export interface OrRow {
   orderReference: string;
   statusLog: string;
   discountPercent?: number;
+  hasMissingPrices?: boolean;
 }
 
-export type OrStatusType = "green" | "yellow" | "red";
+export type OrStatusType = "green" | "yellow" | "red" | "unpriced";
 
 /**
  * Verifica se la stringa corrisponde a un vero numero d'ordine.
@@ -27,6 +28,9 @@ export function isActualOrderReference(ref?: string | null): boolean {
 }
 
 export function getOrStatus(row: OrRow): OrStatusType {
+  if (row.hasMissingPrices) {
+    return "unpriced";
+  }
   if (isActualOrderReference(row.orderReference)) {
     return "green";
   }

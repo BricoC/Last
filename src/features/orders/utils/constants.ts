@@ -90,13 +90,51 @@ export const FORNITORE_COLORS: FornitoreColor[] = [
   { bg: 'rgba(96,165,250,0.18)', text: '#93c5fd', border: '#60a5fa' }, // Blue 400
 ];
 
+// Palette ad alto contrasto dedicata esclusivamente al tema Bianco Avorio
+export const FORNITORE_COLORS_AVORIO: FornitoreColor[] = [
+  { bg: 'rgba(59,130,246,0.15)', text: '#1d4ed8', border: '#3b82f6' }, // Blue 700
+  { bg: 'rgba(16,185,129,0.15)', text: '#047857', border: '#10b981' }, // Emerald 700
+  { bg: 'rgba(139,92,246,0.15)', text: '#6d28d9', border: '#8b5cf6' }, // Violet 700
+  { bg: 'rgba(245,158,11,0.18)', text: '#b45309', border: '#d97706' }, // Amber 700
+  { bg: 'rgba(236,72,153,0.15)', text: '#be185d', border: '#ec4899' }, // Pink 700
+  { bg: 'rgba(14,165,233,0.15)', text: '#0369a1', border: '#0ea5e9' }, // Sky 700
+  { bg: 'rgba(249,115,22,0.16)', text: '#c2410c', border: '#f97316' }, // Orange 700
+  { bg: 'rgba(20,184,166,0.15)', text: '#0f766e', border: '#14b8a6' }, // Teal 700
+  { bg: 'rgba(239,68,68,0.15)', text: '#b91c1c', border: '#ef4444' }, // Red 700
+  { bg: 'rgba(168,85,247,0.15)', text: '#7e22ce', border: '#a855f7' }, // Purple 700
+  { bg: 'rgba(99,102,241,0.15)', text: '#4338ca', border: '#6366f1' }, // Indigo 700
+  { bg: 'rgba(132,204,22,0.18)', text: '#4d7c0f', border: '#65a30d' }, // Lime 700
+  { bg: 'rgba(234,179,8,0.20)', text: '#a16207', border: '#ca8a04' }, // Yellow 700
+  { bg: 'rgba(244,63,94,0.15)', text: '#be123c', border: '#f43f5e' }, // Rose 700
+  { bg: 'rgba(6,182,212,0.15)', text: '#0e7490', border: '#06b6d4' }, // Cyan 700
+  { bg: 'rgba(34,197,94,0.15)', text: '#15803d', border: '#22c55e' }, // Green 700
+  { bg: 'rgba(217,70,239,0.15)', text: '#a21caf', border: '#d946ef' }, // Fuchsia 700
+  { bg: 'rgba(113,113,122,0.16)', text: '#3f3f46', border: '#71717a' }, // Zinc 700
+  { bg: 'rgba(251,146,60,0.18)', text: '#c2410c', border: '#ea580c' }, // Orange 700
+  { bg: 'rgba(129,140,248,0.16)', text: '#4338ca', border: '#6366f1' }, // Indigo 700
+  { bg: 'rgba(56,189,248,0.16)', text: '#0369a1', border: '#0284c7' }, // Sky 700
+  { bg: 'rgba(52,211,153,0.16)', text: '#047857', border: '#059669' }, // Emerald 700
+  { bg: 'rgba(167,139,250,0.16)', text: '#6d28d9', border: '#7c3aed' }, // Violet 700
+  { bg: 'rgba(250,204,21,0.20)', text: '#a16207', border: '#ca8a04' }, // Yellow 700
+  { bg: 'rgba(244,114,182,0.16)', text: '#be185d', border: '#db2777' }, // Pink 700
+  { bg: 'rgba(45,212,191,0.16)', text: '#0f766e', border: '#0d9488' }, // Teal 700
+  { bg: 'rgba(248,113,113,0.16)', text: '#b91c1c', border: '#dc2626' }, // Red 700
+  { bg: 'rgba(192,132,252,0.16)', text: '#7e22ce', border: '#9333ea' }, // Purple 700
+  { bg: 'rgba(163,230,53,0.20)', text: '#4d7c0f', border: '#65a30d' }, // Lime 700
+  { bg: 'rgba(96,165,250,0.16)', text: '#1d4ed8', border: '#2563eb' }, // Blue 700
+];
+
 export const getFornitoreColor = (name?: string | null): FornitoreColor | null => {
   if (!name || name.trim() === '') return null;
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
-  return FORNITORE_COLORS[Math.abs(hash) % FORNITORE_COLORS.length];
+  const isAvorio =
+    typeof document !== 'undefined' &&
+    document.documentElement.getAttribute('data-theme') === 'avorio';
+  const palette = isAvorio ? FORNITORE_COLORS_AVORIO : FORNITORE_COLORS;
+  return palette[Math.abs(hash) % palette.length];
 };
 
 export const ORDER_GRID_CSS = `

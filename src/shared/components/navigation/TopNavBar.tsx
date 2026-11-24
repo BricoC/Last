@@ -21,9 +21,6 @@ import {
   Users,
   StickyNote,
   Settings as SettingsIcon,
-  Columns2,
-  Rows2,
-  Grid2X2,
   Layers,
   Minimize2,
   ChevronLeft,
@@ -75,9 +72,6 @@ export const TopNavBar: React.FC = () => {
   const {
     openWindow,
     activeWindowId,
-    tileSideBySide,
-    tileHorizontal,
-    tileGrid,
     cascadeWindows,
     toggleShowDesktop,
     areAllWindowsMinimized,
@@ -583,30 +577,6 @@ export const TopNavBar: React.FC = () => {
       <div className="flex items-center space-x-2 pl-2 shrink-0">
         {/* Strumenti Rapidi Disposizione Finestre Desktop */}
         <div className="hidden lg:flex items-center space-x-1 border-r border-[var(--border)] pr-2">
-          <button
-            type="button"
-            onClick={tileSideBySide}
-            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors cursor-default"
-            title="Affianca finestre verticalmente (50 / 50)"
-          >
-            <Columns2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={tileHorizontal}
-            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors cursor-default"
-            title="Affianca finestre orizzontalmente (50 / 50)"
-          >
-            <Rows2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={tileGrid}
-            className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors cursor-default"
-            title="Griglia 4 finestre"
-          >
-            <Grid2X2 className="w-3.5 h-3.5" />
-          </button>
           <button
             type="button"
             onClick={cascadeWindows}

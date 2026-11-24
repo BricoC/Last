@@ -207,6 +207,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     const { theme } = get();
     const root = document.documentElement;
 
+    root.setAttribute("data-theme", theme.preset);
     root.style.setProperty("--background", theme.backgroundColor);
     root.style.setProperty("--card", theme.cardColor);
     root.style.setProperty("--card-foreground", theme.textColor);

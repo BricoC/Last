@@ -84,7 +84,7 @@ export const MonthlyPerformanceModal: React.FC<MonthlyPerformanceModalProps> = (
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-6xl h-[92vh] rounded-2xl border border-[var(--border)] bg-[var(--card)] flex flex-col overflow-hidden shadow-2xl">
+      <div data-avorio-modal className="w-full max-w-6xl h-[92vh] rounded-2xl border border-[var(--border)] bg-[var(--card)] flex flex-col overflow-hidden shadow-2xl">
         {/* Modal Header */}
         <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between bg-[var(--background)]/80 shrink-0">
           <div className="flex items-center gap-3">

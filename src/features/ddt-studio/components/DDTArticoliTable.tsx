@@ -636,14 +636,26 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
             console.warn("[DDTArticoliTable] Errore taglia clipboard:", err);
           }
 
-          const { netAmount, vatAmount } = calculateRowAmounts(
-            updatedRow.quantity || (isPositivePrice(updatedRow.unit_price) ? "1" : ""),
-            safeMoney(updatedRow.unit_price),
-            updatedRow.discount_pct || "0",
-            updatedRow.vat_rate
-          );
-          updatedRow.net_amount = netAmount;
-          updatedRow.vat_amount = vatAmount;
+          if (isTextOnlyRow(updatedRow)) {
+            updatedRow.row_kind = "note";
+            updatedRow.unit = "";
+            updatedRow.quantity = "";
+            updatedRow.vat_rate = "";
+            updatedRow.discount_pct = "";
+            updatedRow.unit_price = money(0);
+            updatedRow.purchase_price = money(0);
+            updatedRow.net_amount = money(0);
+            updatedRow.vat_amount = money(0);
+          } else {
+            const { netAmount, vatAmount } = calculateRowAmounts(
+              updatedRow.quantity || (isPositivePrice(updatedRow.unit_price) ? "1" : ""),
+              safeMoney(updatedRow.unit_price),
+              updatedRow.discount_pct || "0",
+              updatedRow.vat_rate
+            );
+            updatedRow.net_amount = netAmount;
+            updatedRow.vat_amount = vatAmount;
+          }
 
           e.node.setData(updatedRow);
           setItems((prev) => {
@@ -698,14 +710,26 @@ export const DDTArticoliTable = forwardRef<DDTArticoliTableHandle, DDTArticoliTa
             updatedRow[colId] = "";
           }
 
-          const { netAmount, vatAmount } = calculateRowAmounts(
-            updatedRow.quantity || (isPositivePrice(updatedRow.unit_price) ? "1" : ""),
-            safeMoney(updatedRow.unit_price),
-            updatedRow.discount_pct || "0",
-            updatedRow.vat_rate
-          );
-          updatedRow.net_amount = netAmount;
-          updatedRow.vat_amount = vatAmount;
+          if (isTextOnlyRow(updatedRow)) {
+            updatedRow.row_kind = "note";
+            updatedRow.unit = "";
+            updatedRow.quantity = "";
+            updatedRow.vat_rate = "";
+            updatedRow.discount_pct = "";
+            updatedRow.unit_price = money(0);
+            updatedRow.purchase_price = money(0);
+            updatedRow.net_amount = money(0);
+            updatedRow.vat_amount = money(0);
+          } else {
+            const { netAmount, vatAmount } = calculateRowAmounts(
+              updatedRow.quantity || (isPositivePrice(updatedRow.unit_price) ? "1" : ""),
+              safeMoney(updatedRow.unit_price),
+              updatedRow.discount_pct || "0",
+              updatedRow.vat_rate
+            );
+            updatedRow.net_amount = netAmount;
+            updatedRow.vat_amount = vatAmount;
+          }
 
           e.node.setData(updatedRow);
           setItems((prev) => {
