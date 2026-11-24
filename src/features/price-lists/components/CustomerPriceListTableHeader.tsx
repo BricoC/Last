@@ -20,9 +20,15 @@ export interface CustomerPriceListTableHeaderProps {
   canEdit: boolean;
   onSelectCell: (rowId: string, colId: string, fromKeyboard?: boolean) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommitCell: (rowId: string, colId: string, val: string) => void;
+  onCommitCell: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancelEdit: () => void;
-  onCellKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onCellKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
 }
 
 export const CustomerPriceListTableHeader: React.FC<CustomerPriceListTableHeaderProps> = ({
@@ -257,6 +263,7 @@ export const CustomerPriceListTableHeader: React.FC<CustomerPriceListTableHeader
             colId="descrizione"
             value={newTopRow.descrizione}
             displayValue={newTopRow.descrizione || "+ Descrizione nuovo articolo..."}
+            richHtml={newTopRow.descrizione_rich}
             isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "descrizione"}
             isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione"}
             shouldScroll={shouldScrollTopRow}

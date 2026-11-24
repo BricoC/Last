@@ -367,8 +367,8 @@ export class PriceListRepository {
       const params: unknown[] = [];
 
       chunk.forEach((row, rIdx) => {
-        const offset = rIdx * 25;
-        const placeholders = Array.from({ length: 25 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
+        const offset = rIdx * 26;
+        const placeholders = Array.from({ length: 26 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
         valueClauses.push(`(${placeholders})`);
 
         if (source === "local") {
@@ -383,6 +383,7 @@ export class PriceListRepository {
           row.codice_articolo ?? null,
           row.data_ref ?? null,
           row.descrizione || "",
+          row.descrizione_rich ?? null,
           row.um ?? "NR.",
           cleanNum5(row.perc_pub),
           cleanNum5(row.prezzo_pubblico),
@@ -410,7 +411,7 @@ export class PriceListRepository {
       }
       const sql = `INSERT INTO listino_generale (
           id, source_table, cat, fornitore, codice_articolo, data_ref,
-          descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
+          descrizione, descrizione_rich, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
           perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
           perc_iva, note, created_at, updated_at, sync_revision, remote_sync_revision
         ) ${source === "cloud"
@@ -427,6 +428,7 @@ export class PriceListRepository {
           codice_articolo = excluded.codice_articolo,
           data_ref = excluded.data_ref,
           descrizione = excluded.descrizione,
+          descrizione_rich = excluded.descrizione_rich,
           um = excluded.um,
           perc_pub = excluded.perc_pub,
           prezzo_pubblico = excluded.prezzo_pubblico,
@@ -477,10 +479,10 @@ export class PriceListRepository {
       const trashItem: TrashListinoRow = { ...row, deleted_at: now, deleted_by: op };
       writes.push({ sql: `INSERT INTO listino_generale_cestino (
           id, deleted_at, deleted_by, source_table, cat, fornitore, codice_articolo, data_ref,
-          descrizione, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
+          descrizione, descrizione_rich, um, perc_pub, prezzo_pubblico, perc_prof, prezzo_profess,
           perc_fatt, prezzo_fattura, prezzo_acquisto, aumento, r1, maga, r2,
           perc_iva, note, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
         ON CONFLICT(id) DO UPDATE SET
           deleted_at = excluded.deleted_at,
           deleted_by = excluded.deleted_by,
@@ -489,6 +491,7 @@ export class PriceListRepository {
           codice_articolo = excluded.codice_articolo,
           data_ref = excluded.data_ref,
           descrizione = excluded.descrizione,
+          descrizione_rich = excluded.descrizione_rich,
           um = excluded.um,
           perc_pub = excluded.perc_pub,
           prezzo_pubblico = excluded.prezzo_pubblico,
@@ -514,6 +517,7 @@ export class PriceListRepository {
           row.codice_articolo ?? null,
           row.data_ref ?? null,
           row.descrizione || "",
+          row.descrizione_rich ?? null,
           row.um ?? "NR.",
           cleanNum5(row.perc_pub),
           cleanNum5(row.prezzo_pubblico),
@@ -613,8 +617,8 @@ export class PriceListRepository {
       const params: unknown[] = [];
 
       chunk.forEach((row, rIdx) => {
-        const offset = rIdx * 20;
-        const placeholders = Array.from({ length: 20 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
+        const offset = rIdx * 21;
+        const placeholders = Array.from({ length: 21 }, (_, pIdx) => `$${offset + pIdx + 1}`).join(", ");
         valueClauses.push(`(${placeholders})`);
 
         if (source === "local") {
@@ -627,6 +631,7 @@ export class PriceListRepository {
           row.fornitore ?? null,
           row.codice_articolo ?? null,
           row.descrizione,
+          row.descrizione_rich ?? null,
           cleanNum5(row.prezzo_fattura),
           cleanNum5(row.prezzo_acquisto),
           cleanNum5(row.acquisto_eur),
@@ -650,7 +655,7 @@ export class PriceListRepository {
           .map((row) => [row.id, row.cloud_write_key]))));
       }
       const sql = `INSERT INTO listini_clienti (
-          id, cliente, fornitore, codice_articolo, descrizione,
+          id, cliente, fornitore, codice_articolo, descrizione, descrizione_rich,
           prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto,
           data_acquisto, acquisto_old, ricarico, data_ref,
           note, note1, note2, created_at, updated_at, sync_revision, remote_sync_revision
@@ -667,6 +672,7 @@ export class PriceListRepository {
           fornitore = excluded.fornitore,
           codice_articolo = excluded.codice_articolo,
           descrizione = excluded.descrizione,
+          descrizione_rich = excluded.descrizione_rich,
           prezzo_fattura = excluded.prezzo_fattura,
           prezzo_acquisto = excluded.prezzo_acquisto,
           acquisto_eur = excluded.acquisto_eur,
@@ -709,10 +715,10 @@ export class PriceListRepository {
       trashEntries.push(trashItem);
 
       writes.push({ sql: `INSERT INTO listini_clienti_cestino (
-          id, deleted_at, deleted_by, cliente, fornitore, codice_articolo, descrizione,
+          id, deleted_at, deleted_by, cliente, fornitore, codice_articolo, descrizione, descrizione_rich,
           prezzo_fattura, prezzo_acquisto, acquisto_eur, perc_acquisto, data_acquisto,
           acquisto_old, ricarico, data_ref, note, note1, note2, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
         ON CONFLICT(id) DO UPDATE SET
           deleted_at = excluded.deleted_at,
           deleted_by = excluded.deleted_by,
@@ -720,6 +726,7 @@ export class PriceListRepository {
           fornitore = excluded.fornitore,
           codice_articolo = excluded.codice_articolo,
           descrizione = excluded.descrizione,
+          descrizione_rich = excluded.descrizione_rich,
           prezzo_fattura = excluded.prezzo_fattura,
           prezzo_acquisto = excluded.prezzo_acquisto,
           acquisto_eur = excluded.acquisto_eur,
@@ -740,6 +747,7 @@ export class PriceListRepository {
           row.fornitore ?? null,
           row.codice_articolo ?? null,
           row.descrizione,
+          row.descrizione_rich ?? null,
           cleanNum5(row.prezzo_fattura),
           cleanNum5(row.prezzo_acquisto),
           cleanNum5(row.acquisto_eur),

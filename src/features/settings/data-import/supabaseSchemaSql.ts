@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS public.listino_generale (
   codice_articolo TEXT,
   data TEXT,
   descrizione TEXT NOT NULL DEFAULT '',
+  descrizione_rich TEXT,
   um TEXT DEFAULT 'NR.',
   perc_pub NUMERIC,
   prezzo_pubblico NUMERIC,
@@ -144,6 +145,7 @@ CREATE TABLE IF NOT EXISTS public.listini_vari (
   codice_articolo TEXT,
   data TEXT,
   descrizione TEXT NOT NULL DEFAULT '',
+  descrizione_rich TEXT,
   um TEXT DEFAULT 'NR.',
   perc_pub NUMERIC,
   prezzo_pubblico NUMERIC,
@@ -168,6 +170,7 @@ CREATE TABLE IF NOT EXISTS public.listino_generale_cestino (
   deleted_by TEXT DEFAULT 'Operatore',
   codice_articolo TEXT,
   descrizione TEXT NOT NULL DEFAULT '',
+  descrizione_rich TEXT,
   fornitore TEXT,
   prezzo_acquisto NUMERIC,
   prezzo_fattura NUMERIC,
@@ -182,6 +185,7 @@ CREATE TABLE IF NOT EXISTS public.listini_clienti (
   fornitore TEXT,
   codice_articolo TEXT,
   descrizione TEXT NOT NULL DEFAULT '',
+  descrizione_rich TEXT,
   prezzo_fattura NUMERIC,
   prezzo_acquisto NUMERIC,
   acquisto_eur NUMERIC,
@@ -206,6 +210,7 @@ CREATE TABLE IF NOT EXISTS public.listini_clienti_cestino (
   fornitore TEXT,
   codice_articolo TEXT,
   descrizione TEXT NOT NULL DEFAULT '',
+  descrizione_rich TEXT,
   prezzo_fattura NUMERIC,
   acquisto_eur NUMERIC,
   perc_acquisto NUMERIC,
@@ -236,6 +241,12 @@ BEGIN
     ALTER TABLE public.listini_clienti_cestino ALTER COLUMN ricarico TYPE TEXT USING ricarico::text;
   END IF;
 END $$;
+
+ALTER TABLE public.listino_generale ADD COLUMN IF NOT EXISTS descrizione_rich TEXT;
+ALTER TABLE public.listini_vari ADD COLUMN IF NOT EXISTS descrizione_rich TEXT;
+ALTER TABLE public.listino_generale_cestino ADD COLUMN IF NOT EXISTS descrizione_rich TEXT;
+ALTER TABLE public.listini_clienti ADD COLUMN IF NOT EXISTS descrizione_rich TEXT;
+ALTER TABLE public.listini_clienti_cestino ADD COLUMN IF NOT EXISTS descrizione_rich TEXT;
 
 -- 4. PREVENTIVI, CESTINO E SEQUENZA
 CREATE TABLE IF NOT EXISTS public.preventivi (

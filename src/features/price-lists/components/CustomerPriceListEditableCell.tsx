@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState, memo } from "react";
 import { getClientFormattedInitValue } from "../utils/customerPriceListViewUtils";
+import { getEffectiveDescriptionRichHtml } from "../utils/descriptionRichText";
+import { DescriptionRichEditorCell } from "./DescriptionRichEditorCell";
 
 interface CellInputEditorProps {
   rowId: string;
@@ -80,6 +82,7 @@ export interface CustomerPriceListEditableCellProps {
   colId: string;
   value: any;
   displayValue: string;
+  richHtml?: string | null;
   align?: "left" | "center" | "right";
   isActive: boolean;
   isEditing: boolean;
@@ -88,9 +91,15 @@ export interface CustomerPriceListEditableCellProps {
   canEdit: boolean;
   onSelectCell: (rowId: string, colId: string, fromKeyboard?: boolean) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommit: (rowId: string, colId: string, val: string) => void;
+  onCommit: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancel: () => void;
-  onKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
   className?: string;
 }
 
@@ -100,6 +109,7 @@ export const CustomerPriceListEditableCell: React.FC<CustomerPriceListEditableCe
     colId,
     value,
     displayValue,
+    richHtml,
     align = "left",
     isActive,
     isEditing,
@@ -116,6 +126,8 @@ export const CustomerPriceListEditableCell: React.FC<CustomerPriceListEditableCe
     const tdRef = useRef<HTMLTableCellElement>(null);
     const alignClass =
       align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+    const effectiveRichHtml =
+      colId === "descrizione" ? getEffectiveDescriptionRichHtml(value, richHtml) : null;
 
     useEffect(() => {
       if (isActive && !isEditing && tdRef.current) {
@@ -136,6 +148,23 @@ export const CustomerPriceListEditableCell: React.FC<CustomerPriceListEditableCe
     }, [isActive, isEditing, shouldScroll]);
 
     if (isEditing) {
+      if (colId === "descrizione" && canEdit) {
+        return (
+          <DescriptionRichEditorCell
+            rowId={rowId}
+            colId={colId}
+            initialPlainValue={getClientFormattedInitValue(value, colId, initialChar)}
+            initialRichHtml={initialChar !== undefined ? null : effectiveRichHtml}
+            isInitialCharTyped={initialChar !== undefined}
+            alignClass={alignClass}
+            className={className}
+            onCommit={onCommit}
+            onCancel={onCancel}
+            onKeyDown={onKeyDown}
+          />
+        );
+      }
+
       return (
         <CellInputEditor
           rowId={rowId}
@@ -166,7 +195,7 @@ export const CustomerPriceListEditableCell: React.FC<CustomerPriceListEditableCe
         onDoubleClick={() => {
           if (canEdit && colId !== "data_ref") onStartEdit(rowId, colId);
         }}
-        onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue)}
+        onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue, effectiveRichHtml)}
         tabIndex={canEdit ? 0 : -1}
         className={`px-2.5 py-1.5 outline-none cursor-pointer select-none ${alignClass} ${className} ${
           isActive
@@ -175,7 +204,11 @@ export const CustomerPriceListEditableCell: React.FC<CustomerPriceListEditableCe
         }`}
         title={displayValue}
       >
-        {displayValue}
+        {effectiveRichHtml ? (
+          <span className="pl-rich-text" dangerouslySetInnerHTML={{ __html: effectiveRichHtml }} />
+        ) : (
+          displayValue
+        )}
       </td>
     );
   }

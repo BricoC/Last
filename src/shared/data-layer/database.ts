@@ -601,6 +601,16 @@ const MIGRATIONS: Migration[] = [
       await db.execute("UPDATE app_users SET can_manage_backups = 1 WHERE is_admin = 1 AND can_manage_backups = 0");
     },
   },
+  {
+    version: 45,
+    name: "add_price_list_descrizione_rich",
+    up: async (db) => {
+      await db.addColumnIfMissing("listino_generale", "descrizione_rich", "TEXT");
+      await db.addColumnIfMissing("listino_generale_cestino", "descrizione_rich", "TEXT");
+      await db.addColumnIfMissing("listini_clienti", "descrizione_rich", "TEXT");
+      await db.addColumnIfMissing("listini_clienti_cestino", "descrizione_rich", "TEXT");
+    },
+  },
 ];
 
 const BUSY_RETRY_DELAYS_MS = [150, 300, 600, 1200, 2000];

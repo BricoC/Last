@@ -30,6 +30,8 @@ describe("Sincronizzazione completa listini", () => {
     await migratePendingCloudWritesV31(db);
     await db.addColumnIfMissing("listino_generale", "remote_sync_revision", "TEXT");
     await db.addColumnIfMissing("listini_clienti", "remote_sync_revision", "TEXT");
+    await db.addColumnIfMissing("listino_generale", "descrizione_rich", "TEXT");
+    await db.addColumnIfMissing("listini_clienti", "descrizione_rich", "TEXT");
     sqlite.exec("CREATE TABLE clients (id TEXT PRIMARY KEY)");
     await migratePendingCloudOperationsV34(db);
     sqlite.exec(`

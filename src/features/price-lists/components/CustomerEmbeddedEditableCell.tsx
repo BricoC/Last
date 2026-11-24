@@ -1,4 +1,6 @@
 import React, { memo, useEffect, useRef, useState } from "react";
+import { getEffectiveDescriptionRichHtml } from "../utils/descriptionRichText";
+import { DescriptionRichEditorCell } from "./DescriptionRichEditorCell";
 
 interface CellInputEditorProps {
   rowId: string;
@@ -80,6 +82,7 @@ export interface CustomerEmbeddedEditableCellProps {
   colId: string;
   value: any;
   displayValue: string;
+  richHtml?: string | null;
   align?: "left" | "center" | "right";
   isActive?: boolean;
   isEditing?: boolean;
@@ -88,9 +91,15 @@ export interface CustomerEmbeddedEditableCellProps {
   className?: string;
   onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommit: (rowId: string, colId: string, val: string) => void;
+  onCommit: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancel: () => void;
-  onKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
 }
 
 export const CustomerEmbeddedEditableCell: React.FC<CustomerEmbeddedEditableCellProps> = memo(
@@ -99,6 +108,7 @@ export const CustomerEmbeddedEditableCell: React.FC<CustomerEmbeddedEditableCell
     colId,
     value,
     displayValue,
+    richHtml,
     align = "left",
     isActive = false,
     isEditing = false,
@@ -113,8 +123,27 @@ export const CustomerEmbeddedEditableCell: React.FC<CustomerEmbeddedEditableCell
   }) => {
     const alignClass =
       align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+    const effectiveRichHtml =
+      colId === "descrizione" ? getEffectiveDescriptionRichHtml(value, richHtml) : null;
 
     if (isEditing) {
+      if (colId === "descrizione" && canEdit) {
+        return (
+          <DescriptionRichEditorCell
+            rowId={rowId}
+            colId={colId}
+            initialPlainValue={initialChar !== undefined ? initialChar : value != null ? String(value) : ""}
+            initialRichHtml={initialChar !== undefined ? null : effectiveRichHtml}
+            isInitialCharTyped={initialChar !== undefined}
+            alignClass={alignClass}
+            className={className}
+            onCommit={onCommit}
+            onCancel={onCancel}
+            onKeyDown={onKeyDown}
+          />
+        );
+      }
+
       return (
         <CellInputEditor
           rowId={rowId}
@@ -137,14 +166,21 @@ export const CustomerEmbeddedEditableCell: React.FC<CustomerEmbeddedEditableCell
         onDoubleClick={() => {
           if (canEdit) onStartEdit(rowId, colId);
         }}
-        onKeyDown={(e) => onKeyDown(e, rowId, colId, value != null ? String(value) : "")}
+        onKeyDown={(e) => onKeyDown(e, rowId, colId, value != null ? String(value) : "", effectiveRichHtml)}
         className={`px-2.5 py-1.5 transition-colors relative outline-none cursor-pointer ${alignClass} ${
           isActive
             ? "ring-2 ring-blue-500 ring-inset bg-blue-500/10 font-bold"
             : "hover:bg-[var(--accent)]/30"
         } ${className}`}
       >
-        <span className="truncate block">{displayValue}</span>
+        {effectiveRichHtml ? (
+          <span
+            className="truncate block pl-rich-text"
+            dangerouslySetInnerHTML={{ __html: effectiveRichHtml }}
+          />
+        ) : (
+          <span className="truncate block">{displayValue}</span>
+        )}
       </td>
     );
   }

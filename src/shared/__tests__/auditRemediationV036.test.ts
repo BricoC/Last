@@ -149,7 +149,7 @@ describe("Audit Remediation v0.3.6 (AUD-01 .. AUD-07, AUD-10)", () => {
         id TEXT PRIMARY KEY,
         source_table TEXT NOT NULL DEFAULT 'listino_generale',
         cat TEXT, fornitore TEXT, codice_articolo TEXT, data_ref TEXT,
-        descrizione TEXT NOT NULL DEFAULT '', um TEXT DEFAULT 'NR.',
+        descrizione TEXT NOT NULL DEFAULT '', descrizione_rich TEXT, um TEXT DEFAULT 'NR.',
         perc_pub REAL, prezzo_pubblico REAL, perc_prof REAL, prezzo_profess REAL,
         perc_fatt REAL, prezzo_fattura REAL, prezzo_acquisto REAL,
         aumento REAL, r1 REAL, maga REAL, r2 REAL, perc_iva REAL DEFAULT 0.22,
@@ -160,6 +160,7 @@ describe("Audit Remediation v0.3.6 (AUD-01 .. AUD-07, AUD-10)", () => {
         id TEXT PRIMARY KEY,
         cliente TEXT NOT NULL DEFAULT '',
         descrizione TEXT NOT NULL DEFAULT '',
+        descrizione_rich TEXT,
         sync_revision TEXT,
         remote_sync_revision TEXT
       );

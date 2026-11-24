@@ -20,6 +20,7 @@ import { useEasterEggStore } from "@/shared/easter-eggs/useEasterEggStore";
 import { CustomerPriceListToolbar } from "./components/CustomerPriceListToolbar";
 import { CustomerPriceListTableHeader } from "./components/CustomerPriceListTableHeader";
 import { CustomerPriceListRow } from "./components/CustomerPriceListRow";
+import { PriceListZoomControl, usePriceListZoom } from "./components/PriceListZoomControl";
 import {
   buildClientPriceChangeLogs,
   createBlankClientRow,
@@ -99,6 +100,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const [visibleCount, setVisibleCount] = useState(CUSTOMER_LIST_BATCH_SIZE);
   const [sortField, setSortField] = useState<CustomerPriceListSortField>("cliente");
   const [sortAsc, setSortAsc] = useState(true);
+  const [tableZoom, setTableZoom] = usePriceListZoom("price_list_zoom_clients");
 
   // Ref container per scroll infinito e virtualizzazione progressiva
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -444,9 +446,9 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
 
   // Applica modifica ad una cella
   const applyCellChange = useCallback(
-    (rowId: string, colId: string, value: string | number | null) => {
+    (rowId: string, colId: string, value: string | number | null, richHtml?: string | null) => {
       if (rowId === newTopRow.id) {
-        const updatedTop = updateClientRowWithField(newTopRow, colId, value);
+        const updatedTop = updateClientRowWithField(newTopRow, colId, value, richHtml);
         const hasData = Boolean(
           updatedTop.descrizione?.trim() ||
             updatedTop.codice_articolo?.trim() ||
@@ -483,7 +485,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         prev.map((r) => {
           if (r.id !== rowId) return r;
           setUndoStack((uPrev) => [...uPrev.slice(-49), { rowId, prevRow: { ...r } }]);
-          const updated = updateClientRowWithField(r, colId, value);
+          const updated = updateClientRowWithField(r, colId, value, richHtml);
           setDirtyRows((prevDirty) => new Map(prevDirty).set(rowId, updated));
           scheduleSilentAutoSaveIfNeeded();
           return updated;
@@ -512,8 +514,8 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   );
 
   const commitCellEdit = useCallback(
-    (rowId: string, colId: string, committedValue: string) => {
-      applyCellChange(rowId, colId, committedValue);
+    (rowId: string, colId: string, committedValue: string, richHtml?: string | null) => {
+      applyCellChange(rowId, colId, committedValue, richHtml);
       setEditingCell(null);
     },
     [applyCellChange]
@@ -568,7 +570,8 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       e: React.KeyboardEvent,
       rowId: string,
       colId: string,
-      currentValStr: string
+      currentValStr: string,
+      currentRichHtml?: string | null
     ) => {
       if (colId === "data_ref") return;
 
@@ -598,7 +601,7 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
 
         if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();
-          if (canEdit) applyCellChange(rowId, colId, null);
+          if (canEdit) applyCellChange(rowId, colId, null, null);
           return;
         }
 
@@ -612,21 +615,21 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
       } else {
         if (e.key === "Enter") {
           e.preventDefault();
-          commitCellEdit(rowId, colId, currentValStr);
+          commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
           moveActiveCell("ArrowDown");
           return;
         }
 
         if (e.key === "Tab") {
           e.preventDefault();
-          commitCellEdit(rowId, colId, currentValStr);
+          commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
           moveActiveCell(e.shiftKey ? "ArrowLeft" : "ArrowRight");
           return;
         }
 
         if (e.key === "ArrowUp" || e.key === "ArrowDown") {
           e.preventDefault();
-          commitCellEdit(rowId, colId, currentValStr);
+          commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
           moveActiveCell(e.key);
           return;
         }
@@ -674,7 +677,10 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
   const unsavedCount = dirtyRows.size;
 
   return (
-    <div className="flex flex-col h-full bg-[var(--background)] text-[var(--foreground)] overflow-hidden">
+    <div
+      data-avorio-customer-pricelist=""
+      className="flex flex-col h-full bg-[var(--background)] text-[var(--foreground)] overflow-hidden"
+    >
       {/* Autocomplete Datalist per Clienti */}
       <datalist id="distinct-clients-autocomplete">
         {distinctClients.map((c) => (
@@ -729,7 +735,10 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         onScroll={handleScroll}
         className="flex-1 overflow-auto bg-[var(--background)]"
       >
-        <table className="w-full text-xs text-left border-collapse border-spacing-0">
+        <table
+          className="w-full text-xs text-left border-collapse border-spacing-0"
+          style={{ zoom: `${tableZoom}%` }}
+        >
           <CustomerPriceListTableHeader
             isVisible={isVisible}
             onToggleSort={handleToggleSort}
@@ -789,12 +798,15 @@ export const CustomerPriceListPage: React.FC<CustomerPriceListPageProps> = ({ wi
         <span>
           Visualizzati: <strong className="text-[var(--foreground)]">{Math.min(visibleCount, filteredItems.length)}</strong> su <strong className="text-[var(--foreground)]">{filteredItems.length}</strong> voci filtrate (Totale DB: {totalDbCount})
         </span>
-        {filteredItems.length > visibleCount && (
-          <span className="text-[11px] text-amber-400 font-medium flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-            Scorri verso il basso per caricare automaticamente
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {filteredItems.length > visibleCount && (
+            <span className="text-[11px] text-amber-400 font-medium flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+              Scorri verso il basso per caricare automaticamente
+            </span>
+          )}
+          <PriceListZoomControl zoom={tableZoom} onChangeZoom={setTableZoom} />
+        </div>
       </div>
 
       {/* Cestino Modale */}

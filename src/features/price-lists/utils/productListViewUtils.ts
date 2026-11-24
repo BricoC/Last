@@ -258,7 +258,8 @@ export function filterAndSortGeneralItems(
 export function updateGeneralRowWithField(
   prevRow: ListinoGeneraleRow,
   colId: EditableColumnKey | string,
-  rawVal: string | number | null
+  rawVal: string | number | null,
+  richHtml?: string | null
 ): ListinoGeneraleRow {
   const updated: ListinoGeneraleRow = { ...prevRow };
 
@@ -281,6 +282,7 @@ export function updateGeneralRowWithField(
       break;
     case "descrizione":
       updated.descrizione = rawVal ? String(rawVal) : "";
+      updated.descrizione_rich = updated.descrizione.trim() ? (richHtml ?? null) : null;
       break;
     case "um":
       updated.um = rawVal ? String(rawVal).trim().toUpperCase() : "NR.";

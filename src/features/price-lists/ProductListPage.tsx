@@ -25,6 +25,7 @@ import { GeneralPriceListToolbar } from "./components/GeneralPriceListToolbar";
 import { GeneralPriceListTableHeader } from "./components/GeneralPriceListTableHeader";
 import { GeneralPriceListNewTopRow } from "./components/GeneralPriceListNewTopRow";
 import { GeneralPriceListRow } from "./components/GeneralPriceListRow";
+import { PriceListZoomControl, usePriceListZoom } from "./components/PriceListZoomControl";
 import {
   applyBulkActionToGeneralRow,
   buildGeneralPriceChangeLogs,
@@ -419,9 +420,9 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
 
   // Applica modifica ad una cella
   const applyCellChange = useCallback(
-    (rowId: string, colId: string, value: string | number | null) => {
+    (rowId: string, colId: string, value: string | number | null, richHtml?: string | null) => {
       if (rowId === newTopRow.id) {
-        const updatedTop = updateGeneralRowWithField(newTopRow, colId, value);
+        const updatedTop = updateGeneralRowWithField(newTopRow, colId, value, richHtml);
 
         const hasData = Boolean(
           updatedTop.descrizione?.trim() ||
@@ -454,7 +455,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
         prev.map((r) => {
           if (r.id !== rowId) return r;
           setUndoStack((uPrev) => [...uPrev.slice(-49), { rowId, prevRow: { ...r } }]);
-          const updated = updateGeneralRowWithField(r, colId, value);
+          const updated = updateGeneralRowWithField(r, colId, value, richHtml);
           setDirtyRows((dirtyPrev) => {
             const next = new Map(dirtyPrev);
             next.set(rowId, updated);
@@ -546,9 +547,11 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
     [canEdit]
   );
 
+  const [tableZoom, setTableZoom] = usePriceListZoom("price_list_zoom_general");
+
   const commitCellEdit = useCallback(
-    (rowId: string, colId: string, committedValue: string) => {
-      applyCellChange(rowId, colId, committedValue);
+    (rowId: string, colId: string, committedValue: string, richHtml?: string | null) => {
+      applyCellChange(rowId, colId, committedValue, richHtml);
       setEditingCell(null);
       setInitialEditChar(undefined);
     },
@@ -588,7 +591,8 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       e: React.KeyboardEvent,
       rowId: string,
       colId: string,
-      currentValStr: string
+      currentValStr: string,
+      currentRichHtml?: string | null
     ) => {
       const isEditing = Boolean(editingCell && editingCell.rowId === rowId && editingCell.colId === colId);
       const allVisibleCols = EDITABLE_COL_ORDER.filter((c) => visibleColumns[c] !== false);
@@ -599,7 +603,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       if (e.key === "Enter") {
         e.preventDefault();
         if (isEditing) {
-          commitCellEdit(rowId, colId, currentValStr);
+          commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
           if (rowIdx < allRows.length - 1) {
             selectCell(allRows[rowIdx + 1].id, colId, true);
           }
@@ -614,7 +618,7 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       } else if (e.key === "Tab") {
         e.preventDefault();
         if (isEditing) {
-          commitCellEdit(rowId, colId, currentValStr);
+          commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
         }
         if (e.shiftKey) {
           if (colIdx > 0) {
@@ -634,6 +638,14 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       } else if (e.key === "Escape") {
         e.preventDefault();
         cancelCellEdit();
+      } else if (isEditing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        e.preventDefault();
+        commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
+        if (e.key === "ArrowDown" && rowIdx < allRows.length - 1) {
+          selectCell(allRows[rowIdx + 1].id, colId, true);
+        } else if (e.key === "ArrowUp" && rowIdx > 0) {
+          selectCell(allRows[rowIdx - 1].id, colId, true);
+        }
       } else if (!isEditing) {
         if (e.key === "ArrowDown" && rowIdx < allRows.length - 1) {
           e.preventDefault();
@@ -894,7 +906,10 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
           }
         }}
       >
-        <table className="w-full border-collapse text-left text-xs whitespace-nowrap">
+        <table
+          className="w-full border-collapse text-left text-xs whitespace-nowrap"
+          style={{ zoom: `${tableZoom}%` }}
+        >
           <GeneralPriceListTableHeader
             visibleColumns={visibleColumns}
             canEdit={canEdit}
@@ -962,10 +977,11 @@ export const ProductListPage: React.FC<ProductListPageProps> = ({ windowId }) =>
       </div>
 
       {/* 3. Footer */}
-      <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center text-[11px] text-[var(--muted-foreground)] font-mono">
+      <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--background)] flex items-center justify-between text-[11px] text-[var(--muted-foreground)] font-mono">
         <span>
           Visualizzati: {Math.min(visibleCount, filteredItems.length)} su {filteredItems.length} filtrati (Totale DB: {totalDbCount})
         </span>
+        <PriceListZoomControl zoom={tableZoom} onChangeZoom={setTableZoom} />
       </div>
 
       <ItemPriceHistoryModal

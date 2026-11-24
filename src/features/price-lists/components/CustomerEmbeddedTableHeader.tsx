@@ -21,9 +21,15 @@ export interface CustomerEmbeddedTableHeaderProps {
   initialEditChar?: string;
   onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommitCell: (rowId: string, colId: string, val: string) => void;
+  onCommitCell: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancelEdit: () => void;
-  onCellKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onCellKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
 }
 
 export const CustomerEmbeddedTableHeader: React.FC<CustomerEmbeddedTableHeaderProps> = ({
@@ -255,6 +261,7 @@ export const CustomerEmbeddedTableHeader: React.FC<CustomerEmbeddedTableHeaderPr
               colId="descrizione"
               value={newTopRow.descrizione}
               displayValue={newTopRow.descrizione || "+ Descrizione nuovo articolo..."}
+              richHtml={newTopRow.descrizione_rich}
               isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "descrizione"}
               isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione"}
               initialChar={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione" ? initialEditChar : undefined}

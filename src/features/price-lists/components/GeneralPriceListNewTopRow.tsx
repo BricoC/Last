@@ -19,9 +19,15 @@ export interface GeneralPriceListNewTopRowProps {
   visibleColumns: Record<string, boolean>;
   onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommitCell: (rowId: string, colId: string, val: string) => void;
+  onCommitCell: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancelEdit: () => void;
-  onCellKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onCellKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
 }
 
 export const GeneralPriceListNewTopRow: React.FC<GeneralPriceListNewTopRowProps> = ({
@@ -144,6 +150,7 @@ export const GeneralPriceListNewTopRow: React.FC<GeneralPriceListNewTopRowProps>
           colId="descrizione"
           value={newTopRow.descrizione}
           displayValue={newTopRow.descrizione || "Digita per inserire nuovo articolo..."}
+          richHtml={newTopRow.descrizione_rich}
           align="left"
           isActive={activeCell?.rowId === newTopRow.id && activeCell?.colId === "descrizione"}
           isEditing={editingCell?.rowId === newTopRow.id && editingCell?.colId === "descrizione"}

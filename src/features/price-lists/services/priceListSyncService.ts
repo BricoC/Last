@@ -47,7 +47,7 @@ function buildAuthHeaders(anonKey: string, extra?: Record<string, string>): Reco
 }
 
 const CLIENT_SELECT_FIELDS =
-  "id,last_write_key,last_sync_revision,created_at,updated_at,cliente,fornitore,codice_articolo,descrizione,prezzo_fattura,prezzo_acquisto,acquisto_eur,perc_acquisto,data_acquisto,acquisto_old,ricarico,data_ref,note,note1,note2";
+  "id,last_write_key,last_sync_revision,created_at,updated_at,cliente,fornitore,codice_articolo,descrizione,descrizione_rich,prezzo_fattura,prezzo_acquisto,acquisto_eur,perc_acquisto,data_acquisto,acquisto_old,ricarico,data_ref,note,note1,note2";
 
 function mapSupabaseClientRow(r: any): ListinoClienteRow {
   return {
@@ -56,6 +56,7 @@ function mapSupabaseClientRow(r: any): ListinoClienteRow {
     fornitore: r.fornitore ?? null,
     codice_articolo: r.codice_articolo ?? null,
     descrizione: r.descrizione ?? "",
+    descrizione_rich: r.descrizione_rich ?? null,
     prezzo_fattura: r.prezzo_fattura != null ? Number(r.prezzo_fattura) : null,
     prezzo_acquisto: r.prezzo_acquisto != null ? Number(r.prezzo_acquisto) : null,
     acquisto_eur: r.acquisto_eur != null ? Number(r.acquisto_eur) : null,
@@ -80,6 +81,7 @@ function clientPriceListPayload(row: ListinoClienteRow, updatedAt: string) {
     fornitore: row.fornitore ?? null,
     codice_articolo: row.codice_articolo ?? null,
     descrizione: row.descrizione,
+    descrizione_rich: row.descrizione_rich ?? null,
     prezzo_fattura: row.prezzo_fattura ?? null,
     prezzo_acquisto: row.prezzo_acquisto ?? null,
     acquisto_eur: row.acquisto_eur ?? null,
@@ -246,6 +248,7 @@ function generalPriceListPayload(r: ListinoGeneraleRow, updatedAt: string) {
     codice_articolo: r.codice_articolo ?? null,
     data: r.data_ref ?? null,
     descrizione: r.descrizione,
+    descrizione_rich: r.descrizione_rich ?? null,
     um: r.um ?? "NR.",
     perc_pub: r.perc_pub ?? null,
     prezzo_pubblico: r.prezzo_pubblico ?? null,
@@ -312,7 +315,7 @@ export class PriceListSyncService {
     });
 
     const genFields =
-      "id,last_write_key,last_sync_revision,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
+      "id,last_write_key,last_sync_revision,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,descrizione_rich,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
 
     const rawGeneral = await fetchAllPages<any>(
       creds.projectUrl,
@@ -393,6 +396,7 @@ export class PriceListSyncService {
         codice_articolo: r.codice_articolo ?? null,
         data_ref: r.data ?? null,
         descrizione: r.descrizione ?? "",
+        descrizione_rich: r.descrizione_rich ?? null,
         um: r.um ?? null,
         perc_pub: r.perc_pub != null ? Number(r.perc_pub) : null,
         prezzo_pubblico: r.prezzo_pubblico != null ? Number(r.prezzo_pubblico) : null,
@@ -420,6 +424,7 @@ export class PriceListSyncService {
         codice_articolo: r.codice_articolo ?? null,
         data_ref: r.data ?? null,
         descrizione: r.descrizione ?? "",
+        descrizione_rich: r.descrizione_rich ?? null,
         um: r.um ?? null,
         perc_pub: r.perc_pub != null ? Number(r.perc_pub) : null,
         prezzo_pubblico: r.prezzo_pubblico != null ? Number(r.prezzo_pubblico) : null,
@@ -632,6 +637,7 @@ export class PriceListSyncService {
         deleted_by: r.deleted_by || "Operatore",
         codice_articolo: r.codice_articolo || null,
         descrizione: r.descrizione || "",
+        descrizione_rich: r.descrizione_rich ?? null,
         fornitore: r.fornitore || null,
         prezzo_acquisto: r.prezzo_acquisto,
         prezzo_fattura: r.prezzo_fattura,
@@ -646,6 +652,7 @@ export class PriceListSyncService {
         fornitore: r.fornitore || null,
         codice_articolo: r.codice_articolo || null,
         descrizione: r.descrizione || "",
+        descrizione_rich: r.descrizione_rich ?? null,
         prezzo_fattura: r.prezzo_fattura,
         acquisto_eur: r.acquisto_eur,
         perc_acquisto: r.perc_acquisto,
@@ -783,7 +790,7 @@ export class PriceListSyncService {
 
       const cursor = await readPriceListPullState(creds.projectUrl);
       const genFields =
-        "id,last_write_key,last_sync_revision,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
+        "id,last_write_key,last_sync_revision,created_at,updated_at,cat,fornitore,codice_articolo,data,descrizione,descrizione_rich,um,perc_pub,prezzo_pubblico,perc_prof,prezzo_profess,perc_fatt,prezzo_fattura,prezzo_acquisto,aumento,r1,maga,r2,perc_iva,note";
 
       const [rawGen, rawVar] = await Promise.all([
         fetchChangedPriceList(creds, "listino_generale", genFields, cursor.get("listino_generale")),
@@ -809,6 +816,7 @@ export class PriceListSyncService {
           codice_articolo: r.codice_articolo ?? null,
           data_ref: r.data ?? null,
           descrizione: r.descrizione ?? "",
+          descrizione_rich: r.descrizione_rich ?? null,
           um: r.um ?? null,
           perc_pub: r.perc_pub != null ? Number(r.perc_pub) : null,
           prezzo_pubblico: r.prezzo_pubblico != null ? Number(r.prezzo_pubblico) : null,
@@ -836,6 +844,7 @@ export class PriceListSyncService {
           codice_articolo: r.codice_articolo ?? null,
           data_ref: r.data ?? null,
           descrizione: r.descrizione ?? "",
+          descrizione_rich: r.descrizione_rich ?? null,
           um: r.um ?? null,
           perc_pub: r.perc_pub != null ? Number(r.perc_pub) : null,
           prezzo_pubblico: r.prezzo_pubblico != null ? Number(r.prezzo_pubblico) : null,

@@ -20,9 +20,15 @@ export interface CustomerPriceListRowProps {
   onDeleteRow: (row: ListinoClienteRow) => void;
   onSelectCell: (rowId: string, colId: string, fromKeyboard?: boolean) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommitCell: (rowId: string, colId: string, val: string) => void;
+  onCommitCell: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancelEdit: () => void;
-  onCellKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onCellKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
 }
 
 export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
@@ -44,6 +50,7 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
 }) => {
   return (
     <tr
+      data-row-active={isRowActive ? "true" : undefined}
       className={`group cursor-default ${
         isRowActive
           ? "bg-[#1e5b87] text-white font-medium"
@@ -88,7 +95,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="font-bold text-amber-400 border-r border-[var(--border)]/30 max-w-[170px] truncate"
+          className={`font-sans text-[12px] font-semibold border-r border-[var(--border)]/30 max-w-[170px] truncate ${
+            isRowActive ? "text-amber-200" : "text-amber-400"
+          }`}
         />
       )}
       {isVisible("fornitore") && (
@@ -107,7 +116,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 text-sky-400 uppercase truncate max-w-[120px]"
+          className={`font-sans text-[12px] font-medium border-r border-[var(--border)]/30 uppercase truncate max-w-[120px] ${
+            isRowActive ? "text-sky-100" : "text-sky-400"
+          }`}
         />
       )}
       {isVisible("codice_articolo") && (
@@ -126,7 +137,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 text-[var(--primary)] font-bold whitespace-nowrap"
+          className={`border-r border-[var(--border)]/30 font-bold whitespace-nowrap ${
+            isRowActive ? "text-white" : "text-[var(--primary)]"
+          }`}
         />
       )}
       {isVisible("data_ref") && (
@@ -146,6 +159,7 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           colId="descrizione"
           value={item.descrizione}
           displayValue={item.descrizione || "—"}
+          richHtml={item.descrizione_rich}
           isActive={activeColId === "descrizione"}
           isEditing={editingColId === "descrizione"}
           shouldScroll={shouldScrollRow}
@@ -156,7 +170,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 font-medium text-[var(--foreground)] truncate max-w-[320px]"
+          className={`font-sans text-[12px] border-r border-[var(--border)]/30 truncate max-w-[320px] ${
+            isRowActive ? "text-white font-semibold" : "font-medium text-[var(--foreground)]"
+          }`}
         />
       )}
       {isVisible("prezzo_fattura") && (
@@ -176,7 +192,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 font-bold text-emerald-400 bg-emerald-950/10"
+          className={`border-r border-[var(--border)]/30 font-bold ${
+            isRowActive ? "text-emerald-200 bg-emerald-950/25" : "text-emerald-400 bg-emerald-950/10"
+          }`}
         />
       )}
       {isVisible("perc_acquisto") && (
@@ -196,7 +214,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 text-sky-400 bg-sky-950/10"
+          className={`border-r border-[var(--border)]/30 font-medium ${
+            isRowActive ? "text-sky-100 bg-sky-900/30" : "text-sky-400 bg-sky-950/10"
+          }`}
         />
       )}
       {isVisible("acquisto_eur") && (
@@ -216,7 +236,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 font-bold text-blue-400 bg-blue-950/10"
+          className={`border-r border-[var(--border)]/30 font-bold ${
+            isRowActive ? "text-white bg-blue-900/30" : "text-blue-400 bg-blue-950/10"
+          }`}
         />
       )}
       {isVisible("data_acquisto") && (
@@ -236,7 +258,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 text-[var(--muted-foreground)] whitespace-nowrap"
+          className={`border-r border-[var(--border)]/30 whitespace-nowrap ${
+            isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+          }`}
         />
       )}
       {isVisible("acquisto_old") && (
@@ -255,7 +279,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 text-amber-400/80 text-xs truncate max-w-[180px]"
+          className={`border-r border-[var(--border)]/30 text-xs font-medium truncate max-w-[180px] ${
+            isRowActive ? "text-amber-200" : "text-amber-400/80"
+          }`}
         />
       )}
       {isVisible("ricarico") && (
@@ -284,7 +310,9 @@ export const CustomerPriceListRow: React.FC<CustomerPriceListRowProps> = ({
           onCommit={onCommitCell}
           onCancel={onCancelEdit}
           onKeyDown={onCellKeyDown}
-          className="border-r border-[var(--border)]/30 text-[var(--muted-foreground)] truncate max-w-[160px]"
+          className={`border-r border-[var(--border)]/30 truncate max-w-[160px] ${
+            isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
+          }`}
         />
       )}
       {isVisible("note1") && (

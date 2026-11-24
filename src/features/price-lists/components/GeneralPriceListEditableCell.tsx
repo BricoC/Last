@@ -1,5 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, memo } from "react";
 import { getFormattedInitValue } from "../utils/productListViewUtils";
+import { getEffectiveDescriptionRichHtml } from "../utils/descriptionRichText";
+import { DescriptionRichEditorCell } from "./DescriptionRichEditorCell";
 
 interface CellInputEditorProps {
   rowId: string;
@@ -76,6 +78,7 @@ export interface GeneralPriceListEditableCellProps {
   colId: string;
   value: any;
   displayValue: string;
+  richHtml?: string | null;
   align?: "left" | "center" | "right";
   isActive: boolean;
   isEditing: boolean;
@@ -85,9 +88,15 @@ export interface GeneralPriceListEditableCellProps {
   canEdit: boolean;
   onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommit: (rowId: string, colId: string, val: string) => void;
+  onCommit: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancel: () => void;
-  onKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
   className?: string;
 }
 
@@ -97,6 +106,7 @@ export const GeneralPriceListEditableCell: React.FC<GeneralPriceListEditableCell
     colId,
     value,
     displayValue,
+    richHtml,
     align = "left",
     isActive,
     isEditing,
@@ -114,6 +124,8 @@ export const GeneralPriceListEditableCell: React.FC<GeneralPriceListEditableCell
     const tdRef = useRef<HTMLTableCellElement>(null);
     const alignClass =
       align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+    const effectiveRichHtml =
+      colId === "descrizione" ? getEffectiveDescriptionRichHtml(value, richHtml) : null;
 
     useEffect(() => {
       if (isActive && !isEditing && tdRef.current) {
@@ -134,6 +146,23 @@ export const GeneralPriceListEditableCell: React.FC<GeneralPriceListEditableCell
     }, [isActive, isEditing, shouldScroll]);
 
     if (isEditing) {
+      if (colId === "descrizione" && canEdit) {
+        return (
+          <DescriptionRichEditorCell
+            rowId={rowId}
+            colId={colId}
+            initialPlainValue={getFormattedInitValue(value, colId, initialChar)}
+            initialRichHtml={initialChar !== undefined ? null : effectiveRichHtml}
+            isInitialCharTyped={initialChar !== undefined}
+            alignClass={alignClass}
+            className={className}
+            onCommit={onCommit}
+            onCancel={onCancel}
+            onKeyDown={onKeyDown}
+          />
+        );
+      }
+
       return (
         <CellInputEditor
           rowId={rowId}
@@ -164,7 +193,7 @@ export const GeneralPriceListEditableCell: React.FC<GeneralPriceListEditableCell
         onDoubleClick={() => {
           if (canEdit && colId !== "data_ref") onStartEdit(rowId, colId);
         }}
-        onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue)}
+        onKeyDown={(e) => onKeyDown(e, rowId, colId, displayValue, effectiveRichHtml)}
         tabIndex={canEdit ? 0 : -1}
         className={`px-2.5 py-1.5 outline-none cursor-pointer select-none ${alignClass} ${className} ${
           isActive
@@ -173,7 +202,11 @@ export const GeneralPriceListEditableCell: React.FC<GeneralPriceListEditableCell
         }`}
         title={displayValue}
       >
-        {displayValue}
+        {effectiveRichHtml ? (
+          <span className="pl-rich-text" dangerouslySetInnerHTML={{ __html: effectiveRichHtml }} />
+        ) : (
+          displayValue
+        )}
       </td>
     );
   }

@@ -6,6 +6,7 @@ export interface ListinoGeneraleRow {
   codice_articolo: string | null;
   data_ref: string | null;
   descrizione: string;
+  descrizione_rich?: string | null;
   um: string | null;
   perc_pub: number | null;
   prezzo_pubblico: number | null;
@@ -33,6 +34,7 @@ export interface ListinoClienteRow {
   fornitore?: string | null;
   codice_articolo: string | null;
   descrizione: string;
+  descrizione_rich?: string | null;
   prezzo_fattura: number | null;
   prezzo_acquisto: number | null;
   acquisto_eur?: number | null;

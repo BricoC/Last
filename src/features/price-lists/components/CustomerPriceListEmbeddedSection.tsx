@@ -302,9 +302,9 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
 
   // Applica modifica a una cella
   const applyCellChange = useCallback(
-    (rowId: string, colId: string, value: string | number | null) => {
+    (rowId: string, colId: string, value: string | number | null, richHtml?: string | null) => {
       if (rowId === newTopRow.id) {
-        const updatedTop = updateEmbeddedClientRowWithField(newTopRow, colId, value);
+        const updatedTop = updateEmbeddedClientRowWithField(newTopRow, colId, value, richHtml);
         const hasData = Boolean(
           updatedTop.descrizione?.trim() ||
             updatedTop.codice_articolo?.trim() ||
@@ -343,7 +343,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
         const target = prev.find((r) => r.id === rowId);
         if (!target) return prev;
         const prevSnapshot = { ...target };
-        const updated = updateEmbeddedClientRowWithField(target, colId, value);
+        const updated = updateEmbeddedClientRowWithField(target, colId, value, richHtml);
 
         setUndoStack((uPrev) => [...uPrev.slice(-49), { rowId, prevRow: prevSnapshot }]);
 
@@ -378,8 +378,8 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
   );
 
   const commitCellEdit = useCallback(
-    (rowId: string, colId: string, val: string) => {
-      applyCellChange(rowId, colId, val);
+    (rowId: string, colId: string, val: string, richHtml?: string | null) => {
+      applyCellChange(rowId, colId, val, richHtml);
       setEditingCell(null);
       setInitialEditChar(undefined);
     },
@@ -465,7 +465,13 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
   );
 
   const handleCellKeyDown = useCallback(
-    (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => {
+    (
+      e: React.KeyboardEvent,
+      rowId: string,
+      colId: string,
+      currentValStr: string,
+      currentRichHtml?: string | null
+    ) => {
       const isEditing = editingCell?.rowId === rowId && editingCell?.colId === colId;
 
       if (!isEditing) {
@@ -489,7 +495,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
 
         if (e.key === "Backspace" || e.key === "Delete") {
           e.preventDefault();
-          if (canEdit) applyCellChange(rowId, colId, null);
+          if (canEdit) applyCellChange(rowId, colId, null, null);
           return;
         }
 
@@ -502,21 +508,21 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
       } else {
         if (e.key === "Enter") {
           e.preventDefault();
-          commitCellEdit(rowId, colId, currentValStr);
+          commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
           moveActiveCell("ArrowDown");
           return;
         }
 
         if (e.key === "Tab") {
           e.preventDefault();
-          commitCellEdit(rowId, colId, currentValStr);
+          commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
           moveActiveCell(e.shiftKey ? "ArrowLeft" : "ArrowRight");
           return;
         }
 
         if (e.key === "ArrowUp" || e.key === "ArrowDown") {
           e.preventDefault();
-          commitCellEdit(rowId, colId, currentValStr);
+          commitCellEdit(rowId, colId, currentValStr, currentRichHtml);
           moveActiveCell(e.key);
           return;
         }
@@ -569,6 +575,7 @@ export const CustomerPriceListEmbeddedSection = forwardRef<
 
   return (
     <div
+      data-avorio-customer-pricelist=""
       className={`flex flex-col overflow-hidden bg-[var(--card)] ${
         layoutMode === "horizontal" ? "flex-1 min-h-[160px]" : "flex-1 min-w-[280px]"
       }`}

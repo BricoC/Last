@@ -449,6 +449,175 @@ html[data-theme="avorio"] [data-avorio-notes-body] {
   color: #1f2937 !important;
 }
 
+/* Listini Clienti (finestra principale ed embedded): testo nero nitido in Avorio, mantenendo gli sfondi colorati delle colonne */
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table th,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table td,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table .text-amber-300,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table .text-amber-400,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table .text-amber-400\/80,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table .text-emerald-400,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table .text-emerald-500,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table .text-sky-400,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table .text-blue-400 {
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] .text-amber-400 {
+  color: #111827 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] .bg-emerald-950\/15 {
+  background-color: #e6f7ec !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] .bg-emerald-950\/10 {
+  background-color: #f2fbf5 !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] .bg-sky-950\/15 {
+  background-color: #e0f2fe !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] .bg-sky-950\/10 {
+  background-color: #f0f9ff !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] .bg-blue-950\/15 {
+  background-color: #dbeafe !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] .bg-blue-950\/10 {
+  background-color: #eff6ff !important;
+}
+
+/* Mantieni contrasto bianco su riga selezionata (sfondo blu scuro #1e5b87) */
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] td,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] .text-amber-200,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] .text-amber-400,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] .text-amber-400\/80,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] .text-emerald-200,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] .text-emerald-400,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] .text-sky-100,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] .text-sky-400,
+html[data-theme="avorio"] [data-avorio-customer-pricelist] table tr[data-row-active="true"] .text-blue-400 {
+  color: #ffffff !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] tr[data-row-active="true"] .bg-emerald-950\/10 {
+  background-color: rgba(2, 44, 34, 0.25) !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] tr[data-row-active="true"] .bg-sky-950\/10 {
+  background-color: rgba(12, 74, 110, 0.3) !important;
+}
+
+html[data-theme="avorio"] [data-avorio-customer-pricelist] tr[data-row-active="true"] .bg-blue-950\/10 {
+  background-color: rgba(30, 58, 138, 0.3) !important;
+}
+
+/* ─── Formattazione Rich-Text Descrizione Articoli (palette adattiva per tema) ─── */
+.pl-rich-text b {
+  font-weight: 700;
+}
+
+.pl-rich-text i {
+  font-style: italic;
+}
+
+/* Palette temi scuri (Grigio / Nero OLED) */
+.pl-rich-text [data-pl-color="red"] {
+  color: #f87171;
+}
+.pl-rich-text [data-pl-color="amber"] {
+  color: #fbbf24;
+}
+.pl-rich-text [data-pl-color="green"] {
+  color: #4ade80;
+}
+.pl-rich-text [data-pl-color="blue"] {
+  color: #60a5fa;
+}
+.pl-rich-text [data-pl-color="purple"] {
+  color: #c084fc;
+}
+
+.pl-rich-text mark[data-pl-hl] {
+  border-radius: 3px;
+  padding: 0 2px;
+  color: inherit;
+}
+.pl-rich-text mark[data-pl-hl="yellow"] {
+  background-color: rgba(250, 204, 21, 0.28);
+}
+.pl-rich-text mark[data-pl-hl="green"] {
+  background-color: rgba(34, 197, 94, 0.28);
+}
+.pl-rich-text mark[data-pl-hl="sky"] {
+  background-color: rgba(56, 189, 248, 0.28);
+}
+.pl-rich-text mark[data-pl-hl="rose"] {
+  background-color: rgba(244, 63, 94, 0.28);
+}
+
+/* Palette tema chiaro (Bianco Avorio) */
+html[data-theme="avorio"] .pl-rich-text [data-pl-color="red"] {
+  color: #b91c1c;
+}
+html[data-theme="avorio"] .pl-rich-text [data-pl-color="amber"] {
+  color: #b45309;
+}
+html[data-theme="avorio"] .pl-rich-text [data-pl-color="green"] {
+  color: #15803d;
+}
+html[data-theme="avorio"] .pl-rich-text [data-pl-color="blue"] {
+  color: #1d4ed8;
+}
+html[data-theme="avorio"] .pl-rich-text [data-pl-color="purple"] {
+  color: #7e22ce;
+}
+
+html[data-theme="avorio"] .pl-rich-text mark[data-pl-hl="yellow"] {
+  background-color: #fef08a;
+}
+html[data-theme="avorio"] .pl-rich-text mark[data-pl-hl="green"] {
+  background-color: #bbf7d0;
+}
+html[data-theme="avorio"] .pl-rich-text mark[data-pl-hl="sky"] {
+  background-color: #bae6fd;
+}
+html[data-theme="avorio"] .pl-rich-text mark[data-pl-hl="rose"] {
+  background-color: #fecdd3;
+}
+
+/* Contrasto leggibile su riga selezionata (sfondo blu scuro #1e5b87) in qualsiasi tema */
+tr[data-row-active="true"] .pl-rich-text [data-pl-color="red"] {
+  color: #fecaca !important;
+}
+tr[data-row-active="true"] .pl-rich-text [data-pl-color="amber"] {
+  color: #fde68a !important;
+}
+tr[data-row-active="true"] .pl-rich-text [data-pl-color="green"] {
+  color: #bbf7d0 !important;
+}
+tr[data-row-active="true"] .pl-rich-text [data-pl-color="blue"] {
+  color: #bfdbfe !important;
+}
+tr[data-row-active="true"] .pl-rich-text [data-pl-color="purple"] {
+  color: #e9d5ff !important;
+}
+tr[data-row-active="true"] .pl-rich-text mark[data-pl-hl="yellow"] {
+  background-color: rgba(250, 204, 21, 0.35) !important;
+}
+tr[data-row-active="true"] .pl-rich-text mark[data-pl-hl="green"] {
+  background-color: rgba(34, 197, 94, 0.35) !important;
+}
+tr[data-row-active="true"] .pl-rich-text mark[data-pl-hl="sky"] {
+  background-color: rgba(56, 189, 248, 0.35) !important;
+}
+tr[data-row-active="true"] .pl-rich-text mark[data-pl-hl="rose"] {
+  background-color: rgba(244, 63, 94, 0.38) !important;
+}
+
 
 
 

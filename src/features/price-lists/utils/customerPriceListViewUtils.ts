@@ -165,7 +165,8 @@ export function filterAndSortClientPriceItems(
 export function updateClientRowWithField(
   row: ListinoClienteRow,
   field: string,
-  rawValue: string | number | null
+  rawValue: string | number | null,
+  richHtml?: string | null
 ): ListinoClienteRow {
   const updated = { ...row };
   const today = getTodayAaaaMmGg();
@@ -183,6 +184,7 @@ export function updateClientRowWithField(
       break;
     case "descrizione":
       updated.descrizione = String(rawValue || "").trim();
+      updated.descrizione_rich = updated.descrizione ? (richHtml ?? null) : null;
       break;
     case "data_acquisto":
       updated.data_acquisto = String(rawValue || "").trim() || null;

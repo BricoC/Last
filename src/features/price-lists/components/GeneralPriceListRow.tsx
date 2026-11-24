@@ -27,9 +27,15 @@ export interface GeneralPriceListRowProps {
   onDeleteRow: (item: ListinoGeneraleRow) => void;
   onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommitCell: (rowId: string, colId: string, val: string) => void;
+  onCommitCell: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancelEdit: () => void;
-  onCellKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onCellKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
 }
 
 export const GeneralPriceListRow = memo<GeneralPriceListRowProps>(
@@ -60,6 +66,7 @@ export const GeneralPriceListRow = memo<GeneralPriceListRowProps>(
 
     return (
       <tr
+        data-row-active={isHighlighted ? "true" : undefined}
         className={`group cursor-default ${
           isHighlighted
             ? "bg-[#1e5b87] text-white font-medium"
@@ -243,6 +250,7 @@ export const GeneralPriceListRow = memo<GeneralPriceListRowProps>(
             colId="descrizione"
             value={item.descrizione}
             displayValue={item.descrizione}
+            richHtml={item.descrizione_rich}
             align="left"
             isActive={activeColId === "descrizione"}
             isEditing={editingColId === "descrizione"}

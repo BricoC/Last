@@ -19,9 +19,15 @@ export interface CustomerEmbeddedRowProps {
   onInsertIntoDdt: (row: ListinoClienteRow) => void;
   onSelectCell: (rowId: string, colId: string) => void;
   onStartEdit: (rowId: string, colId: string, char?: string) => void;
-  onCommitCell: (rowId: string, colId: string, val: string) => void;
+  onCommitCell: (rowId: string, colId: string, val: string, richHtml?: string | null) => void;
   onCancelEdit: () => void;
-  onCellKeyDown: (e: React.KeyboardEvent, rowId: string, colId: string, currentValStr: string) => void;
+  onCellKeyDown: (
+    e: React.KeyboardEvent,
+    rowId: string,
+    colId: string,
+    currentValStr: string,
+    currentRichHtml?: string | null
+  ) => void;
 }
 
 export const CustomerEmbeddedRow: React.FC<CustomerEmbeddedRowProps> = ({
@@ -156,6 +162,7 @@ export const CustomerEmbeddedRow: React.FC<CustomerEmbeddedRowProps> = ({
           colId="descrizione"
           value={item.descrizione}
           displayValue={item.descrizione}
+          richHtml={item.descrizione_rich}
           isActive={activeColId === "descrizione"}
           isEditing={editingColId === "descrizione"}
           initialChar={editingColId === "descrizione" ? initialEditChar : undefined}
