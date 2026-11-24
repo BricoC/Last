@@ -114,12 +114,8 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d last_upgrade_v035 -v ON_ERROR_STOP=1 -f src/features/settings/data-import/supabaseStationAccess.sql
           psql -h 127.0.0.1 -U postgres -d last_upgrade_v035 -v ON_ERROR_STOP=1 -f /tmp/schema_head.sql
 
-  publish-tauri:
-    needs: [verify-supabase-migrations]
-    permissions:
-      contents: write
-    runs-on: windows-latest
-
+  verify-frontend:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -129,17 +125,6 @@ jobs:
         with:
           node-version: 24
           cache: "npm"
-
-      - name: Install Rust 1.94
-        uses: dtolnay/rust-toolchain@1.94.0
-        with:
-          components: rustfmt, clippy
-
-      - name: Setup Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: "src-tauri -> target"
-          shared-key: "last-windows"
 
       - name: Install Node Dependencies
         run: npm ci
@@ -156,6 +141,26 @@ jobs:
       - name: Enforce Initial Bundle Budget
         run: npm run check:bundle
 
+  verify-rust:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.94
+        uses: dtolnay/rust-toolchain@1.94.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Setup Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          shared-key: "last-windows-check"
+
+      - name: Ensure frontendDist Directory Exists for Tauri Macro
+        run: New-Item -ItemType Directory -Force -Path dist | Out-Null
+
       - name: Check Rust Formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
@@ -171,8 +176,38 @@ jobs:
       - name: Run Cargo Security Audit
         run: cargo audit -f src-tauri/Cargo.lock
 
-      - name: Build & Publish Release with Tauri Action
-        if: startsWith(github.ref, 'refs/tags/v')
+  publish-tauri:
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    outputs:
+      release_id: ${{ steps.tauri_build.outputs.releaseId }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install Rust 1.94
+        uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Setup Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          shared-key: "last-windows-release"
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Build Draft Release with Tauri Action
+        id: tauri_build
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -182,6 +217,27 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Last ${{ github.ref_name }}"
           releaseBody: "Aggiornamento automatico Last Gestionale BricoClass."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
+
+  finalize-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [verify-supabase-migrations, verify-frontend, verify-rust, publish-tauri]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish Verified Draft Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.publish-tauri.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_ID}" ]; then
+            echo "Errore: release_id mancante da publish-tauri"
+            exit 1
+          fi
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -f make_latest=true
 
