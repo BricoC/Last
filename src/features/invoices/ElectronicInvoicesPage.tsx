@@ -6,61 +6,26 @@ import {
 } from "./services/electronicInvoicesService";
 import { InvoiceDetailModal } from "./components/InvoiceDetailModal";
 import { AddToOrderManagerModal, AddToOrderManagerItem } from "./components/AddToOrderManagerModal";
-import { Button } from "@/shared/components/ui/button";
+import { ElectronicInvoicesToolbar } from "./components/ElectronicInvoicesToolbar";
+import { InvoiceItemsTable } from "./components/InvoiceItemsTable";
+import { InvoiceHeadersTable } from "./components/InvoiceHeadersTable";
+import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
+import { X, LoaderCircle, Upload, Check, Receipt } from "lucide-react";
 import {
-  normalizeSearch,
-  tokenizeSearch,
-  matchesSearchToken,
-} from "@/shared/hooks/useFragmentSearch";
-import {
-  Search,
-  X,
-  RefreshCw,
-  LoaderCircle,
-  CloudDownload,
-  FileText,
-  Eye,
-  EyeOff,
-  Upload,
-  CheckCircle2,
-  AlertTriangle,
-  AlertCircle,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
-  Check,
-  Receipt,
-} from "lucide-react";
-import { cn } from "@/shared/utils/cn";
-
-type IndexedItemRow = SupplierInvoiceItem & { _searchIndex: string };
-type IndexedInvoiceRow = SupplierInvoice & { _searchIndex: string };
-
-type ItemSortField =
-  | "doc_date"
-  | "doc_number"
-  | "supplier_name"
-  | "article_code"
-  | "unit"
-  | "quantity"
-  | "description"
-  | "unit_price"
-  | "discount_1"
-  | "discounted_price"
-  | "total_price"
-  | "vat_rate";
-
-type InvoiceSortField =
-  | "doc_date"
-  | "doc_number"
-  | "supplier_name"
-  | "year"
-  | "taxable_amount"
-  | "vat_amount"
-  | "total_amount"
-  | "payment_method"
-  | "due_date"
-  | "notes";
+  computeAvailableInvoiceYears,
+  computeInvoiceSummaryTotals,
+  filterInvoiceItems,
+  filterInvoices,
+  getInvoiceRowKey,
+  ImportNotificationState,
+  indexInvoiceItems,
+  indexInvoices,
+  InvoiceSortField,
+  ItemSortField,
+  SelectedInvoiceCell,
+  sortInvoiceItems,
+  sortInvoices,
+} from "./utils/invoiceViewUtils";
 
 const BATCH_SIZE = 150;
 
@@ -75,45 +40,31 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
   isModal = false,
   onClose,
 }) => {
-  // Vista attiva: "items" (Storico Articoli) o "invoices" (Elenco Documenti)
   const [activeTab, setActiveTab] = useState<"items" | "invoices">("items");
-
-  // Dati grezzi caricati una sola volta in memoria per performance 60fps istantanee
   const [items, setItems] = useState<SupplierInvoiceItem[]>([]);
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Ricerca con useDeferredValue per non bloccare mai la digitazione
   const [search, setSearch] = useState(initialSearch || "");
   const deferredSearch = useDeferredValue(search);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
-  // Filtri
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [onlyWithPrice, setOnlyWithPrice] = useState(true);
   const [showExtendedColumns, setShowExtendedColumns] = useState(false);
 
-  // Ordinamento Colonne
   const [itemSortField, setItemSortField] = useState<ItemSortField>("doc_date");
   const [itemSortAsc, setItemSortAsc] = useState(false);
-
   const [invSortField, setInvSortField] = useState<InvoiceSortField>("doc_date");
   const [invSortAsc, setInvSortAsc] = useState(false);
 
-  // Selezione Cella per Copia Rapida (Ctrl + C)
-  const [selectedCell, setSelectedCell] = useState<{
-    rowKey: string | number;
-    col: "article_code" | "description";
-    text: string;
-  } | null>(null);
+  const [selectedCell, setSelectedCell] = useState<SelectedInvoiceCell | null>(null);
   const [activeRowKey, setActiveRowKey] = useState<string | number | null>(null);
   const isKeyboardNavRef = useRef(false);
   const activeRowElementRef = useRef<HTMLTableRowElement | null>(null);
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
-
-  // Popup Aggiunta a Order Manager
   const [addToOrderTarget, setAddToOrderTarget] = useState<AddToOrderManagerItem | null>(null);
 
   const copyText = (text: string) => {
@@ -123,37 +74,22 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     setTimeout(() => setCopiedToast(null), 2500);
   };
 
-  // Paginazione virtuale progressiva (infinite scroll)
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
-
-  // Sincronizzazione Supabase
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState<{ msg: string; pct: number }>({
-    msg: "",
-    pct: 0,
-  });
+  const [syncProgress, setSyncProgress] = useState<{ msg: string; pct: number }>({ msg: "", pct: 0 });
 
-  // Modale Dettaglio Fattura
   const [selectedInvoice, setSelectedInvoice] = useState<SupplierInvoice | null>(null);
   const [invoiceLines, setInvoiceLines] = useState<SupplierInvoiceItem[]>([]);
   const [isLoadingLines, setIsLoadingLines] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
-  // Importazione XML & Drag and Drop
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState<{ msg: string; pct: number }>({
-    msg: "",
-    pct: 0,
-  });
-  const [importNotification, setImportNotification] = useState<{
-    type: "success" | "warning" | "error";
-    message: string;
-  } | null>(null);
+  const [importProgress, setImportProgress] = useState<{ msg: string; pct: number }>({ msg: "", pct: 0 });
+  const [importNotification, setImportNotification] = useState<ImportNotificationState | null>(null);
 
-  // Scorciatoia F4 per focalizzare la ricerca rapida (come in DDT Articoli e noManV1)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "F4") {
@@ -166,22 +102,15 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Aggiornamento dinamico termine di ricerca se passato come prop modale
   useEffect(() => {
-    if (initialSearch !== undefined) {
-      setSearch(initialSearch);
-    }
+    if (initialSearch !== undefined) setSearch(initialSearch);
   }, [initialSearch]);
 
-  // Gestione tasto ESC per chiudere il popup modale se non ci sono sotto-modali aperte
   useEffect(() => {
     if (!isModal || !onClose) return;
     const handleEscKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        // Se una modale di dettaglio interna è aperta, lascia che sia lei a chiudersi
-        if (isDetailOpen || Boolean(addToOrderTarget)) {
-          return;
-        }
+        if (isDetailOpen || Boolean(addToOrderTarget)) return;
         e.preventDefault();
         e.stopPropagation();
         onClose();
@@ -191,40 +120,30 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     return () => window.removeEventListener("keydown", handleEscKeyDown);
   }, [isModal, onClose, isDetailOpen, addToOrderTarget]);
 
-  // Scorciatoia Ctrl+C per copiare cella attiva o testo selezionato
   useEffect(() => {
     const handleCopyKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (
-        target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
-      ) {
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
         return;
       }
-
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
         const mouseSelection = window.getSelection()?.toString();
         if (mouseSelection && mouseSelection.trim().length > 0) {
           void navigator.clipboard.writeText(mouseSelection);
-          setCopiedToast(
-            `Copiato: "${mouseSelection.slice(0, 32)}${mouseSelection.length > 32 ? "..." : ""}"`
-          );
+          setCopiedToast(`Copiato: "${mouseSelection.slice(0, 32)}${mouseSelection.length > 32 ? "..." : ""}"`);
           setTimeout(() => setCopiedToast(null), 2500);
           return;
         }
-
         if (selectedCell && selectedCell.text && selectedCell.text !== "—") {
           e.preventDefault();
           copyText(selectedCell.text);
         }
       }
     };
-
     window.addEventListener("keydown", handleCopyKeyDown);
     return () => window.removeEventListener("keydown", handleCopyKeyDown);
   }, [selectedCell]);
 
-  // Caricamento rapido iniziale di tutte le righe (richiede ~80ms una sola volta)
   const loadData = async () => {
     setLoading(true);
     setError("");
@@ -246,92 +165,27 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     void loadData();
   }, []);
 
-  // Pre-indicizzazione in memoria delle righe articoli (fatta una volta sola)
-  const indexedItems = useMemo<IndexedItemRow[]>(() => {
-    return items.map((r) => ({
-      ...r,
-      _searchIndex: normalizeSearch(
-        `${r.description} ${r.article_code || ""} ${r.supplier_name} ${r.doc_number} ${r.year} ${r.doc_date}`
-      ),
-    }));
-  }, [items]);
-
-  // Pre-indicizzazione in memoria delle testate fattura
-  const indexedInvoices = useMemo<IndexedInvoiceRow[]>(() => {
-    return invoices.map((inv) => ({
-      ...inv,
-      _searchIndex: normalizeSearch(
-        `${inv.supplier_name} ${inv.doc_number} ${inv.doc_date} ${inv.year} ${inv.iban || ""} ${inv.notes || ""}`
-      ),
-    }));
-  }, [invoices]);
-
+  const indexedItems = useMemo(() => indexInvoiceItems(items), [items]);
+  const indexedInvoices = useMemo(() => indexInvoices(invoices), [invoices]);
   const searchTokens = useMemo(() => tokenizeSearch(deferredSearch), [deferredSearch]);
 
-  // Filtraggio ISTANTANEO in memoria (0-2 ms)
-  const filteredItems = useMemo(() => {
-    return indexedItems.filter((row) => {
-      if (selectedYear !== null && row.year !== selectedYear) return false;
-      if (onlyWithPrice && row.discounted_price <= 0 && row.unit_price <= 0 && row.total_price <= 0) {
-        return false;
-      }
-      if (!searchTokens.length) return true;
-      return searchTokens.every((token) => matchesSearchToken(row._searchIndex, token));
-    });
-  }, [indexedItems, selectedYear, onlyWithPrice, searchTokens]);
+  const filteredItems = useMemo(
+    () => filterInvoiceItems(indexedItems, selectedYear, onlyWithPrice, searchTokens),
+    [indexedItems, selectedYear, onlyWithPrice, searchTokens]
+  );
+  const filteredInvoices = useMemo(
+    () => filterInvoices(indexedInvoices, selectedYear, searchTokens),
+    [indexedInvoices, selectedYear, searchTokens]
+  );
+  const sortedItems = useMemo(
+    () => sortInvoiceItems(filteredItems, itemSortField, itemSortAsc),
+    [filteredItems, itemSortField, itemSortAsc]
+  );
+  const sortedInvoices = useMemo(
+    () => sortInvoices(filteredInvoices, invSortField, invSortAsc),
+    [filteredInvoices, invSortField, invSortAsc]
+  );
 
-  const filteredInvoices = useMemo(() => {
-    return indexedInvoices.filter((inv) => {
-      if (selectedYear !== null && inv.year !== selectedYear) return false;
-      if (!searchTokens.length) return true;
-      return searchTokens.every((token) => matchesSearchToken(inv._searchIndex, token));
-    });
-  }, [indexedInvoices, selectedYear, searchTokens]);
-
-  // Ordinamento Articoli
-  const sortedItems = useMemo(() => {
-    return [...filteredItems].sort((a, b) => {
-      let valA: any = a[itemSortField];
-      let valB: any = b[itemSortField];
-
-      if (itemSortField === "discounted_price") {
-        valA = a.discounted_price > 0 ? a.discounted_price : a.unit_price;
-        valB = b.discounted_price > 0 ? b.discounted_price : b.unit_price;
-      }
-
-      if (valA == null) valA = "";
-      if (valB == null) valB = "";
-
-      if (typeof valA === "number" && typeof valB === "number") {
-        return itemSortAsc ? valA - valB : valB - valA;
-      }
-
-      return itemSortAsc
-        ? String(valA).localeCompare(String(valB), "it", { numeric: true, sensitivity: "base" })
-        : String(valB).localeCompare(String(valA), "it", { numeric: true, sensitivity: "base" });
-    });
-  }, [filteredItems, itemSortField, itemSortAsc]);
-
-  // Ordinamento Fatture
-  const sortedInvoices = useMemo(() => {
-    return [...filteredInvoices].sort((a, b) => {
-      let valA: any = a[invSortField];
-      let valB: any = b[invSortField];
-
-      if (valA == null) valA = "";
-      if (valB == null) valB = "";
-
-      if (typeof valA === "number" && typeof valB === "number") {
-        return invSortAsc ? valA - valB : valB - valA;
-      }
-
-      return invSortAsc
-        ? String(valA).localeCompare(String(valB), "it", { numeric: true, sensitivity: "base" })
-        : String(valB).localeCompare(String(valA), "it", { numeric: true, sensitivity: "base" });
-    });
-  }, [filteredInvoices, invSortField, invSortAsc]);
-
-  // Toggle Ordinamento
   const handleToggleItemSort = (field: ItemSortField) => {
     if (itemSortField === field) {
       setItemSortAsc(!itemSortAsc);
@@ -350,37 +204,11 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     }
   };
 
-  const renderItemSortIndicator = (field: ItemSortField) => {
-    if (itemSortField === field) {
-      return itemSortAsc ? (
-        <ArrowUp className="w-3 h-3 text-[var(--primary)] shrink-0" />
-      ) : (
-        <ArrowDown className="w-3 h-3 text-[var(--primary)] shrink-0" />
-      );
-    }
-    return <ArrowUpDown className="w-2.5 h-2.5 opacity-25 group-hover:opacity-75 transition-opacity shrink-0" />;
-  };
-
-  const renderInvSortIndicator = (field: InvoiceSortField) => {
-    if (invSortField === field) {
-      return invSortAsc ? (
-        <ArrowUp className="w-3 h-3 text-[var(--primary)] shrink-0" />
-      ) : (
-        <ArrowDown className="w-3 h-3 text-[var(--primary)] shrink-0" />
-      );
-    }
-    return <ArrowUpDown className="w-2.5 h-2.5 opacity-25 group-hover:opacity-75 transition-opacity shrink-0" />;
-  };
-
-  // Reset del batch visibile quando cambia la ricerca o i filtri o l'ordinamento
   useEffect(() => {
     setVisibleCount(BATCH_SIZE);
-    if (tableContainerRef.current) {
-      tableContainerRef.current.scrollTop = 0;
-    }
+    if (tableContainerRef.current) tableContainerRef.current.scrollTop = 0;
   }, [deferredSearch, selectedYear, onlyWithPrice, activeTab, itemSortField, itemSortAsc, invSortField, invSortAsc]);
 
-  // Infinite scroll fluido ad alte prestazioni
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     const maxLen = activeTab === "items" ? sortedItems.length : sortedInvoices.length;
@@ -404,24 +232,16 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     if (currentList.length === 0) return;
     e.preventDefault();
 
-    const getKey = (item: any) =>
-      item.id ?? `${item.supplier_name || ""}-${item.doc_number}-${item.line_number || item.doc_date || ""}`;
-    const currentIndex = activeRowKey != null ? currentList.findIndex((r) => getKey(r) === activeRowKey) : -1;
+    const currentIndex = activeRowKey != null ? currentList.findIndex((r) => getInvoiceRowKey(r) === activeRowKey) : -1;
     let nextIndex = currentIndex;
-
-    if (e.key === "ArrowDown") {
-      nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, currentList.length - 1);
-    } else if (e.key === "ArrowUp") {
-      nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 1, 0);
-    } else if (e.key === "PageDown") {
-      nextIndex = currentIndex === -1 ? 10 : Math.min(currentIndex + 15, currentList.length - 1);
-    } else if (e.key === "PageUp") {
-      nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 15, 0);
-    }
+    if (e.key === "ArrowDown") nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, currentList.length - 1);
+    else if (e.key === "ArrowUp") nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 1, 0);
+    else if (e.key === "PageDown") nextIndex = currentIndex === -1 ? 10 : Math.min(currentIndex + 15, currentList.length - 1);
+    else if (e.key === "PageUp") nextIndex = currentIndex === -1 ? 0 : Math.max(currentIndex - 15, 0);
 
     if (nextIndex !== -1 && nextIndex !== currentIndex) {
       isKeyboardNavRef.current = true;
-      const nextKey = getKey(currentList[nextIndex]);
+      const nextKey = getInvoiceRowKey(currentList[nextIndex]);
       setActiveRowKey(nextKey);
       if (activeTab === "items") {
         const row = currentList[nextIndex] as SupplierInvoiceItem;
@@ -434,13 +254,11 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     }
   };
 
-  // Apertura Dettaglio Fattura da Riga Articolo
   const handleOpenDetailFromItem = async (item: SupplierInvoiceItem) => {
     setIsLoadingLines(true);
     setIsDetailOpen(true);
     try {
       const found = item.invoice_id == null ? undefined : await electronicInvoicesService.getInvoiceById(item.invoice_id);
-
       setSelectedInvoice(
         found || {
           supplier_name: item.supplier_name,
@@ -452,12 +270,11 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
           vat_amount: 0,
         }
       );
-
       const lines = await electronicInvoicesService.getInvoiceLines(
         item.supplier_name,
         item.doc_number,
         item.doc_date,
-        item.invoice_id,
+        item.invoice_id
       );
       setInvoiceLines(lines.length > 0 ? lines : [item]);
     } catch (err) {
@@ -467,7 +284,6 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     }
   };
 
-  // Apertura Dettaglio da Testata
   const handleOpenDetailFromInvoice = async (inv: SupplierInvoice) => {
     setSelectedInvoice(inv);
     setIsLoadingLines(true);
@@ -477,7 +293,7 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
         inv.supplier_name,
         inv.doc_number,
         inv.doc_date,
-        inv.id,
+        inv.id
       );
       setInvoiceLines(lines);
     } catch (err) {
@@ -487,15 +303,12 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     }
   };
 
-  // Sincronizzazione da Supabase Cloud
   const handleSyncCloud = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
     setError("");
     try {
-      await electronicInvoicesService.syncFromSupabase((msg, pct) => {
-        setSyncProgress({ msg, pct });
-      });
+      await electronicInvoicesService.syncFromSupabase((msg, pct) => setSyncProgress({ msg, pct }));
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sincronizzazione non riuscita.");
@@ -504,13 +317,11 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     }
   };
 
-  // Processamento file XML importati (da Drag & Drop o da Pulsante File Picker)
   const handleProcessFiles = async (fileList: File[]) => {
     const xmlFiles = fileList.filter((f) => {
       const name = f.name.toLowerCase();
       return name.endsWith(".xml") || name.endsWith(".p7m");
     });
-
     if (xmlFiles.length === 0) {
       setImportNotification({
         type: "error",
@@ -522,7 +333,6 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     setIsImporting(true);
     setImportNotification(null);
     setImportProgress({ msg: "Lettura file...", pct: 5 });
-
     try {
       const payload: { name: string; content: string | ArrayBuffer }[] = [];
       for (let i = 0; i < xmlFiles.length; i++) {
@@ -531,16 +341,11 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
           msg: `Lettura ${file.name} (${i + 1}/${xmlFiles.length})...`,
           pct: Math.round(((i + 1) / xmlFiles.length) * 20),
         });
-        const content = await file.arrayBuffer();
-        payload.push({ name: file.name, content });
+        payload.push({ name: file.name, content: await file.arrayBuffer() });
       }
-
-      const res = await electronicInvoicesService.importXmlFiles(
-        payload,
-        (msg, pct) => setImportProgress({ msg, pct })
+      const res = await electronicInvoicesService.importXmlFiles(payload, (msg, pct) =>
+        setImportProgress({ msg, pct })
       );
-
-      // Ricarica i dati locali in memoria per ricerca immediata
       await loadData();
 
       if (res.importedInvoices > 0) {
@@ -548,15 +353,9 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
         if (res.skippedDuplicates > 0) {
           msg += ` ${res.skippedDuplicates} fattur${res.skippedDuplicates === 1 ? "a" : "e"} già present${res.skippedDuplicates === 1 ? "e" : "i"} saltat${res.skippedDuplicates === 1 ? "a" : "e"}.`;
         }
-        if (res.cloudSynced) {
-          msg += ` Sincronizzato con Supabase Cloud.`;
-        } else if (res.cloudError) {
-          msg += ` (Salvate localmente; Cloud non sincronizzato).`;
-        }
-        setImportNotification({
-          type: "success",
-          message: msg,
-        });
+        if (res.cloudSynced) msg += ` Sincronizzato con Supabase Cloud.`;
+        else if (res.cloudError) msg += ` (Salvate localmente; Cloud non sincronizzato).`;
+        setImportNotification({ type: "success", message: msg });
       } else if (res.skippedDuplicates > 0) {
         setImportNotification({
           type: "warning",
@@ -575,9 +374,7 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
       });
     } finally {
       setIsImporting(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -585,9 +382,7 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     e.preventDefault();
     e.stopPropagation();
     dragCounterRef.current += 1;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDraggingOver(true);
-    }
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) setIsDraggingOver(true);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -610,79 +405,22 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
     e.stopPropagation();
     dragCounterRef.current = 0;
     setIsDraggingOver(false);
-
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const droppedFiles = Array.from(e.dataTransfer.files);
-      await handleProcessFiles(droppedFiles);
+      await handleProcessFiles(Array.from(e.dataTransfer.files));
     }
   };
 
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const selectedFiles = Array.from(e.target.files);
-      await handleProcessFiles(selectedFiles);
+      await handleProcessFiles(Array.from(e.target.files));
     }
   };
 
-  const formatEuro = (val: number, decimals = 2) =>
-    `€ ${val.toLocaleString("it-IT", {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals,
-    })}`;
-
-  const availableYears = useMemo(() => {
-    const yearsSet = new Set<number>();
-    invoices.forEach((inv) => {
-      if (inv.year) yearsSet.add(inv.year);
-    });
-    items.forEach((item) => {
-      if (item.year) yearsSet.add(item.year);
-    });
-    [2026, 2025, 2024, 2023].forEach((y) => yearsSet.add(y));
-    return Array.from(yearsSet).sort((a, b) => b - a);
-  }, [invoices, items]);
-
-  // Calcolo totali complessivi degli elementi filtrati / visualizzati
-  const summaryTotals = useMemo(() => {
-    if (activeTab === "invoices") {
-      let taxable = 0;
-      let vat = 0;
-      let total = 0;
-      for (let i = 0; i < filteredInvoices.length; i++) {
-        const inv = filteredInvoices[i];
-        taxable += inv.taxable_amount || 0;
-        vat += inv.vat_amount || 0;
-        total += inv.total_amount || 0;
-      }
-      return {
-        count: filteredInvoices.length,
-        taxable,
-        vat,
-        total,
-      };
-    } else {
-      let taxable = 0;
-      let vat = 0;
-      let total = 0;
-      for (let i = 0; i < filteredItems.length; i++) {
-        const it = filteredItems[i];
-        const lineTotal = it.total_price || 0;
-        taxable += lineTotal;
-        const rate = it.vat_rate !== null && it.vat_rate !== undefined && Number.isFinite(Number(it.vat_rate))
-          ? Number(it.vat_rate)
-          : 22;
-        const lineVat = lineTotal * (rate / 100);
-        vat += lineVat;
-        total += lineTotal + lineVat;
-      }
-      return {
-        count: filteredItems.length,
-        taxable,
-        vat,
-        total,
-      };
-    }
-  }, [activeTab, filteredInvoices, filteredItems]);
+  const availableYears = useMemo(() => computeAvailableInvoiceYears(invoices, items), [invoices, items]);
+  const summaryTotals = useMemo(
+    () => computeInvoiceSummaryTotals(activeTab, filteredInvoices, filteredItems),
+    [activeTab, filteredInvoices, filteredItems]
+  );
 
   return (
     <div
@@ -692,7 +430,6 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* File input nascosto per il pulsante Importa XML */}
       <input
         ref={fileInputRef}
         type="file"
@@ -702,7 +439,6 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
         className="hidden"
       />
 
-      {/* Drop overlay visivo quando si trascinano i file sopra l'applicazione */}
       {isDraggingOver && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[var(--background)]/85 backdrop-blur-xs border-2 border-dashed border-[var(--primary)] rounded-lg p-6 pointer-events-none animate-in fade-in duration-100">
           <div className="flex flex-col items-center gap-3 p-8 rounded-xl bg-[var(--card)] border border-[var(--border)] shadow-2xl text-center">
@@ -718,7 +454,7 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
           </div>
         </div>
       )}
-      {/* Header Modal Bar se aperta come popup dal Listino Generale */}
+
       {isModal && (
         <div className="flex h-10 shrink-0 items-center justify-between rounded-md bg-slate-900 border border-slate-800 px-3 text-xs text-slate-200 shadow-sm">
           <div className="flex items-center gap-2.5 overflow-hidden">
@@ -748,839 +484,88 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
         </div>
       )}
 
-      {/* ─── 1. BARRA DI RICERCA (STESSO IDENTICO STILE DI DDT ARTICOLI) ─── */}
-      <label className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 text-xs text-[var(--foreground)]">
-        <Search className="h-4 w-4 shrink-0 text-[var(--muted-foreground)]" />
-        <input
-          ref={searchInputRef}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={
-            activeTab === "items"
-              ? "Cerca fornitore, codice articolo, descrizione, numero documento o anno... (F4 per cercare)"
-              : "Cerca fornitore, numero fattura, IBAN, note... (F4 per cercare)"
-          }
-          className="w-full bg-transparent outline-none text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]"
-        />
-        {search && (
-          <button
-            type="button"
-            onClick={() => {
-              setSearch("");
-              searchInputRef.current?.focus();
-            }}
-            className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] p-0.5 rounded cursor-pointer"
-            title="Cancella ricerca"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </label>
+      <ElectronicInvoicesToolbar
+        activeTab={activeTab}
+        onChangeTab={setActiveTab}
+        itemsTotalCount={items.length}
+        invoicesTotalCount={invoices.length}
+        search={search}
+        onChangeSearch={setSearch}
+        searchInputRef={searchInputRef}
+        selectedYear={selectedYear}
+        onChangeYear={setSelectedYear}
+        availableYears={availableYears}
+        showExtendedColumns={showExtendedColumns}
+        onToggleExtendedColumns={() => setShowExtendedColumns(!showExtendedColumns)}
+        onlyWithPrice={onlyWithPrice}
+        onChangeOnlyWithPrice={setOnlyWithPrice}
+        summaryTotals={summaryTotals}
+        loading={loading}
+        isSyncing={isSyncing}
+        syncProgress={syncProgress}
+        isImporting={isImporting}
+        importProgress={importProgress}
+        importNotification={importNotification}
+        onDismissImportNotification={() => setImportNotification(null)}
+        error={error}
+        onTriggerImportXml={() => fileInputRef.current?.click()}
+        onSyncCloud={handleSyncCloud}
+        onReload={() => void loadData()}
+      />
 
-      {/* ─── 2. TOOLBAR / HEADER (STESSO IDENTICO STILE DI DDT ARTICOLI) ─── */}
-      <div className="flex h-7 shrink-0 items-center justify-between gap-3 px-1 text-xs">
-        {/* Titolo, Tabs e Filtri */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 font-semibold">
-            <h1 className="text-xs font-bold uppercase tracking-wider text-[var(--foreground)]">
-              {activeTab === "items" ? "Fatture Elettroniche (Articoli)" : "Fatture Fornitori"}
-            </h1>
-            <span className="text-[var(--muted-foreground)] text-[11px] font-normal">
-              ({(activeTab === "items" ? items.length : invoices.length).toLocaleString("it-IT")} totali)
-            </span>
-          </div>
-
-          {/* Switch Vista Schede */}
-          <div className="flex items-center bg-[var(--card)] border border-[var(--border)] rounded p-0.5">
-            <button
-              type="button"
-              onClick={() => setActiveTab("items")}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                activeTab === "items"
-                  ? "bg-[var(--primary)] text-white font-semibold"
-                  : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-              }`}
-            >
-              Articoli & Prezzi
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("invoices")}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                activeTab === "invoices"
-                  ? "bg-[var(--primary)] text-white font-semibold"
-                  : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-              }`}
-            >
-              Fatture ({invoices.length})
-            </button>
-          </div>
-
-          {/* Menù a tendina Selezione Anno */}
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <label htmlFor="year-select" className="text-[var(--muted-foreground)] font-semibold shrink-0">
-              Anno:
-            </label>
-            <select
-              id="year-select"
-              value={selectedYear === null ? "ALL" : String(selectedYear)}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSelectedYear(val === "ALL" ? null : parseInt(val, 10));
-              }}
-              className="h-6 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-0 text-[11px] font-medium text-[var(--foreground)] outline-none cursor-pointer hover:border-[var(--primary)] transition-colors"
-            >
-              <option value="ALL">Tutti gli anni</option>
-              {availableYears.map((yr) => (
-                <option key={yr} value={String(yr)}>
-                  {yr}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Switch Colonne Estese */}
-          {activeTab === "items" && (
-            <button
-              type="button"
-              onClick={() => setShowExtendedColumns(!showExtendedColumns)}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
-                showExtendedColumns
-                  ? "border-lime-500/50 bg-lime-500/10 text-lime-400"
-                  : "border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-              }`}
-              title="Mostra/Nascondi UM, Quantità, Listino e Sconti"
-            >
-              {showExtendedColumns ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-              <span>Show</span>
-            </button>
-          )}
-
-          {/* Filtro Solo con Prezzo */}
-          {activeTab === "items" && (
-            <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer">
-              <input
-                type="checkbox"
-                checked={onlyWithPrice}
-                onChange={(e) => setOnlyWithPrice(e.target.checked)}
-                className="rounded border-[var(--border)] bg-[var(--card)] text-[var(--primary)] cursor-pointer"
-              />
-              <span>Solo con prezzo</span>
-            </label>
-          )}
-        </div>
-
-        {/* Info Destra: Totali Elementi Filtrati + Pulsante Importa XML + Pulsante Sync + Refresh */}
-        <div className="flex items-center gap-2">
-          {/* Badge Riepilogo: N. Elementi - Imponibile - IVA - Totale Documento */}
-          <div className="flex items-center gap-2 px-2.5 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] text-[11px] whitespace-nowrap shadow-xs">
-            <div className="flex items-center gap-1">
-              <span className="text-[var(--muted-foreground)]">Elementi:</span>
-              <span className="font-bold text-[var(--foreground)]">
-                {summaryTotals.count.toLocaleString("it-IT")}
-              </span>
-            </div>
-            <span className="text-[var(--border)] select-none">|</span>
-            <div className="flex items-center gap-1">
-              <span className="text-[var(--muted-foreground)]">Imponibile:</span>
-              <span className="font-semibold text-[var(--foreground)]">
-                {formatEuro(summaryTotals.taxable)}
-              </span>
-            </div>
-            <span className="text-[var(--border)] select-none">|</span>
-            <div className="flex items-center gap-1">
-              <span className="text-[var(--muted-foreground)]">IVA:</span>
-              <span className="font-semibold text-[var(--foreground)]">
-                {formatEuro(summaryTotals.vat)}
-              </span>
-            </div>
-            <span className="text-[var(--border)] select-none">|</span>
-            <div className="flex items-center gap-1">
-              <span className="text-[var(--muted-foreground)]">Totale:</span>
-              <span className="font-bold text-[var(--primary)]">
-                {formatEuro(summaryTotals.total)}
-              </span>
-            </div>
-          </div>
-
-          <Button
-            type="button"
-            size="sm"
-            variant="primary"
-            className="h-6 px-2.5 text-[11px] gap-1.5 cursor-pointer bg-[var(--primary)] text-white hover:opacity-90 font-medium shadow-xs"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isImporting || isSyncing}
-            title="Importa file XML di fatture elettroniche (o trascina i file qui)"
-          >
-            <Upload className={`h-3 w-3 ${isImporting ? "animate-bounce" : ""}`} />
-            <span>{isImporting ? "Importando..." : "Importa XML"}</span>
-          </Button>
-
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="h-6 px-2 text-[11px] gap-1.5 cursor-pointer"
-            onClick={handleSyncCloud}
-            disabled={isSyncing || isImporting}
-            title="Scarica e allinea con Supabase Cloud"
-          >
-            <CloudDownload className={`h-3 w-3 ${isSyncing ? "animate-bounce" : ""}`} />
-            <span>{isSyncing ? "Sync..." : "Sincronizza Cloud"}</span>
-          </Button>
-
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="h-6 px-2 cursor-pointer"
-            onClick={() => void loadData()}
-            disabled={loading || isImporting || isSyncing}
-            title="Ricarica elenco"
-          >
-            {loading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          </Button>
-        </div>
-      </div>
-
-      {/* NOTIFICA ERRORE O SYNC */}
-      {error && (
-        <p role="alert" className="text-xs text-[var(--destructive)] px-1">
-          {error}
-        </p>
-      )}
-
-      {isSyncing && (
-        <div className="flex items-center justify-between p-2 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs text-[var(--primary)]">
-          <span>{syncProgress.msg}</span>
-          <span className="font-bold">{syncProgress.pct}%</span>
-        </div>
-      )}
-
-      {/* PROGRESSO IMPORTAZIONE XML */}
-      {isImporting && (
-        <div className="flex items-center justify-between p-2 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs text-[var(--primary)]">
-          <div className="flex items-center gap-2">
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin shrink-0" />
-            <span>{importProgress.msg}</span>
-          </div>
-          <span className="font-bold">{importProgress.pct}%</span>
-        </div>
-      )}
-
-      {/* BANNER NOTIFICA RISULTATO IMPORTAZIONE */}
-      {importNotification && (
-        <div
-          className={`flex items-center justify-between p-2 rounded-md border text-xs ${
-            importNotification.type === "success"
-              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-              : importNotification.type === "warning"
-              ? "border-amber-500/40 bg-amber-500/10 text-amber-400"
-              : "border-rose-500/40 bg-rose-500/10 text-rose-400"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {importNotification.type === "success" && <CheckCircle2 className="h-4 w-4 shrink-0" />}
-            {importNotification.type === "warning" && <AlertTriangle className="h-4 w-4 shrink-0" />}
-            {importNotification.type === "error" && <AlertCircle className="h-4 w-4 shrink-0" />}
-            <span>{importNotification.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setImportNotification(null)}
-            className="p-1 hover:opacity-80 rounded cursor-pointer ml-2"
-            title="Chiudi notifica"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* ─── 3. TABELLA PRINCIPALE CON CELLE COPIABILI E ORDINABILI ─── */}
       {loading && items.length === 0 ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-[var(--muted-foreground)]">
           <LoaderCircle className="h-4 w-4 animate-spin" />
           Caricamento righe...
         </div>
       ) : activeTab === "items" ? (
-        /* VISTA ARTICOLI */
-        sortedItems.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center p-8 text-xs text-[var(--muted-foreground)] border border-[var(--border)] rounded-md bg-[var(--card)]">
-            {items.length === 0
-              ? "Nessun dato locale trovato. Clicca su 'Sincronizza Cloud' in alto a destra per scaricare l'archivio."
-              : "Nessun articolo trovato per i filtri selezionati."}
-          </div>
-        ) : (
-          <div
-            ref={tableContainerRef}
-            tabIndex={0}
-            onKeyDown={handleTableKeyDown}
-            onScroll={handleScroll}
-            className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)] select-text outline-none"
-          >
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider select-none">
-                <tr>
-                  <th
-                    onClick={() => handleToggleItemSort("doc_date")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left w-32 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per data documento"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>DATA</span>
-                      {renderItemSortIndicator("doc_date")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleItemSort("doc_number")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left w-28 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per numero documento"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>DOC N.</span>
-                      {renderItemSortIndicator("doc_number")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleItemSort("supplier_name")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left w-52 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per fornitore"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>FORNITORE</span>
-                      {renderItemSortIndicator("supplier_name")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleItemSort("article_code")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left w-36 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per codice articolo"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>CODICE ART.</span>
-                      {renderItemSortIndicator("article_code")}
-                    </div>
-                  </th>
-                  {showExtendedColumns && (
-                    <th
-                      onClick={() => handleToggleItemSort("unit")}
-                      style={{ cursor: "pointer" }}
-                      className="px-2 py-2 text-center w-14 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                      title="Ordina per unità di misura"
-                    >
-                      <div className="flex items-center justify-center gap-1">
-                        <span>UM</span>
-                        {renderItemSortIndicator("unit")}
-                      </div>
-                    </th>
-                  )}
-                  {showExtendedColumns && (
-                    <th
-                      onClick={() => handleToggleItemSort("quantity")}
-                      style={{ cursor: "pointer" }}
-                      className="px-3 py-2 text-right w-16 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                      title="Ordina per quantità"
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        <span>Q.TÀ</span>
-                        {renderItemSortIndicator("quantity")}
-                      </div>
-                    </th>
-                  )}
-                  <th
-                    onClick={() => handleToggleItemSort("description")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per descrizione articolo"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>DESCRIZIONE</span>
-                      {renderItemSortIndicator("description")}
-                    </div>
-                  </th>
-                  {showExtendedColumns && (
-                    <th
-                      onClick={() => handleToggleItemSort("unit_price")}
-                      style={{ cursor: "pointer" }}
-                      className="px-3 py-2 text-right w-24 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                      title="Ordina per prezzo di listino"
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        <span>LISTINO</span>
-                        {renderItemSortIndicator("unit_price")}
-                      </div>
-                    </th>
-                  )}
-                  {showExtendedColumns && (
-                    <th
-                      onClick={() => handleToggleItemSort("discount_1")}
-                      style={{ cursor: "pointer" }}
-                      className="px-2 py-2 text-center w-20 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                      title="Ordina per sconti"
-                    >
-                      <div className="flex items-center justify-center gap-1">
-                        <span>SCONTO</span>
-                        {renderItemSortIndicator("discount_1")}
-                      </div>
-                    </th>
-                  )}
-                  <th
-                    onClick={() => handleToggleItemSort("discounted_price")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-right w-28 text-[var(--primary)] font-bold group hover:bg-[var(--card)] transition-colors"
-                    title="Ordina per costo netto"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      <span>COSTO NETTO (€)</span>
-                      {renderItemSortIndicator("discounted_price")}
-                    </div>
-                  </th>
-                  {showExtendedColumns && (
-                    <th
-                      onClick={() => handleToggleItemSort("total_price")}
-                      style={{ cursor: "pointer" }}
-                      className="px-3 py-2 text-right w-24 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                      title="Ordina per importo riga"
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        <span>IMPORTO</span>
-                        {renderItemSortIndicator("total_price")}
-                      </div>
-                    </th>
-                  )}
-                  <th
-                    onClick={() => handleToggleItemSort("vat_rate")}
-                    style={{ cursor: "pointer" }}
-                    className="px-2 py-2 text-center w-14 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per aliquota IVA"
-                  >
-                    <div className="flex items-center justify-center gap-1">
-                      <span>IVA</span>
-                      {renderItemSortIndicator("vat_rate")}
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
-                {visibleItems.map((row) => {
-                  const discounts = [row.discount_1, row.discount_2, row.discount_3]
-                    .filter((d) => d > 0)
-                    .map((d) => `${d}%`)
-                    .join("+");
-
-                  const rowKey = row.id || `${row.doc_number}-${row.line_number}`;
-                  const isRowActive = activeRowKey === rowKey || selectedCell?.rowKey === rowKey;
-                  const isCodeSelected = selectedCell?.rowKey === rowKey && selectedCell?.col === "article_code";
-                  const isDescSelected = selectedCell?.rowKey === rowKey && selectedCell?.col === "description";
-
-                  return (
-                    <tr
-                      key={row.id}
-                      ref={isRowActive ? activeRowElementRef : null}
-                      onMouseDown={() => {
-                        isKeyboardNavRef.current = false;
-                        setActiveRowKey(rowKey);
-                      }}
-                      className={`group cursor-default ${
-                        isRowActive
-                          ? "bg-[#1e5b87] text-white font-medium"
-                          : "hover:bg-[var(--background)]/60"
-                      }`}
-                    >
-                      {/* DATA (copiabile) */}
-                      <td className={`px-3 py-2 font-sans font-medium whitespace-nowrap select-text ${
-                        isRowActive ? "text-white" : "text-[var(--foreground)]"
-                      }`}>
-                        {row.doc_date}
-                      </td>
-
-                      {/* DOC N. (SOLO QUESTO TASTO APRE LA FATTURA) */}
-                      <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenDetailFromItem(row);
-                          }}
-                          className={`font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer ${
-                            isRowActive ? "text-sky-200 hover:text-white" : "text-[var(--primary)]"
-                          }`}
-                          title="Apri fattura fornitore"
-                        >
-                          <FileText className="h-3 w-3" />
-                          <span>{row.doc_number}</span>
-                        </button>
-                      </td>
-
-                      {/* FORNITORE (copiabile) */}
-                      <td
-                        className={`px-3 py-2 font-sans font-medium truncate max-w-[200px] select-text ${
-                          isRowActive ? "text-white" : "text-[var(--foreground)]"
-                        }`}
-                        title={row.supplier_name}
-                      >
-                        {row.supplier_name}
-                      </td>
-
-                      {/* CODICE ART. (copiabile con selezione mouse o click + Ctrl+C o doppio click) */}
-                      <td
-                        onMouseDown={() => {
-                          isKeyboardNavRef.current = false;
-                          setActiveRowKey(rowKey);
-                          setSelectedCell({
-                            rowKey,
-                            col: "article_code",
-                            text: row.article_code || "",
-                          });
-                        }}
-                        onDoubleClick={() => copyText(row.article_code || "")}
-                        style={{ userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}
-                        title="Fai clic o seleziona per copiare con Ctrl+C"
-                        className={cn(
-                          "px-3 py-2 select-text cursor-text",
-                          isCodeSelected
-                            ? "ring-1 ring-sky-300 ring-inset bg-white/10 font-bold"
-                            : isRowActive
-                            ? "text-sky-100"
-                            : "text-[var(--muted-foreground)]"
-                        )}
-                      >
-                        {row.article_code || "—"}
-                      </td>
-
-                      {/* UM (copiabile) */}
-                      {showExtendedColumns && (
-                        <td className={`px-2 py-2 text-center uppercase select-text ${
-                          isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                        }`}>
-                          {row.unit || "NR"}
-                        </td>
-                      )}
-
-                      {/* QUANTITÀ (copiabile) */}
-                      {showExtendedColumns && (
-                        <td className={`px-3 py-2 text-right font-bold select-text ${
-                          isRowActive ? "text-white" : "text-[var(--foreground)]"
-                        }`}>
-                          {row.quantity > 0 ? row.quantity : "—"}
-                        </td>
-                      )}
-
-                      {/* DESCRIZIONE (copiabile con Ctrl+C, doppio clic per aggiungere a Order Manager) */}
-                      <td
-                        onMouseDown={() => {
-                          isKeyboardNavRef.current = false;
-                          setActiveRowKey(rowKey);
-                          setSelectedCell({
-                            rowKey,
-                            col: "description",
-                            text: row.description || "",
-                          });
-                        }}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          setAddToOrderTarget({
-                            supplier_name: row.supplier_name,
-                            article_code: row.article_code || "",
-                            description: row.description,
-                            quantity: row.quantity > 0 ? row.quantity : 1,
-                            unit_price: row.unit_price,
-                            discounted_price: row.discounted_price,
-                          });
-                        }}
-                        style={{ userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}
-                        title="Doppio clic per aggiungere a Order Manager &bull; Clic + Ctrl+C per copiare"
-                        className={cn(
-                          "px-3 py-2 font-sans select-text cursor-text",
-                          isDescSelected
-                            ? "ring-1 ring-sky-300 ring-inset bg-white/10 font-bold"
-                            : isRowActive
-                            ? "text-white font-medium"
-                            : "text-[var(--foreground)]"
-                        )}
-                      >
-                        {row.description}
-                      </td>
-
-                      {/* PREZZO LISTINO (copiabile) */}
-                      {showExtendedColumns && (
-                        <td className={`px-3 py-2 text-right select-text ${
-                          isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                        }`}>
-                          {row.unit_price > 0 ? formatEuro(row.unit_price, 4) : "—"}
-                        </td>
-                      )}
-
-                      {/* SCONTO (copiabile) */}
-                      {showExtendedColumns && (
-                        <td className={`px-2 py-2 text-center select-text ${
-                          isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                        }`}>
-                          {discounts || "—"}
-                        </td>
-                      )}
-
-                      {/* COSTO NETTO (EVIDENZIATO, copiabile) */}
-                      <td className={`px-3 py-2 text-right font-bold select-text ${
-                        isRowActive ? "text-sky-200" : "text-[var(--primary)]"
-                      }`}>
-                        {row.discounted_price > 0
-                          ? formatEuro(row.discounted_price, 4)
-                          : row.unit_price > 0
-                          ? formatEuro(row.unit_price, 4)
-                          : "—"}
-                      </td>
-
-                      {/* IMPORTO (copiabile) */}
-                      {showExtendedColumns && (
-                        <td className={`px-3 py-2 text-right select-text ${
-                          isRowActive ? "text-white font-bold" : "text-[var(--foreground)]"
-                        }`}>
-                          {row.total_price > 0 ? formatEuro(row.total_price, 2) : "—"}
-                        </td>
-                      )}
-
-                      {/* IVA (copiabile) */}
-                      <td className={`px-2 py-2 text-center select-text ${
-                        isRowActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                      }`}>
-                        {row.vat_rate}%
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )
+        <InvoiceItemsTable
+          visibleItems={visibleItems}
+          totalItemsCount={items.length}
+          sortedItemsCount={sortedItems.length}
+          showExtendedColumns={showExtendedColumns}
+          sortField={itemSortField}
+          sortAsc={itemSortAsc}
+          onToggleSort={handleToggleItemSort}
+          activeRowKey={activeRowKey}
+          selectedCell={selectedCell}
+          activeRowElementRef={activeRowElementRef}
+          tableContainerRef={tableContainerRef}
+          onSelectRow={(rowKey) => {
+            isKeyboardNavRef.current = false;
+            setActiveRowKey(rowKey);
+          }}
+          onSelectCell={(cell) => {
+            isKeyboardNavRef.current = false;
+            setActiveRowKey(cell.rowKey);
+            setSelectedCell(cell);
+          }}
+          onCopyText={copyText}
+          onOpenDetail={(row) => void handleOpenDetailFromItem(row)}
+          onAddToOrder={setAddToOrderTarget}
+          onKeyDown={handleTableKeyDown}
+          onScroll={handleScroll}
+        />
       ) : (
-        /* VISTA TESTATE FATTURE */
-        sortedInvoices.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center p-8 text-xs text-[var(--muted-foreground)] border border-[var(--border)] rounded-md bg-[var(--card)]">
-            Nessuna fattura trovata per i filtri selezionati.
-          </div>
-        ) : (
-          <div
-            ref={tableContainerRef}
-            tabIndex={0}
-            onKeyDown={handleTableKeyDown}
-            onScroll={handleScroll}
-            className="min-h-0 flex-1 overflow-auto border border-[var(--border)] rounded-md bg-[var(--card)] select-text outline-none"
-          >
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider select-none">
-                <tr>
-                  <th
-                    onClick={() => handleToggleInvSort("doc_date")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left w-32 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per data documento"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>DATA DOC</span>
-                      {renderInvSortIndicator("doc_date")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("doc_number")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left w-28 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per numero fattura"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>N° FATTURA</span>
-                      {renderInvSortIndicator("doc_number")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("supplier_name")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left w-64 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per fornitore"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>FORNITORE</span>
-                      {renderInvSortIndicator("supplier_name")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("year")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-center w-20 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per anno"
-                  >
-                    <div className="flex items-center justify-center gap-1">
-                      <span>ANNO</span>
-                      {renderInvSortIndicator("year")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("taxable_amount")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-right w-28 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per imponibile"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      <span>IMPONIBILE</span>
-                      {renderInvSortIndicator("taxable_amount")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("vat_amount")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-right w-24 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per importo IVA"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      <span>IVA</span>
-                      {renderInvSortIndicator("vat_amount")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("total_amount")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-right w-32 font-bold text-[var(--foreground)] group hover:bg-[var(--card)] transition-colors"
-                    title="Ordina per totale documento"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      <span>TOTALE DOC (€)</span>
-                      {renderInvSortIndicator("total_amount")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("payment_method")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left w-48 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per modalità di pagamento"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>MODALITÀ PAGAMENTO</span>
-                      {renderInvSortIndicator("payment_method")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("due_date")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-center w-28 group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per scadenza"
-                  >
-                    <div className="flex items-center justify-center gap-1">
-                      <span>SCADENZA</span>
-                      {renderInvSortIndicator("due_date")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleToggleInvSort("notes")}
-                    style={{ cursor: "pointer" }}
-                    className="px-3 py-2 text-left group hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
-                    title="Ordina per note / causale"
-                  >
-                    <div className="flex items-center gap-1">
-                      <span>NOTE / CAUSALE</span>
-                      {renderInvSortIndicator("notes")}
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border)]/40 font-mono text-[11.5px]">
-                {visibleInvoices.map((inv) => {
-                  const invKey = inv.id ?? `${inv.supplier_name}-${inv.doc_number}-${inv.doc_date}`;
-                  const isInvActive = activeRowKey === invKey;
-                  return (
-                    <tr
-                      key={invKey}
-                      ref={isInvActive ? activeRowElementRef : null}
-                      onMouseDown={() => {
-                        isKeyboardNavRef.current = false;
-                        setActiveRowKey(invKey);
-                      }}
-                      className={`group cursor-default ${
-                        isInvActive
-                          ? "bg-[#1e5b87] text-white font-medium"
-                          : "hover:bg-[var(--background)]/60"
-                      }`}
-                    >
-                      <td className={`px-3 py-2 font-sans font-medium whitespace-nowrap select-text ${
-                        isInvActive ? "text-white" : "text-[var(--foreground)]"
-                      }`}>
-                        {inv.doc_date}
-                      </td>
-                      <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenDetailFromInvoice(inv);
-                          }}
-                          className={`font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer ${
-                            isInvActive ? "text-sky-200 hover:text-white" : "text-[var(--primary)]"
-                          }`}
-                          title="Apri fattura fornitore"
-                        >
-                          <FileText className="h-3 w-3" />
-                          <span>{inv.doc_number}</span>
-                        </button>
-                      </td>
-                      <td
-                        className={`px-3 py-2 font-sans font-medium truncate max-w-[240px] select-text ${
-                          isInvActive ? "text-white" : "text-[var(--foreground)]"
-                        }`}
-                        title={inv.supplier_name}
-                      >
-                        {inv.supplier_name}
-                      </td>
-                      <td className={`px-3 py-2 text-center select-text ${
-                        isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                      }`}>
-                        {inv.year}
-                      </td>
-                      <td className={`px-3 py-2 text-right select-text ${
-                        isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                      }`}>
-                        {formatEuro(inv.taxable_amount)}
-                      </td>
-                      <td className={`px-3 py-2 text-right select-text ${
-                        isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                      }`}>
-                        {formatEuro(inv.vat_amount)}
-                      </td>
-                      <td className={`px-3 py-2 text-right font-bold select-text ${
-                        isInvActive ? "text-white font-bold" : "text-[var(--foreground)]"
-                      }`}>
-                        {formatEuro(inv.total_amount)}
-                      </td>
-                      <td className={`px-3 py-2 font-sans truncate max-w-[180px] select-text ${
-                        isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                      }`}>
-                        {inv.payment_method || "—"}
-                      </td>
-                      <td className={`px-3 py-2 text-center font-sans font-semibold select-text ${
-                        isInvActive ? "text-amber-200 font-bold" : "text-amber-400"
-                      }`}>
-                        {inv.due_date || "—"}
-                      </td>
-                      <td
-                        className={`px-3 py-2 font-sans truncate max-w-[200px] select-text ${
-                          isInvActive ? "text-sky-100" : "text-[var(--muted-foreground)]"
-                        }`}
-                        title={inv.notes}
-                      >
-                        {inv.notes || "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )
+        <InvoiceHeadersTable
+          visibleInvoices={visibleInvoices}
+          sortedInvoicesCount={sortedInvoices.length}
+          sortField={invSortField}
+          sortAsc={invSortAsc}
+          onToggleSort={handleToggleInvSort}
+          activeRowKey={activeRowKey}
+          activeRowElementRef={activeRowElementRef}
+          tableContainerRef={tableContainerRef}
+          onSelectRow={(rowKey) => {
+            isKeyboardNavRef.current = false;
+            setActiveRowKey(rowKey);
+          }}
+          onOpenDetail={(inv) => void handleOpenDetailFromInvoice(inv)}
+          onKeyDown={handleTableKeyDown}
+          onScroll={handleScroll}
+        />
       )}
 
-      {/* ─── 4. SUMMARY FOOTER (STESSO IDENTICO STILE DI DDT ARTICOLI) ─── */}
       <div className="shrink-0 flex items-center justify-between px-1 text-[11px] text-[var(--muted-foreground)]">
         <div>
           <span>Archivio locale: </span>
@@ -1592,7 +577,6 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
         </div>
       </div>
 
-      {/* ─── MODALE DETTAGLIO FATTURA ─── */}
       <InvoiceDetailModal
         isOpen={isDetailOpen}
         onClose={() => setIsDetailOpen(false)}
@@ -1601,7 +585,6 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
         isLoadingLines={isLoadingLines}
       />
 
-      {/* ─── MODALE AGGIUNGI A ORDER MANAGER ─── */}
       <AddToOrderManagerModal
         isOpen={Boolean(addToOrderTarget)}
         onClose={() => setAddToOrderTarget(null)}
@@ -1612,7 +595,6 @@ export const ElectronicInvoicesPage: React.FC<ElectronicInvoicesPageProps> = ({
         }}
       />
 
-      {/* ─── TOAST FEEDBACK COPIA (CTRL + C) ─── */}
       {copiedToast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-150 pointer-events-none">
           <Check className="w-4 h-4" />
