@@ -179,7 +179,6 @@ export async function pullDdtChanges(projectUrl: string, anonKey: string) {
         candidates.length === 1 &&
         other.sync_status === "synced" &&
         other.project_url === null &&
-        /-restored$/i.test(other.id) &&
         (() => {
           const mapped = mapHeaderForLocal(doc.header);
           return (
@@ -294,8 +293,31 @@ export async function pullDdtChanges(projectUrl: string, anonKey: string) {
     "SELECT change_json FROM ddt_pull_deferred WHERE project_url=$1", [project],
   );
   for (const { change_json } of deferred) await saveChanges([JSON.parse(change_json) as DdtChange]);
-  const [pending] = await db.select<{ count: number }[]>(
-    "SELECT COUNT(*) AS count FROM ddt_pull_deferred WHERE project_url=$1", [project],
+  const remainingRows = await db.select<{ id: string; change_json: string }[]>(
+    "SELECT id, change_json FROM ddt_pull_deferred WHERE project_url=$1", [project],
   );
-  return { ...counts, deferred: pending.count };
+  const deferredDetails: string[] = [];
+  for (const row of remainingRows) {
+    try {
+      const ch = JSON.parse(row.change_json) as DdtChange;
+      const numLabel = ch.document?.header
+        ? `DDT ${ch.document.header.numero}/${ch.document.header.anno}`
+        : `ID ${row.id.slice(0, 8)}`;
+      const localMatch = await db.select<{ sync_status: string; project_url: string | null }[]>(
+        "SELECT sync_status, project_url FROM ddt_documents WHERE id = $1 LIMIT 1",
+        [row.id],
+      ).catch(() => []);
+      const reason = localMatch[0]
+        ? (localMatch[0].sync_status !== "synced"
+          ? "modifica locale non inviata"
+          : localMatch[0].project_url && normalizeSupabaseProjectUrl(localMatch[0].project_url) !== project
+          ? "progetto diverso"
+          : "conflitto numero DDT")
+        : "conflitto numero DDT";
+      deferredDetails.push(`${numLabel} (${reason})`);
+    } catch {
+      deferredDetails.push(`ID ${row.id.slice(0, 8)}`);
+    }
+  }
+  return { ...counts, deferred: remainingRows.length, deferredDetails };
 }

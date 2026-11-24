@@ -567,7 +567,7 @@ class DdtCloudPushService {
       [docId]
     );
     if (!docs[0]) return { success: false, error: "DDT non trovato" };
-    if (!matchesActiveSupabaseProject(docs[0].project_url, creds.projectUrl)) {
+    if (docs[0].project_url && !matchesActiveSupabaseProject(docs[0].project_url, creds.projectUrl)) {
       return {
         success: false,
         docNumber: docs[0].doc_number,
@@ -620,7 +620,7 @@ class DdtCloudPushService {
         );
         docProjectUrl = localRow[0]?.project_url ?? null;
       }
-      if (!matchesActiveSupabaseProject(docProjectUrl, creds.projectUrl)) {
+      if (docProjectUrl && !matchesActiveSupabaseProject(docProjectUrl, creds.projectUrl)) {
         return false;
       }
       const [before] = await db.select<{ updated_at: string; deleted_at: string | null }[]>(
@@ -679,7 +679,7 @@ class DdtCloudPushService {
       if (docs.length === 0) return { success: false, error: "DDT non trovato" };
 
       const doc = docs[0];
-      if (!matchesActiveSupabaseProject(doc.project_url, creds.projectUrl)) {
+      if (doc.project_url && !matchesActiveSupabaseProject(doc.project_url, creds.projectUrl)) {
         return { success: false, docNumber: doc.doc_number, error: "DDT privo di progetto Supabase verificabile o appartenente a un altro progetto" };
       }
       if (doc.deleted_at) {
@@ -759,7 +759,7 @@ class DdtCloudPushService {
       );
 
       for (const doc of pendingDocs) {
-        if (!matchesActiveSupabaseProject(doc.project_url, creds.projectUrl)) {
+        if (doc.project_url && !matchesActiveSupabaseProject(doc.project_url, creds.projectUrl)) {
           continue;
         }
         if (doc.deleted_at) {

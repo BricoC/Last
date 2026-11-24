@@ -158,7 +158,10 @@ class DdtIncrementalSyncService {
         backupPath: null,
         unresolvedGaps,
         ...(push.errors || pull.deferred ? {
-          error: [push.errors && `DDT da inviare: ${push.errors}`, pull.deferred && `DDT cloud in conflitto: ${pull.deferred}`]
+          error: [
+            push.errors && `DDT da inviare: ${push.errors}`,
+            pull.deferred && `DDT cloud in conflitto: ${pull.deferred}${pull.deferredDetails?.length ? ` (${pull.deferredDetails.join(", ")})` : ""}`,
+          ]
             .filter(Boolean).join(" · "),
         } : {}),
       };
