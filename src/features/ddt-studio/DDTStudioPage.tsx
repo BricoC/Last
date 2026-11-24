@@ -423,12 +423,20 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
         if (!changedOnDisk) return;
 
+        const padded = buildPaddedDdtItems(latest.id, latest.items || []);
+        const latestSignature = signature(latest, padded, globalDiscount, globalMarkup);
+        if (!isMerged && latestSignature === savedSignature.current) {
+          // Rimbalzo del proprio salvataggio dal Cloud (stesso contenuto, cambia solo formato updated_at)
+          ddtUpdatedAtRef.current = latest.updated_at;
+          return;
+        }
+
         if (!isDirtyRef.current || isMerged) {
-          const padded = buildPaddedDdtItems(latest.id, latest.items || []);
           setDdt(latest);
           setItems(padded);
           setRemoteUpdateNotice(null);
-          savedSignature.current = signature(latest, padded, globalDiscount, globalMarkup);
+          ddtUpdatedAtRef.current = latest.updated_at;
+          savedSignature.current = latestSignature;
           showToast(
             isMerged
               ? "Modifiche unite automaticamente con l'altra postazione"
@@ -632,6 +640,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   // Salva Bozza
   const handleSaveDraft = async (): Promise<boolean> => {
+    if (isSavingRef.current) return false;
     setIsSaving(true);
     try {
       const saved = await ddtRepository.saveDraft(ddt, items);
@@ -685,6 +694,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
 
   // Salva e Conferma DDT (Emissione con numero progressivo)
   const handleEmitDdt = async (): Promise<boolean> => {
+    if (isSavingRef.current) return false;
     if (!ddt.client_name?.trim()) {
       showToast("Attenzione: Inserisci il nome del cliente prima di salvare il DDT!");
       return false;
@@ -702,6 +712,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     try {
       const saved = await ddtRepository.emitDdt(targetDdt, items);
       const syncedItems = buildPaddedDdtItems(saved.id, saved.items || []);
+      ddtUpdatedAtRef.current = saved.updated_at;
       setDdt(saved);
       setItems(syncedItems);
       setRemoteUpdateNotice(null);
@@ -754,6 +765,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       // 1. Salva con numero progressivo
       const saved = await ddtRepository.emitDdt(targetDdt, items);
       const syncedItems = buildPaddedDdtItems(saved.id, saved.items || []);
+      ddtUpdatedAtRef.current = saved.updated_at;
       setDdt(saved);
       setItems(syncedItems);
       setRemoteUpdateNotice(null);
@@ -866,6 +878,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       showToast("DDT spostato nel Cestino");
     } catch (e) {
       console.error("Errore eliminazione:", e);
+      showToast(`Errore eliminazione DDT: ${getErrorMessage(e)}`);
     }
   };
 
@@ -1046,14 +1059,14 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
       insertedIdx = targetIdx;
 
       const price = money(article.unit_price || 0);
-      const purchasePrice = money(0);
+      const purchasePrice = money(article.purchase_price ?? 0);
       const q = String(article.quantity || "1").trim() || "1";
 
       let effectivePrice = price;
       const markupClean = globalMarkup.trim().replace("%", "").replace(",", ".");
       const markupNum = parseFloat(markupClean);
       if (!isNaN(markupNum) && markupNum !== 0) {
-        effectivePrice = price.times(1 + markupNum / 100);
+        effectivePrice = price.plus(price.times(markupNum).dividedBy(100));
       }
       const disc = globalDiscount.trim();
       const rawVat = article.vat_rate;

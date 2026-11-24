@@ -70,6 +70,10 @@ export async function requestWindowClose(id: string): Promise<void> {
 export async function runAllWindowCloseGuards(): Promise<boolean> {
   for (const [id, guard] of Array.from(windowCloseGuards.entries())) {
     try {
+      const dirtyCheck = dirtyChecks.get(id);
+      if (dirtyCheck && !dirtyCheck()) {
+        continue;
+      }
       useWindowStore.getState().focusWindow(id);
       const allowed = await guard();
       if (!allowed) {

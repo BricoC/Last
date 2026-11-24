@@ -115,7 +115,20 @@ export class OrNumbersRepository {
     });
   }
 
+  private static inFlightOrderSyncs = new Map<string, Promise<void>>();
+
   public static async syncOrdersFromSupabase(year: number, month?: number): Promise<void> {
+    const key = `${year}:${month ?? "all"}`;
+    const existing = this.inFlightOrderSyncs.get(key);
+    if (existing) return existing;
+    const task = this.executeSyncOrdersFromSupabase(year, month).finally(() => {
+      this.inFlightOrderSyncs.delete(key);
+    });
+    this.inFlightOrderSyncs.set(key, task);
+    return task;
+  }
+
+  private static async executeSyncOrdersFromSupabase(year: number, month?: number): Promise<void> {
     try {
       const configRes = await invoke<{ config: { projectUrl: string; anonKey: string } | null }>("load_supabase_config").catch(() => null);
       if (!configRes?.config?.projectUrl || !configRes?.config?.anonKey) return;
@@ -229,7 +242,7 @@ export class OrNumbersRepository {
       FROM ddt_documents
       WHERE deleted_at IS NULL
         AND doc_number IS NOT NULL
-        AND status <> 'bozza'
+        AND status NOT IN ('bozza', 'annullato')
         AND ${clientCondition}
         AND doc_date >= $1 AND doc_date <= $2
       ORDER BY 

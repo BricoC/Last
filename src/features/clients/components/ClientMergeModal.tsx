@@ -73,6 +73,7 @@ export const ClientMergeModal: React.FC<ClientMergeModalProps> = ({
     if (!window.confirm(`Vuoi unire tutti i ${groups.length} gruppi di duplicati rilevati?`)) return;
     setMerging(true);
     setStatusMessage("Unione di tutti i duplicati in corso...");
+    let mergedAny = false;
     try {
       let allSynced = true;
       for (const group of groups) {
@@ -80,11 +81,11 @@ export const ClientMergeModal: React.FC<ClientMergeModalProps> = ({
           group.canonical.id,
           group.duplicates.map((d) => d.id)
         );
+        mergedAny = true;
+        setGroups((prev) => prev.filter((g) => g.canonical.id !== group.canonical.id));
         const synced = await clientSyncService.syncMergedClientToSupabase(merged);
         if (!synced) allSynced = false;
       }
-      setGroups([]);
-      onMerged();
       setStatusMessage(
         allSynced
           ? "Tutti i duplicati sono stati uniti e sincronizzati sul Cloud!"
@@ -96,6 +97,7 @@ export const ClientMergeModal: React.FC<ClientMergeModalProps> = ({
     } catch (err: unknown) {
       setStatusMessage(err instanceof Error ? err.message : "Errore durante l'unione.");
     } finally {
+      if (mergedAny) onMerged();
       setMerging(false);
     }
   };

@@ -421,6 +421,7 @@ export class OrderSupabaseService {
       highlight: ["highlights", JSON.stringify(payload ?? {})],
       mark_sent: ["ordered_date", payload],
     } as const;
+    const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
     for (const targetId of targets) {
       const hasRemoteOrInsert = this.cleanId(targetId) !== null || this.hasQueuedOrder(targetId);
       const storedId = targetId.startsWith("ord_") ? targetId : `ord_${targetId}`;
@@ -434,7 +435,16 @@ export class OrderSupabaseService {
           [value, timestamp, targetId, storedId],
         );
       }
-      if (hasRemoteOrInsert) this.enqueueOffline({ id: crypto.randomUUID(), targetId, action, payload, timestamp });
+      if (hasRemoteOrInsert) {
+        this.enqueueOffline({
+          id: crypto.randomUUID(),
+          targetId,
+          action,
+          payload,
+          timestamp,
+          ...(activeProjectUrl ? { projectUrl: activeProjectUrl } : {}),
+        });
+      }
     }
     if (targets.size) await this.processOfflineQueue();
     return true;
@@ -553,8 +563,14 @@ export class OrderSupabaseService {
       }
     }
     if (toSave.sync_status === "pending") {
+      const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
       this.enqueueOffline({
-        id: crypto.randomUUID(), targetId, action: "upsert_supplier", payload, timestamp: nowIso,
+        id: crypto.randomUUID(),
+        targetId,
+        action: "upsert_supplier",
+        payload,
+        timestamp: nowIso,
+        ...(activeProjectUrl ? { projectUrl: activeProjectUrl } : {}),
       });
     }
     await this.cacheSingleSupplierToSqlite(toSave, supplier.id);
@@ -582,7 +598,14 @@ export class OrderSupabaseService {
       ?? this.supplierRemoteId(id);
     const targetId = remoteId ?? id;
     if (remoteId || this.hasQueuedSupplier(targetId)) {
-      this.enqueueOffline({ id: crypto.randomUUID(), targetId, action: "delete_supplier", timestamp: new Date().toISOString() });
+      const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
+      this.enqueueOffline({
+        id: crypto.randomUUID(),
+        targetId,
+        action: "delete_supplier",
+        timestamp: new Date().toISOString(),
+        ...(activeProjectUrl ? { projectUrl: activeProjectUrl } : {}),
+      });
     }
     await this.deleteSupplierFromSqlite(targetId);
     if (id !== targetId) await this.deleteSupplierFromSqlite(id);
@@ -651,12 +674,21 @@ export class OrderSupabaseService {
     this.saveOfflineQueue(queue);
   }
 
+  private lastQueueFailure: string | null = null;
+
+  public getLastQueueFailure(): string | null {
+    return this.lastQueueFailure;
+  }
+
   async processOfflineQueue(): Promise<number> {
     if (!navigator.onLine) return 0;
     await getDatabase();
     if (this.queueFlight) return 0;
     const initialQueue = this.getOfflineQueue();
-    if (initialQueue.length === 0) return 0;
+    if (initialQueue.length === 0) {
+      this.lastQueueFailure = null;
+      return 0;
+    }
     this.queueFlight = this.drainOfflineQueue(initialQueue).finally(() => { this.queueFlight = null; });
     return this.queueFlight;
   }
@@ -665,9 +697,13 @@ export class OrderSupabaseService {
     let processedCount = 0;
     let legacyHeld = 0;
     const failedTargets = new Set<string>();
+    this.lastQueueFailure = null;
     try {
       const supabase = await this.getClient();
-      if (!supabase) return 0;
+      if (!supabase) {
+        this.lastQueueFailure = "Sessione Supabase non disponibile per svuotare la coda ordini";
+        return 0;
+      }
       const activeProjectUrl =
         getLastKnownSupabaseProjectUrl() ??
         normalizeSupabaseProjectUrl((await this.getCredentials())?.projectUrl);
@@ -788,6 +824,9 @@ export class OrderSupabaseService {
       }
     } finally {
       this.processingItemId = undefined;
+    }
+    if (failedTargets.size > 0) {
+      this.lastQueueFailure = `${failedTargets.size} operazioni ordini non confermate su Supabase`;
     }
     if (legacyHeld > 0) {
       console.warn(

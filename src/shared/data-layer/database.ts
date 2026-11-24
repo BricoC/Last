@@ -588,6 +588,19 @@ const MIGRATIONS: Migration[] = [
       )`);
     },
   },
+  {
+    version: 44,
+    name: "ensure_app_users_can_manage_backups",
+    up: async (db) => {
+      await db.addColumnIfMissing(
+        "app_users",
+        "can_manage_backups",
+        "INTEGER NOT NULL DEFAULT 0",
+        "UPDATE app_users SET can_manage_backups = 1 WHERE is_admin = 1",
+      );
+      await db.execute("UPDATE app_users SET can_manage_backups = 1 WHERE is_admin = 1 AND can_manage_backups = 0");
+    },
+  },
 ];
 
 const BUSY_RETRY_DELAYS_MS = [150, 300, 600, 1200, 2000];
@@ -655,7 +668,13 @@ export async function getDatabase(): Promise<Database> {
       await runMigrations();
       const db = wrapDatabaseWithBusyRetry(Database.get(DB_FILENAME));
 
-      if (typeof window !== "undefined") await consumeRestoredOrderQueue(db);
+      if (typeof window !== "undefined") {
+        try {
+          await consumeRestoredOrderQueue(db);
+        } catch (queueErr) {
+          console.warn("[Database] Ripristino coda ordini non completato all'avvio (non bloccante):", queueErr);
+        }
+      }
       dbInstance = db;
       return db;
     } catch (err) {

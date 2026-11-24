@@ -632,9 +632,9 @@ export class DashboardService {
       const costEntry = ytdCostMap.get(yr);
       const cost = costEntry?.cost || 0;
       const marginTurnover = costEntry?.net || 0;
-      const margin = marginTurnover - cost;
+      const margin = marginTurnover > 0 && cost > 0 ? marginTurnover - cost : 0;
       const marginPercent = marginTurnover > 0 && cost > 0 ? (margin / marginTurnover) * 100 : null;
-      const markupPercent = cost > 0 ? (margin / cost) * 100 : null;
+      const markupPercent = marginTurnover > 0 && cost > 0 ? (margin / cost) * 100 : null;
       ytdDataMap.set(yr, { turnover, ddtCount, cost, margin, marginPercent, markupPercent });
     });
 
@@ -645,9 +645,9 @@ export class DashboardService {
       const costEntry = mtdCostMap.get(yr);
       const cost = costEntry?.cost || 0;
       const marginTurnover = costEntry?.net || 0;
-      const margin = marginTurnover - cost;
+      const margin = marginTurnover > 0 && cost > 0 ? marginTurnover - cost : 0;
       const marginPercent = marginTurnover > 0 && cost > 0 ? (margin / marginTurnover) * 100 : null;
-      const markupPercent = cost > 0 ? (margin / cost) * 100 : null;
+      const markupPercent = marginTurnover > 0 && cost > 0 ? (margin / cost) * 100 : null;
       mtdDataMap.set(yr, { turnover, ddtCount, cost, margin, marginPercent, markupPercent });
     });
 

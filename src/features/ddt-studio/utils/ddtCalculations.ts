@@ -245,7 +245,9 @@ export function calculateDdtTotals(items: Partial<DdtItem>[]): DdtTotals {
     if (isPositivePrice(item.purchase_price)) {
       const pCost = safeMoney(item.purchase_price);
       const q = parseDdtQuantity(item.quantity) ?? (item.quantity?.trim() ? 0 : 1);
-      totalCost = totalCost.plus(pCost.times(q));
+      if (q > 0) {
+        totalCost = totalCost.plus(pCost.times(q));
+      }
     }
   }
 

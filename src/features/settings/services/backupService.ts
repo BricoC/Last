@@ -319,6 +319,10 @@ export function saveBackupConfig(config: BackupConfig): void {
   }
 }
 
+function isSharedNetworkBackupPath(folderPath?: string | null): boolean {
+  return Boolean(folderPath && folderPath.trim().startsWith("\\\\"));
+}
+
 /**
  * Invia la configurazione di backup al Cloud Supabase (tabella backup_settings)
  */
@@ -329,7 +333,8 @@ export async function pushBackupSettingsToSupabase(config: BackupConfig): Promis
 
     const row = {
       id: "backup_config",
-      folder_path: config.folderPath,
+      // Non propagare percorsi locali specifici del singolo PC (es. C:\Users\...\Desktop) agli altri PC
+      folder_path: isSharedNetworkBackupPath(config.folderPath) ? config.folderPath.trim() : "",
       auto_daily_enabled: config.autoDailyEnabled,
       auto_backup_type: config.autoBackupType,
       auto_categories: config.autoCategories,
@@ -386,8 +391,13 @@ export async function pullBackupSettingsFromSupabase(requireCloud = false): Prom
     if (requireCloud && !Array.isArray(data)) throw new Error("Risposta Supabase non valida");
     if (Array.isArray(data) && data.length > 0 && data[0]) {
       const r = data[0];
+      const localCfg = loadBackupConfig();
+      const remoteFolder = typeof r.folder_path === "string" ? r.folder_path.trim() : "";
+      const resolvedFolder = isSharedNetworkBackupPath(remoteFolder)
+        ? remoteFolder
+        : (localCfg.folderPath || DEFAULT_BACKUP_FOLDER);
       const parsed: BackupConfig = {
-        folderPath: r.folder_path || DEFAULT_BACKUP_FOLDER,
+        folderPath: resolvedFolder,
         autoDailyEnabled: r.auto_daily_enabled ?? true,
         autoBackupType: r.auto_backup_type || "full",
         autoCategories: Array.isArray(r.auto_categories) ? r.auto_categories : BACKUP_CATEGORIES.map((c) => c.id),
@@ -630,22 +640,48 @@ export async function executeModularBackup(
 
     const exportedData: Record<string, any[]> = {};
     const tableCounts: Record<string, number> = {};
+    const pendingScopes = getPendingScopesForCategories(selectedCategoryIds);
 
-    for (const table of tablesToExport) {
-      const rows = await db.select<any[]>(`SELECT * FROM ${table}`);
-      exportedData[table] = rows || [];
-      tableCounts[table] = rows?.length || 0;
+    // Snapshot coerente in un'unica transazione di lettura SQLite lato Rust (evita righe orfane FK)
+    let atomicExport: Record<string, any[]> | undefined;
+    try {
+      atomicExport = await invoke<Record<string, any[]>>("export_modular_backup_tables", {
+        tables: Array.from(tablesToExport),
+        pendingScopes,
+      });
+    } catch (invokeErr) {
+      // Fallback solo se il comando non è disponibile in ambiente test/non-Tauri
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        throw invokeErr;
+      }
     }
 
-    const pendingScopes = getPendingScopesForCategories(selectedCategoryIds);
-    if (pendingScopes.length > 0) {
-      const placeholders = pendingScopes.map((_, i) => `$${i + 1}`).join(", ");
-      const opRows = await db.select<any[]>(
-        `SELECT * FROM pending_cloud_operations WHERE scope IN (${placeholders})`,
-        pendingScopes
-      );
-      exportedData.pending_cloud_operations = opRows || [];
-      tableCounts.pending_cloud_operations = opRows?.length || 0;
+    if (atomicExport && typeof atomicExport === "object") {
+      for (const table of tablesToExport) {
+        const rows = atomicExport[table] || [];
+        exportedData[table] = rows;
+        tableCounts[table] = rows.length;
+      }
+      if (pendingScopes.length > 0) {
+        const opRows = atomicExport.pending_cloud_operations || [];
+        exportedData.pending_cloud_operations = opRows;
+        tableCounts.pending_cloud_operations = opRows.length;
+      }
+    } else {
+      for (const table of tablesToExport) {
+        const rows = await db.select<any[]>(`SELECT * FROM ${table}`);
+        exportedData[table] = rows || [];
+        tableCounts[table] = rows?.length || 0;
+      }
+      if (pendingScopes.length > 0) {
+        const placeholders = pendingScopes.map((_, i) => `$${i + 1}`).join(", ");
+        const opRows = await db.select<any[]>(
+          `SELECT * FROM pending_cloud_operations WHERE scope IN (${placeholders})`,
+          pendingScopes
+        );
+        exportedData.pending_cloud_operations = opRows || [];
+        tableCounts.pending_cloud_operations = opRows?.length || 0;
+      }
     }
 
     const isTotal = selectedCategoryIds.length === BACKUP_CATEGORIES.length;
@@ -845,11 +881,32 @@ export async function restoreModularBackup(
               .sort((a, b) => a.pk - b.pk).map((column) => column.name);
 
       // Older backups can omit columns. Group equal row shapes without replacing defaults with NULL.
+      const computeLegacyInvoiceIssuerKey = (r: Record<string, unknown>): string => {
+        const norm = (v: unknown) => String(v ?? "").replace(/\s+/g, "").toUpperCase();
+        const vat = norm(r.vat_number);
+        if (vat) {
+          const stripped = vat.length === 13 && vat.startsWith("IT") && /^\d{11}$/.test(vat.slice(2))
+            ? vat.slice(2)
+            : vat;
+          return `vat:${stripped}`;
+        }
+        const cf = norm(r.fiscal_code);
+        if (cf) return `cf:${cf}`;
+        return `name:${String(r.supplier_name ?? "").trim().toUpperCase()}`;
+      };
+
       const groups = new Map<string, { keys: string[]; rows: Record<string, unknown>[] }>();
-      for (const row of rows) {
-        if (!row || typeof row !== "object" || Array.isArray(row)) {
+      for (const rawRow of rows) {
+        if (!rawRow || typeof rawRow !== "object" || Array.isArray(rawRow)) {
           throw new Error("Riga backup non valida in " + table);
         }
+        // Compatibilità backup modulari pre-V39: backfill automatico di supplier_invoices.issuer_key (NOT NULL)
+        const row =
+          table === "supplier_invoices" &&
+          columns.includes("issuer_key") &&
+          (!Object.prototype.hasOwnProperty.call(rawRow, "issuer_key") || !String((rawRow as Record<string, unknown>).issuer_key ?? "").trim())
+            ? { ...(rawRow as Record<string, unknown>), issuer_key: computeLegacyInvoiceIssuerKey(rawRow as Record<string, unknown>) }
+            : (rawRow as Record<string, unknown>);
         const keys = columns.filter((column) => Object.prototype.hasOwnProperty.call(row, column));
         if (keys.length === 0 || primaryKey.some((key) => !keys.includes(key) || row[key] == null)) {
           throw new Error("Colonne o chiave primaria mancanti nel backup di " + table);
@@ -866,9 +923,11 @@ export async function restoreModularBackup(
         const insert = "INSERT INTO " + quote(table) + " (" + keys.map(quote).join(", ") + ") VALUES ";
         const updates = keys.filter((key) => !primaryKey.includes(key))
           .map((key) => quote(key) + " = excluded." + quote(key));
+        // In modalità merge gestiamo sia conflitti su PK (UPDATE) sia eventuali vincoli UNIQUE non-PK (DO NOTHING)
         const conflict = mode === "merge" && primaryKey.length
           ? " ON CONFLICT (" + primaryKey.map(quote).join(", ") + ") DO " +
-            (updates.length ? "UPDATE SET " + updates.join(", ") : "NOTHING")
+            (updates.length ? "UPDATE SET " + updates.join(", ") : "NOTHING") +
+            " ON CONFLICT DO NOTHING"
           : "";
         for (let index = 0; index < group.rows.length; index += 50) {
           const chunk = group.rows.slice(index, index + 50);
@@ -877,23 +936,28 @@ export async function restoreModularBackup(
           writes.push({ sql: insert + values.join(", ") + conflict, params });
         }
       }
+      if (table === "app_users" && columns.includes("can_manage_backups")) {
+        writes.push({
+          sql: "UPDATE app_users SET can_manage_backups = 1 WHERE is_admin = 1",
+          params: [],
+        });
+      }
       restoredCounts[table] = rows.length;
     }
 
     const referenceTables = Object.keys(restoredCounts).filter((table) =>
       mode === "replace" || restoredCounts[table] > 0,
     );
-    if (mode === "replace") {
-      if (categoriesToRestore.includes("ddt")) {
-        writes.push(
-          { sql: "DELETE FROM ddt_pull_state", params: [] },
-          { sql: "DELETE FROM ddt_pull_seen", params: [] },
-          { sql: "DELETE FROM ddt_pull_deferred", params: [] },
-        );
-      }
-      if (categoriesToRestore.includes("price_lists")) {
-        writes.push({ sql: "DELETE FROM price_list_pull_state", params: [] });
-      }
+    // Azzera i cursori incrementali sia in replace sia in merge quando si ripristinano DDT o Listini
+    if (categoriesToRestore.includes("ddt")) {
+      writes.push(
+        { sql: "DELETE FROM ddt_pull_state", params: [] },
+        { sql: "DELETE FROM ddt_pull_seen", params: [] },
+        { sql: "DELETE FROM ddt_pull_deferred", params: [] },
+      );
+    }
+    if (categoriesToRestore.includes("price_lists")) {
+      writes.push({ sql: "DELETE FROM price_list_pull_state", params: [] });
     }
     const importQueue = categoriesToRestore.includes("orders") && pkg.orderQueue !== undefined;
     if (importQueue) writes.push({
@@ -921,9 +985,9 @@ export async function checkAndExecuteDailyBackup(currentUserName?: string): Prom
   filePath?: string;
   error?: string;
 }> {
-  // Verifica permesso backup per l'utente corrente (evita backup da postazioni non autorizzate)
+  // Verifica permesso backup per l'utente corrente (blocca se utente autenticato senza permesso)
   const activeUser = useUserStore.getState().currentUser;
-  if (activeUser && activeUser.can_manage_backups === false) {
+  if (activeUser ? !activeUser.can_manage_backups : !currentUserName) {
     return { ran: false };
   }
 

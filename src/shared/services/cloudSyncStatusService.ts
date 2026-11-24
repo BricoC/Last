@@ -192,9 +192,9 @@ class CloudSyncStatusService {
          OR EXISTS(SELECT 1 FROM listini_clienti WHERE sync_revision IS NOT NULL)) AS priceLists,
         EXISTS(SELECT 1 FROM company_settings WHERE id = 'company_profile' AND deleted_at IS NULL AND sync_status = 'pending') AS companySettings,
         EXISTS(SELECT 1 FROM email_settings WHERE id = 'email_config' AND deleted_at IS NULL AND sync_status = 'pending') AS emailSettings,
-        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM ddt_documents WHERE sync_status = 'pending' AND status <> 'bozza' AND project_url = $1)) AS ddt,
-        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)) AS quotes,
-        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM clients WHERE sync_status = 'pending' AND deleted_at IS NULL AND project_url = $1)) AS clients,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM ddt_documents WHERE sync_status = 'pending' AND status <> 'bozza' AND (project_url = $1 OR project_url IS NULL))) AS ddt,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM quotes WHERE sync_status = 'pending' AND project_url = $1)) AS quotes,
+        ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM clients WHERE sync_status = 'pending' AND project_url = $1)) AS clients,
         ($1 IS NOT NULL AND EXISTS(SELECT 1 FROM offers WHERE sync_status = 'pending' AND project_url = $1)) AS offers,
         ($1 IS NOT NULL AND (EXISTS(SELECT 1 FROM notes WHERE sync_status = 'pending' AND project_url = $1)
          OR EXISTS(SELECT 1 FROM note_deletions WHERE project_url = $1))) AS notes,
@@ -356,6 +356,7 @@ class CloudSyncStatusService {
       orNumbersModule,
       companySettingsModule,
       emailSettingsModule,
+      pendingOpsModule,
     ] = await Promise.all([
       import("@/features/price-lists/services/priceListSyncService"),
       import("@/features/offers/services/offersSyncService"),
@@ -368,6 +369,7 @@ class CloudSyncStatusService {
       import("@/features/or-numbers/services/orNumbersRepository"),
       import("@/features/settings/companySettingsRepository"),
       import("@/features/settings/emailSettingsRepository"),
+      import("@/shared/data-layer/pendingCloudOperations"),
     ]);
     const { priceListSyncService } = priceListModule;
     const { offersSyncService } = offersModule;
@@ -380,6 +382,7 @@ class CloudSyncStatusService {
     const { OrNumbersRepository } = orNumbersModule;
     const { retryPendingCompanySettings } = companySettingsModule;
     const { retryPendingEmailSettings } = emailSettingsModule;
+    const { getPendingOperationFailure } = pendingOpsModule;
 
     const [
       priceWrites,
@@ -395,7 +398,7 @@ class CloudSyncStatusService {
     ] = await Promise.allSettled([
       priceListSyncService.retryPendingChanges(),
       offersSyncService.retryPendingChanges(),
-      clientSyncService.syncPendingClientsToSupabase(),
+      clientSyncService.syncAllFromSupabase(),
       QuoteSyncService.retryPendingChanges(),
       notesSyncService.sync(),
       orderSupabaseService.processOfflineQueue(),
@@ -404,10 +407,14 @@ class CloudSyncStatusService {
       retryPendingCompanySettings().then((ok) => { if (!ok) throw new Error("Invio dati aziendali non confermato"); }),
       retryPendingEmailSettings().then((ok) => { if (!ok) throw new Error("Invio impostazioni email non confermato"); }),
     ]);
-    const [ddt, general, clients] = await Promise.allSettled([
+    const [ddt, general, clients, quotesPull, offersPull, ordersPull, invoicesPull] = await Promise.allSettled([
       ddtIncrementalSyncService.syncNewDdtsFromSupabase({ includePreviousYear: true, checkModifiedRecent: true }),
       priceListSyncService.syncIncrementalGeneralFromSupabase(),
       priceListSyncService.syncIncrementalClientiFromSupabase(),
+      QuoteSyncService.pullQuotes(),
+      offerWrites.status === "fulfilled" ? offersSyncService.sync() : Promise.resolve({ success: true, pushed: 0, pulled: 0 }),
+      orderSupabaseService.fetchOrders("attivi", true),
+      electronicInvoicesService.syncFromSupabase(),
     ]);
     const ddtResult = ddt.status === "fulfilled" ? ddt.value : {
       newHeadersCount: 0, newLinesCount: 0, backupPath: null, error: String(ddt.reason),
@@ -416,14 +423,55 @@ class CloudSyncStatusService {
     const cliCount = clients.status === "fulfilled" ? clients.value.updatedCount : 0;
 
     const failures = [
-      ["Invio listini", priceWrites.status === "rejected" ? String(priceWrites.reason) : undefined],
-      ["Offerte", offerWrites.status === "rejected" ? String(offerWrites.reason) : undefined],
-      ["Clienti", clientWrites.status === "rejected" ? String(clientWrites.reason) : undefined],
-      ["Preventivi", quoteWrites.status === "rejected" ? String(quoteWrites.reason) : undefined],
+      [
+        "Invio listini",
+        priceWrites.status === "rejected"
+          ? String(priceWrites.reason)
+          : (getPendingOperationFailure("listino_generale") || getPendingOperationFailure("listini_clienti") || undefined),
+      ],
+      [
+        "Offerte",
+        offerWrites.status === "rejected"
+          ? String(offerWrites.reason)
+          : (offersPull.status === "rejected"
+              ? String(offersPull.reason)
+              : (offersPull.value && !offersPull.value.success
+                  ? (("error" in offersPull.value && offersPull.value.error) || "Sincronizzazione offerte non confermata")
+                  : (getPendingOperationFailure("offers") || undefined))),
+      ],
+      [
+        "Clienti",
+        clientWrites.status === "rejected" ? String(clientWrites.reason) : undefined,
+      ],
+      [
+        "Preventivi",
+        quoteWrites.status === "rejected"
+          ? String(quoteWrites.reason)
+          : (quotesPull.status === "rejected"
+              ? String(quotesPull.reason)
+              : (QuoteSyncService.getLastRetryError() || getPendingOperationFailure("quotes") || undefined)),
+      ],
       ["Note", noteWrites.status === "rejected" ? String(noteWrites.reason) : undefined],
-      ["Ordini", orderWrites.status === "rejected" ? String(orderWrites.reason) : undefined],
-      ["Fatture", invoiceWrites.status === "rejected" ? String(invoiceWrites.reason) : undefined],
-      ["Log OR", orLogWrites.status === "rejected" ? String(orLogWrites.reason) : undefined],
+      [
+        "Ordini",
+        orderWrites.status === "rejected"
+          ? String(orderWrites.reason)
+          : (ordersPull.status === "rejected"
+              ? String(ordersPull.reason)
+              : (orderSupabaseService.getLastQueueFailure() || undefined)),
+      ],
+      [
+        "Fatture",
+        invoiceWrites.status === "rejected"
+          ? String(invoiceWrites.reason)
+          : (invoicesPull.status === "rejected" ? String(invoicesPull.reason) : undefined),
+      ],
+      [
+        "Log OR",
+        orLogWrites.status === "rejected"
+          ? String(orLogWrites.reason)
+          : (getPendingOperationFailure("or_logs") || undefined),
+      ],
       ["Dati aziendali", companySettingsWrites.status === "rejected" ? String(companySettingsWrites.reason) : undefined],
       ["Impostazioni email", emailSettingsWrites.status === "rejected" ? String(emailSettingsWrites.reason) : undefined],
       ["DDT", ddtResult.error],

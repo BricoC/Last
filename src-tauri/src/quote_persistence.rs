@@ -128,7 +128,8 @@ async fn persist_header(
           customer_notes = excluded.customer_notes, total_taxable_subunits = excluded.total_taxable_subunits,
           total_vat_subunits = excluded.total_vat_subunits, total_document_subunits = excluded.total_document_subunits,
           total_cost_subunits = excluded.total_cost_subunits, total_profit_subunits = excluded.total_profit_subunits,
-          updated_at = excluded.updated_at, updated_by = excluded.updated_by, sync_status = 'pending'
+          updated_at = excluded.updated_at, updated_by = excluded.updated_by, sync_status = 'pending',
+          project_url = COALESCE(quotes.project_url, excluded.project_url)
           WHERE quotes.deleted_at IS NULL",
     );
     let result = query

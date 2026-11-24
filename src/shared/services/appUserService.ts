@@ -307,14 +307,20 @@ export class AppUserService {
         }
       }
 
-      // Aggiunta colonna can_manage_backups: alla prima migrazione abilita automaticamente gli Admin esistenti
+      // Aggiunta colonna can_manage_backups e garanzia permanente per gli Admin
       try {
         await db.execute(
           "ALTER TABLE app_users ADD COLUMN can_manage_backups INTEGER NOT NULL DEFAULT 0"
         );
-        await db.execute("UPDATE app_users SET can_manage_backups = 1 WHERE is_admin = 1");
       } catch {
         // Colonna già presente
+      }
+      try {
+        await db.execute(
+          "UPDATE app_users SET can_manage_backups = 1 WHERE is_admin = 1 AND can_manage_backups = 0"
+        );
+      } catch {
+        // Nessun aggiornamento necessario
       }
 
       // Rinomina automatica di 'Amministratore' in 'Admin' per l'account principale id='admin'

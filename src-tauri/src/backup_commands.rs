@@ -4,7 +4,7 @@ use crate::sqlite_backup::{
 use crate::sqlite_utils::{local_database_path, DATABASE_KEY};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::{Connection, SqliteConnection};
+use sqlx::{AssertSqlSafe, Column, Connection, Row, SqliteConnection, TypeInfo, ValueRef};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -224,16 +224,37 @@ pub fn open_folder_in_explorer(folder_path: String) -> Result<(), String> {
     }
 }
 
-/// Scrive un pacchetto di backup testuale (JSON / .lastbackup)
+/// Scrive un pacchetto di backup testuale (JSON / .lastbackup) in modo atomico (temp + sync + rename)
 #[tauri::command]
 pub fn write_backup_file(file_path: String, content: String) -> Result<u64, String> {
+    use std::io::Write;
     let path = validate_file_path_with_extensions(&file_path, &["lastbackup", "json"], "backup")?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Errore creazione cartella di destinazione: {}", e))?;
     }
-    fs::write(&path, content.as_bytes())
-        .map_err(|e| format!("Errore scrittura file backup: {}", e))?;
+    let tmp_name = format!(
+        ".{}.tmp.{}",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("backup"),
+        std::process::id()
+    );
+    let tmp_path = path.with_file_name(tmp_name);
+    let write_res = (|| -> Result<(), std::io::Error> {
+        let mut f = fs::File::create(&tmp_path)?;
+        f.write_all(content.as_bytes())?;
+        f.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("Errore scrittura file backup: {}", e));
+    }
+    if let Err(e) = fs::rename(&tmp_path, &path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("Errore finalizzazione file backup: {}", e));
+    }
     let len = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     Ok(len)
 }
@@ -279,7 +300,9 @@ pub async fn copy_database_file(
 ) -> Result<u64, String> {
     let _operation = BACKUP_FILE_OPERATION.lock().await;
     let db_path = local_database_path(&app)?;
-    let target = Path::new(&target_file_path);
+    let target_buf =
+        validate_file_path_with_extensions(&target_file_path, &["db"], "backup database")?;
+    let target = target_buf.as_path();
     check_different_paths(&db_path, target)?;
 
     let stage = StagedSnapshot::new(target)?;
@@ -300,7 +323,9 @@ pub async fn restore_database_file(
     use tauri_plugin_sql::{DbInstances, DbPool};
     let _operation = BACKUP_FILE_OPERATION.lock().await;
     let db_path = local_database_path(&app)?;
-    let source_path = Path::new(&source_file_path);
+    let source_buf =
+        validate_file_path_with_extensions(&source_file_path, &["db"], "ripristino database")?;
+    let source_path = source_buf.as_path();
     check_different_paths(source_path, &db_path)?;
 
     let stage = StagedSnapshot::new(&db_path)?;
@@ -321,24 +346,162 @@ pub async fn restore_database_file(
         None => None,
     };
     let result = replace_active_database(&db_path, &stage).await;
-    if let Some(options) = previous_options {
-        match sqlx::SqlitePool::connect_with((*options).clone()).await {
-            Ok(pool) => {
-                instances.insert(DATABASE_KEY.into(), DbPool::Sqlite(pool));
-            }
-            Err(reopen_error) => {
-                if let Err(error) = &result {
-                    return Err(format!(
-                        "{error}. Riapertura del database originale fallita: {reopen_error}"
-                    ));
+    // On success, intentionally keep DbInstances closed until relaunch() so no background
+    // frontend timer or sync worker can read/write the unmigrated restored database.
+    if result.is_err() {
+        if let Some(options) = previous_options {
+            match sqlx::SqlitePool::connect_with((*options).clone()).await {
+                Ok(pool) => {
+                    instances.insert(DATABASE_KEY.into(), DbPool::Sqlite(pool));
                 }
-                return Err(format!(
-                    "Ripristino completato, ma riapertura del database fallita: {reopen_error}"
-                ));
+                Err(reopen_error) => {
+                    if let Err(error) = &result {
+                        return Err(format!(
+                            "{error}. Riapertura del database originale fallita: {reopen_error}"
+                        ));
+                    }
+                }
             }
         }
     }
     result
+}
+
+const ALLOWED_BACKUP_EXPORT_TABLES: &[&str] = &[
+    "listino_generale",
+    "listini_clienti",
+    "listino_generale_cestino",
+    "listini_clienti_cestino",
+    "listini_prezzi_log",
+    "products",
+    "supplier_price_list_files",
+    "supplier_price_list_items",
+    "ddt_documents",
+    "ddt_items",
+    "ddt_logs",
+    "ddt_sync_snapshots",
+    "clients",
+    "suppliers",
+    "supplier_invoices",
+    "supplier_invoice_items",
+    "notes",
+    "notes_trash",
+    "note_deletions",
+    "offers",
+    "offers_trash",
+    "quotes",
+    "quote_items",
+    "quotes_trash",
+    "quote_sequences",
+    "quote_favorite_items",
+    "orders",
+    "order_audit_logs",
+    "company_settings",
+    "email_settings",
+    "app_preferences",
+    "app_users",
+];
+
+fn sqlite_row_to_json(row: &sqlx::sqlite::SqliteRow) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (idx, col) in row.columns().iter().enumerate() {
+        let name = col.name().to_string();
+        let val = match row.try_get_raw(idx) {
+            Ok(raw) if raw.is_null() => serde_json::Value::Null,
+            Ok(raw) => match raw.type_info().name() {
+                "INTEGER" | "INT" | "BIGINT" => row
+                    .try_get::<i64, _>(idx)
+                    .map(serde_json::Value::from)
+                    .unwrap_or(serde_json::Value::Null),
+                "REAL" | "FLOAT" | "DOUBLE" | "NUMERIC" => row
+                    .try_get::<f64, _>(idx)
+                    .ok()
+                    .and_then(serde_json::Number::from_f64)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null),
+                "BLOB" => row
+                    .try_get::<Vec<u8>, _>(idx)
+                    .map(|bytes| {
+                        serde_json::Value::Array(
+                            bytes.into_iter().map(serde_json::Value::from).collect(),
+                        )
+                    })
+                    .unwrap_or(serde_json::Value::Null),
+                _ => row
+                    .try_get::<String, _>(idx)
+                    .map(serde_json::Value::String)
+                    .or_else(|_| row.try_get::<i64, _>(idx).map(serde_json::Value::from))
+                    .or_else(|_| row.try_get::<f64, _>(idx).map(|f| serde_json::json!(f)))
+                    .unwrap_or(serde_json::Value::Null),
+            },
+            Err(_) => serde_json::Value::Null,
+        };
+        map.insert(name, val);
+    }
+    serde_json::Value::Object(map)
+}
+
+/// Esporta le tabelle richieste in un'unica transazione di lettura SQLite (snapshot coerente).
+#[tauri::command]
+pub async fn export_modular_backup_tables(
+    app: AppHandle,
+    tables: Vec<String>,
+    pending_scopes: Vec<String>,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    for table in &tables {
+        if !ALLOWED_BACKUP_EXPORT_TABLES.contains(&table.as_str()) {
+            return Err(format!(
+                "Tabella non consentita nell'export backup: {table}"
+            ));
+        }
+    }
+    let db_path = local_database_path(&app)?;
+    let mut conn = open_database(&db_path, true).await?;
+    sqlx::query("BEGIN DEFERRED")
+        .execute(&mut conn)
+        .await
+        .map_err(|e| format!("Errore avvio transazione lettura backup: {e}"))?;
+
+    let export_result: Result<serde_json::Map<String, serde_json::Value>, String> = async {
+        let mut out = serde_json::Map::new();
+        for table in &tables {
+            let sql = format!("SELECT * FROM \"{table}\"");
+            let rows = sqlx::query(AssertSqlSafe(sql))
+                .fetch_all(&mut conn)
+                .await
+                .map_err(|e| format!("Errore lettura tabella {table}: {e}"))?;
+            let json_rows: Vec<serde_json::Value> = rows.iter().map(sqlite_row_to_json).collect();
+            out.insert(table.clone(), serde_json::Value::Array(json_rows));
+        }
+        if !pending_scopes.is_empty() {
+            let placeholders = (1..=pending_scopes.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT * FROM \"pending_cloud_operations\" WHERE scope IN ({placeholders})"
+            );
+            let mut q = sqlx::query(AssertSqlSafe(sql));
+            for scope in &pending_scopes {
+                q = q.bind(scope);
+            }
+            let rows = q
+                .fetch_all(&mut conn)
+                .await
+                .map_err(|e| format!("Errore lettura pending_cloud_operations: {e}"))?;
+            let json_rows: Vec<serde_json::Value> = rows.iter().map(sqlite_row_to_json).collect();
+            out.insert(
+                "pending_cloud_operations".to_string(),
+                serde_json::Value::Array(json_rows),
+            );
+        }
+        Ok(out)
+    }
+    .await;
+
+    let _ = sqlx::query("COMMIT").execute(&mut conn).await;
+    let _ = conn.close().await;
+    export_result
 }
 
 fn is_managed_backup_file(fname: &str, ext: &str) -> bool {
@@ -436,10 +599,15 @@ pub fn check_today_backup_exists(
         let fpath = entry.path();
         if fpath.is_file() {
             let fname = fpath.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if (fname.contains(&date_str) || fname.contains(&date_dot))
-                && (fname.ends_with(".db")
-                    || fname.ends_with(".lastbackup")
-                    || fname.ends_with(".json"))
+            let ext = fpath
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let non_empty = fs::metadata(&fpath).map(|m| m.len() > 0).unwrap_or(false);
+            if non_empty
+                && is_managed_backup_file(fname, &ext)
+                && (fname.contains(&date_str) || fname.contains(&date_dot))
             {
                 return Ok(Some(fname.to_string()));
             }

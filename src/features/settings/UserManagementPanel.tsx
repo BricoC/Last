@@ -125,8 +125,8 @@ export const UserManagementPanel: React.FC = () => {
     setMessage(null);
     try {
       let finalHash = "";
-      if (newRequirePassword && newPassword.trim()) {
-        finalHash = await hashPassword(newPassword.trim());
+      if (newRequirePassword && newPassword.length > 0) {
+        finalHash = await hashPassword(newPassword);
       }
 
       await createUser({
@@ -158,6 +158,14 @@ export const UserManagementPanel: React.FC = () => {
     e.preventDefault();
     if (!editingUser) return;
 
+    if (editingUser.is_admin && !currentUser?.is_admin) {
+      setMessage({
+        type: "error",
+        text: "Solo un amministratore può modificare l'account Admin.",
+      });
+      return;
+    }
+
     if (editRequirePassword) {
       if (!editingUser.password_hash && !editPassword.trim()) {
         setMessage({
@@ -176,8 +184,8 @@ export const UserManagementPanel: React.FC = () => {
     setMessage(null);
     try {
       let finalHash = editingUser.password_hash || "";
-      if (editRequirePassword && editPassword.trim()) {
-        finalHash = await hashPassword(editPassword.trim());
+      if (editRequirePassword && editPassword.length > 0) {
+        finalHash = await hashPassword(editPassword);
       } else if (!editRequirePassword) {
         finalHash = "";
       }
@@ -198,7 +206,7 @@ export const UserManagementPanel: React.FC = () => {
         can_access_settings: editingUser.is_admin ? true : editingUser.can_access_settings,
         can_edit_price_lists: editingUser.is_admin ? true : editingUser.can_edit_price_lists,
         can_edit_or_numbers: editingUser.is_admin ? true : editingUser.can_edit_or_numbers,
-        can_manage_backups: Boolean(editingUser.can_manage_backups),
+        can_manage_backups: editingUser.is_admin ? true : Boolean(editingUser.can_manage_backups),
         allowed_pages: effectivePages,
         topbar_order: finalTopbarOrder,
       };
@@ -216,6 +224,10 @@ export const UserManagementPanel: React.FC = () => {
   const handleDelete = async (user: AppUser) => {
     if (user.is_admin) {
       setMessage({ type: "error", text: "Impossibile eliminare l'account Admin principale." });
+      return;
+    }
+    if (user.id === currentUser?.id) {
+      setMessage({ type: "error", text: "Impossibile eliminare l'utente attualmente attivo." });
       return;
     }
     if (confirm(`Sei sicuro di voler eliminare l'utente / postazione "${user.name}"?`)) {
@@ -496,8 +508,9 @@ export const UserManagementPanel: React.FC = () => {
                   <input
                     type="checkbox"
                     checked={editRequirePassword}
+                    disabled={editingUser.is_admin && !currentUser?.is_admin}
                     onChange={(e) => setEditRequirePassword(e.target.checked)}
-                    className="w-4 h-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-0"
+                    className="w-4 h-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-0 disabled:opacity-50"
                   />
                   <div className="flex items-center space-x-2">
                     <Lock className="w-4 h-4 text-blue-400" />
@@ -1288,16 +1301,18 @@ export const UserManagementPanel: React.FC = () => {
 
                     <td className="py-3 px-3 text-right">
                       <div className="flex items-center justify-end space-x-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit(u)}
-                          className="p-1 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 transition-colors cursor-pointer"
-                          title="Configura permessi, pagine, tema e password"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
+                        {(!u.is_admin || currentUser?.is_admin) && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(u)}
+                            className="p-1 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 transition-colors cursor-pointer"
+                            title="Configura permessi, pagine, tema e password"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
 
-                        {!u.is_admin && (
+                        {!u.is_admin && u.id !== currentUser?.id && (
                           <button
                             type="button"
                             onClick={() => handleDelete(u)}

@@ -270,21 +270,45 @@ export class ClientSyncService {
     const creds = await this.getCredentials();
     const availablePriceLists = await clientRepository.getAllAvailablePriceLists();
 
-    const url = new URL("/rest/v1/clienti", creds.projectUrl);
-    url.searchParams.set("select", "*");
-    url.searchParams.set("order", "cliente.asc,id.asc");
-    url.searchParams.set("limit", "1000");
+    const PAGE_SIZE = 1000;
     const rows: SupabaseClientRow[] = [];
+    const seenIds = new Set<string | number>();
+    let expectedTotal: number | null = null;
+    let lastId: string | number | null = null;
+    let paginationComplete = true;
     while (true) {
-      url.searchParams.set("offset", String(rows.length));
+      const url = new URL("/rest/v1/clienti", creds.projectUrl);
+      url.searchParams.set("select", "*");
+      url.searchParams.set("order", "id.asc");
+      url.searchParams.set("limit", String(PAGE_SIZE));
+      if (lastId !== null) {
+        url.searchParams.set("id", `gt.${lastId}`);
+      }
       const response = await supabaseFetch(url.toString(), {
-        headers: { apikey: creds.anonKey },
+        headers: { apikey: creds.anonKey, Prefer: "count=exact" },
       });
       if (!response.ok) throw new Error(`Errore connessione Supabase clienti: HTTP ${response.status}`);
+      const rangeHeader = response.headers.get("content-range");
+      const parsedTotal = rangeHeader ? Number(rangeHeader.split("/").pop()) : NaN;
+      if (Number.isFinite(parsedTotal) && expectedTotal === null) {
+        expectedTotal = parsedTotal;
+      }
       const page = await response.json();
       if (!Array.isArray(page)) throw new Error("Inventario clienti cloud non valido");
       if (!page.length) break;
-      rows.push(...page);
+      for (const item of page) {
+        if (item?.id != null && !seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          rows.push(item);
+        }
+      }
+      const tailId = page[page.length - 1]?.id;
+      if (tailId == null) {
+        paginationComplete = false;
+        break;
+      }
+      lastId = tailId;
+      if (page.length < PAGE_SIZE) break;
     }
     let imported = 0;
     let matchedPriceLists = 0;
@@ -509,7 +533,10 @@ export class ClientSyncService {
       }
 
       // Allinea eventuali clienti già sincronizzati ma rimossi da Supabase da un altro PC
-      if (rows.length > 0) {
+      // solo se l'inventario scaricato è completo (nessuno shift/troncamento di paginazione)
+      const isCompleteSnapshot =
+        paginationComplete && (expectedTotal === null || rows.length === expectedTotal);
+      if (isCompleteSnapshot && rows.length > 0) {
         for (const existing of existingRows) {
           if (
             existing.sync_status === "synced" &&

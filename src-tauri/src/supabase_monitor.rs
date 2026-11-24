@@ -73,7 +73,13 @@ fn supabase_config_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn read_mgmt_config(app: &AppHandle) -> Result<SupabaseManagementConfig, String> {
+    const MAX_MGMT_CONFIG_BYTES: u64 = 16 * 1024;
     let path = mgmt_config_path(app)?;
+    if let Ok(meta) = fs::metadata(&path) {
+        if meta.len() > MAX_MGMT_CONFIG_BYTES {
+            return Err("File configurazione token Management troppo grande".into());
+        }
+    }
     match fs::read(&path) {
         Ok(bytes) => {
             let plain = crate::supabase_session_store::dpapi::unprotect(&bytes)?;
@@ -385,16 +391,23 @@ pub async fn fetch_supabase_cloud_metrics(app: AppHandle) -> Result<SupabaseClou
     // 3. Best-effort Egress tramite endpoint usage organizzazione (se disponibile)
     let mut egress_bytes: Option<u64> = None;
     if let Some(org_id) = proj_json["organization_id"].as_str() {
-        let usage_url = format!("https://api.supabase.com/v1/organizations/{org_id}/usage");
-        if let Ok(u_res) = client.get(&usage_url).bearer_auth(&token).send().await {
-            if u_res.status().is_success() {
-                if let Ok(u_text) = u_res.text().await {
-                    if let Ok(u_json) = serde_json::from_str::<serde_json::Value>(&u_text) {
-                        if let Some(val) = u_json["egress"]["usage"]
-                            .as_u64()
-                            .or_else(|| u_json["egress_bytes"].as_u64())
-                        {
-                            egress_bytes = Some(val);
+        let valid_org_id = !org_id.is_empty()
+            && org_id.len() <= 128
+            && org_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        if valid_org_id {
+            let usage_url = format!("https://api.supabase.com/v1/organizations/{org_id}/usage");
+            if let Ok(u_res) = client.get(&usage_url).bearer_auth(&token).send().await {
+                if u_res.status().is_success() {
+                    if let Ok(u_text) = u_res.text().await {
+                        if let Ok(u_json) = serde_json::from_str::<serde_json::Value>(&u_text) {
+                            if let Some(val) = u_json["egress"]["usage"]
+                                .as_u64()
+                                .or_else(|| u_json["egress_bytes"].as_u64())
+                            {
+                                egress_bytes = Some(val);
+                            }
                         }
                     }
                 }

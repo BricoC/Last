@@ -158,7 +158,7 @@ export class NotesRepository {
         params: [],
       },
     ]);
-    void notesSyncService.sync();
+    void notesSyncService.sync().catch(() => {});
   }
 
   /**
@@ -212,7 +212,7 @@ export class NotesRepository {
       { sql: "DELETE FROM note_deletions WHERE id = $1", params: [id] },
       { sql: "DELETE FROM notes_trash WHERE id = $1", params: [id] },
     ]);
-    void notesSyncService.sync();
+    void notesSyncService.sync().catch(() => {});
 
     return {
       id: item.id,
@@ -242,7 +242,7 @@ export class NotesRepository {
       { sql: "DELETE FROM notes WHERE id = $1", params: [id] },
       { sql: "DELETE FROM notes_trash WHERE id = $1", params: [id] },
     ]);
-    void notesSyncService.sync();
+    void notesSyncService.sync().catch(() => {});
   }
 }
 

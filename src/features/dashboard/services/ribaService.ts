@@ -238,11 +238,13 @@ export async function saveRemoteRibaPaid(
     const creds = await getSupabaseCredentials();
     if (!creds) return false;
 
+    const parsedSentAt = new Date(sentAt);
+    const sentAtIso = Number.isNaN(parsedSentAt.getTime()) ? new Date().toISOString() : parsedSentAt.toISOString();
     const row = {
       deadline_key: deadlineKey,
       deadline_date: deadlineStr,
       is_paid: true,
-      sent_at: new Date(sentAt).toISOString(),
+      sent_at: sentAtIso,
       updated_at: new Date().toISOString(),
     };
 
@@ -277,12 +279,12 @@ export async function registerRibaPayment(
   sentAt: string,
   projectUrl?: string | null,
 ) {
-  const cached = saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl);
+  saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl);
   const [sqlite, remote] = await Promise.all([
     saveSqliteRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl),
     saveRemoteRibaPaid(deadlineKey, deadlineStr, sentAt),
   ]);
-  return { confirmed: cached || sqlite || remote, remote };
+  return { confirmed: sqlite || remote, remote };
 }
 
 /**
@@ -305,10 +307,10 @@ export async function openRibaEmailDraft(info: {
     const subject = `Autorizzazione pagamento Ri.Ba. scadenza ${info.deadlineStr}`;
     const companySettings = await getCompanySettings().catch(() => null);
     const companyName = (companySettings?.business_name || "").trim();
-    const safeCompanyName = companyName
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    const escapeHtml = (value: string) =>
+      value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const safeCompanyName = escapeHtml(companyName);
+    const safeDeadlineStr = escapeHtml(info.deadlineStr);
     const signatureHtml = safeCompanyName
       ? `<p>Cordiali saluti,<br/><strong>${safeCompanyName}</strong></p>`
       : `<p>Cordiali saluti.</p>`;
@@ -316,7 +318,7 @@ export async function openRibaEmailDraft(info: {
     const bodyHtml = `
       <div style="font-family: Segoe UI, Arial, sans-serif; font-size: 14px; color: #1e293b; line-height: 1.5;">
         <p>Buongiorno,</p>
-        <p>Si prega di autorizzare il pagamento delle <strong>Ri.Ba.</strong> in scadenza il <strong>${info.deadlineStr}</strong>.</p>
+        <p>Si prega di autorizzare il pagamento delle <strong>Ri.Ba.</strong> in scadenza il <strong>${safeDeadlineStr}</strong>.</p>
         <br/>
         ${signatureHtml}
       </div>

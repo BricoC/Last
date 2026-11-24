@@ -972,9 +972,11 @@ export class PriceListSyncService {
 
       const remoteIds = new Set<string>();
       const PAGE_SIZE = 1000;
-      for (let offset = 0; ; offset += PAGE_SIZE) {
+      let lastId: string | number | null = null;
+      for (;;) {
+        const keysetFilter = lastId !== null ? `&id=gt.${encodeURIComponent(String(lastId))}` : "";
         const res = await supabaseFetch(
-          `${creds.projectUrl}/rest/v1/${cloudTable}?select=id&order=id.asc&limit=${PAGE_SIZE}&offset=${offset}`,
+          `${creds.projectUrl}/rest/v1/${cloudTable}?select=id&order=id.asc&limit=${PAGE_SIZE}${keysetFilter}`,
           { headers: buildAuthHeaders(creds.anonKey) },
         );
         if (!res.ok) return 0;
@@ -983,6 +985,9 @@ export class PriceListSyncService {
         for (const r of page) {
           if (r?.id != null) remoteIds.add(`${idPrefix}${r.id}`);
         }
+        const tailId = page[page.length - 1]?.id;
+        if (tailId == null) return 0;
+        lastId = tailId;
         if (page.length < PAGE_SIZE) break;
       }
       if (remoteIds.size !== remoteTotal) return 0;

@@ -58,7 +58,7 @@ import { useUserStore } from "@/shared/stores/useUserStore";
 
 export const BackupSettingsPanel: React.FC = () => {
   const { currentUser } = useUserStore();
-  const canManageBackups = currentUser ? Boolean(currentUser.can_manage_backups) : true;
+  const canManageBackups = Boolean(currentUser?.can_manage_backups);
   const [config, setConfig] = useState<BackupConfig>(() => loadBackupConfig());
   const [recordCounts, setRecordCounts] = useState<Record<string, number>>({});
   const [selectedCategories, setSelectedCategories] = useState<string[]>(config.autoCategories);
@@ -153,6 +153,10 @@ export const BackupSettingsPanel: React.FC = () => {
 
   // Eliminazione manuale di un singolo file
   const handleDeleteBackup = async (filePath: string, filename: string) => {
+    if (!canManageBackups) {
+      setFeedback({ type: "error", message: "Non hai i permessi per eliminare file di backup." });
+      return;
+    }
     try {
       const ok = await deleteBackupFile(filePath);
       if (ok) {
@@ -279,6 +283,7 @@ export const BackupSettingsPanel: React.FC = () => {
         updateConfig({
           lastRunDate: getLocalBackupDate(),
           lastRunTimestamp: new Date().toISOString(),
+          lastRunBy: currentUser?.name || "Admin",
         });
         void refreshBackupsList(config.folderPath);
       } else {
@@ -319,6 +324,7 @@ export const BackupSettingsPanel: React.FC = () => {
         updateConfig({
           lastRunDate: getLocalBackupDate(),
           lastRunTimestamp: new Date().toISOString(),
+          lastRunBy: currentUser?.name || "Admin",
         });
         void refreshBackupsList(config.folderPath);
       } else {
@@ -364,6 +370,10 @@ export const BackupSettingsPanel: React.FC = () => {
 
   // Conferma ed esecuzione ripristino
   const handleConfirmRestore = async () => {
+    if (!canManageBackups) {
+      setFeedback({ type: "error", message: "Non hai i permessi per ripristinare backup." });
+      return;
+    }
     if (!selectedBackupPath) return;
 
     setIsRestoring(true);
@@ -375,17 +385,15 @@ export const BackupSettingsPanel: React.FC = () => {
         if (res.success) {
           setFeedback({
             type: "success",
-            message: "Database SQLite ripristinato con successo! Ricaricamento dell'applicazione in corso...",
+            message: "Database SQLite ripristinato con successo! Riavvio dell'applicazione in corso...",
           });
           setInspectModalOpen(false);
-          setTimeout(async () => {
-            try {
-              const { relaunch } = await import("@tauri-apps/plugin-process");
-              await relaunch();
-            } catch {
-              window.location.reload();
-            }
-          }, 1200);
+          try {
+            const { relaunch } = await import("@tauri-apps/plugin-process");
+            await relaunch();
+          } catch {
+            window.location.reload();
+          }
         } else {
           setFeedback({ type: "error", message: res.error || "Errore durante il ripristino del database." });
         }

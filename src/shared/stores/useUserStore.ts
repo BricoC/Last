@@ -169,26 +169,38 @@ export const useUserStore = create<UserState>((set, get) => ({
       });
     }
 
-    set({ pendingPasswordSwitch: null });
-    get().switchUser(pendingPasswordSwitch.id);
+    const verifiedTarget = get().users.find((u) => u.id === pendingPasswordSwitch.id) ?? pendingPasswordSwitch;
+    AppUserService.setActiveUserId(verifiedTarget.id);
+    set({ pendingPasswordSwitch: null, currentUser: verifiedTarget });
+    if (verifiedTarget.theme_preset) {
+      const themeStore = useThemeStore.getState();
+      if (verifiedTarget.theme_brightness) {
+        themeStore.setBrightness(verifiedTarget.theme_brightness);
+      }
+      themeStore.setPreset(verifiedTarget.theme_preset);
+    }
     return true;
   },
 
   switchUser: (userId: string) => {
-    const { users } = get();
+    const { users, currentUser } = get();
     const target = users.find((u) => u.id === userId);
-    if (target) {
-      AppUserService.setActiveUserId(target.id);
-      set({ currentUser: target });
+    if (!target) return;
+    // Non consentire mai switch diretto su un utente protetto da password senza verifica
+    if (target.require_password && currentUser?.id !== target.id) {
+      set({ pendingPasswordSwitch: target });
+      return;
+    }
+    AppUserService.setActiveUserId(target.id);
+    set({ currentUser: target });
 
-      // Cambio tema istantaneo in base alle preferenze della postazione selezionata
-      if (target.theme_preset) {
-        const themeStore = useThemeStore.getState();
-        if (target.theme_brightness) {
-          themeStore.setBrightness(target.theme_brightness);
-        }
-        themeStore.setPreset(target.theme_preset);
+    // Cambio tema istantaneo in base alle preferenze della postazione selezionata
+    if (target.theme_preset) {
+      const themeStore = useThemeStore.getState();
+      if (target.theme_brightness) {
+        themeStore.setBrightness(target.theme_brightness);
       }
+      themeStore.setPreset(target.theme_preset);
     }
   },
 
@@ -274,22 +286,28 @@ export const useUserStore = create<UserState>((set, get) => ({
 
   deleteUser: async (userId: string) => {
     await AppUserService.deleteUser(userId);
-    const { users, currentUser } = get();
+    const { users, currentUser, pendingPasswordSwitch } = get();
     const updated = users.filter((u) => u.id !== userId);
     let nextCurrent = currentUser;
+    let nextPending = pendingPasswordSwitch?.id === userId ? null : pendingPasswordSwitch;
     if (currentUser?.id === userId) {
-      nextCurrent = updated[0] || null;
-      if (nextCurrent) {
-        AppUserService.setActiveUserId(nextCurrent.id);
-        if (nextCurrent.theme_preset) {
+      const unprotectedFallback = updated.find((u) => !u.require_password) || null;
+      if (unprotectedFallback) {
+        nextCurrent = unprotectedFallback;
+        AppUserService.setActiveUserId(unprotectedFallback.id);
+        if (unprotectedFallback.theme_preset) {
           const themeStore = useThemeStore.getState();
-          if (nextCurrent.theme_brightness) {
-            themeStore.setBrightness(nextCurrent.theme_brightness);
+          if (unprotectedFallback.theme_brightness) {
+            themeStore.setBrightness(unprotectedFallback.theme_brightness);
           }
-          themeStore.setPreset(nextCurrent.theme_preset);
+          themeStore.setPreset(unprotectedFallback.theme_preset);
         }
+      } else {
+        // Non effettuare mai switch diretto su un account protetto da password (es. Admin)
+        nextCurrent = null;
+        nextPending = updated[0] || null;
       }
     }
-    set({ users: updated, currentUser: nextCurrent });
+    set({ users: updated, currentUser: nextCurrent, pendingPasswordSwitch: nextPending });
   },
 }));

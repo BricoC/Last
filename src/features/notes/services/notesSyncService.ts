@@ -160,27 +160,8 @@ export class NotesSyncService {
           if (res.ok) {
             const updatedRows = await res.json().catch(() => null);
             if (Array.isArray(updatedRows) && updatedRows.length === 0) {
-              // La nota non esiste più sul cloud (es. eliminata da altro PC): ricreala via upsert per non perdere la modifica locale
-              const upsertUrl = new URL("/rest/v1/note?on_conflict=local_id", creds.projectUrl);
-              const upsertRes = await supabaseFetch(upsertUrl.toString(), {
-                method: "POST",
-                headers: {
-                  apikey: creds.anonKey,
-                  "Content-Type": "application/json",
-                  Prefer: "resolution=merge-duplicates,return=representation",
-                },
-                body: JSON.stringify(payload),
-              });
-              if (!upsertRes.ok) {
-                const errBody = (await upsertRes.json().catch(() => ({}))) as { message?: string };
-                throw new Error(`Errore reinserimento nota Supabase: ${errBody?.message || upsertRes.statusText || upsertRes.status}`);
-              }
-              const inserted = await upsertRes.json().catch(() => []);
-              const newRemoteId = Array.isArray(inserted) && inserted[0]?.id ? Number(inserted[0].id) : item.supabase_id;
-              await db.execute(
-                `UPDATE notes SET supabase_id = $1, sync_status = 'synced', project_url = $4 WHERE id = $2 AND updated_at = $3`,
-                [newRemoteId, item.id, item.updated_at, activeProjectUrl]
-              );
+              // La nota è stata eliminata su Cloud da un'altra postazione: non resuscitarla silenziosamente
+              throw new Error(`Nota #${item.supabase_id} eliminata da un'altra postazione sul Cloud`);
             } else {
               await db.execute(
                 `UPDATE notes SET sync_status = 'synced', project_url = $3 WHERE id = $1 AND updated_at = $2`,
@@ -275,12 +256,15 @@ export class NotesSyncService {
           if (typeof row?.id === "number") remoteById.set(row.id, row);
         }
         const last = page[page.length - 1];
-        if (typeof last?.id !== "number") break;
+        if (typeof last?.id !== "number") {
+          pullOk = false;
+          break;
+        }
         cursor = { updated_at: last.updated_at ?? null, id: last.id };
         const totalMatch = pullRes.headers.get("content-range")?.match(/\/(\d+)$/);
         if (totalMatch) {
           const total = Number(totalMatch[1]);
-          if (page.length >= total) break;
+          if (remoteById.size >= total) break;
         } else if (page.length < PAGE_SIZE) {
           break;
         }
@@ -349,7 +333,7 @@ export class NotesSyncService {
                   created_by = $8,
                   updated_by = $9,
                   updated_at = $10
-                WHERE id = $11 AND sync_status = 'synced'`,
+                WHERE id = $11 AND sync_status = 'synced' AND (updated_at IS NULL OR updated_at <= $10)`,
                 [
                   rem.id,
                   rem.title || "Nuova Nota",

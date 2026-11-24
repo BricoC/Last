@@ -299,6 +299,16 @@ export class OffersRepository {
         id, supabase_id, offer_date, requester, contact, items_text, status, is_urgent, is_archived, created_by, updated_by, created_at, updated_at, deleted_at, deleted_by, project_url
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       ON CONFLICT(id) DO UPDATE SET
+        supabase_id = excluded.supabase_id,
+        offer_date = excluded.offer_date,
+        requester = excluded.requester,
+        contact = excluded.contact,
+        items_text = excluded.items_text,
+        status = excluded.status,
+        is_urgent = excluded.is_urgent,
+        is_archived = excluded.is_archived,
+        updated_by = excluded.updated_by,
+        updated_at = excluded.updated_at,
         deleted_at = excluded.deleted_at,
         deleted_by = excluded.deleted_by,
         project_url = COALESCE(offers_trash.project_url, excluded.project_url)`,
@@ -421,6 +431,8 @@ export class OffersRepository {
 
     { sql: "DELETE FROM offers_trash WHERE id = $1 AND deleted_at = $2",
       params: [id, item.deleted_at], expectedRows: 1 },
+    { sql: "DELETE FROM pending_cloud_operations WHERE scope = 'offers' AND record_id = $1 AND action = 'delete'",
+      params: [id] },
     ]);
 
     // 3. Notifica la UI e sincronizza su Supabase

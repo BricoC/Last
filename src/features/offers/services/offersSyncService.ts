@@ -1,5 +1,5 @@
 import { createSupabaseRealtimeSubscription } from "@/shared/services/supabaseRealtimeSubscription";
-import { flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
+import { flushPendingCloudOperations, getPendingOperationFailure } from "@/shared/data-layer/pendingCloudOperations";
 import { getAuthenticatedSupabaseClient } from "@/shared/services/supabaseSession";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { matchesActiveSupabaseProject, normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
@@ -383,6 +383,11 @@ export class OffersSyncService {
       if (missingOffers.size) {
         this.syncError = `Offerte da verificare prima di ripubblicarle sul cloud: ${missingOffers.size}`;
         return { success: false, pushed, pulled, error: this.syncError };
+      }
+      const deletionFailure = getPendingOperationFailure("offers");
+      if (deletionFailure) {
+        this.syncError = deletionFailure;
+        return { success: false, pushed, pulled, error: deletionFailure };
       }
       this.lastSyncTime = new Date();
       return { success: true, pushed, pulled };

@@ -10,6 +10,7 @@ RETURNS text LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
   FROM (SELECT upper(regexp_replace(coalesce(p_vat,''), '[[:space:]]', '', 'g')) AS vat,
                upper(regexp_replace(coalesce(p_cf,''), '[[:space:]]', '', 'g')) AS cf) tax
 $$;
+REVOKE ALL ON FUNCTION public.last_invoice_issuer_key(text, text, text) FROM PUBLIC, anon, authenticated;
 
 ALTER TABLE public.fatture_elettroniche_testate ADD COLUMN IF NOT EXISTS issuer_key text
   GENERATED ALWAYS AS (public.last_invoice_issuer_key(partita_iva,codice_fiscale,fornitore)) STORED;

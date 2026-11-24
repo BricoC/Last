@@ -392,6 +392,7 @@ export class DdtRepository {
           params: [now, id, doc.deleted_at],
         },
       ]);
+      notifyDdtUpdated();
       return { success: true, restoredAs: "bozza", docNumber: null, year: doc.year };
     }
 
@@ -432,18 +433,32 @@ export class DdtRepository {
       };
     }
 
-    // Numero originale libero: ripristina normalmente
-    await applyLocalDatabaseBatch([
-      {
-        sql: `UPDATE ddt_documents SET deleted_at = NULL, updated_at = $1, cloud_restore_requested = 1, sync_status = 'pending' WHERE id = $2 AND deleted_at = $3`,
-        params: [now, id, doc.deleted_at],
-        expectedRows: 1,
-      },
-      {
-        sql: `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2 AND deleted_at = $3`,
-        params: [now, id, doc.deleted_at],
-      },
-    ]);
+    // Numero originale libero: ripristina atomicamente verificando assenza di conflitti concorrenti
+    try {
+      await applyLocalDatabaseBatch([
+        {
+          sql: `UPDATE ddt_documents
+            SET deleted_at = NULL, updated_at = $1, cloud_restore_requested = 1, sync_status = 'pending'
+            WHERE id = $2 AND deleted_at = $3
+              AND NOT EXISTS (
+                SELECT 1 FROM ddt_documents WHERE year = $4 AND doc_number = $5 AND deleted_at IS NULL AND id <> $2
+              )`,
+          params: [now, id, doc.deleted_at, doc.year, doc.doc_number],
+          expectedRows: 1,
+        },
+        {
+          sql: `UPDATE ddt_items SET deleted_at = NULL, updated_at = $1, sync_status = 'pending' WHERE ddt_id = $2 AND deleted_at = $3`,
+          params: [now, id, doc.deleted_at],
+        },
+      ]);
+    } catch {
+      return {
+        success: false,
+        conflict: true,
+        docNumber: doc.doc_number,
+        year: doc.year,
+      };
+    }
     notifyDdtUpdated();
     void ddtCloudPushService.pushDdtById(id, { reassignNumberOnConflict: false }).catch(() => {});
     return { success: true, restoredAs: "original", docNumber: doc.doc_number, year: doc.year };
@@ -591,6 +606,7 @@ export class DdtRepository {
     );
     const itemPayloads = validItems.map((it, index) => {
       const isNote = it.row_kind === "note" || (
+        it.row_kind !== "item" &&
         Boolean(it.description?.trim()) &&
         !isPositivePrice(it.unit_price) &&
         (!it.purchase_price || !isPositivePrice(it.purchase_price)) &&
@@ -760,7 +776,8 @@ export class DdtRepository {
   private mapRowToItem(row: any): DdtItem {
     const isNote =
       row.row_kind === "note" ||
-      (Boolean(row.description?.trim()) &&
+      (row.row_kind !== "item" &&
+        Boolean(row.description?.trim()) &&
         (row.unit_price_subunits ?? 0) === 0 &&
         (row.net_amount_subunits ?? 0) === 0 &&
         (!row.purchase_price_subunits || row.purchase_price_subunits === 0) &&

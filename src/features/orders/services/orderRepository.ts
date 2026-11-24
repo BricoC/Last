@@ -47,31 +47,6 @@ class OrderRepository {
   async getOrders(viewMode: OrderViewMode): Promise<OrderItem[]> {
     const db = await getDatabase();
 
-    // Elimina eventuali duplicati generati da desincronizzazione ID locale / remoto
-    try {
-      await db.execute(`
-        DELETE FROM orders 
-        WHERE supabase_id IS NOT NULL 
-        AND id NOT IN (
-          SELECT MIN(id) FROM orders WHERE supabase_id IS NOT NULL GROUP BY supabase_id
-        )
-      `);
-      await db.execute(`
-        DELETE FROM orders 
-        WHERE supabase_id IS NULL AND is_archived = 0 AND is_deleted = 0
-        AND (supplier_name IS NULL OR supplier_name = '') 
-        AND (description IS NULL OR description = '')
-        AND (article_code IS NULL OR article_code = '')
-      `);
-      await db.execute(`
-        UPDATE orders 
-        SET highlights = '{}' 
-        WHERE highlights = '"{}"' OR highlights = '\"{}\"' OR highlights LIKE '"%' OR highlights IS NULL
-      `);
-    } catch {
-      // Cleanup facoltativo
-    }
-
     let query = `
       SELECT 
         id, supabase_id, order_date, supplier_name, article_code, description,
@@ -483,7 +458,7 @@ class OrderRepository {
 
     for (const r of rows) {
       const key = `${(r.supplier_name || '').toLowerCase()}:::${(r.article_code || '').toLowerCase()}`;
-      const qtyNum = parseFloat(r.quantity) || 0;
+      const qtyNum = parseFloat(String(r.quantity ?? "").replace(",", ".")) || 0;
       const orderDate = r.ordered_date || r.order_date || '';
 
       if (!map.has(key)) {

@@ -28,14 +28,14 @@ export function isActualOrderReference(ref?: string | null): boolean {
 }
 
 export function getOrStatus(row: OrRow): OrStatusType {
-  if (row.hasMissingPrices) {
-    return "unpriced";
-  }
   if (isActualOrderReference(row.orderReference)) {
     return "green";
   }
   if (row.statusLog && row.statusLog.trim()) {
     return "yellow";
+  }
+  if (row.hasMissingPrices) {
+    return "unpriced";
   }
   return "red";
 }

@@ -66,7 +66,7 @@ export class SupplierPriceListService {
     else if (lower.includes("ineco")) supplier = "INECO";
 
     // Rilevamento data (es. 01.07.2026, Novembre 2026, 2026)
-    let listDate = "2026";
+    let listDate = String(new Date().getFullYear());
     const dateMatch = clean.match(/(\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4})/);
     if (dateMatch) {
       listDate = dateMatch[1];
@@ -511,7 +511,19 @@ export class SupplierPriceListService {
       });
     }
 
-    if (items.length === 0) return 0;
+    if (items.length === 0) {
+      await applyLocalDatabaseBatch([
+        {
+          sql: "DELETE FROM supplier_price_list_items WHERE file_id IN (SELECT id FROM supplier_price_list_files WHERE filename = $1)",
+          params: [file.filename],
+        },
+        {
+          sql: "DELETE FROM supplier_price_list_files WHERE filename = $1",
+          params: [file.filename],
+        },
+      ]);
+      return 0;
+    }
 
     // Prepara tutte le scritture e applica sostituzione atomica in transazione SQLite
     const writes: SqliteWrite[] = [
@@ -663,23 +675,25 @@ export class SupplierPriceListService {
    * Elimina un intero fornitore e tutti i suoi articoli dal database locale
    */
   public static async deleteSupplier(supplierName: string): Promise<void> {
-    const db = await getDatabase();
-    await db.execute(
-      "DELETE FROM supplier_price_list_items WHERE supplier_name = $1",
-      [supplierName]
-    );
-    await db.execute(
-      "DELETE FROM supplier_price_list_files WHERE supplier_name = $1",
-      [supplierName]
-    );
+    await applyLocalDatabaseBatch([
+      {
+        sql: "DELETE FROM supplier_price_list_items WHERE supplier_name = $1",
+        params: [supplierName],
+      },
+      {
+        sql: "DELETE FROM supplier_price_list_files WHERE supplier_name = $1",
+        params: [supplierName],
+      },
+    ]);
   }
 
   /**
    * Svuota completamente l'archivio dei listini fornitori
    */
   public static async clearAll(): Promise<void> {
-    const db = await getDatabase();
-    await db.execute("DELETE FROM supplier_price_list_items");
-    await db.execute("DELETE FROM supplier_price_list_files");
+    await applyLocalDatabaseBatch([
+      { sql: "DELETE FROM supplier_price_list_items", params: [] },
+      { sql: "DELETE FROM supplier_price_list_files", params: [] },
+    ]);
   }
 }

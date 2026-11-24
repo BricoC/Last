@@ -1,0 +1,55 @@
+name: "CI Verifica Qualità (main & PR)"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  verify:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install Rust 1.94
+        uses: dtolnay/rust-toolchain@1.94.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Setup Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          shared-key: "last-ci-windows"
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Run TypeScript Tests & Coverage
+        run: npm run test:coverage
+
+      - name: Check Frontend Build
+        run: npm run build
+
+      - name: Enforce Initial Bundle Budget
+        run: npm run check:bundle
+
+      - name: Check Rust Formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Run Rust Tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Run Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings

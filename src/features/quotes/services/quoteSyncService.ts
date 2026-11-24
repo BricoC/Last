@@ -1,4 +1,4 @@
-import { flushPendingCloudOperations } from "@/shared/data-layer/pendingCloudOperations";
+import { flushPendingCloudOperations, getPendingOperationFailure } from "@/shared/data-layer/pendingCloudOperations";
 import type { TrashQuoteRow } from "../models/quote";
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { getDatabase } from "@/shared/data-layer/database";
@@ -362,9 +362,16 @@ export class QuoteSyncService {
 
   private static pendingRetry: Promise<void> | null = null;
 
+  private static lastRetryError: string | null = null;
+
+  public static getLastRetryError(): string | null {
+    return this.lastRetryError;
+  }
+
   public static retryPendingChanges(): Promise<void> {
     if (this.pendingRetry) return this.pendingRetry;
     this.pendingRetry = (async () => {
+      this.lastRetryError = null;
       const { quoteRepository } = await import("./quoteRepository");
       const initialCreds = await getSupabaseCredentials();
       await flushPendingCloudOperations(
@@ -394,6 +401,7 @@ export class QuoteSyncService {
         },
         initialCreds?.projectUrl ?? null,
       );
+      let failedCount = 0;
       const db = await getDatabase();
       const archived = await db.select<Array<{ id: string; deleted_at: string; in_trash: number; project_url?: string | null }>>(
         `SELECT id, deleted_at, project_url, EXISTS(SELECT 1 FROM quotes_trash WHERE id = quotes.id) AS in_trash
@@ -408,10 +416,14 @@ export class QuoteSyncService {
         const confirmed = row.in_trash
           ? await this.pushTrashRow({ ...this.mapQuoteToSupabase(quote), deleted_by: quote.updated_by || "system" }, initialCreds ?? undefined)
           : await this.deleteQuote(row.id, initialCreds ?? undefined);
-        if (confirmed) await db.execute(
-          "UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND deleted_at = $2",
-          [row.id, row.deleted_at],
-        );
+        if (confirmed) {
+          await db.execute(
+            "UPDATE quotes SET sync_status = 'synced' WHERE id = $1 AND deleted_at = $2",
+            [row.id, row.deleted_at],
+          );
+        } else {
+          failedCount++;
+        }
       }
       const pending = await db.select<Array<{ id: string; project_url?: string | null }>>(
         `SELECT id, project_url FROM quotes WHERE sync_status = 'pending' AND deleted_at IS NULL AND NOT EXISTS (
@@ -421,7 +433,15 @@ export class QuoteSyncService {
       for (const { id, project_url } of pending) {
         if (!matchesActiveSupabaseProject(project_url, initialCreds?.projectUrl)) continue;
         const quote = await quoteRepository.getQuoteById(id, false);
-        if (quote) await this.pushQuote(quote);
+        if (quote && !(await this.pushQuote(quote))) {
+          failedCount++;
+        }
+      }
+      const opFailure = getPendingOperationFailure("quotes");
+      if (opFailure) {
+        this.lastRetryError = opFailure;
+      } else if (failedCount > 0) {
+        this.lastRetryError = `${failedCount} preventivi non confermati su Supabase`;
       }
     })().finally(() => { this.pendingRetry = null; });
     return this.pendingRetry;
@@ -515,6 +535,9 @@ export class QuoteSyncService {
     try {
       const creds = overrideCreds ?? (await getSupabaseCredentials());
       if (!creds) return false;
+      if (quote.project_url && !matchesActiveSupabaseProject(quote.project_url, creds.projectUrl)) {
+        return false;
+      }
 
       const db = await getDatabase();
       if (quote.quote_number == null) {
@@ -587,6 +610,14 @@ export class QuoteSyncService {
     try {
       const creds = overrideCreds ?? (await getSupabaseCredentials());
       if (!creds) return false;
+      const db = await getDatabase();
+      const [localRow] = await db.select<Array<{ project_url?: string | null }>>(
+        "SELECT project_url FROM quotes WHERE id = $1 LIMIT 1",
+        [id],
+      );
+      if (localRow?.project_url && !matchesActiveSupabaseProject(localRow.project_url, creds.projectUrl)) {
+        return false;
+      }
 
       const now = new Date().toISOString();
       const url = `${creds.projectUrl}/rest/v1/preventivi?id=eq.${encodeURIComponent(id)}`;

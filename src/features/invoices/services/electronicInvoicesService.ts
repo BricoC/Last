@@ -315,8 +315,12 @@ export class ElectronicInvoicesService {
           ? remoteInvoices.get(String(r.invoice_id))
           : legacyInvoiceKeys.get(JSON.stringify([r.fornitore || "", String(r.numero_documento || "").trim(), r.data_documento || ""]));
         if (!identity) {
-          if (r.invoice_id != null || identity === null) {
+          if (identity === null) {
             throw new Error("Una riga fattura cloud non ha una testata univoca. Verifica i dati su Supabase.");
+          }
+          if (r.invoice_id != null) {
+            // Testata inserita concorrentemente da un altro PC tra il fetch testate e righe: salta la riga per questo ciclo
+            console.warn(`[ElectronicInvoices] Riga ${r.id ?? "?"} ignorata temporaneamente: testata ${r.invoice_id} non presente nello snapshot corrente.`);
           }
           continue;
         }

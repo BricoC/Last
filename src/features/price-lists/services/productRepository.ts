@@ -1,4 +1,5 @@
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { Product, CreateProductInput, UpdateProductInput } from "../models/product";
 import { validateProductInput } from "../utils/productValidation";
 import { buildMultiTermSqlSearch } from "@/shared/utils/multiTermSqlSearch";
@@ -231,11 +232,8 @@ export class ProductRepository {
   async batchUpsert(products: Product[]): Promise<void> {
     if (products.length === 0) return;
 
-    const db = await getDatabase();
-
-    for (const p of products) {
-      await db.execute(
-        `INSERT INTO products (
+    const writes: SqliteWrite[] = products.map((p) => ({
+      sql: `INSERT INTO products (
           id, code, description, unit, purchase_price_cents, sale_price_cents,
           vat_rate, category, supplier, notes, created_at, updated_at, updated_by,
           deleted_at, sync_status
@@ -253,25 +251,25 @@ export class ProductRepository {
           updated_at = excluded.updated_at,
           updated_by = excluded.updated_by,
           sync_status = excluded.sync_status`,
-        [
-          p.id,
-          p.code,
-          p.description,
-          p.unit,
-          p.purchase_price_cents,
-          p.sale_price_cents,
-          p.vat_rate,
-          p.category ?? null,
-          p.supplier ?? null,
-          p.notes ?? null,
-          p.created_at,
-          p.updated_at,
-          p.updated_by,
-          p.deleted_at,
-          p.sync_status,
-        ]
-      );
-    }
+      params: [
+        p.id,
+        p.code,
+        p.description,
+        p.unit,
+        p.purchase_price_cents,
+        p.sale_price_cents,
+        p.vat_rate,
+        p.category ?? null,
+        p.supplier ?? null,
+        p.notes ?? null,
+        p.created_at,
+        p.updated_at,
+        p.updated_by,
+        p.deleted_at,
+        p.sync_status,
+      ],
+    }));
+    await applyLocalDatabaseBatch(writes);
   }
 }
 

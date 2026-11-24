@@ -16,6 +16,7 @@ export interface PendingCloudOperation {
 
 const loadPendingOpConfig = createCachedSupabaseConfigLoader("pendingCloudOperations");
 const legacyOperationsByScope = new Map<string, number>();
+const failedOperationsByScope = new Map<string, string>();
 
 export function getLegacyPendingOperationsCount(): number {
   let total = 0;
@@ -23,6 +24,10 @@ export function getLegacyPendingOperationsCount(): number {
     total += count;
   }
   return total;
+}
+
+export function getPendingOperationFailure(scope: string): string | null {
+  return failedOperationsByScope.get(scope) ?? null;
 }
 
 export function pendingCloudWrite(
@@ -57,6 +62,7 @@ export function flushPendingCloudOperations(
       [scope],
     );
     const failed = new Set<string>();
+    let firstFailureMessage: string | null = null;
     let confirmed = 0;
     let legacyHeld = 0;
     for (const operation of operations) {
@@ -77,8 +83,19 @@ export function flushPendingCloudOperations(
         confirmed++;
       } catch (error) {
         failed.add(operation.record_id);
+        if (!firstFailureMessage) {
+          firstFailureMessage = error instanceof Error ? error.message : String(error);
+        }
         console.warn(`[${scope}] Operazione cloud ancora in sospeso:`, error);
       }
+    }
+    if (failed.size > 0) {
+      failedOperationsByScope.set(
+        scope,
+        `${failed.size} operazioni in coda non confermate (${firstFailureMessage || "errore cloud"})`,
+      );
+    } else {
+      failedOperationsByScope.delete(scope);
     }
     if (legacyHeld > 0) {
       legacyOperationsByScope.set(scope, legacyHeld);

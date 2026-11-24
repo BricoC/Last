@@ -146,7 +146,15 @@ impl StagedSnapshot {
         .execute(&mut connection)
         .await
         .map_err(|error| format!("Coda ordini nel backup: {error}"))?;
-        connection.close().await.map_err(|error| error.to_string())
+        connection
+            .close()
+            .await
+            .map_err(|error| error.to_string())?;
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&self.path)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| format!("Impossibile consolidare la coda ordini nel backup: {error}"))
     }
 
     pub(crate) async fn validate(&self, require_last_schema: bool) -> Result<(), String> {

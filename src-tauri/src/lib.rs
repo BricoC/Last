@@ -79,10 +79,29 @@ fn sanitize_safe_output_path(base_dir: &Path, filename: &str) -> Result<PathBuf,
     Ok(base_dir.join(normalized))
 }
 
+const ALLOWED_OUTPUT_EXTENSIONS: &[&str] = &[
+    "pdf", "xlsx", "csv", "txt", "json", "xml", "png", "jpg", "jpeg",
+];
+
+fn validate_allowed_extension(path: &Path, allowed: &[&str]) -> Result<(), String> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext.is_empty() || !allowed.contains(&ext.as_str()) {
+        return Err(format!(
+            "Estensione file '.{ext}' non consentita per il salvataggio."
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn save_file_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, String> {
     let desktop_dir = resolve_desktop_dir()?;
     let file_path = sanitize_safe_output_path(&desktop_dir, &filename)?;
+    validate_allowed_extension(&file_path, ALLOWED_OUTPUT_EXTENSIONS)?;
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Errore creazione cartella: {}", e))?;
     }
@@ -96,6 +115,7 @@ fn save_file_base64_to_desktop(filename: String, base64_content: String) -> Resu
     use base64::prelude::*;
     let desktop_dir = resolve_desktop_dir()?;
     let file_path = sanitize_safe_output_path(&desktop_dir, &filename)?;
+    validate_allowed_extension(&file_path, ALLOWED_OUTPUT_EXTENSIONS)?;
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Errore creazione cartella: {}", e))?;
     }
@@ -251,6 +271,9 @@ fn read_single_excel_file_base64(file_path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn save_pdf_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, String> {
+    let desktop_dir = resolve_desktop_dir()?;
+    let file_path = sanitize_safe_output_path(&desktop_dir, &filename)?;
+    validate_allowed_extension(&file_path, &["pdf"])?;
     save_file_to_desktop(filename, bytes)
 }
 
@@ -414,6 +437,7 @@ fn save_temp_file(filename: String, bytes: Vec<u8>) -> Result<String, String> {
     fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("Errore creazione cartella temporanea: {}", e))?;
     let file_path = sanitize_safe_output_path(&temp_dir, &filename)?;
+    validate_allowed_extension(&file_path, ALLOWED_OUTPUT_EXTENSIONS)?;
     fs::write(&file_path, bytes).map_err(|e| format!("Errore scrittura file temporaneo: {}", e))?;
     Ok(file_path.to_string_lossy().to_string())
 }
@@ -501,11 +525,21 @@ fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());
     }
+    let mut validated_paths = Vec::with_capacity(paths.len());
+    for raw in &paths {
+        if raw.trim().starts_with("\\\\") {
+            return Err(
+                "Percorsi di rete UNC non consentiti per la copia negli appunti".to_string(),
+            );
+        }
+        let valid = validate_allowed_file_path(raw, ALLOWED_OUTPUT_EXTENSIONS, "clipboard")?;
+        validated_paths.push(valid.to_string_lossy().to_string());
+    }
 
     #[cfg(target_os = "windows")]
     {
         use base64::{engine::general_purpose, Engine as _};
-        let paths_json = serde_json::to_string(&paths).unwrap_or_default();
+        let paths_json = serde_json::to_string(&validated_paths).unwrap_or_default();
         let paths_b64 = general_purpose::STANDARD.encode(&paths_json);
 
         let ps_script = format!(
@@ -603,6 +637,7 @@ pub fn run() {
             backup_commands::read_backup_file,
             backup_commands::copy_database_file,
             backup_commands::restore_database_file,
+            backup_commands::export_modular_backup_tables,
             backup_commands::list_backups_in_directory,
             backup_commands::check_today_backup_exists,
             backup_commands::clean_old_backups,
@@ -616,7 +651,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_safe_output_path;
+    use super::{sanitize_safe_output_path, validate_allowed_extension, ALLOWED_OUTPUT_EXTENSIONS};
     use std::path::PathBuf;
 
     #[test]
@@ -629,6 +664,22 @@ mod tests {
 
         let ok = sanitize_safe_output_path(&base, "DDT 12.pdf").expect("valid filename");
         assert_eq!(ok, base.join("DDT 12.pdf"));
+        assert!(validate_allowed_extension(&ok, &["pdf"]).is_ok());
+    }
+
+    #[test]
+    fn validate_allowed_extension_blocks_executables_and_scripts() {
+        for bad in ["drop.exe", "run.bat", "script.ps1", "evil.lnk", "noext"] {
+            let p = PathBuf::from(bad);
+            assert!(validate_allowed_extension(&p, ALLOWED_OUTPUT_EXTENSIONS).is_err());
+        }
+        assert!(validate_allowed_extension(
+            &PathBuf::from("report.xlsx"),
+            ALLOWED_OUTPUT_EXTENSIONS
+        )
+        .is_ok());
+        assert!(validate_allowed_extension(&PathBuf::from("ddt.pdf"), &["pdf"]).is_ok());
+        assert!(validate_allowed_extension(&PathBuf::from("ddt.xlsx"), &["pdf"]).is_err());
     }
 
     #[test]

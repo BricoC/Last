@@ -252,10 +252,10 @@ export function safeMoney(val?: any): MonetaryValue {
  */
 export function isPositivePrice(val?: any): boolean {
   if (val === null || val === undefined || val === "" || val === 0 || val === "0") return false;
-  if (typeof val === "object" && typeof val.isZero === "function") {
-    return !val.isZero();
+  if (typeof val === "object" && typeof val.isPositive === "function") {
+    return val.isPositive();
   }
   const m = safeMoney(val);
-  return !m.isZero();
+  return m.isPositive();
 }
 

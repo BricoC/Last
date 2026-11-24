@@ -377,14 +377,25 @@ export class ClientRepository {
     let pec = target.pec;
     let email = target.email;
     let paymentMethod = target.payment_method;
+    let destinationName = target.destination_name;
+    let destinationAddress = target.destination_address;
+    let destinationCity = target.destination_city;
+    const noteParts: string[] = [];
+    if (target.notes?.trim()) noteParts.push(target.notes.trim());
+    let mergedCount = 0;
+    let skippedCrossProject = 0;
 
     for (const dupId of new Set(duplicateIds)) {
       if (dupId === canonicalId) continue;
       const dup = await this.getClientById(dupId);
       if (!dup) continue;
-      if ((target.project_url ?? null) !== (dup.project_url ?? null)) continue;
+      if ((target.project_url ?? null) !== (dup.project_url ?? null)) {
+        skippedCrossProject++;
+        continue;
+      }
+      mergedCount++;
 
-      // Completa i campi anagrafici se mancanti nel principale
+      // Completa i campi anagrafici e destinazione principale se mancanti nel principale
       if (!address && dup.address) address = dup.address;
       if (!city && dup.city) city = dup.city;
       if (!postalCode && dup.postal_code) postalCode = dup.postal_code;
@@ -395,6 +406,12 @@ export class ClientRepository {
       if (!pec && dup.pec) pec = dup.pec;
       if (!email && dup.email) email = dup.email;
       if (!paymentMethod && dup.payment_method) paymentMethod = dup.payment_method;
+      if (!destinationName && dup.destination_name) destinationName = dup.destination_name;
+      if (!destinationAddress && dup.destination_address) destinationAddress = dup.destination_address;
+      if (!destinationCity && dup.destination_city) destinationCity = dup.destination_city;
+      if (dup.notes?.trim() && !noteParts.includes(dup.notes.trim())) {
+        noteParts.push(dup.notes.trim());
+      }
 
       // Fonde le destinazioni uniche
       for (const d of dup.destinations) {
@@ -439,6 +456,36 @@ export class ClientRepository {
         params: [target.business_name, target.id, now, dup.business_name, dup.id, mergeProjectUrl],
       });
 
+      // Riassegna eventuali preventivi nel cestino, listini clienti e offerte referenziati per nome
+      writes.push({
+        sql: `UPDATE quotes_trash SET client_name = $1
+         WHERE LOWER(TRIM(client_name)) = LOWER(TRIM($2))
+           AND (($3 IS NULL AND project_url IS NULL) OR project_url = $3)`,
+        params: [target.business_name, dup.business_name, mergeProjectUrl],
+      });
+      writes.push({
+        sql: `UPDATE listini_clienti SET cliente = $1, updated_at = $2, sync_revision = COALESCE(sync_revision, 0) + 1
+         WHERE LOWER(TRIM(cliente)) = LOWER(TRIM($3))`,
+        params: [target.business_name, now, dup.business_name],
+      });
+      writes.push({
+        sql: `UPDATE listini_clienti_cestino SET cliente = $1
+         WHERE LOWER(TRIM(cliente)) = LOWER(TRIM($2))`,
+        params: [target.business_name, dup.business_name],
+      });
+      writes.push({
+        sql: `UPDATE offers SET requester = $1, updated_at = $2, sync_status = 'pending'
+         WHERE LOWER(TRIM(requester)) = LOWER(TRIM($3))
+           AND (($4 IS NULL AND project_url IS NULL) OR project_url = $4)`,
+        params: [target.business_name, now, dup.business_name, mergeProjectUrl],
+      });
+      writes.push({
+        sql: `UPDATE offers_trash SET requester = $1
+         WHERE LOWER(TRIM(requester)) = LOWER(TRIM($2))
+           AND (($3 IS NULL AND project_url IS NULL) OR project_url = $3)`,
+        params: [target.business_name, dup.business_name, mergeProjectUrl],
+      });
+
       // Soft delete del record duplicato
       writes.push({
         sql: `UPDATE clients
@@ -447,6 +494,10 @@ export class ClientRepository {
         params: [now, target.business_name, dup.id, dup.updated_at, mergeProjectUrl],
         expectedRows: 1,
       });
+    }
+
+    if (mergedCount === 0 && skippedCrossProject > 0) {
+      throw new Error("Impossibile unire clienti appartenenti a progetti Supabase diversi o legacy.");
     }
 
     // Salva il target arricchito
@@ -463,13 +514,13 @@ export class ClientRepository {
       pec,
       email,
       payment_method: paymentMethod,
-      destination_name: target.destination_name,
-      destination_address: target.destination_address,
-      destination_city: target.destination_city,
+      destination_name: destinationName,
+      destination_address: destinationAddress,
+      destination_city: destinationCity,
       destinations: deduplicateDestinations(destinations),
       price_lists: Array.from(priceLists),
       phones,
-      notes: target.notes,
+      notes: noteParts.length ? noteParts.join("\n") : undefined,
       is_active: target.is_active,
     }, target.id, now);
     writes.push({
@@ -478,6 +529,9 @@ export class ClientRepository {
       expectedRows: 1,
     });
     await applyLocalDatabaseBatch(writes);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+    }
     const updatedTarget = await this.getClientById(target.id);
     if (!updatedTarget) throw new Error("Cliente principale non trovato dopo l'unione.");
     return updatedTarget;

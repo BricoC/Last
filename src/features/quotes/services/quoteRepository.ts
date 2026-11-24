@@ -233,6 +233,20 @@ export class QuoteRepository {
             )`,
             params: [],
           },
+      {
+        sql: `DELETE FROM quote_items WHERE deleted_at IS NOT NULL AND quote_id IN (
+          SELECT id FROM quotes WHERE deleted_at IS NOT NULL AND sync_status = 'synced'
+            AND id NOT IN (SELECT id FROM quotes_trash)
+            AND NOT EXISTS (SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = quotes.id)
+        )`,
+        params: [],
+      },
+      {
+        sql: `DELETE FROM quotes WHERE deleted_at IS NOT NULL AND sync_status = 'synced'
+          AND id NOT IN (SELECT id FROM quotes_trash)
+          AND NOT EXISTS (SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = quotes.id)`,
+        params: [],
+      },
     ]);
     await QuoteSyncService.retryPendingChanges();
   }
@@ -321,6 +335,8 @@ export class QuoteRepository {
     const originProjectUrl = trash?.project_url ?? local?.project_url ?? null;
     await applyLocalDatabaseBatch([
       { sql: "DELETE FROM quotes_trash WHERE id = $1", params: [id] },
+      { sql: "DELETE FROM quote_items WHERE quote_id = $1 AND deleted_at IS NOT NULL", params: [id] },
+      { sql: "DELETE FROM quotes WHERE id = $1 AND deleted_at IS NOT NULL", params: [id] },
       pendingCloudWrite("quotes", id, "cleanup", null, originProjectUrl),
     ]);
     await QuoteSyncService.retryPendingChanges();
