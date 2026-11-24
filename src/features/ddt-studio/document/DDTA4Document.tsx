@@ -905,7 +905,12 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             paddingTop: DDT_CONFIG.footer.paddingTopValori,
                           }}
                         >
-                          {ddt.weight_kg || ""}
+                          {(() => {
+                            const w = String(ddt.weight_kg ?? "").trim();
+                            if (!w) return "";
+                            const n = Number(w.replace(",", "."));
+                            return !Number.isNaN(n) && n <= 0 ? "" : w;
+                          })()}
                         </div>
                       </td>
 

@@ -61,6 +61,7 @@ export const UserManagementPanel: React.FC = () => {
   const [newCanSettings, setNewCanSettings] = useState(false);
   const [newCanEditPrices, setNewCanEditPrices] = useState(false);
   const [newCanEditOr, setNewCanEditOr] = useState(false);
+  const [newCanManageBackups, setNewCanManageBackups] = useState(false);
   const [newTheme, setNewTheme] = useState<"grigio" | "nero-oled" | "avorio">("grigio");
   const [newAllowedPages, setNewAllowedPages] = useState<string[]>([...DEFAULT_ALLOWED_PAGES]);
   const [newRequirePassword, setNewRequirePassword] = useState(false);
@@ -83,6 +84,7 @@ export const UserManagementPanel: React.FC = () => {
     setNewCanSettings(false);
     setNewCanEditPrices(false);
     setNewCanEditOr(false);
+    setNewCanManageBackups(false);
     setNewTheme("grigio");
     setNewAllowedPages(DEFAULT_ALLOWED_PAGES.filter((p) => p !== "settings"));
     setNewRequirePassword(false);
@@ -133,6 +135,7 @@ export const UserManagementPanel: React.FC = () => {
         can_access_settings: newCanSettings,
         can_edit_price_lists: newCanEditPrices,
         can_edit_or_numbers: newCanEditOr,
+        can_manage_backups: newCanManageBackups,
         can_access_ddt: true,
         can_access_price_lists: true,
         allowed_pages: newAllowedPages,
@@ -195,6 +198,7 @@ export const UserManagementPanel: React.FC = () => {
         can_access_settings: editingUser.is_admin ? true : editingUser.can_access_settings,
         can_edit_price_lists: editingUser.is_admin ? true : editingUser.can_edit_price_lists,
         can_edit_or_numbers: editingUser.is_admin ? true : editingUser.can_edit_or_numbers,
+        can_manage_backups: Boolean(editingUser.can_manage_backups),
         allowed_pages: effectivePages,
         topbar_order: finalTopbarOrder,
       };
@@ -740,6 +744,25 @@ export const UserManagementPanel: React.FC = () => {
                     </span>
                   </div>
                 </label>
+
+                <label className="flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editingUser.can_manage_backups)}
+                    onChange={(e) =>
+                      setEditingUser({ ...editingUser, can_manage_backups: e.target.checked })
+                    }
+                    className="w-4 h-4 mt-0.5 rounded border-[var(--border)] text-[var(--primary)]"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-[var(--foreground)] block">
+                      Esegui Backup
+                    </span>
+                    <span className="text-[10px] text-[var(--muted-foreground)] leading-tight block mt-0.5">
+                      Autorizza l'esecuzione di backup automatici e manuali da questa utenza
+                    </span>
+                  </div>
+                </label>
               </div>
             </div>
 
@@ -1034,6 +1057,23 @@ export const UserManagementPanel: React.FC = () => {
                     </span>
                   </div>
                 </label>
+
+                <label className="flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={newCanManageBackups}
+                    onChange={(e) => setNewCanManageBackups(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded border-[var(--border)] text-[var(--primary)]"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-[var(--foreground)] block">
+                      Esegui Backup
+                    </span>
+                    <span className="text-[10px] text-[var(--muted-foreground)] leading-tight block">
+                      Autorizza backup automatici e manuali
+                    </span>
+                  </div>
+                </label>
               </div>
             </div>
 
@@ -1094,6 +1134,7 @@ export const UserManagementPanel: React.FC = () => {
                 <th className="py-2.5 px-3 text-center">Pagine Visibili</th>
                 <th className="py-2.5 px-3 text-center">Modifica OR</th>
                 <th className="py-2.5 px-3 text-center">Modifica Listini</th>
+                <th className="py-2.5 px-3 text-center">Backup</th>
                 <th className="py-2.5 px-3 text-center">Settings</th>
                 <th className="py-2.5 px-3 text-center">PC Locale</th>
                 <th className="py-2.5 px-3 text-right">Azioni</th>
@@ -1195,6 +1236,20 @@ export const UserManagementPanel: React.FC = () => {
                         )}
                       >
                         {u.is_admin ? "SEMPRE (ADMIN)" : u.can_edit_price_lists ? "SÌ" : "NO"}
+                      </span>
+                    </td>
+
+                    {/* Permesso Esegui Backup */}
+                    <td className="py-3 px-3 text-center">
+                      <span
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[10px] font-bold border",
+                          u.can_manage_backups
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                            : "bg-red-500/10 text-red-400 border-red-500/30"
+                        )}
+                      >
+                        {u.can_manage_backups ? "SÌ" : "NO"}
                       </span>
                     </td>
 

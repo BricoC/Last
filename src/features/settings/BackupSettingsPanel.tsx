@@ -54,8 +54,11 @@ import {
 } from "./services/backupService";
 import { Trash2, FileSearch } from "lucide-react";
 import { useEscClose } from "@/shared/hooks/useEscClose";
+import { useUserStore } from "@/shared/stores/useUserStore";
 
 export const BackupSettingsPanel: React.FC = () => {
+  const { currentUser } = useUserStore();
+  const canManageBackups = currentUser ? Boolean(currentUser.can_manage_backups) : true;
   const [config, setConfig] = useState<BackupConfig>(() => loadBackupConfig());
   const [recordCounts, setRecordCounts] = useState<Record<string, number>>({});
   const [selectedCategories, setSelectedCategories] = useState<string[]>(config.autoCategories);
@@ -697,13 +700,28 @@ export const BackupSettingsPanel: React.FC = () => {
           <span>Esecuzione Manuale & Ripristino</span>
         </h2>
 
+        {!canManageBackups && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>
+              L'esecuzione dei backup (automatici e manuali) è disabilitata per l'utente{" "}
+              <strong>{currentUser?.name}</strong>. Puoi abilitarla in{" "}
+              <strong>Sicurezza &amp; Permessi</strong>.
+            </span>
+          </div>
+        )}
+
         <div className="flex items-center gap-3 flex-wrap">
           <button
             type="button"
             onClick={handleRunFullBackup}
-            disabled={isExporting || isRestoring}
+            disabled={!canManageBackups || isExporting || isRestoring}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition-all shadow-md cursor-pointer disabled:opacity-50"
-            title="Esegui una copia fisica immediata di tutto il database LastData.db"
+            title={
+              !canManageBackups
+                ? "Backup disabilitato per questo utente (Sicurezza & Permessi)"
+                : "Esegui una copia fisica immediata di tutto il database LastData.db"
+            }
           >
             {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             <span>Esegui Backup Completo (.db)</span>
@@ -712,9 +730,13 @@ export const BackupSettingsPanel: React.FC = () => {
           <button
             type="button"
             onClick={handleRunModularBackup}
-            disabled={isExporting || isRestoring || selectedCategories.length === 0}
+            disabled={!canManageBackups || isExporting || isRestoring || selectedCategories.length === 0}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--primary)] hover:opacity-90 text-white font-bold text-xs transition-all shadow-md cursor-pointer disabled:opacity-50"
-            title="Esporta le sole categorie selezionate in un file compatto .lastbackup"
+            title={
+              !canManageBackups
+                ? "Backup disabilitato per questo utente (Sicurezza & Permessi)"
+                : "Esporta le sole categorie selezionate in un file compatto .lastbackup"
+            }
           >
             {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowDownToLine className="w-4 h-4" />}
             <span>Backup Moduli Selezionati ({selectedCategories.length})</span>

@@ -34,6 +34,7 @@ interface UserState {
     can_access_price_lists?: boolean;
     can_edit_price_lists?: boolean;
     can_edit_or_numbers?: boolean;
+    can_manage_backups?: boolean;
     allowed_pages?: string[];
     theme_preset?: "grigio" | "nero-oled" | "avorio";
     theme_brightness?: number;

@@ -23,54 +23,6 @@ const FOLDER_FIELDS: FieldSpec[] = [
     placeholder: "Es. C:\\Cartella\\Listini Fornitori",
     isFolder: true,
   },
-  {
-    key: "oneDriveClientiDir",
-    label: "Cartella Listini Clienti (OneDrive / Sync)",
-    placeholder: "Es. C:\\OneDrive\\ListiniClienti",
-    isFolder: true,
-  },
-  {
-    key: "oneDriveGeneraliDir",
-    label: "Cartella Listini Generali (OneDrive / Sync)",
-    placeholder: "Es. C:\\OneDrive\\Listini\\Listini Generali",
-    isFolder: true,
-  },
-  {
-    key: "oneDriveGeneraleFileName",
-    label: "Nome file Listino Generale (OneDrive)",
-    placeholder: "LISTINO GENERALE.xlsm",
-    isFolder: false,
-  },
-  {
-    key: "offlineClientiDir",
-    label: "Cartella Migrazione Listini Clienti",
-    placeholder: "Es. C:\\Migrazione\\ListiniClienti",
-    isFolder: true,
-  },
-  {
-    key: "offlineGeneraliDir",
-    label: "Cartella Migrazione Listini Generali",
-    placeholder: "Es. C:\\Migrazione\\Listini\\Listini Generali",
-    isFolder: true,
-  },
-  {
-    key: "offlineGeneraleFileName",
-    label: "Nome file Listino Generale (Migrazione)",
-    placeholder: "LISTINO GENERALE.xlsm",
-    isFolder: false,
-  },
-  {
-    key: "offlineDdtDatiDir",
-    label: "Cartella Migrazione DDT Dati",
-    placeholder: "Es. C:\\Migrazione\\Database\\DDTDati",
-    isFolder: true,
-  },
-  {
-    key: "offlineDdtArticoliDir",
-    label: "Cartella Migrazione DDT Articoli",
-    placeholder: "Es. C:\\Migrazione\\Database\\DDTArticoli",
-    isFolder: true,
-  },
 ];
 
 export const FolderPathsSettingsPanel: React.FC = () => {
@@ -110,7 +62,7 @@ export const FolderPathsSettingsPanel: React.FC = () => {
             Percorsi Cartelle e File Locali / OneDrive
           </h3>
           <p className="text-xs text-[var(--muted-foreground)]">
-            Configura i percorsi locali usati da Listini Fornitori, Importa Listini OneDrive e Migrazione Listini/DDT.
+            Configura la cartella locale usata da Listini Fornitori.
           </p>
         </div>
         <button

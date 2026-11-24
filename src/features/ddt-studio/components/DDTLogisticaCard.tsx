@@ -63,7 +63,12 @@ export const DDTLogisticaCard: React.FC<DDTLogisticaCardProps> = ({
           <div className="text-[11px] text-[var(--muted-foreground)] flex items-center gap-1">
             <span>Peso:</span>
             <span className="font-semibold text-[var(--foreground)] font-mono">
-              {ddt.weight_kg ? `${ddt.weight_kg} kg` : "-"}
+              {(() => {
+                const w = String(ddt.weight_kg ?? "").trim();
+                if (!w) return "-";
+                const n = Number(w.replace(",", "."));
+                return !Number.isNaN(n) && n <= 0 ? "-" : `${w} kg`;
+              })()}
             </span>
           </div>
 
@@ -188,7 +193,12 @@ export const DDTLogisticaCard: React.FC<DDTLogisticaCardProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={ddt.weight_kg || ""}
+                  value={(() => {
+                    const w = String(ddt.weight_kg ?? "").trim();
+                    if (!w) return "";
+                    const n = Number(w.replace(",", "."));
+                    return !Number.isNaN(n) && n <= 0 ? "" : w;
+                  })()}
                   onChange={(e) => setDdt((p) => ({ ...p, weight_kg: e.target.value }))}
                   className="w-full mt-0.5 px-2 py-1 text-xs text-center bg-[var(--background)] border border-[var(--border)] rounded text-[var(--foreground)] outline-none focus:border-[var(--primary)]"
                 />

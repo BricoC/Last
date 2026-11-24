@@ -364,22 +364,18 @@ describe("Audit Remediation Regression Suite", () => {
       const {
         loadFolderPathsConfig,
         saveFolderPathsConfig,
-        getOneDriveGeneraleFilePath,
       } = await import("@/features/settings/services/folderPathsSettings");
 
       const initial = loadFolderPathsConfig();
       expect(JSON.stringify(initial)).not.toMatch(/BricoClassFiles/i);
       expect(initial.supplierPriceListsDir).toBe("");
-      expect(initial.oneDriveClientiDir).toBe("");
 
       saveFolderPathsConfig({
         ...initial,
         supplierPriceListsDir: "C:\\Custom\\Fornitori",
-        oneDriveGeneraliDir: "C:\\Custom\\Generali",
       });
       const reloaded = loadFolderPathsConfig();
       expect(reloaded.supplierPriceListsDir).toBe("C:\\Custom\\Fornitori");
-      expect(getOneDriveGeneraleFilePath(reloaded)).toBe("C:\\Custom\\Generali\\LISTINO GENERALE.xlsm");
     } finally {
       vi.unstubAllGlobals();
     }

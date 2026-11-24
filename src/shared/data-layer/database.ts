@@ -563,6 +563,7 @@ const MIGRATIONS: Migration[] = [
         can_access_price_lists INTEGER NOT NULL DEFAULT 1,
         can_edit_price_lists INTEGER NOT NULL DEFAULT 0,
         can_edit_or_numbers INTEGER NOT NULL DEFAULT 0,
+        can_manage_backups INTEGER NOT NULL DEFAULT 0,
         is_admin INTEGER NOT NULL DEFAULT 0,
         allowed_pages TEXT,
         theme_preset TEXT DEFAULT 'grigio',

@@ -87,7 +87,6 @@ import { cloudSyncStatusService } from "@/shared/services/cloudSyncStatusService
 import { saveLocalRibaPaid, getLocalRibaStatus } from "@/features/dashboard/services/ribaService";
 import { flushPendingCloudOperations, getLegacyPendingOperationsCount } from "@/shared/data-layer/pendingCloudOperations";
 import { OrderEmailService } from "@/features/orders/services/orderEmailService";
-import { backupLocalSqliteTable } from "@/features/manual-cloud-import/services/manualPriceListImportService";
 import { extractPkcs7ContentBytes } from "@/features/invoices/services/invoiceXmlParser";
 
 describe("Audit Remediation v0.3.6 (AUD-01 .. AUD-07, AUD-10)", () => {
@@ -457,10 +456,7 @@ describe("Audit Remediation v0.3.6 (AUD-01 .. AUD-07, AUD-10)", () => {
     expect(sentCall).toBeDefined();
     expect(String((sentCall?.[1] as { body: string }).body)).not.toContain("image/svg+xml");
 
-    // 2. backupLocalSqliteTable rejects SQL injection table names
-    await expect(backupLocalSqliteTable("listini_clienti; DROP TABLE clients;--")).rejects.toThrow("Nome tabella non valido");
-
-    // 3. Deeply nested BER constructed tags do not cause stack overflow
+    // 2. Deeply nested BER constructed tags do not cause stack overflow
     const oid = [0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x01];
     const nested = new Uint8Array(oid.length + 2 + 200);
     nested.set(oid, 0);

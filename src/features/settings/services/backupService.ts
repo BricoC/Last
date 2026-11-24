@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
+import { useUserStore } from "@/shared/stores/useUserStore";
 
 export interface TableCountItem {
   tableName: string;
@@ -556,6 +557,16 @@ export function getLocalBackupDate(): string {
   return getBackupFileTimestamp().slice(0, 10).replace(/\./g, "-");
 }
 
+function getBackupStationSuffix(): string {
+  try {
+    const rawName = useUserStore.getState().currentUser?.name || "";
+    const clean = rawName.replace(/[^a-zA-Z0-9._ -]/g, "").trim();
+    return clean ? ` (${clean})` : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function executeFullDatabaseBackup(folderPath: string): Promise<{
   success: boolean;
   filePath: string;
@@ -565,7 +576,8 @@ export async function executeFullDatabaseBackup(folderPath: string): Promise<{
 }> {
   try {
     const ts = getBackupFileTimestamp();
-    const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\Backup Completo ${ts}.db`;
+    const stationSuffix = getBackupStationSuffix();
+    const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\Backup Completo ${ts}${stationSuffix}.db`;
 
     const size = await invoke<number>("copy_database_file", { targetFilePath: targetFile, orderQueue: JSON.stringify(readOrderQueueForBackup()) });
 
@@ -649,8 +661,9 @@ export async function executeModularBackup(
     };
 
     const ts = getBackupFileTimestamp();
+    const stationSuffix = getBackupStationSuffix();
     const prefix = isTotal ? "Backup Completo Modulare" : "Backup Modulare";
-    const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\${prefix} ${ts}.lastbackup`;
+    const targetFile = `${folderPath.replace(/[\\/]$/, "")}\\${prefix} ${ts}${stationSuffix}.lastbackup`;
 
     const json = JSON.stringify(pkg, null, 2);
     const size = await invoke<number>("write_backup_file", {
@@ -908,6 +921,12 @@ export async function checkAndExecuteDailyBackup(currentUserName?: string): Prom
   filePath?: string;
   error?: string;
 }> {
+  // Verifica permesso backup per l'utente corrente (evita backup da postazioni non autorizzate)
+  const activeUser = useUserStore.getState().currentUser;
+  if (activeUser && activeUser.can_manage_backups === false) {
+    return { ran: false };
+  }
+
   const config = loadBackupConfig();
   // Se la cartella di backup non è stata esplicitamente configurata dall'utente, non fare backup automatico
   if (!config.folderPath || config.folderPath.trim() === "") {

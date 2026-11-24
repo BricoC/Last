@@ -64,6 +64,7 @@ export interface AppUser {
   can_access_price_lists: boolean;
   can_edit_price_lists: boolean;
   can_edit_or_numbers: boolean;
+  can_manage_backups?: boolean;
   is_admin: boolean;
   allowed_pages: string[];
   theme_preset: "grigio" | "nero-oled" | "avorio";
@@ -185,6 +186,7 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     can_access_price_lists: true,
     can_edit_price_lists: true,
     can_edit_or_numbers: true,
+    can_manage_backups: true,
     is_admin: true,
     allowed_pages: DEFAULT_ALLOWED_PAGES,
     theme_preset: "grigio",
@@ -202,6 +204,7 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     can_access_price_lists: true,
     can_edit_price_lists: false,
     can_edit_or_numbers: false,
+    can_manage_backups: false,
     is_admin: false,
     allowed_pages: [
       "dashboard",
@@ -232,6 +235,7 @@ const DEFAULT_USERS: Omit<AppUser, "created_at">[] = [
     can_access_price_lists: true,
     can_edit_price_lists: false,
     can_edit_or_numbers: false,
+    can_manage_backups: false,
     is_admin: false,
     allowed_pages: [
       "dashboard",
@@ -272,6 +276,7 @@ export class AppUserService {
           can_access_price_lists INTEGER NOT NULL DEFAULT 1,
           can_edit_price_lists INTEGER NOT NULL DEFAULT 0,
           can_edit_or_numbers INTEGER NOT NULL DEFAULT 0,
+          can_manage_backups INTEGER NOT NULL DEFAULT 0,
           is_admin INTEGER NOT NULL DEFAULT 0,
           allowed_pages TEXT,
           theme_preset TEXT DEFAULT 'grigio',
@@ -302,6 +307,16 @@ export class AppUserService {
         }
       }
 
+      // Aggiunta colonna can_manage_backups: alla prima migrazione abilita automaticamente gli Admin esistenti
+      try {
+        await db.execute(
+          "ALTER TABLE app_users ADD COLUMN can_manage_backups INTEGER NOT NULL DEFAULT 0"
+        );
+        await db.execute("UPDATE app_users SET can_manage_backups = 1 WHERE is_admin = 1");
+      } catch {
+        // Colonna già presente
+      }
+
       // Rinomina automatica di 'Amministratore' in 'Admin' per l'account principale id='admin'
       try {
         await db.execute(
@@ -320,9 +335,9 @@ export class AppUserService {
           await db.execute(
             `INSERT INTO app_users (
               id, name, station_name, can_access_settings, can_access_ddt, can_access_price_lists,
-              can_edit_price_lists, can_edit_or_numbers, is_admin, allowed_pages, theme_preset, theme_brightness,
+              can_edit_price_lists, can_edit_or_numbers, can_manage_backups, is_admin, allowed_pages, theme_preset, theme_brightness,
               password_hash, require_password, created_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, datetime('now'))`,
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, datetime('now'))`,
             [
               u.id,
               u.name,
@@ -332,6 +347,7 @@ export class AppUserService {
               u.can_access_price_lists ? 1 : 0,
               u.can_edit_price_lists ? 1 : 0,
               u.can_edit_or_numbers ? 1 : 0,
+              u.can_manage_backups ? 1 : 0,
               u.is_admin ? 1 : 0,
               JSON.stringify(u.allowed_pages),
               u.theme_preset,
@@ -397,6 +413,7 @@ export class AppUserService {
           can_access_price_lists: true,
           can_edit_price_lists: isAdmin ? true : Boolean(r.can_edit_price_lists),
           can_edit_or_numbers: isAdmin ? true : Boolean(r.can_edit_or_numbers),
+          can_manage_backups: Boolean(r.can_manage_backups),
           is_admin: isAdmin,
           allowed_pages: isAdmin ? DEFAULT_ALLOWED_PAGES : allowedPages,
           theme_preset: (r.theme_preset || "grigio") as "grigio" | "nero-oled" | "avorio",
@@ -422,6 +439,7 @@ export class AppUserService {
     can_access_price_lists?: boolean;
     can_edit_price_lists?: boolean;
     can_edit_or_numbers?: boolean;
+    can_manage_backups?: boolean;
     is_admin?: boolean;
     allowed_pages?: string[];
     theme_preset?: "grigio" | "nero-oled" | "avorio";
@@ -441,6 +459,7 @@ export class AppUserService {
     const canPrices = 1;
     const canEditPrices = isAdmin ? 1 : user.can_edit_price_lists ? 1 : 0;
     const canEditOr = isAdmin ? 1 : user.can_edit_or_numbers ? 1 : 0;
+    const canManageBackups = user.can_manage_backups !== undefined ? (user.can_manage_backups ? 1 : 0) : (isAdmin ? 1 : 0);
     const pages = isAdmin
       ? DEFAULT_ALLOWED_PAGES
       : (user.allowed_pages || DEFAULT_ALLOWED_PAGES.filter((p) => p !== "settings"));
@@ -454,9 +473,9 @@ export class AppUserService {
     await db.execute(
       `INSERT INTO app_users (
         id, name, station_name, can_access_settings, can_access_ddt, can_access_price_lists,
-        can_edit_price_lists, can_edit_or_numbers, is_admin, allowed_pages, theme_preset, theme_brightness,
+        can_edit_price_lists, can_edit_or_numbers, can_manage_backups, is_admin, allowed_pages, theme_preset, theme_brightness,
         password_hash, require_password, topbar_order, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         id,
         name,
@@ -466,6 +485,7 @@ export class AppUserService {
         canPrices,
         canEditPrices,
         canEditOr,
+        canManageBackups,
         isAdmin ? 1 : 0,
         JSON.stringify(pages),
         themePreset,
@@ -486,6 +506,7 @@ export class AppUserService {
       can_access_price_lists: Boolean(canPrices),
       can_edit_price_lists: Boolean(canEditPrices),
       can_edit_or_numbers: Boolean(canEditOr),
+      can_manage_backups: Boolean(canManageBackups),
       is_admin: isAdmin,
       allowed_pages: pages,
       theme_preset: themePreset,
@@ -507,6 +528,7 @@ export class AppUserService {
     const canSettings = isAdmin ? 1 : user.can_access_settings ? 1 : 0;
     const canEditPrices = isAdmin ? 1 : user.can_edit_price_lists ? 1 : 0;
     const canEditOr = isAdmin ? 1 : user.can_edit_or_numbers ? 1 : 0;
+    const canManageBackups = user.can_manage_backups ? 1 : 0;
     const pages = isAdmin ? DEFAULT_ALLOWED_PAGES : (user.allowed_pages || []);
     const requirePassword = user.require_password ? 1 : 0;
     const topbarOrder = user.topbar_order && user.topbar_order.length > 0 ? user.topbar_order : DEFAULT_TOPBAR_ORDER;
@@ -515,15 +537,16 @@ export class AppUserService {
       `UPDATE app_users 
        SET name = $1, station_name = $2, can_access_settings = $3, can_access_ddt = 1,
            can_access_price_lists = 1, can_edit_price_lists = $4, can_edit_or_numbers = $5,
-           is_admin = $6, allowed_pages = $7, theme_preset = $8, theme_brightness = $9,
-           password_hash = $10, require_password = $11, topbar_order = $12
-       WHERE id = $13`,
+           can_manage_backups = $6, is_admin = $7, allowed_pages = $8, theme_preset = $9, theme_brightness = $10,
+           password_hash = $11, require_password = $12, topbar_order = $13
+       WHERE id = $14`,
       [
         user.name,
         user.station_name,
         canSettings,
         canEditPrices,
         canEditOr,
+        canManageBackups,
         isAdmin ? 1 : 0,
         JSON.stringify(pages),
         user.theme_preset || "grigio",

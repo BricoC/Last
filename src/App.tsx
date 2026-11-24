@@ -32,8 +32,6 @@ const OrNumbersPage = lazy(() => import("@/features/or-numbers/OrNumbersPage").t
 const OffersPage = lazy(() => import("@/features/offers/OffersPage").then((module) => ({ default: module.OffersPage })));
 const NotesPage = lazy(() => import("@/features/notes/NotesPage").then((module) => ({ default: module.NotesPage })));
 const SupplierPriceListPage = lazy(() => import("@/features/supplier-price-lists/SupplierPriceListPage").then((module) => ({ default: module.SupplierPriceListPage })));
-const ManualCloudImportPage = lazy(() => import("@/features/manual-cloud-import/ManualCloudImportPage").then((module) => ({ default: module.ManualCloudImportPage })));
-const OneDriveListiniImportPage = lazy(() => import("@/features/onedrive-listini-import/OneDriveListiniImportPage").then((module) => ({ default: module.OneDriveListiniImportPage })));
 const DdtBatchExportRunner = lazy(() => import("@/features/ddt-studio/components/DdtBatchExportRunner").then((module) => ({ default: module.DdtBatchExportRunner })));
 const IllidanCinematicOverlay = lazy(() => import("@/shared/easter-eggs/IllidanCinematicOverlay").then((module) => ({ default: module.IllidanCinematicOverlay })));
 const EasterEggVaultModal = lazy(() => import("@/shared/easter-eggs/EasterEggVaultModal").then((module) => ({ default: module.EasterEggVaultModal })));
@@ -360,10 +358,6 @@ export function App() {
         return renderLazyPage(<NotesPage windowId={windowId} />);
       case "supplier-price-lists":
         return renderLazyPage(<SupplierPriceListPage />);
-      case "manual-cloud-import":
-        return currentUser?.is_admin ? renderLazyPage(<ManualCloudImportPage />) : null;
-      case "onedrive-listini-import":
-        return currentUser?.is_admin ? renderLazyPage(<OneDriveListiniImportPage />) : null;
       default:
         return (
           <div className="p-6 max-w-4xl mx-auto">
