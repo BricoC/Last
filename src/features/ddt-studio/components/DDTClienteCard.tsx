@@ -4,6 +4,7 @@ import { DdtDocument, DdtAccountOrBalance } from "../models/ddt";
 import { Client, ClientDestination } from "@/features/clients/models/client";
 import { clientRepository } from "@/features/clients/services/clientRepository";
 import { deduplicateDestinations } from "@/features/clients/utils/destinationUtils";
+import { formatCityForDdt } from "@/features/clients/utils/cityProvinceUtils";
 import { getDestinationInfo } from "../utils/destinationCleaner";
 
 export interface DDTClienteCardProps {
@@ -105,7 +106,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
             return {
               ...prev,
               client_address: prev.client_address || c.address || "",
-              client_city: prev.client_city || [c.city, c.province].filter(Boolean).join(" (") + (c.province ? ")" : ""),
+              client_city: prev.client_city || formatCityForDdt(c.city, c.province),
               client_vat: prev.client_vat || c.vat_number || "",
               client_fiscal_code: prev.client_fiscal_code || c.fiscal_code || "",
               client_sdi: prev.client_sdi || c.sdi_code || "",
@@ -145,7 +146,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
               ...prev,
               client_id: prev.client_id || exact.id,
               client_address: prev.client_address || exact.address || "",
-              client_city: prev.client_city || [exact.city, exact.province].filter(Boolean).join(" (") + (exact.province ? ")" : ""),
+              client_city: prev.client_city || formatCityForDdt(exact.city, exact.province),
               client_vat: prev.client_vat || exact.vat_number || "",
               client_fiscal_code: prev.client_fiscal_code || exact.fiscal_code || "",
               client_sdi: prev.client_sdi || exact.sdi_code || "",
@@ -217,21 +218,24 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
   const handleSelectClient = (c: Client) => {
     setSelectedClient(c);
 
-    // Destinazione merci: predefinita su destinazione alternativa (sigla in Indirizzo Consegna, città vuota)
+    // Destinazione merci:
+    // - Se il cliente ha destinazioni multiple (> 1 sede), imposta SOLO nome ditta e indirizzo di consegna (città vuota)
+    // - Se ha 1 sola sede, mantiene anche la città pulita senza provincia ripetuta
+    const cleanClientCity = formatCityForDdt(c.city, c.province);
     let destName = c.business_name;
     let destAddress = c.address || "";
-    let destCity = c.city || "";
+    let destCity = cleanClientCity;
 
     if (c.destinations && c.destinations.length > 0) {
       const firstDest = c.destinations[0];
       const destInfo = getDestinationInfo(firstDest, c.business_name);
-      destName = firstDest.luogo || c.business_name;
+      destName = c.business_name;
       destAddress = destInfo.addressValue;
       destCity = "";
     } else if (c.destination_name || c.destination_city) {
       destName = c.destination_name || c.business_name;
       destAddress = c.destination_address || c.address || "";
-      destCity = c.destination_city || c.city || "";
+      destCity = formatCityForDdt(c.destination_city || c.city || "", c.province);
     }
 
     setDdt((prev) => ({
@@ -239,7 +243,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
       client_id: c.id,
       client_name: c.business_name,
       client_address: c.address || "",
-      client_city: [c.city, c.province].filter(Boolean).join(" (") + (c.province ? ")" : ""),
+      client_city: cleanClientCity,
       client_vat: c.vat_number || "",
       client_fiscal_code: c.fiscal_code || "",
       client_sdi: c.sdi_code || "",
@@ -341,7 +345,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
         const newDestEntry: ClientDestination = {
           id: crypto.randomUUID(),
           citta: cleanAddr || cleanCity,
-          luogo: cleanCity && cleanAddr ? `${cleanName} · ${cleanCity}` : cleanName,
+          luogo: cleanName,
           note: "",
         };
 
@@ -588,11 +592,14 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
                   {/* Sede Legale */}
                   <div
                     onClick={() => {
+                      const hasMultipleDestinations = (selectedClient?.destinations?.length ?? 0) > 0;
                       setDdt((prev) => ({
                         ...prev,
                         destination_name: selectedClient?.business_name || prev.client_name || "",
                         destination_address: selectedClient?.address || prev.client_address || "",
-                        destination_city: selectedClient?.city || prev.client_city || "",
+                        destination_city: hasMultipleDestinations
+                          ? ""
+                          : formatCityForDdt(selectedClient?.city || prev.client_city || "", selectedClient?.province),
                       }));
                       setShowDestDropdown(false);
                       setTimeout(() => {
@@ -627,7 +634,7 @@ export const DDTClienteCard: React.FC<DDTClienteCardProps> = ({
                         onClick={() => {
                           setDdt((prev) => ({
                             ...prev,
-                            destination_name: d.luogo || selectedClient.business_name || prev.client_name || "",
+                            destination_name: selectedClient.business_name || prev.client_name || "",
                             destination_address: addressValue,
                             destination_city: "",
                           }));

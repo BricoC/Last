@@ -1,5 +1,6 @@
 import { parseDdtQuantity } from "./ddtQuantity";
 import { MonetaryValue, money, safeMoney, isPositivePrice } from "@/shared/domain/monetaryValue";
+import { collapseDuplicateProvinces } from "@/features/clients/utils/cityProvinceUtils";
 import { DdtItem, DdtTotals } from "../models/ddt";
 
 export const OPERATORI = ["Alessandro", "Nicola", "Samu"] as const;
@@ -33,7 +34,7 @@ export function toDateIT(iso?: string): string {
 
 export function formatAddressOrCity(str?: string): string {
   if (!str) return "";
-  const s = str.trim();
+  const s = collapseDuplicateProvinces(str);
   if (s.includes("-")) {
     const parts = s.split("-");
     const main = parts[0].trim();

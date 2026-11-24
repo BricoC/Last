@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { X, Plus, Trash2, Loader2, CheckCircle2 } from "lucide-react";
+import { X, Plus, Trash2, Loader2, CheckCircle2, Percent } from "lucide-react";
 import { DdtDocument, DdtItem } from "@/features/ddt-studio/models/ddt";
 import { ddtRepository } from "@/features/ddt-studio/services/ddtRepository";
 import { safeMoney, money } from "@/shared/domain/monetaryValue";
@@ -50,6 +50,9 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
   const [goodsAppearance, setGoodsAppearance] = useState<string>("");
   const [carrier, setCarrier] = useState<string>("");
 
+  // Sconto generale su tutte le righe articolo
+  const [globalDiscount, setGlobalDiscount] = useState<string>("");
+
   // Righe Editabili
   const [rows, setRows] = useState<EditableRow[]>([]);
 
@@ -63,6 +66,7 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
     let isMounted = true;
     setLoading(true);
     setError("");
+    setGlobalDiscount("");
 
     (async () => {
       try {
@@ -163,6 +167,18 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
     });
   };
 
+  const handleGlobalDiscountChange = (rawValue: string) => {
+    setGlobalDiscount(rawValue);
+    const cleaned = rawValue.replace(/%/g, "").trim();
+    setRows((prev) =>
+      prev.map((r) =>
+        r.row_kind === "note" || !r.description.trim()
+          ? r
+          : { ...r, discount_pct: cleaned }
+      )
+    );
+  };
+
   // Calcolo Totali live in tempo reale
   const totals = useMemo(() => {
     let totImponibile = money(0);
@@ -258,33 +274,54 @@ export const DDTMiniStudioModal: React.FC<DDTMiniStudioModalProps> = ({
   return (
     <div
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150 select-none overflow-hidden"
-      onClick={onClose}
     >
       <div
         className="bg-[#0f172a] border border-[#1e3a5f] rounded-2xl shadow-2xl flex flex-col w-full max-w-5xl h-[88vh] text-white relative animate-in zoom-in-95 duration-150 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header Modale */}
-        <div className="px-5 py-3.5 border-b border-[#1e3a5f] bg-[#1e293b]/70 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-sm">
+        <div className="px-5 py-3.5 border-b border-[#1e3a5f] bg-[#1e293b]/70 flex items-center justify-between gap-4 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-sm shrink-0">
               DDT
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <span>DDT {docNumber || "Bozza"}</span>
                 <span className="text-slate-400 text-xs font-normal">del {docDate}</span>
-                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/30">
+                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/30 truncate">
                   {clientName}
                 </span>
               </h2>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-slate-400 truncate">
                 Modifica rapida testata, articoli e numero d'ordine (Premi Esc per uscire senza salvare)
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          {/* Sconto generale applicato a tutte le voci del DDT */}
+          <div
+            className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-[#0f172a]/90 border border-amber-500/35 shrink-0"
+            title="Applica uno sconto percentuale generale a tutte le righe articolo del DDT (es. 10 oppure 10+5)"
+          >
+            <Percent className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <label
+              htmlFor="ddt-mini-global-discount"
+              className="text-[10px] font-bold uppercase tracking-wider text-amber-300 whitespace-nowrap"
+            >
+              Sconto DDT
+            </label>
+            <input
+              id="ddt-mini-global-discount"
+              type="text"
+              value={globalDiscount}
+              onChange={(e) => handleGlobalDiscountChange(e.target.value)}
+              placeholder="Es. 10"
+              disabled={loading || saving}
+              className="w-20 bg-[#1e293b] border border-slate-700 rounded px-2 py-1 text-xs text-amber-300 font-mono text-center placeholder:text-slate-500 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400/50"
+            />
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0">
             <button
               type="button"
               onClick={onClose}

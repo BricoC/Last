@@ -7,8 +7,9 @@ import {
 } from "@/shared/services/supabaseConfigCache";
 import { Client, ClientDestination, ClientPhone } from "../models/client";
 import { clientRepository } from "./clientRepository";
-import { normalizeDestinationKey, deduplicateDestinations } from "../utils/destinationUtils";
+import { deduplicateDestinations } from "../utils/destinationUtils";
 import { normalizeClientCanonicalKey } from "../utils/clientSearchUtils";
+import { formatLocalitaForSupabase, parseCityAndProvince } from "../utils/cityProvinceUtils";
 
 interface SupabaseConfig {
   projectUrl: string;
@@ -332,12 +333,22 @@ export class ClientSyncService {
       id: string;
       business_name: string;
       price_lists_json: string | null;
+      destinations_json: string | null;
       sync_status: string | null;
       project_url?: string | null;
     }[]>(
-      "SELECT id, business_name, price_lists_json, sync_status, project_url FROM clients WHERE deleted_at IS NULL"
+      "SELECT id, business_name, price_lists_json, destinations_json, sync_status, project_url FROM clients WHERE deleted_at IS NULL"
     );
-    const existingMap = new Map<string, { id: string; price_lists_json: string | null; sync_status?: string | null; project_url?: string | null }>();
+    const existingMap = new Map<
+      string,
+      {
+        id: string;
+        price_lists_json: string | null;
+        destinations_json: string | null;
+        sync_status?: string | null;
+        project_url?: string | null;
+      }
+    >();
     for (const r of existingRows) {
       existingMap.set(r.business_name.trim().toLowerCase(), r);
     }
@@ -368,23 +379,21 @@ export class ClientSyncService {
       remoteNamesLower.add(lowerName);
       if (pendingDeletedNames.has(lowerName)) continue;
 
-      // Parsing localita ("TASSIGNANO - LU") -> citta e provincia
-      let city = "";
-      let province = "";
-      if (row.localita) {
-        const parts = row.localita.split(" - ");
-        if (parts.length >= 2) {
-          city = parts[0].trim();
-          province = parts[parts.length - 1].trim();
-        } else {
-          city = row.localita.trim();
+      // Parsing localita ("TASSIGNANO - LU", "LUNATA (LU) (LU)") -> citta e provincia pulite
+      const { city, province } = parseCityAndProvince(row.localita);
+
+      // Parsing destinazioni (supporta sia array JSONB che stringa JSON serializzata)
+      const destinations: ClientDestination[] = [];
+      let rawDestList: unknown = row.destinazioni;
+      if (typeof rawDestList === "string" && rawDestList.trim()) {
+        try {
+          rawDestList = JSON.parse(rawDestList);
+        } catch {
+          rawDestList = [];
         }
       }
-
-      // Parsing destinazioni
-      const destinations: ClientDestination[] = [];
-      if (Array.isArray(row.destinazioni)) {
-        for (const d of row.destinazioni) {
+      if (Array.isArray(rawDestList)) {
+        for (const d of rawDestList) {
           if (typeof d === "object" && d !== null) {
             const destObj = d as Record<string, unknown>;
             destinations.push({
@@ -445,6 +454,20 @@ export class ClientSyncService {
         if (priceLists.length > 0) matchedPriceLists++;
       }
 
+      // Se Supabase restituisce destinazioni vuote ma in locale esistono destinazioni salvate,
+      // preserviamo quelle locali per evitare azzeramenti accidentali da sync legacy/parziali.
+      let effectiveDestinations = destinations;
+      if (effectiveDestinations.length === 0 && existing?.destinations_json) {
+        try {
+          const parsedExistingDests = JSON.parse(existing.destinations_json);
+          if (Array.isArray(parsedExistingDests) && parsedExistingDests.length > 0) {
+            effectiveDestinations = parsedExistingDests as ClientDestination[];
+          }
+        } catch {
+          // ignore malformed local json
+        }
+      }
+
       const clientId = existing ? existing.id : crypto.randomUUID();
 
       writes.push({
@@ -457,7 +480,7 @@ export class ClientSyncService {
         fiscalCode: row.cod_fiscale || null,
         sdiCode: row.sdi || null,
         paymentMethod: row.pagamento || null,
-        destinationsJson: JSON.stringify(destinations),
+        destinationsJson: JSON.stringify(effectiveDestinations),
         phonesJson: JSON.stringify(phones),
         priceListsJson: JSON.stringify(priceLists),
         isUpdate: !!existing,
@@ -467,6 +490,7 @@ export class ClientSyncService {
         existingMap.set(businessName.toLowerCase(), {
           id: clientId,
           price_lists_json: JSON.stringify(priceLists),
+          destinations_json: JSON.stringify(effectiveDestinations),
         });
       }
     }
@@ -570,7 +594,7 @@ export class ClientSyncService {
       if (!matchesActiveSupabaseProject(clientProjectUrl, creds.projectUrl)) {
         return false;
       }
-      const localita = [client.city, client.province].filter(Boolean).join(" - ");
+      const localita = formatLocalitaForSupabase(client.city, client.province);
 
       const payload = {
         cliente: client.business_name.toUpperCase(),
@@ -760,18 +784,7 @@ export class ClientSyncService {
       }
 
       if (!missingClients.has(normName)) {
-        // Parsing citta e provincia se presente " - "
-        let city = "";
-        let province = "";
-        if (row.client_city) {
-          const parts = row.client_city.split(" - ");
-          if (parts.length >= 2) {
-            city = parts[0].trim();
-            province = parts[parts.length - 1].trim();
-          } else {
-            city = row.client_city.trim();
-          }
-        }
+        const { city, province } = parseCityAndProvince(row.client_city);
 
         missingClients.set(normName, {
           business_name: normName,
@@ -791,12 +804,10 @@ export class ClientSyncService {
       // Aggiorna campi se non ancora trovati
       if (!clientData.address && row.client_address) clientData.address = row.client_address.trim();
       if (!clientData.city && row.client_city) {
-        const parts = row.client_city.split(" - ");
-        if (parts.length >= 2) {
-          clientData.city = parts[0].trim();
-          clientData.province = parts[parts.length - 1].trim();
-        } else {
-          clientData.city = row.client_city.trim();
+        const parsed = parseCityAndProvince(row.client_city);
+        clientData.city = parsed.city;
+        if (!clientData.province && parsed.province) {
+          clientData.province = parsed.province;
         }
       }
       if (!clientData.vat_number && row.client_vat) clientData.vat_number = row.client_vat.trim();
@@ -804,22 +815,8 @@ export class ClientSyncService {
       if (!clientData.sdi_code && row.client_sdi) clientData.sdi_code = row.client_sdi.trim();
       if (!clientData.payment_method && row.payment_method) clientData.payment_method = row.payment_method.trim();
 
-      // Raccoglie destinazioni uniche usate nei DDT
-      const destCity = (row.destination_city || "").trim().toUpperCase();
-      const destLuogo = (row.destination_name || "").trim().toUpperCase();
-      const destAddr = (row.destination_address || "").trim();
-
-      if (destCity || destLuogo || destAddr) {
-        const destKey = normalizeDestinationKey(destCity, destLuogo, destAddr);
-        if (!clientData.destinationsMap.has(destKey)) {
-          clientData.destinationsMap.set(destKey, {
-            id: crypto.randomUUID(),
-            citta: destCity,
-            luogo: destLuogo || destAddr,
-            note: destAddr && destAddr !== destLuogo ? destAddr : undefined,
-          });
-        }
-      }
+      // Le destinazioni salvate in anagrafica si aggiungono solo manualmente dalla pagina Clienti
+      // o tramite "Nuova destinazione permanente" in DDT Studio (non in automatico dai DDT).
     }
 
     let added = 0;

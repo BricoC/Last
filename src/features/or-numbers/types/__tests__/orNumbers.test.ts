@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getOrStatus, OrRow } from "../orNumbers";
+import { getOrStatus, matchesOrRowSearch, OrRow } from "../orNumbers";
 
 describe("orNumbers getOrStatus", () => {
   it("restituisce 'green' se è presente orderReference", () => {
@@ -85,6 +85,33 @@ describe("orNumbers getOrStatus", () => {
       hasMissingPrices: true,
     };
     expect(getOrStatus(row)).toBe("unpriced");
+  });
+});
+
+describe("orNumbers matchesOrRowSearch", () => {
+  const sampleRow: OrRow = {
+    id: "ddt-2854",
+    docNumber: 2854,
+    series: "",
+    date: "2026-11-02",
+    client: "CARTIERE CARRARA",
+    destination: "CV2",
+    orderReference: "4500129911 del 04.11.2026",
+    statusLog: "Email Multi Gialli 03/11/2026",
+    itemsSearchText: "SCOPA M/MET CASSETTA LAMIERA PENNARELLO P.FINA DURA-INK",
+  };
+
+  it("filtra con ricerca multi-parola dentro gli articoli (es. 'cass era')", () => {
+    expect(matchesOrRowSearch(sampleRow, "cass era")).toBe(true);
+    expect(matchesOrRowSearch(sampleRow, "dura penna")).toBe(true);
+    expect(matchesOrRowSearch(sampleRow, "cass plastica")).toBe(false);
+  });
+
+  it("filtra anche per numero DDT, numero ordine, destinazione o combinazioni", () => {
+    expect(matchesOrRowSearch(sampleRow, "2854")).toBe(true);
+    expect(matchesOrRowSearch(sampleRow, "4500129911")).toBe(true);
+    expect(matchesOrRowSearch(sampleRow, "cv2 cass")).toBe(true);
+    expect(matchesOrRowSearch(sampleRow, "   ")).toBe(true);
   });
 });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -10,16 +10,16 @@ import {
   Calendar,
   Layers,
   Sparkles,
+  Search,
+  X,
 } from "lucide-react";
-import { OrRow, getOrStatus } from "./types/orNumbers";
+import { OrRow, getOrStatus, matchesOrRowSearch } from "./types/orNumbers";
 import { OrNumbersRepository } from "./services/orNumbersRepository";
 import { OrTable } from "./components/OrTable";
-import { OrAssignModal } from "./components/OrAssignModal";
 import { DDTMiniStudioModal } from "./components/DDTMiniStudioModal";
 import { ddtRepository } from "@/features/ddt-studio/services/ddtRepository";
 import { requestOpenDdt } from "@/features/ddt-studio/services/ddtNavigation";
 import { useWindowStore } from "@/shared/stores/useWindowStore";
-import { useUserStore } from "@/shared/stores/useUserStore";
 import { DdtDocument } from "@/features/ddt-studio/models/ddt";
 import { DDTA4Document } from "@/features/ddt-studio/document/DDTA4Document";
 import { generatePdfBytesFromElements, formatDdtPdfFilename } from "@/features/ddt-studio/utils/ddtExportManager";
@@ -51,8 +51,6 @@ interface OrNumbersPageProps {
 
 export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   const { openWindow } = useWindowStore();
-  const { currentUser } = useUserStore();
-  const canEditOrNumbers = Boolean(currentUser?.is_admin || currentUser?.can_edit_or_numbers);
 
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth() + 1);
@@ -64,10 +62,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   const [selectedWepaIds, setSelectedWepaIds] = useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState<boolean>(true);
-
-  // Modale Assegnazione OR
-  const [isAssignModalOpen, setIsAssignModalOpen] = useState<boolean>(false);
-  const [assignModalRow, setAssignModalRow] = useState<OrRow | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   // Modale Quick View DDT (mini DDT Studio con Esc)
   const [quickViewDdtId, setQuickViewDdtId] = useState<string | null>(null);
@@ -138,16 +133,6 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   const handleOpenDdtInStudio = (id: string) => {
     requestOpenDdt(id);
     openWindow({ id: "ddt-studio", title: "DDT Studio (Pro)", componentId: "ddt-studio" });
-  };
-
-  // Apertura modale assegnazione OR
-  const handleOpenAssign = (row?: OrRow) => {
-    if (!canEditOrNumbers) {
-      showToast("Accesso negato: questa postazione non ha i permessi per modificare gli OR Numbers.", "error");
-      return;
-    }
-    setAssignModalRow(row || null);
-    setIsAssignModalOpen(true);
   };
 
   // Helper per inviare un gruppo di DDT via Outlook
@@ -531,8 +516,18 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
     });
   };
 
+  const filteredCarraraRows = useMemo(
+    () => carraraRows.filter((r) => matchesOrRowSearch(r, searchQuery)),
+    [carraraRows, searchQuery]
+  );
+
+  const filteredWepaRows = useMemo(
+    () => wepaRows.filter((r) => matchesOrRowSearch(r, searchQuery)),
+    [wepaRows, searchQuery]
+  );
+
   const handleToggleSelectAllCarrara = () => {
-    const selectable = carraraRows.filter((r) => !r.hasMissingPrices);
+    const selectable = filteredCarraraRows.filter((r) => !r.hasMissingPrices);
     if (selectable.length > 0 && selectedCarraraIds.size === selectable.length) {
       setSelectedCarraraIds(new Set());
     } else {
@@ -552,7 +547,7 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
   };
 
   const handleToggleSelectAllWepa = () => {
-    const selectable = wepaRows.filter((r) => !r.hasMissingPrices);
+    const selectable = filteredWepaRows.filter((r) => !r.hasMissingPrices);
     if (selectable.length > 0 && selectedWepaIds.size === selectable.length) {
       setSelectedWepaIds(new Set());
     } else {
@@ -621,8 +616,37 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
           </button>
         </div>
 
-        {/* Centro: Riepilogo Rapido KPI */}
-        <div className="hidden lg:flex items-center gap-3 text-xs">
+        {/* Filtro ricerca multi-parola su articoli, DDT, ordine e destinazione (occupa tutto lo spazio disponibile) */}
+        <div className="relative flex items-center flex-1 min-w-[200px]">
+          <Search className="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && searchQuery) {
+                e.stopPropagation();
+                setSearchQuery("");
+              }
+            }}
+            placeholder="Cerca articolo, DDT, ordine o dest..."
+            className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-[var(--card)] border border-[var(--border)] text-xs text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/70 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 transition-colors"
+            title="Ricerca multi-parola su articoli nel DDT, numero DDT, numero ordine e destinazione (es. cass era)"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 p-0.5 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] transition-colors cursor-pointer"
+              title="Pulisci ricerca"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Destra: Riepilogo Rapido KPI */}
+        <div className="hidden lg:flex items-center gap-3 text-xs shrink-0">
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[var(--card)] border border-[var(--border)]">
             <Layers className="w-3.5 h-3.5 text-blue-400" />
             <span className="text-[var(--muted-foreground)]">Totale DDT:</span>
@@ -696,13 +720,12 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
         <OrTable
           title="CARTIERE CARRARA"
           type="CARRARA"
-          rows={carraraRows}
+          rows={filteredCarraraRows}
           selectedIds={selectedCarraraIds}
           onToggleSelectRow={handleToggleSelectRowCarrara}
           onToggleSelectAll={handleToggleSelectAllCarrara}
           onOpenDdt={(id) => setQuickViewDdtId(id)}
           onOpenInStudio={handleOpenDdtInStudio}
-          onAssignOr={handleOpenAssign}
           onSendCarraraRed={handleSendCarraraRed}
           onSendCarraraYellow={handleSendCarraraYellow}
           onSendSelected={handleSendCarraraSelected}
@@ -714,13 +737,12 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
         <OrTable
           title="WEPA"
           type="WEPA"
-          rows={wepaRows}
+          rows={filteredWepaRows}
           selectedIds={selectedWepaIds}
           onToggleSelectRow={handleToggleSelectRowWepa}
           onToggleSelectAll={handleToggleSelectAllWepa}
           onOpenDdt={(id) => setQuickViewDdtId(id)}
           onOpenInStudio={handleOpenDdtInStudio}
-          onAssignOr={handleOpenAssign}
           onSendWepaMulti={handleSendWepaMulti}
           onSendSelected={handleSendWepaSelected}
           onSendSingle={handleSendSingle}
@@ -737,21 +759,6 @@ export const OrNumbersPage: React.FC<OrNumbersPageProps> = () => {
           showToast("Modifiche al DDT salvate con successo!", "success");
           await loadData();
         }}
-      />
-
-      {/* Modale Assegna Numero Ordine & Sconto */}
-      <OrAssignModal
-        isOpen={isAssignModalOpen}
-        onClose={() => {
-          setIsAssignModalOpen(false);
-          setAssignModalRow(null);
-        }}
-        onSaved={async () => {
-          showToast("Numero ordine assegnato con successo!", "success");
-          await loadData();
-        }}
-        row={assignModalRow}
-        availableRows={allRows}
       />
 
       {/* Portale invisibile per il rendering batch dei DDT in formato A4 */}

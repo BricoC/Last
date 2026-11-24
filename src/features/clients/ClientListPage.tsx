@@ -20,6 +20,7 @@ import { Card } from "@/shared/components/ui/card";
 import { Client, CreateClientInput } from "./models/client";
 import { clientRepository } from "./services/clientRepository";
 import { clientSyncService, SyncClientsResult } from "./services/clientSyncService";
+import { formatCityForAnagrafica } from "./utils/cityProvinceUtils";
 import { ClientFormPanel } from "./components/ClientFormPanel";
 import { ClientMergeModal } from "./components/ClientMergeModal";
 import { DDTClientArticleHistoryModal } from "@/features/ddt-studio/components/DDTClientArticleHistoryModal";
@@ -524,8 +525,7 @@ export function ClientListPage() {
                     {/* Sede / Località */}
                     <td className="py-2.5 px-3 font-sans text-[var(--muted-foreground)]">
                       <div className="truncate max-w-[180px]">
-                        {[client.city, client.province].filter(Boolean).join(" (") +
-                          (client.province ? ")" : "") || "-"}
+                        {formatCityForAnagrafica(client.city, client.province) || "-"}
                       </div>
                     </td>
 

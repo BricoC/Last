@@ -129,6 +129,56 @@ describe("ClientRepository - upsertClientFromDocument & price list columns", () 
     expect(mockExecute).not.toHaveBeenCalled();
   });
 
+  it("upsertClientFromDocument non salva province ripetute (LU) (LU) (LU) dentro clients.city", async () => {
+    const repo = new ClientRepository();
+    const wepaRow = {
+      id: "cli-wepa-1",
+      code: null,
+      business_name: "WEPA ITALIA",
+      address: "LOCALITA' SALANETTI",
+      city: "LUNATA",
+      postal_code: null,
+      province: "LU",
+      vat_number: null,
+      fiscal_code: null,
+      sdi_code: null,
+      pec: null,
+      email: null,
+      payment_method: null,
+      destination_name: null,
+      destination_address: null,
+      destination_city: null,
+      destinations_json: JSON.stringify([
+        { id: "1", citta: "F.SSO RALLETTA", luogo: "WEPA ITALIA" },
+        { id: "2", citta: "LOCALITA' SALANETTI", luogo: "WEPA ITALIA" },
+      ]),
+      price_lists_json: "[]",
+      phones_json: "[]",
+      notes: null,
+      is_active: 1,
+      created_at: "2026-10-27T13:49:15.140Z",
+      updated_at: "2026-10-27T13:49:15.140Z",
+      updated_by: "supabase-sync",
+      deleted_at: null,
+      sync_status: "synced",
+      project_url: null,
+    };
+
+    mockSelect.mockResolvedValueOnce([wepaRow]);
+
+    const result = await repo.upsertClientFromDocument({
+      id: "cli-wepa-1",
+      business_name: "WEPA ITALIA",
+      address: "LOCALITA' SALANETTI",
+      city: "LUNATA (LU) (LU) (LU)",
+      phones: [],
+    });
+
+    expect(result.city).toBe("LUNATA");
+    expect(result.destinations).toHaveLength(2);
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+
   it("getPriceListArticles legge acquisto_eur e perc_acquisto da listini_clienti", async () => {
     const repo = new ClientRepository();
     mockSelect.mockResolvedValueOnce([

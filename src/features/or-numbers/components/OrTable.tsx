@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2, Clock, AlertCircle, Mail, Edit3, Plus, ExternalLink } from "lucide-react";
+import { CheckCircle2, Clock, AlertCircle, Mail, ExternalLink } from "lucide-react";
 import { OrRow, getOrStatus } from "../types/orNumbers";
 import { cn } from "@/shared/utils/cn";
 
@@ -12,7 +12,6 @@ interface OrTableProps {
   onToggleSelectAll: () => void;
   onOpenDdt: (id: string) => void;
   onOpenInStudio?: (id: string) => void;
-  onAssignOr: (row: OrRow) => void;
   onSendCarraraRed?: () => void;
   onSendCarraraYellow?: () => void;
   onSendWepaMulti?: () => void;
@@ -30,7 +29,6 @@ export const OrTable: React.FC<OrTableProps> = ({
   onToggleSelectAll,
   onOpenDdt,
   onOpenInStudio,
-  onAssignOr,
   onSendCarraraRed,
   onSendCarraraYellow,
   onSendWepaMulti,
@@ -175,6 +173,9 @@ export const OrTable: React.FC<OrTableProps> = ({
               <th className="py-1 px-2 text-[10px]">Destinazione</th>
               <th className="py-1 px-1.5 text-center w-36 text-[10px]">Data richiesta OR</th>
               <th className="py-1 px-2 text-[10px]">Ordine</th>
+              <th className="py-1 px-2 text-right w-24 text-[10px]" title="Totale imponibile (netto IVA)">
+                Imponibile
+              </th>
               <th className="py-1 px-1 w-14 text-center text-[10px]">Azioni</th>
             </tr>
           </thead>
@@ -182,7 +183,7 @@ export const OrTable: React.FC<OrTableProps> = ({
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="py-8 text-center text-xs text-[var(--muted-foreground)]"
                 >
                   Nessun DDT trovato per {title} nel mese selezionato.
@@ -290,23 +291,22 @@ export const OrTable: React.FC<OrTableProps> = ({
                     {/* Ordine (OR) */}
                     <td className="py-0.5 px-2 text-[11px] leading-none">
                       {row.orderReference ? (
-                        <div
-                          onClick={() => onAssignOr(row)}
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[11px] font-semibold cursor-pointer hover:bg-emerald-500/20 transition-colors leading-none"
-                          title="Clicca per modificare il numero ordine o lo sconto"
-                        >
-                          <span className="font-mono">{row.orderReference}</span>
-                          <Edit3 className="w-2.5 h-2.5 text-emerald-400/70 shrink-0" />
-                        </div>
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[11px] font-semibold font-mono leading-none">
+                          {row.orderReference}
+                        </span>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => onAssignOr(row)}
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--background)] hover:bg-blue-600 hover:text-white border border-[var(--border)] text-[10px] font-medium text-[var(--muted-foreground)] transition-colors cursor-pointer leading-none"
-                        >
-                          <Plus className="w-2.5 h-2.5 text-blue-400" />
-                          <span>+ Assegna</span>
-                        </button>
+                        <span className="text-slate-600">—</span>
+                      )}
+                    </td>
+
+                    {/* Totale DDT (Netto IVA / Imponibile) */}
+                    <td className="py-0.5 px-2 text-right font-mono text-[11px] whitespace-nowrap leading-none">
+                      {row.taxableTotalFormatted ? (
+                        <span className="font-semibold text-[var(--foreground)]">
+                          {row.taxableTotalFormatted}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600">—</span>
                       )}
                     </td>
 

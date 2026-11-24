@@ -238,7 +238,26 @@ export class OrNumbersRepository {
           )
           THEN 0
           ELSE 1
-        END AS has_missing_prices
+        END AS has_missing_prices,
+        (
+          SELECT GROUP_CONCAT(
+            TRIM(COALESCE(i.code, '') || ' ' || COALESCE(i.description, '')),
+            ' '
+          )
+          FROM ddt_items i
+          WHERE i.ddt_id = ddt_documents.id
+            AND i.deleted_at IS NULL
+        ) AS items_search_text,
+        CASE
+          WHEN COALESCE(total_taxable_subunits, 0) > 0 THEN total_taxable_subunits
+          ELSE COALESCE((
+            SELECT SUM(COALESCE(i.net_amount_subunits, 0))
+            FROM ddt_items i
+            WHERE i.ddt_id = ddt_documents.id
+              AND i.deleted_at IS NULL
+              AND COALESCE(i.row_kind, 'item') <> 'note'
+          ), 0)
+        END AS resolved_taxable_subunits
       FROM ddt_documents
       WHERE deleted_at IS NULL
         AND doc_number IS NOT NULL
@@ -262,6 +281,8 @@ export class OrNumbersRepository {
         destination_city: string | null;
         order_reference: string | null;
         has_missing_prices: number;
+        items_search_text: string | null;
+        resolved_taxable_subunits: number | null;
       }>>(query, [startDate, endDate]),
       this.getLogsMap(),
     ]);
@@ -293,6 +314,12 @@ export class OrNumbersRepository {
         const rawOrderRef = (r.order_reference || "").trim();
         const effectiveOrderRef = isActualOrderReference(rawOrderRef) ? rawOrderRef : "";
 
+        const taxableSubunits = Number(r.resolved_taxable_subunits || 0);
+        const taxableTotalFormatted =
+          taxableSubunits > 0
+            ? MonetaryValue.fromSubunits(taxableSubunits).formatIT2(true)
+            : "";
+
         return {
           id: r.id,
           docNumber: r.doc_number,
@@ -303,6 +330,8 @@ export class OrNumbersRepository {
           orderReference: effectiveOrderRef,
           statusLog: logStatus,
           hasMissingPrices: Boolean(r.has_missing_prices),
+          itemsSearchText: (r.items_search_text || "").trim(),
+          taxableTotalFormatted,
         };
       })
       .sort((a, b) => statusPriority[getOrStatus(a)] - statusPriority[getOrStatus(b)]);

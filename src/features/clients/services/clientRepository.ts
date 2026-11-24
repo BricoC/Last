@@ -4,6 +4,7 @@ import { resolveActiveSupabaseProjectUrl } from "@/shared/services/supabaseConfi
 import { Client, ClientPhone, CreateClientInput } from "../models/client";
 import { rankClientsBySearch, normalizeClientCanonicalKey } from "../utils/clientSearchUtils";
 import { deduplicateDestinations } from "../utils/destinationUtils";
+import { parseCityAndProvince } from "../utils/cityProvinceUtils";
 
 export class ClientRepository {
   public async getClients(search = ""): Promise<Client[]> {
@@ -33,10 +34,17 @@ export class ClientRepository {
     const destinationsJson = JSON.stringify(input.destinations || []);
     const priceListsJson = JSON.stringify(input.price_lists || []);
 
+    const normalizedLocation = parseCityAndProvince(input.city, input.province);
+    const normalizedInput: CreateClientInput & { id?: string } = {
+      ...input,
+      city: normalizedLocation.city || undefined,
+      province: normalizedLocation.province || undefined,
+    };
+
     const projectUrl =
-      input.project_url !== undefined ? input.project_url : await resolveActiveSupabaseProjectUrl();
-    if (input.id) {
-      const { sql, params } = this.clientUpdate(input, id, now);
+      normalizedInput.project_url !== undefined ? normalizedInput.project_url : await resolveActiveSupabaseProjectUrl();
+    if (normalizedInput.id) {
+      const { sql, params } = this.clientUpdate(normalizedInput, id, now);
       await db.execute(sql, params);
     } else {
       await db.execute(
@@ -51,26 +59,26 @@ export class ClientRepository {
         )`,
         [
           id,
-          input.code || null,
-          input.business_name.trim(),
-          input.address || null,
-          input.city || null,
-          input.postal_code || null,
-          input.province || null,
-          input.vat_number || null,
-          input.fiscal_code || null,
-          input.sdi_code || null,
-          input.pec || null,
-          input.email || null,
-          input.payment_method || null,
-          input.destination_name || null,
-          input.destination_address || null,
-          input.destination_city || null,
+          normalizedInput.code || null,
+          normalizedInput.business_name.trim(),
+          normalizedInput.address || null,
+          normalizedInput.city || null,
+          normalizedInput.postal_code || null,
+          normalizedInput.province || null,
+          normalizedInput.vat_number || null,
+          normalizedInput.fiscal_code || null,
+          normalizedInput.sdi_code || null,
+          normalizedInput.pec || null,
+          normalizedInput.email || null,
+          normalizedInput.payment_method || null,
+          normalizedInput.destination_name || null,
+          normalizedInput.destination_address || null,
+          normalizedInput.destination_city || null,
           destinationsJson,
           priceListsJson,
           phonesJson,
-          input.notes || null,
-          input.is_active === false ? 0 : 1,
+          normalizedInput.notes || null,
+          normalizedInput.is_active === false ? 0 : 1,
           now,
           "system",
           projectUrl,
@@ -197,30 +205,38 @@ export class ClientRepository {
       return this.createOrUpdateClient({ ...input, id: undefined });
     }
 
-    const resolveCity = (): string | undefined => {
+    const resolveLocation = (): { city?: string; province?: string } => {
       const trimmedInputCity = input.city?.trim();
-      if (!trimmedInputCity) return existing.city;
-      const existingCity = existing.city?.trim();
-      const existingProvince = existing.province?.trim();
-      if (
-        existingCity &&
-        existingProvince &&
-        trimmedInputCity.toLowerCase() === `${existingCity} (${existingProvince})`.toLowerCase()
-      ) {
-        return existing.city;
+      if (!trimmedInputCity) {
+        return { city: existing.city, province: existing.province };
       }
-      return trimmedInputCity;
+      const parsedInput = parseCityAndProvince(trimmedInputCity, existing.province);
+      const parsedExisting = parseCityAndProvince(existing.city, existing.province);
+      if (
+        parsedExisting.city &&
+        parsedInput.city.toLowerCase() === parsedExisting.city.toLowerCase()
+      ) {
+        return {
+          city: existing.city,
+          province: existing.province || parsedInput.province || undefined,
+        };
+      }
+      return {
+        city: parsedInput.city || existing.city,
+        province: existing.province || parsedInput.province || undefined,
+      };
     };
 
+    const resolvedLocation = resolveLocation();
     const mergedPhones = input.phones && input.phones.length > 0 ? input.phones : existing.phones;
     const merged: CreateClientInput & { id: string } = {
       id: existing.id,
       code: existing.code,
       business_name: existing.business_name || trimmedName,
       address: input.address?.trim() || existing.address,
-      city: resolveCity(),
+      city: resolvedLocation.city,
       postal_code: existing.postal_code,
-      province: existing.province,
+      province: resolvedLocation.province,
       vat_number: input.vat_number?.trim() || existing.vat_number,
       fiscal_code: input.fiscal_code?.trim() || existing.fiscal_code,
       sdi_code: input.sdi_code?.trim() || existing.sdi_code,
