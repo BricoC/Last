@@ -363,4 +363,23 @@ describe("quoteCalculations", () => {
     expect(reloaded.items[9].description).toBe("NOTA SU RIGA 10");
     expect(reloaded.items[9].vat_rate).toBeNull();
   });
+
+  it("calcola il castelletto IVA raggruppato per aliquota in ordine decrescente per l'anteprima/PDF", () => {
+    const draft = createEmptyQuoteDraft();
+    draft.items[0] = { ...draft.items[0], description: "A", quantity: "1", base_unit_price: "100", vat_rate: 22 };
+    draft.items[1] = { ...draft.items[1], description: "B", quantity: "2", base_unit_price: "25", vat_rate: 10 };
+    draft.items[2] = { ...draft.items[2], description: "C", quantity: "1", base_unit_price: "50", vat_rate: 22 };
+    draft.items[3] = { ...draft.items[3], description: "D", quantity: "1", base_unit_price: "100", vat_rate: 5 };
+    draft.items[4] = { ...draft.items[4], description: "SENZA IVA", quantity: "1", base_unit_price: "40", vat_rate: null };
+
+    const printed = prepareQuoteForPrint(draft);
+    expect(printed.vatBreakdown.map((e) => e.rate)).toEqual([22, 10, 5]);
+    expect(printed.vatBreakdown[0].taxable.toNumber()).toBe(150);
+    expect(printed.vatBreakdown[0].vat.toNumber()).toBe(33);
+    expect(printed.vatBreakdown[1].taxable.toNumber()).toBe(50);
+    expect(printed.vatBreakdown[1].vat.toNumber()).toBe(5);
+    expect(printed.vatBreakdown[2].taxable.toNumber()).toBe(100);
+    expect(printed.vatBreakdown[2].vat.toNumber()).toBe(5);
+    expect(printed.totals.vat.toNumber()).toBe(43);
+  });
 });

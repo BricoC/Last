@@ -1,11 +1,11 @@
 import type { CompanySettings } from "@/features/settings/companySettingsRepository";
 import { formatQuoteCode, type QuoteDraft } from "../models/quoteDraft";
-import type { PreparedQuoteItem } from "./quotePrintModel";
+import type { PreparedQuoteItem, QuoteVatBreakdownEntry } from "./quotePrintModel";
 import type { CalculatedQuoteTotals } from "../utils/quoteCalculations";
 
-export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages, isFirst, isLast }: {
+export function QuoteA4Page({ draft, company, rows, totals, vatBreakdown = [], pageNum, totalPages, isFirst, isLast }: {
   draft: QuoteDraft; company: CompanySettings | null; rows: PreparedQuoteItem[];
-  totals: CalculatedQuoteTotals; pageNum: number; totalPages: number; isFirst: boolean; isLast: boolean;
+  totals: CalculatedQuoteTotals; vatBreakdown?: QuoteVatBreakdownEntry[]; pageNum: number; totalPages: number; isFirst: boolean; isLast: boolean;
 }) {
   const footer = [company?.address, company?.postal_code, company?.city, company?.province,
     company?.phone, company?.email, company?.vat_number && `P.IVA ${company.vat_number}`]
@@ -111,7 +111,19 @@ export function QuoteA4Page({ draft, company, rows, totals, pageNum, totalPages,
         <div className="col-span-5 flex flex-col justify-between rounded-lg border border-slate-300 bg-slate-50 p-3">
           <div className="space-y-1.5 text-[10.5px] text-slate-600">
             <div className="flex items-center justify-between"><span>Totale Imponibile Netto:</span><strong className="font-mono text-slate-800">{formatMoney(totals.taxable)}</strong></div>
-            <div className="flex items-center justify-between"><span>I.V.A.:</span><span className="font-mono text-slate-700">{formatMoney(totals.vat)}</span></div>
+            {vatBreakdown.length > 1 ? (
+              vatBreakdown.map((entry) => (
+                <div key={entry.rate} className="flex items-center justify-between text-[10px]">
+                  <span>IVA {entry.rate}% <span className="text-[9px] text-slate-400">(su {formatMoney(entry.taxable)})</span>:</span>
+                  <span className="font-mono text-slate-700">{formatMoney(entry.vat)}</span>
+                </div>
+              ))
+            ) : (
+              <div className="flex items-center justify-between">
+                <span>{vatBreakdown.length === 1 ? `I.V.A. (${vatBreakdown[0].rate}%):` : "I.V.A.:"}</span>
+                <span className="font-mono text-slate-700">{formatMoney(totals.vat)}</span>
+              </div>
+            )}
           </div>
           <div className="mt-2 flex items-center justify-between border-t-2 pt-2" style={{ borderColor: "var(--document-total-border)" }}>
             <span className="text-[12px] font-black tracking-wide text-[var(--document-accent)] uppercase">TOTALE OFFERTA:</span><span className="font-mono text-[15px] font-black text-[var(--document-accent)]">{formatMoney(totals.total)}</span>

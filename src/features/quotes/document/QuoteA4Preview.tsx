@@ -36,7 +36,7 @@ export function QuoteA4Preview({ draft, inline = false, captureOnly = false }: {
       Anteprima Cliente • Foglio A4 ({pages.length} {pages.length === 1 ? "pagina" : "pagine"})
     </div>}
     <div id="quote-print-root" data-ready={settingsLoaded ? "true" : "false"} className="flex flex-col items-center gap-6">
-      {pages.map((rows, index) => <QuoteA4Page key={`quote-page-${index + 1}`} draft={draft} company={company} rows={rows} totals={prepared.totals}
+      {pages.map((rows, index) => <QuoteA4Page key={`quote-page-${index + 1}`} draft={draft} company={company} rows={rows} totals={prepared.totals} vatBreakdown={prepared.vatBreakdown}
         pageNum={index + 1} totalPages={pages.length} isFirst={index === 0} isLast={index === pages.length - 1} />)}
     </div>
     <style>{`@media print { @page { size:A4; margin:0; } body * { visibility:hidden !important; } #quote-print-root, #quote-print-root * { visibility:visible !important; } #quote-print-root { position:absolute; inset:0; } .quote-a4-page { break-after:page; box-shadow:none !important; } .quote-a4-page:last-child { break-after:auto; } }`}</style>

@@ -1,4 +1,4 @@
-import { money } from "@/shared/domain/monetaryValue";
+import { money, type MonetaryValue } from "@/shared/domain/monetaryValue";
 import { calculateQuoteItem, calculateQuoteTotals, quoteQuantityOrNull, type CalculatedQuoteItem, type CalculatedQuoteTotals } from "../utils/quoteCalculations";
 import { isQuoteDraftItemActive, type QuoteDraft, type QuoteDraftItem } from "../models/quoteDraft";
 
@@ -8,9 +8,16 @@ export interface PreparedQuoteItem {
   isBlank?: boolean;
 }
 
+export interface QuoteVatBreakdownEntry {
+  rate: number;
+  taxable: MonetaryValue;
+  vat: MonetaryValue;
+}
+
 export interface PreparedQuote {
   rows: PreparedQuoteItem[];
   totals: CalculatedQuoteTotals;
+  vatBreakdown: QuoteVatBreakdownEntry[];
 }
 
 const ZERO_CALCULATION: CalculatedQuoteItem = {
@@ -61,9 +68,30 @@ export function prepareQuoteForPrint(draft: QuoteDraft): PreparedQuote {
     }, validDiscount(draft.global_discount_pct));
     return { item: printItem, calculation, isBlank: false };
   });
+  const activeRows = rows.filter((row) => !row.isBlank);
+  const byRate = new Map<number, { taxable: MonetaryValue; vat: MonetaryValue }>();
+  for (const row of activeRows) {
+    const rate = row.item.vat_rate;
+    if (rate == null || row.calculation.net_amount.isZero()) continue;
+    const prev = byRate.get(rate);
+    if (prev) {
+      prev.taxable = prev.taxable.plus(row.calculation.net_amount);
+      prev.vat = prev.vat.plus(row.calculation.vat_amount);
+    } else {
+      byRate.set(rate, {
+        taxable: row.calculation.net_amount,
+        vat: row.calculation.vat_amount,
+      });
+    }
+  }
+  const vatBreakdown: QuoteVatBreakdownEntry[] = Array.from(byRate.entries())
+    .sort(([a], [b]) => b - a)
+    .map(([rate, amounts]) => ({ rate, ...amounts }));
+
   return {
     rows,
-    totals: calculateQuoteTotals(rows.filter((row) => !row.isBlank).map((row) => row.calculation)),
+    totals: calculateQuoteTotals(activeRows.map((row) => row.calculation)),
+    vatBreakdown,
   };
 }
 
