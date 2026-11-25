@@ -42,7 +42,7 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
       }
     } else if (colId === "vat_rate" || colId === "iva_pct") {
       const vStr = String(props.value).trim();
-      startValue = vStr === "" || vStr === "null" || vStr === "undefined" || vStr === "0" ? "" : vStr;
+      startValue = vStr === "" || vStr === "null" || vStr === "undefined" ? "" : vStr;
     } else if (colId === "quantity" || colId === "quantita") {
       startValue = String(props.value).trim();
     } else if (colId === "ric_pct") {
@@ -223,7 +223,11 @@ export const DDTTextEditor = forwardRef((props: ICellEditorParams, ref) => {
         }
       }
 
-      inputRef.current.setSelectionRange(String(startValue).length, String(startValue).length);
+      if (!isTypedChar && (colId === "vat_rate" || colId === "iva_pct") && String(startValue).length > 0) {
+        inputRef.current.select();
+      } else {
+        inputRef.current.setSelectionRange(String(startValue).length, String(startValue).length);
+      }
     }
     return () => {
       window.__isDDTCellEditing = false;

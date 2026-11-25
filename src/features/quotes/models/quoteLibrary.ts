@@ -14,7 +14,7 @@ export interface QuoteFavoriteItem {
   base_unit_price: MonetaryValue;
   forced_unit_price: MonetaryValue | null;
   discount_pct: number;
-  vat_rate: QuoteVatRate;
+  vat_rate: QuoteVatRate | null;
   availability: string | null;
   notes: string | null;
   usage_count: number;
@@ -35,7 +35,7 @@ export interface QuoteFavoriteItemInput {
   base_unit_price?: MonetaryValue | string | number | null;
   forced_unit_price?: MonetaryValue | string | number | null;
   discount_pct?: number;
-  vat_rate?: QuoteVatRate;
+  vat_rate?: QuoteVatRate | null;
   availability?: string | null;
   notes?: string | null;
 }
@@ -59,7 +59,7 @@ export interface QuoteHistoricalItem {
   effective_unit_price: MonetaryValue;
   forced_unit_price: MonetaryValue | null;
   discount_pct: number;
-  vat_rate: QuoteVatRate;
+  vat_rate: QuoteVatRate | null;
   availability: string | null;
   notes: string | null;
 }

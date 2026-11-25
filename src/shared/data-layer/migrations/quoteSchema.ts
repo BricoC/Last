@@ -107,3 +107,76 @@ export async function migrateQuoteSchemaV6(db: MigrationDatabase): Promise<void>
     ON quote_items(sync_status, updated_at);
   `);
 }
+
+export async function migrateQuoteNullableVatV46(db: MigrationDatabase): Promise<void> {
+  await rebuildQuoteItemsWithFlexibleVat(db, "quote_items_v46");
+}
+
+export async function migrateQuoteFlexibleVatV47(db: MigrationDatabase): Promise<void> {
+  await rebuildQuoteItemsWithFlexibleVat(db, "quote_items_v47");
+}
+
+async function rebuildQuoteItemsWithFlexibleVat(db: MigrationDatabase, tempTable: string): Promise<void> {
+  await db.execute(`
+    CREATE TABLE ${tempTable} (
+      id TEXT PRIMARY KEY,
+      quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE RESTRICT,
+      row_index INTEGER NOT NULL,
+      product_id TEXT,
+      supplier TEXT,
+      supplier_item_code TEXT,
+      code TEXT,
+      description TEXT NOT NULL,
+      unit TEXT NOT NULL DEFAULT 'NR',
+      quantity TEXT NOT NULL DEFAULT '1',
+      purchase_price_subunits INTEGER NOT NULL DEFAULT 0,
+      markup_pct TEXT,
+      base_unit_price_subunits INTEGER NOT NULL DEFAULT 0,
+      effective_unit_price_subunits INTEGER NOT NULL DEFAULT 0,
+      forced_unit_price_subunits INTEGER,
+      discount_pct TEXT NOT NULL DEFAULT '0',
+      effective_markup_pct TEXT,
+      margin_pct TEXT,
+      net_amount_subunits INTEGER NOT NULL DEFAULT 0,
+      cost_total_subunits INTEGER NOT NULL DEFAULT 0,
+      gross_profit_subunits INTEGER NOT NULL DEFAULT 0,
+      vat_rate INTEGER CHECK(vat_rate IS NULL OR (vat_rate >= 0 AND vat_rate <= 100)),
+      vat_amount_subunits INTEGER NOT NULL DEFAULT 0,
+      availability TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      deleted_at TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'pending'
+    );
+  `);
+  await db.execute(`
+    INSERT INTO ${tempTable} (
+      id, quote_id, row_index, product_id, supplier, supplier_item_code, code, description,
+      unit, quantity, purchase_price_subunits, markup_pct, base_unit_price_subunits,
+      effective_unit_price_subunits, forced_unit_price_subunits, discount_pct,
+      effective_markup_pct, margin_pct, net_amount_subunits, cost_total_subunits,
+      gross_profit_subunits, vat_rate, vat_amount_subunits, availability, notes,
+      created_at, updated_at, updated_by, deleted_at, sync_status
+    )
+    SELECT
+      id, quote_id, row_index, product_id, supplier, supplier_item_code, code, description,
+      unit, quantity, purchase_price_subunits, markup_pct, base_unit_price_subunits,
+      effective_unit_price_subunits, forced_unit_price_subunits, discount_pct,
+      effective_markup_pct, margin_pct, net_amount_subunits, cost_total_subunits,
+      gross_profit_subunits, vat_rate, vat_amount_subunits, availability, notes,
+      created_at, updated_at, updated_by, deleted_at, sync_status
+    FROM quote_items;
+  `);
+  await db.execute("DROP TABLE quote_items;");
+  await db.execute(`ALTER TABLE ${tempTable} RENAME TO quote_items;`);
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_quote_items_active_order
+    ON quote_items(quote_id, deleted_at, row_index);
+  `);
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_quote_items_sync
+    ON quote_items(sync_status, updated_at);
+  `);
+}

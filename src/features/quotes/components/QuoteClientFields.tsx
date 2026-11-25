@@ -206,7 +206,7 @@ export function QuoteClientFields({ draft, onChange }: { draft: QuoteDraft; onCh
         )}
       </div>
 
-      <FieldBox className="col-span-12 md:col-span-2" label="Oggetto / Titolo" icon={<FileText />} value={draft.subject ?? ""} onChange={(value) => onChange({ subject: value })} />
+      <FieldBox className="col-span-12 md:col-span-2" label="Oggetto / Titolo" icon={<FileText />} value={(draft.subject ?? "").toUpperCase()} onChange={(value) => onChange({ subject: value.toUpperCase() })} inputClassName="uppercase" />
       <FieldBox className="col-span-6 md:col-span-1" label="Data" icon={<CalendarDays />} type="date" value={draft.quote_date ?? ""} onChange={(value) => onChange({ quote_date: value })} />
       <FieldBox className="col-span-3 md:col-span-1" label="Validità" icon={<Clock3 />} type="number" value={String(draft.validity_days ?? 30)} onChange={(value) => onChange({ validity_days: Number(value) || 0 })} />
       <FieldBox className="col-span-3 md:col-span-1" label="Consegna" icon={<Truck />} type="date" value={draft.delivery_date ?? ""} onChange={(value) => onChange({ delivery_date: value })} />
@@ -217,14 +217,14 @@ export function QuoteClientFields({ draft, onChange }: { draft: QuoteDraft; onCh
   );
 }
 
-function FieldBox({ label, icon, value, onChange, type = "text", className, title }: {
+function FieldBox({ label, icon, value, onChange, type = "text", className, inputClassName, title }: {
   label: string; icon: ReactNode; value: string; onChange: (value: string) => void;
-  type?: string; className?: string; title?: string;
+  type?: string; className?: string; inputClassName?: string; title?: string;
 }) {
   return (
     <label className={`${className ?? ""} min-w-0`} title={title}>
       <FieldLabel icon={icon} title={label} />
-      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} className={inputClass} />
+      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} className={`${inputClass} ${inputClassName ?? ""}`} />
     </label>
   );
 }

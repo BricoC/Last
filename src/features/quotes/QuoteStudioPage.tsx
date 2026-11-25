@@ -249,7 +249,7 @@ export function QuoteStudioPage({ windowId }: { windowId: string }) {
         base_unit_price: itemData.base_unit_price || "",
         forced_unit_price: itemData.forced_unit_price || "",
         discount_pct: itemData.discount_pct ?? 0,
-        vat_rate: itemData.vat_rate ?? 22,
+        vat_rate: null, // IVA rimossa dall'autoinserimento (inserimento manuale richiesto)
         availability: "", // Disponibilità rimossa dall'autoinserimento (inserimento manuale richiesto)
         notes: itemData.notes || "",
       };

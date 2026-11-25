@@ -13,7 +13,7 @@ import {
   migrateDdtNumberUniquenessV8,
   migrateDdtSchemaV5,
 } from "./migrations/ddtSchema";
-import { migrateQuoteSchemaV6 } from "./migrations/quoteSchema";
+import { migrateQuoteFlexibleVatV47, migrateQuoteNullableVatV46, migrateQuoteSchemaV6 } from "./migrations/quoteSchema";
 import { migrateCompanySettingsSchemaV7 } from "./migrations/companySettingsSchema";
 import { migratePriceListsSchemaV11 } from "./migrations/priceListSchema";
 import { migratePriceListLogSchemaV12 } from "./migrations/priceListLogSchema";
@@ -610,6 +610,16 @@ const MIGRATIONS: Migration[] = [
       await db.addColumnIfMissing("listini_clienti", "descrizione_rich", "TEXT");
       await db.addColumnIfMissing("listini_clienti_cestino", "descrizione_rich", "TEXT");
     },
+  },
+  {
+    version: 46,
+    name: "allow_nullable_quote_item_vat_rate",
+    up: migrateQuoteNullableVatV46,
+  },
+  {
+    version: 47,
+    name: "allow_any_quote_item_vat_rate_0_100",
+    up: migrateQuoteFlexibleVatV47,
   },
 ];
 

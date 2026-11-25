@@ -64,7 +64,7 @@ pub(crate) struct QuoteItemPayload {
     pub(crate) net_amount_subunits: i64,
     pub(crate) cost_total_subunits: i64,
     pub(crate) gross_profit_subunits: i64,
-    pub(crate) vat_rate: i64,
+    pub(crate) vat_rate: Option<i64>,
     pub(crate) vat_amount_subunits: i64,
     pub(crate) availability: Option<String>,
     pub(crate) notes: Option<String>,

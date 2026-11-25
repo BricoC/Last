@@ -4,7 +4,7 @@ import { calculateQuoteItem, calculateQuoteTotals } from "../quoteCalculations";
 import { buildQuoteDdtConversion } from "../../services/quoteDdtConversion";
 import { buildQuoteSavePayload } from "../../services/quotePayload";
 import { QuoteItemInput } from "../../models/quote";
-import { formatQuoteCode, createEmptyQuoteDraft } from "../../models/quoteDraft";
+import { formatQuoteCode, createEmptyQuoteDraft, quoteToDraft, toQuoteInput } from "../../models/quoteDraft";
 import { makeQuotePdfFilename } from "../quoteExportManager";
 import { prepareQuoteForPrint } from "../../document/quotePrintModel";
 
@@ -108,7 +108,10 @@ describe("quoteCalculations", () => {
   it("rifiuta quantità, sconti e aliquote non valide", () => {
     expect(() => calculateQuoteItem(item({ quantity: "0" }), 0)).toThrow(RangeError);
     expect(() => calculateQuoteItem(item({ discount_pct: 101 }), 0)).toThrow(RangeError);
-    expect(() => calculateQuoteItem(item({ vat_rate: 8 as QuoteItemInput["vat_rate"] }), 0)).toThrow(RangeError);
+    expect(() => calculateQuoteItem(item({ vat_rate: -1 }), 0)).toThrow(RangeError);
+    expect(() => calculateQuoteItem(item({ vat_rate: 101 }), 0)).toThrow(RangeError);
+    expect(calculateQuoteItem(item({ purchase_price: money(100), markup_pct: 0, discount_pct: 0, vat_rate: 5 }), 0).vat_amount.toNumber()).toBe(5);
+    expect(calculateQuoteItem(item({ purchase_price: money(100), markup_pct: 0, discount_pct: 0, vat_rate: 100 }), 0).vat_amount.toNumber()).toBe(100);
   });
 
   it("formatta il codice preventivo univoco anno.numero_a_3_cifre", () => {
@@ -231,5 +234,133 @@ describe("quoteCalculations", () => {
     const ids = savePayload.items.map((it) => it.id);
     expect(ids[0]).toBe("row-2");
     expect(new Set(ids).size).toBe(2);
+  });
+
+  it("non imposta IVA automaticamente sulle nuove righe e calcola IVA 0 quando non inserita", () => {
+    const draft = createEmptyQuoteDraft();
+    expect(draft.items[0].vat_rate).toBeNull();
+
+    draft.items[0] = {
+      ...draft.items[0],
+      description: "VITE ACCIAIO",
+      quantity: "2",
+      base_unit_price: "10",
+    };
+
+    const printed = prepareQuoteForPrint(draft);
+    expect(printed.rows).toHaveLength(1);
+    expect(printed.rows[0].item.vat_rate).toBeNull();
+    expect(printed.totals.taxable.toNumber()).toBe(20);
+    expect(printed.totals.vat.isZero()).toBe(true);
+    expect(printed.totals.total.toNumber()).toBe(20);
+  });
+
+  it("normalizza l'oggetto/titolo sempre in maiuscolo in salvataggio e caricamento", () => {
+    const draft = createEmptyQuoteDraft();
+    draft.subject = "offerta materiale edile";
+    const input = toQuoteInput(draft);
+    expect(input.subject).toBe("OFFERTA MATERIALE EDILE");
+
+    const payload = buildQuoteSavePayload(input, null, "2026-11-25T10:00:00Z", "q-upper");
+    expect(payload.subject).toBe("OFFERTA MATERIALE EDILE");
+  });
+
+  it("mantiene le righe vuote intermedie sia in anteprima/PDF che nel round-trip salvataggio/caricamento", () => {
+    const draft = createEmptyQuoteDraft();
+    draft.items[0] = { ...draft.items[0], description: "RIGA 1", quantity: "1", base_unit_price: "10", vat_rate: 22 };
+    draft.items[9] = { ...draft.items[9], description: "NOTA SU RIGA 10" };
+
+    // Anteprima / PDF mantiene 10 righe con righe 2..9 vuote (isBlank: true)
+    const printed = prepareQuoteForPrint(draft);
+    expect(printed.rows).toHaveLength(10);
+    expect(printed.rows[0].isBlank).toBe(false);
+    expect(printed.rows[0].item.description).toBe("RIGA 1");
+    for (let i = 1; i <= 8; i++) {
+      expect(printed.rows[i].isBlank).toBe(true);
+    }
+    expect(printed.rows[9].isBlank).toBe(false);
+    expect(printed.rows[9].item.description).toBe("NOTA SU RIGA 10");
+    expect(printed.rows[9].item.quantity).toBe("");
+    expect(printed.rows[9].item.vat_rate).toBeNull();
+    expect(printed.totals.taxable.toNumber()).toBe(10);
+
+    // Salvataggio e ricaricamento preservano row_index = 1 e row_index = 10
+    const input = toQuoteInput(draft);
+    const payload = buildQuoteSavePayload(input, null, "2026-11-25T10:00:00Z", "q-spacer");
+    expect(payload.items.map((it) => it.row_index)).toEqual([1, 10]);
+
+    const reloaded = quoteToDraft({
+      id: "q-spacer",
+      quote_number: 1,
+      year: 2026,
+      quote_date: "2026-11-25",
+      status: "bozza",
+      client_id: null,
+      client_name: "ACME",
+      client_address: null,
+      client_city: null,
+      client_postal_code: null,
+      client_province: null,
+      client_vat: null,
+      client_fiscal_code: null,
+      client_sdi: null,
+      client_pec: null,
+      client_phones: [],
+      destination_name: null,
+      destination_address: null,
+      destination_city: null,
+      subject: "titolo minuscolo",
+      global_discount_pct: 0,
+      validity_days: 30,
+      payment_method: null,
+      delivery_date: null,
+      delivery_terms: null,
+      default_supplier: null,
+      internal_notes: null,
+      customer_notes: null,
+      converted_ddt_id: null,
+      totals: {
+        taxable: money(10),
+        vat: money(2.2),
+        total: money(12.2),
+        cost: money(0),
+        gross_profit: money(10),
+        markup_pct: null,
+        margin_pct: 100,
+      },
+      created_at: "2026-11-25T10:00:00Z",
+      updated_at: "2026-11-25T10:00:00Z",
+      updated_by: "system",
+      deleted_at: null,
+      sync_status: "pending",
+      items: [
+        {
+          id: "r1", quote_id: "q-spacer", row_index: 1, product_id: null, supplier: null,
+          supplier_item_code: null, code: null, description: "RIGA 1", unit: "NR", quantity: "1",
+          purchase_price: money(0), markup_pct: null, base_unit_price: money(10),
+          effective_unit_price: money(10), forced_unit_price: null, discount_pct: 0,
+          effective_markup_pct: null, margin_pct: 100, net_amount: money(10),
+          cost_total: money(0), gross_profit: money(10), vat_rate: 22, vat_amount: money(2.2),
+          availability: null, notes: null, created_at: "", updated_at: "", updated_by: "system",
+          deleted_at: null, sync_status: "pending",
+        },
+        {
+          id: "r10", quote_id: "q-spacer", row_index: 10, product_id: null, supplier: null,
+          supplier_item_code: null, code: null, description: "NOTA SU RIGA 10", unit: "NR", quantity: "1",
+          purchase_price: money(0), markup_pct: null, base_unit_price: money(0),
+          effective_unit_price: money(0), forced_unit_price: null, discount_pct: 0,
+          effective_markup_pct: null, margin_pct: null, net_amount: money(0),
+          cost_total: money(0), gross_profit: money(0), vat_rate: null, vat_amount: money(0),
+          availability: null, notes: null, created_at: "", updated_at: "", updated_by: "system",
+          deleted_at: null, sync_status: "pending",
+        },
+      ],
+    });
+    expect(reloaded.subject).toBe("TITOLO MINUSCOLO");
+    expect(reloaded.items[0].description).toBe("RIGA 1");
+    expect(reloaded.items[1].description).toBe("");
+    expect(reloaded.items[8].description).toBe("");
+    expect(reloaded.items[9].description).toBe("NOTA SU RIGA 10");
+    expect(reloaded.items[9].vat_rate).toBeNull();
   });
 });

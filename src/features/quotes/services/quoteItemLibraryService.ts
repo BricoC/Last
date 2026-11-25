@@ -47,7 +47,7 @@ interface HistoricalRow {
   effective_unit_price_subunits: number;
   forced_unit_price_subunits: number | null;
   discount_pct: string;
-  vat_rate: number;
+  vat_rate: number | null;
   availability: string | null;
   notes: string | null;
 }
@@ -338,8 +338,8 @@ export class QuoteItemLibraryService {
         row.vat_rate !== undefined &&
         Number.isFinite(Number(row.vat_rate))
           ? Number(row.vat_rate)
-          : 22
-      ) as QuoteVatRate,
+          : null
+      ) as QuoteVatRate | null,
       availability: row.availability,
       notes: row.notes,
       usage_count: row.usage_count || 0,
@@ -376,8 +376,8 @@ export class QuoteItemLibraryService {
         row.vat_rate !== undefined &&
         Number.isFinite(Number(row.vat_rate))
           ? Number(row.vat_rate)
-          : 22
-      ) as QuoteVatRate,
+          : null
+      ) as QuoteVatRate | null,
       availability: row.availability,
       notes: row.notes,
     };

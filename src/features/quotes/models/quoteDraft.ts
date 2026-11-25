@@ -32,7 +32,7 @@ export function createEmptyQuoteItem(): QuoteDraftItem {
   return {
     description: "", code: "", unit: "", quantity: "", purchase_price: "0",
     markup_pct: 0, base_unit_price: "", forced_unit_price: "", discount_pct: 0,
-    vat_rate: 22,
+    vat_rate: null,
   };
 }
 
@@ -42,20 +42,50 @@ export function isQuoteDraftItemActive(item: QuoteDraftItem | QuoteItemInput): b
   return Boolean(item.description.trim() || item.code?.trim() || item.unit?.trim()
     || item.supplier?.trim() || item.supplier_item_code?.trim() || String(item.quantity ?? "").trim()
     || hasPrice || Number(item.markup_pct) !== 0 || Number(item.discount_pct) !== 0
-    || item.availability?.trim() || item.notes?.trim());
+    || item.vat_rate != null || item.availability?.trim() || item.notes?.trim());
 }
 
 export function quoteToDraft(quote: Quote): QuoteDraft {
-  const savedItems = quote.items.map((item) => ({
-    id: item.id, product_id: item.product_id, supplier: item.supplier,
-    supplier_item_code: item.supplier_item_code, code: item.code,
-    description: item.description, unit: item.unit, quantity: item.quantity,
-    purchase_price: item.purchase_price.toCanonicalString(),
-    markup_pct: item.markup_pct, base_unit_price: item.base_unit_price.toCanonicalString(),
-    forced_unit_price: item.forced_unit_price?.toCanonicalString() ?? "",
-    discount_pct: item.discount_pct, vat_rate: item.vat_rate,
-    availability: item.availability, notes: item.notes,
-  }));
+  const maxRowIndex = quote.items.reduce((max, item) => Math.max(max, item.row_index || 0), 0);
+  const totalSlots = Math.max(500, maxRowIndex, quote.items.length);
+  const padded = Array.from({ length: totalSlots }, createEmptyQuoteItem);
+
+  for (const item of quote.items) {
+    const mapped: QuoteDraftItem = {
+      id: item.id, product_id: item.product_id, supplier: item.supplier,
+      supplier_item_code: item.supplier_item_code, code: item.code,
+      description: item.description, unit: item.unit, quantity: item.quantity,
+      purchase_price: item.purchase_price.toCanonicalString(),
+      markup_pct: item.markup_pct, base_unit_price: item.base_unit_price.toCanonicalString(),
+      forced_unit_price: item.forced_unit_price?.toCanonicalString() ?? "",
+      discount_pct: item.discount_pct, vat_rate: item.vat_rate ?? null,
+      availability: item.availability, notes: item.notes,
+    };
+    const targetIdx = item.row_index && item.row_index >= 1 && item.row_index <= padded.length
+      ? item.row_index - 1
+      : -1;
+    if (targetIdx >= 0 && !isQuoteDraftItemActive(padded[targetIdx])) {
+      padded[targetIdx] = mapped;
+    } else {
+      const startSearch = targetIdx >= 0 ? targetIdx : 0;
+      let freeIdx = -1;
+      for (let i = startSearch; i < padded.length; i++) {
+        if (!isQuoteDraftItemActive(padded[i])) {
+          freeIdx = i;
+          break;
+        }
+      }
+      if (freeIdx === -1) {
+        freeIdx = padded.findIndex((slot) => !isQuoteDraftItemActive(slot));
+      }
+      if (freeIdx >= 0) {
+        padded[freeIdx] = mapped;
+      } else {
+        padded.push(mapped);
+      }
+    }
+  }
+
   return {
     id: quote.id,
     quote_number: quote.quote_number,
@@ -77,7 +107,7 @@ export function quoteToDraft(quote: Quote): QuoteDraft {
     destination_name: quote.destination_name,
     destination_address: quote.destination_address,
     destination_city: quote.destination_city,
-    subject: quote.subject,
+    subject: (quote.subject ?? "").toUpperCase(),
     validity_days: quote.validity_days,
     payment_method: quote.payment_method,
     delivery_date: quote.delivery_date,
@@ -86,26 +116,30 @@ export function quoteToDraft(quote: Quote): QuoteDraft {
     global_discount_pct: quote.global_discount_pct,
     internal_notes: quote.internal_notes,
     customer_notes: quote.customer_notes,
-    items: [...savedItems, ...Array.from({ length: Math.max(0, 500 - savedItems.length) }, createEmptyQuoteItem)],
+    items: padded,
   };
 }
 
 export function toQuoteInput(draft: QuoteDraft): QuoteDraftInput {
   return {
     ...draft,
-    items: draft.items.filter(isQuoteDraftItemActive).map((item) => {
+    subject: (draft.subject ?? "").toUpperCase(),
+    items: draft.items.flatMap((item, index) => {
+      if (!isQuoteDraftItemActive(item)) return [];
       const baseMoney = item.base_unit_price
         ? money(item.base_unit_price)
         : item.forced_unit_price
         ? money(item.forced_unit_price)
         : null;
-      return {
+      return [{
         ...item,
+        row_index: index + 1,
         quantity: String(item.quantity ?? "").trim() || "1",
         purchase_price: money(item.purchase_price),
         base_unit_price: baseMoney,
         forced_unit_price: item.forced_unit_price ? money(item.forced_unit_price) : null,
-      };
+        vat_rate: item.vat_rate ?? null,
+      }];
     }),
   };
 }

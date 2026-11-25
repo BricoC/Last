@@ -2,7 +2,7 @@ import type { MonetaryValue } from "@/shared/domain/monetaryValue";
 import type { BaseEntity } from "@/shared/types/baseEntity";
 
 export type QuoteStatus = "bozza" | "inviato" | "confermato" | "rifiutato";
-export type QuoteVatRate = 0 | 4 | 10 | 22;
+export type QuoteVatRate = number;
 
 export interface QuoteTotals {
   taxable: MonetaryValue;
@@ -69,7 +69,7 @@ export interface QuoteItem extends BaseEntity {
   net_amount: MonetaryValue;
   cost_total: MonetaryValue;
   gross_profit: MonetaryValue;
-  vat_rate: QuoteVatRate;
+  vat_rate: QuoteVatRate | null;
   vat_amount: MonetaryValue;
   availability: string | null;
   notes: string | null;
@@ -77,6 +77,7 @@ export interface QuoteItem extends BaseEntity {
 
 export interface QuoteItemInput {
   id?: string;
+  row_index?: number;
   product_id?: string | null;
   supplier?: string | null;
   supplier_item_code?: string | null;
@@ -89,7 +90,7 @@ export interface QuoteItemInput {
   base_unit_price?: MonetaryValue | null;
   forced_unit_price?: MonetaryValue | null;
   discount_pct?: number;
-  vat_rate: QuoteVatRate;
+  vat_rate?: QuoteVatRate | null;
   availability?: string | null;
   notes?: string | null;
 }

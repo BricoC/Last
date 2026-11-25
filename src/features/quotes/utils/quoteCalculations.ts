@@ -69,7 +69,7 @@ export function calculateQuoteItem(
     net_amount: netAmount,
     cost_total: costTotal,
     gross_profit: profit,
-    vat_amount: netAmount.calculateVat(input.vat_rate),
+    vat_amount: input.vat_rate != null ? netAmount.calculateVat(input.vat_rate) : money(0),
   };
 }
 
@@ -131,9 +131,10 @@ function assertFinite(label: string, value: number): void {
   if (!Number.isFinite(value)) throw new TypeError(`${label} deve essere un numero valido.`);
 }
 
-function assertVatRate(value: number): asserts value is QuoteVatRate {
-  if (![0, 4, 10, 22].includes(value)) {
-    throw new RangeError("L'aliquota IVA deve essere 0, 4, 10 o 22.");
+function assertVatRate(value: number | null | undefined): asserts value is QuoteVatRate | null | undefined {
+  if (value === null || value === undefined) return;
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new RangeError("L'aliquota IVA deve essere compresa tra 0 e 100.");
   }
 }
 import { normalizeDdtQuantity } from "@/features/ddt-studio/utils/ddtQuantity";

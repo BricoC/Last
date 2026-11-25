@@ -26,7 +26,7 @@ export function buildQuoteDdtConversion(input: QuoteDraftInput, ddtId: string) {
       description: item.description.trim(), unit: item.unit?.trim() || "NR", quantity: String(item.quantity),
       unit_price: ddtUnitPrice,
       base_price: calculated.base_unit_price,
-      discount_pct: ddtDiscountPct, net_amount: calculated.net_amount, vat_rate: item.vat_rate,
+      discount_pct: ddtDiscountPct, net_amount: calculated.net_amount, vat_rate: item.vat_rate ?? "",
       vat_amount: calculated.vat_amount, purchase_price: item.purchase_price ?? money(0),
     };
   });

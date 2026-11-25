@@ -20,7 +20,7 @@ export function buildQuoteSavePayload(input: QuoteDraftInput, existing: Quote | 
     client_fiscal_code: input.client_fiscal_code ?? null, client_sdi: input.client_sdi ?? null,
     client_pec: input.client_pec ?? null, client_phones_json: JSON.stringify(input.client_phones ?? []),
     destination_name: input.destination_name ?? null, destination_address: input.destination_address ?? null,
-    destination_city: input.destination_city ?? null, subject: input.subject?.trim() ?? "",
+    destination_city: input.destination_city ?? null, subject: input.subject?.trim().toUpperCase() ?? "",
     global_discount_pct: String(globalDiscount), validity_days: input.validity_days ?? 30,
     payment_method: input.payment_method ?? null, delivery_date: input.delivery_date ?? null,
     delivery_terms: input.delivery_terms ?? null, default_supplier: input.default_supplier ?? null,
@@ -28,7 +28,7 @@ export function buildQuoteSavePayload(input: QuoteDraftInput, existing: Quote | 
     total_taxable_subunits: totals.taxable.toSubunits(), total_vat_subunits: totals.vat.toSubunits(),
     total_document_subunits: totals.total.toSubunits(), total_cost_subunits: totals.cost.toSubunits(),
     total_profit_subunits: totals.gross_profit.toSubunits(),
-    items: items.map((item, index) => buildItemPayload(item, calculations[index], index + 1)),
+    items: items.map((item, index) => buildItemPayload(item, calculations[index], item.row_index ?? index + 1)),
   };
 }
 
@@ -51,7 +51,7 @@ function buildItemPayload(
     effective_markup_pct: calculation.effective_markup_pct === null ? null : String(calculation.effective_markup_pct),
     margin_pct: calculation.margin_pct === null ? null : String(calculation.margin_pct),
     net_amount_subunits: calculation.net_amount.toSubunits(), cost_total_subunits: calculation.cost_total.toSubunits(),
-    gross_profit_subunits: calculation.gross_profit.toSubunits(), vat_rate: item.vat_rate,
+    gross_profit_subunits: calculation.gross_profit.toSubunits(), vat_rate: item.vat_rate ?? null,
     vat_amount_subunits: calculation.vat_amount.toSubunits(), availability: item.availability ?? null,
     notes: item.notes ?? null,
   };

@@ -416,7 +416,7 @@ export class QuoteRepository {
       net_amount: MonetaryValue.fromSubunits(row.net_amount_subunits),
       cost_total: MonetaryValue.fromSubunits(row.cost_total_subunits),
       gross_profit: MonetaryValue.fromSubunits(row.gross_profit_subunits),
-      vat_rate: row.vat_rate as QuoteVatRate,
+      vat_rate: row.vat_rate !== null && row.vat_rate !== undefined ? (row.vat_rate as QuoteVatRate) : null,
       vat_amount: MonetaryValue.fromSubunits(row.vat_amount_subunits),
       availability: row.availability,
       notes: row.notes,
@@ -452,7 +452,7 @@ interface QuoteItemRow {
   base_unit_price_subunits: number; effective_unit_price_subunits: number;
   forced_unit_price_subunits: number | null; discount_pct: string; effective_markup_pct: string | null;
   margin_pct: string | null; net_amount_subunits: number; cost_total_subunits: number;
-  gross_profit_subunits: number; vat_rate: number; vat_amount_subunits: number;
+  gross_profit_subunits: number; vat_rate: number | null; vat_amount_subunits: number;
   availability: string | null; notes: string | null; created_at: string; updated_at: string;
   updated_by: string; deleted_at: string | null; sync_status: "synced" | "pending";
 }

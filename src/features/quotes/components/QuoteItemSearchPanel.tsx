@@ -265,7 +265,7 @@ export function QuoteItemSearchPanel({
       base_unit_price: salePrice,
       forced_unit_price: "",
       discount_pct: pendingInsert.discount_pct ?? 0,
-      vat_rate: pendingInsert.vat_rate ?? 22,
+      vat_rate: null,
       availability: "",
       notes: pendingInsert.notes || "",
     });

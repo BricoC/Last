@@ -16,9 +16,10 @@ import { parseItalianNumber } from "@/shared/utils/numberUtils";
 
 export const getSupabaseCredentials = createCachedSupabaseConfigLoader("QuoteSyncService");
 
-function cloudVatRate(value: unknown): number {
+function cloudVatRate(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const rate = parseItalianNumber(value);
-  return rate !== null && [0, 4, 10, 22].includes(rate) ? rate : 22;
+  return rate !== null && Number.isFinite(rate) && rate >= 0 && rate <= 100 ? Math.round(rate) : null;
 }
 
 function parseDataJson(raw: any): Record<string, any> {
@@ -77,7 +78,7 @@ function extractAndNormalizeItems(dataJson: Record<string, any>): any[] {
       const profitSubunits = Math.round((Number(riga.ricavo_riga) || 0) * 100000);
       const vatRate = cloudVatRate(riga.iva);
       const vat = parseItalianNumber(riga.importo_iva);
-      const vatSubunits = vat === null ? Math.round(netSubunits * vatRate / 100) : money(vat).toSubunits();
+      const vatSubunits = vat === null ? (vatRate ? Math.round(netSubunits * vatRate / 100) : 0) : money(vat).toSubunits();
 
       return {
         id: riga.id || crypto.randomUUID(),

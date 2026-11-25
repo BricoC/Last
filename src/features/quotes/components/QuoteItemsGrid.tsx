@@ -26,12 +26,12 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
   const rowData = useMemo(() => items.map((item, index) => ({ ...item, row_index: index + 1 })), [items]);
   const activeColumns = useMemo(() => [
     ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct"] : []),
-    "unit", "quantity", "description", "unit_price", "discount_pct", "availability", "vat_rate",
+    "unit", "quantity", "description", "unit_price", "discount_pct", "vat_rate", "availability",
   ], [alexMode]);
 
   const allVisibleCols = useMemo(() => [
     ...(alexMode ? ["supplier", "supplier_item_code", "purchase_price", "markup_pct"] : []),
-    "unit", "quantity", "description", "unit_price", "discount_pct", "net_amount", "availability", "vat_rate",
+    "unit", "quantity", "description", "unit_price", "discount_pct", "net_amount", "vat_rate", "availability",
   ], [alexMode]);
 
   const isMouseDownRef = useRef(false);
@@ -136,7 +136,7 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
         row.base_unit_price = row.forced_unit_price;
       }
       row.forced_unit_price = "";
-    } else if (field === "vat_rate") row.vat_rate = parseVatRate(value);
+    } else if (field === "vat_rate") row.vat_rate = parseVatRate(value, event.oldValue ?? null);
     else if (field === "quantity") row.quantity = String(value ?? "");
     else if (field === "supplier" || field === "supplier_item_code" || field === "availability") row[field] = String(value ?? "");
     update(event.rowIndex, row);
@@ -156,8 +156,8 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
         "description",
         "unit_price",
         "discount_pct",
-        "availability",
         "vat_rate",
+        "availability",
       ];
 
       const startColIdx = editableColsOrder.indexOf(startColId);
@@ -173,14 +173,14 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
           updated.push({
             description: "",
             code: "",
-            unit: "NR",
+            unit: "",
             quantity: "",
             purchase_price: "0",
             markup_pct: 0,
             base_unit_price: "",
             forced_unit_price: "",
             discount_pct: 0,
-            vat_rate: 22,
+            vat_rate: null,
           });
         }
 
@@ -436,7 +436,9 @@ export function QuoteItemsGrid({ items, alexMode, globalDiscount, suppliers = []
     onReorder(reordered);
   };
 
-  const handleDelete = useCallback((rowIndex: number) => onDeleteRow(rowIndex), [onDeleteRow]);
+  const onDeleteRowRef = useRef(onDeleteRow);
+  onDeleteRowRef.current = onDeleteRow;
+  const handleDelete = useCallback((rowIndex: number) => onDeleteRowRef.current(rowIndex), []);
   const columnDefs = useMemo<ColDef<QuoteGridRow>[]>(
     () => createColumns(alexMode, globalDiscount, handleDelete, suppliers),
     [alexMode, globalDiscount, handleDelete, suppliers]
@@ -553,10 +555,10 @@ function createColumns(
     { headerName: "IMPORTO €", colId: "net_amount", width: 125, editable: false,
       valueGetter: (params) => params.data ? calculateAmount(params.data, discount).toCanonicalString() : "",
       valueFormatter: (params) => formatMoney(params.value), cellStyle: { textAlign: "right", fontWeight: 800, color: "var(--primary)" } },
-    textColumn("DISP.", "availability", 92, true),
     { headerName: "IVA", field: "vat_rate", width: 70, editable: true, cellEditor: DDTTextEditor,
-      valueFormatter: (params) => isBlankRow(params.data) ? "" : `${params.value}%`,
-      valueParser: (params) => parseVatRate(params.newValue), cellStyle: { textAlign: "center" } },
+      valueFormatter: (params) => (params.value === null || params.value === undefined || params.value === "") ? "" : `${params.value}%`,
+      valueParser: (params) => parseVatRate(params.newValue, params.oldValue ?? null), cellStyle: { textAlign: "center" } },
+    textColumn("DISP.", "availability", 92, true),
     {
       headerName: "",
       colId: "actions",
@@ -659,6 +661,7 @@ function isBlankRow(row?: QuoteDraftItem): boolean {
     (row.unit && row.unit.trim() !== "") ||
     (row.quantity && String(row.quantity).trim() !== "") ||
     (row.discount_pct && Number(row.discount_pct) !== 0) ||
+    (row.vat_rate !== null && row.vat_rate !== undefined) ||
     (row.availability && row.availability.trim() !== "") ||
     (row.notes && row.notes.trim() !== "") ||
     rowHasPrice(row)
@@ -676,9 +679,12 @@ function parseNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function parseVatRate(value: unknown): QuoteDraftItem["vat_rate"] {
-  const parsed = Number.parseInt(String(value ?? "22").replace("%", "").trim(), 10);
-  return ([0, 4, 10, 22].includes(parsed) ? parsed : 22) as QuoteDraftItem["vat_rate"];
+function parseVatRate(value: unknown, fallback: QuoteDraftItem["vat_rate"] = null): QuoteDraftItem["vat_rate"] {
+  const raw = String(value ?? "").replace("%", "").trim();
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return fallback;
+  return parsed;
 }
 
 function clearQuoteField(row: QuoteGridRow, field: string): void {
@@ -689,7 +695,7 @@ function clearQuoteField(row: QuoteGridRow, field: string): void {
   }
   else if (field === "markup_pct") { row.markup_pct = 0; row.base_unit_price = ""; row.forced_unit_price = ""; }
   else if (field === "discount_pct") { row.discount_pct = 0; }
-  else if (field === "vat_rate") row.vat_rate = 22;
+  else if (field === "vat_rate") row.vat_rate = null;
   else if (field === "quantity") row.quantity = "";
   else if (field === "unit" || field === "description" || field === "supplier" || field === "supplier_item_code" || field === "availability") row[field] = "";
 }
