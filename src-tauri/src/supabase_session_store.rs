@@ -3,6 +3,9 @@ use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
 static SESSION_LOCK: Mutex<()> = Mutex::new(());
+#[cfg(debug_assertions)]
+const SESSION_FILE: &str = "supabase.session.dev.local.bin";
+#[cfg(not(debug_assertions))]
 const SESSION_FILE: &str = "supabase.session.local.bin";
 const MAX_SESSION_BYTES: u64 = 65_536;
 

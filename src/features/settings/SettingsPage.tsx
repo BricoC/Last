@@ -1,6 +1,7 @@
 import { SupabaseConnectionFields } from "./data-import/SupabaseConnectionFields";
 import React, { useEffect, useState } from "react";
-import { useThemeStore, ThemePresetId } from "@/shared/stores/useThemeStore";
+import { useThemeStore, ThemePresetId, getBrightnessLevelsForPreset } from "@/shared/stores/useThemeStore";
+import { useUserStore } from "@/shared/stores/useUserStore";
 import { Palette, Sliders, Mail, Database, Shield, RotateCcw, Check, Building2, Users, HardDrive, DownloadCloud, Activity, FileSpreadsheet } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { CompanySettingsPanel } from "./CompanySettingsPanel";
@@ -16,7 +17,23 @@ import { UserManagementPanel } from "./UserManagementPanel";
 
 export const SettingsPage: React.FC = () => {
   const { theme, setPreset, setBrightness, resetTheme } = useThemeStore();
+  const currentUser = useUserStore((state) => state.currentUser);
+  const setUserTheme = useUserStore((state) => state.setUserTheme);
   const [activeNav, setActiveNav] = useState("users");
+
+  const handlePresetChange = (preset: ThemePresetId) => {
+    setPreset(preset);
+    if (currentUser?.id) {
+      void setUserTheme(currentUser.id, preset, theme.brightnessLevel);
+    }
+  };
+
+  const handleBrightnessChange = (level: number) => {
+    setBrightness(level);
+    if (currentUser?.id) {
+      void setUserTheme(currentUser.id, theme.preset, level);
+    }
+  };
 
   useEffect(() => {
     const onOpenSettingsTab = (e: Event) => {
@@ -37,7 +54,7 @@ export const SettingsPage: React.FC = () => {
     {
       id: "grigio",
       name: "Grigio",
-      desc: "Tonalità neutre ed equilibrate con luminosità regolabile da L1 a L5",
+      desc: "Tonalità neutre ed equilibrate con luminosità regolabile da L1 a L10",
       colors: ["#22242a", "#2c3038", "#3b82f6"],
     },
     {
@@ -54,36 +71,7 @@ export const SettingsPage: React.FC = () => {
     },
   ];
 
-  // Etichette dinamiche per i 5 livelli in base al tema attivo
-  const getBrightnessLevels = () => {
-    if (theme.preset === "avorio") {
-      return [
-        { level: 1, label: "L1 (Bianco Puro)" },
-        { level: 2, label: "L2 (Avorio Luminoso)" },
-        { level: 3, label: "L3 (Avorio Caldo — Consigliato)" },
-        { level: 4, label: "L4 (Avorio Sabbia)" },
-        { level: 5, label: "L5 (Avorio Titanio)" },
-      ];
-    }
-    if (theme.preset === "nero-oled") {
-      return [
-        { level: 1, label: "L1 (Nero Assoluto 100%)" },
-        { level: 2, label: "L2 (Carbone Scuro)" },
-        { level: 3, label: "L3 (Grafite Notte)" },
-        { level: 4, label: "L4 (Ossidiana)" },
-        { level: 5, label: "L5 (Ardesia Scuro)" },
-      ];
-    }
-    return [
-      { level: 1, label: "L1 (Scuro Profondo)" },
-      { level: 2, label: "L2 (Grafite Medio)" },
-      { level: 3, label: "L3 (Standard)" },
-      { level: 4, label: "L4 (Titanio Chiaro — Consigliato)" },
-      { level: 5, label: "L5 (Massima Luminosità)" },
-    ];
-  };
-
-  const brightnessLevels = getBrightnessLevels();
+  const brightnessLevels = getBrightnessLevelsForPreset(theme.preset);
 
   return (
     <div className="w-full min-h-full flex flex-col p-6 space-y-6 select-none text-[var(--foreground)]">
@@ -209,7 +197,12 @@ export const SettingsPage: React.FC = () => {
               </div>
               <button
                 type="button"
-                onClick={resetTheme}
+                onClick={() => {
+                  resetTheme();
+                  if (currentUser?.id) {
+                    void setUserTheme(currentUser.id, "grigio", 4);
+                  }
+                }}
                 className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] text-xs text-[var(--foreground)] hover:border-[var(--primary)] cursor-default"
               >
                 <RotateCcw className="w-3 h-3" />
@@ -223,7 +216,7 @@ export const SettingsPage: React.FC = () => {
                 return (
                   <div
                     key={p.id}
-                    onClick={() => setPreset(p.id)}
+                    onClick={() => handlePresetChange(p.id)}
                     className={cn(
                       "p-3.5 rounded-lg border cursor-default transition-all flex flex-col justify-between",
                       isActive
@@ -275,7 +268,7 @@ export const SettingsPage: React.FC = () => {
                 <button
                   key={b.level}
                   type="button"
-                  onClick={() => setBrightness(b.level)}
+                  onClick={() => handleBrightnessChange(b.level)}
                   className={cn(
                     "py-2 px-1 rounded-lg border text-center text-xs font-medium transition-all flex flex-col items-center justify-center space-y-1 cursor-default",
                     theme.brightnessLevel === b.level

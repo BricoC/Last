@@ -28,6 +28,7 @@ export interface DDTStudioHeaderProps {
   isExportingPdf?: boolean;
   isPrinting?: boolean;
   isDirty?: boolean;
+  hasContent?: boolean;
   toastMessage?: string | null;
   numberingStatus?: {
     missing: number[];
@@ -60,6 +61,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   isExportingPdf = false,
   isPrinting = false,
   isDirty = true,
+  hasContent = true,
   toastMessage = null,
   numberingStatus = null,
   onOpenGapModal,
@@ -82,7 +84,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
   }, [activeView, setActiveView]);
 
   const isConfirmed = ddt.status === "confermato" && ddt.doc_number !== null;
-  const isTheOneDisabled = Boolean(isConfirmed || isSaving || isPrinting);
+  const isTheOneDisabled = Boolean(isConfirmed || isSaving || isPrinting || !hasContent);
 
   const handleTheOneContainerClick = () => {
     if (!isTheOneDisabled) return;
@@ -228,11 +230,13 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
             title={
               isConfirmed
                 ? "The One è disabilitato perché questo DDT è già stato salvato con numero definitivo"
-                : "The One: Salva DDT con numero progressivo e stampa immediatamente 3 copie"
+                : !hasContent
+                ? "The One è disabilitato perché il DDT è vuoto (inserisci cliente o almeno una riga)"
+                : "The One (F3): Salva DDT con numero progressivo e stampa immediatamente 3 copie"
             }
           >
             <Sparkles className={cn("w-3.5 h-3.5", !isConfirmed && "text-purple-200 animate-pulse")} />
-            <span>The One</span>
+            <span>The One (F3)</span>
           </button>
         </div>
 
@@ -249,7 +253,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
                 isUpdateDisabled
                   ? "Nessuna modifica da aggiornare"
                   : isConfirmed
-                  ? "Aggiorna il DDT con le modifiche correnti"
+                  ? "Aggiorna il DDT con le modifiche correnti (F3)"
                   : "Salva e conferma il DDT con numero progressivo"
               }
               className={cn(
@@ -260,7 +264,7 @@ export const DDTStudioHeader: React.FC<DDTStudioHeaderProps> = ({
               )}
             >
               <Save className="w-3.5 h-3.5" />
-              <span>{isConfirmed ? "Aggiorna DDT" : "Salva DDT"}</span>
+              <span>{isConfirmed ? "Aggiorna DDT (F3)" : "Salva DDT"}</span>
             </button>
           );
         })()}

@@ -175,7 +175,11 @@ export function App() {
     };
 
     const runQuickSync = () => {
-      if (!getSupabaseSessionEmail() || (typeof navigator !== "undefined" && !navigator.onLine)) return;
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      if (!getSupabaseSessionEmail()) {
+        void restoreSupabaseSession();
+        return;
+      }
       triggerDdtSync(false, true, false);
       retryPendingCloudWrites();
     };

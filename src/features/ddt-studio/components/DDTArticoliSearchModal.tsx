@@ -23,7 +23,6 @@ export interface DDTArticoliSearchModalProps {
   searchQuery?: string;
   onSearchQueryChange?: (query: string) => void;
   f3FocusTrigger?: number;
-  onReturnToTable?: () => void;
   onPendingInsertChange?: (isOpen: boolean) => void;
 }
 
@@ -45,7 +44,6 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
   searchQuery,
   onSearchQueryChange,
   f3FocusTrigger,
-  onReturnToTable,
   onPendingInsertChange,
 }) => {
   const [sourceTab, setSourceTab] = useState<"generale" | "cliente">("generale");
@@ -276,18 +274,10 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
   // Gestione tastiera fluida tra tabella sopra e tabella sotto
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (pendingInsert) {
-      if (e.key === "F3" || e.key === "F4") {
+      if (e.key === "F4") {
         e.preventDefault();
         e.stopPropagation();
       }
-      return;
-    }
-
-    // Se si preme di nuovo F3 dentro la ricerca, torna immediatamente alla tabella DDT
-    if (e.key === "F3") {
-      e.preventDefault();
-      e.stopPropagation();
-      onReturnToTable?.();
       return;
     }
 
@@ -788,7 +778,7 @@ export const DDTArticoliSearchModal: React.FC<DDTArticoliSearchModalProps> = Rea
         <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-100"
           onKeyDown={(e) => {
-            if (e.key === "F3" || e.key === "F4") {
+            if (e.key === "F4") {
               e.preventDefault();
               e.stopPropagation();
             }

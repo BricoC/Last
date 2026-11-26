@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useUserStore } from "@/shared/stores/useUserStore";
+import { getBrightnessLevelsForPreset, type ThemePresetId } from "@/shared/stores/useThemeStore";
 import {
   AppUser,
   ALL_APP_PAGE_MODULES,
@@ -63,6 +64,7 @@ export const UserManagementPanel: React.FC = () => {
   const [newCanEditOr, setNewCanEditOr] = useState(false);
   const [newCanManageBackups, setNewCanManageBackups] = useState(false);
   const [newTheme, setNewTheme] = useState<"grigio" | "nero-oled" | "avorio">("grigio");
+  const [newThemeBrightness, setNewThemeBrightness] = useState<number>(4);
   const [newAllowedPages, setNewAllowedPages] = useState<string[]>([...DEFAULT_ALLOWED_PAGES]);
   const [newRequirePassword, setNewRequirePassword] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -86,6 +88,7 @@ export const UserManagementPanel: React.FC = () => {
     setNewCanEditOr(false);
     setNewCanManageBackups(false);
     setNewTheme("grigio");
+    setNewThemeBrightness(4);
     setNewAllowedPages(DEFAULT_ALLOWED_PAGES.filter((p) => p !== "settings"));
     setNewRequirePassword(false);
     setNewPassword("");
@@ -140,7 +143,7 @@ export const UserManagementPanel: React.FC = () => {
         can_access_price_lists: true,
         allowed_pages: newAllowedPages,
         theme_preset: newTheme,
-        theme_brightness: newTheme === "nero-oled" ? 1 : newTheme === "avorio" ? 3 : 4,
+        theme_brightness: newThemeBrightness,
         require_password: newRequirePassword,
         password_hash: finalHash,
       });
@@ -191,8 +194,16 @@ export const UserManagementPanel: React.FC = () => {
       }
 
       const effectivePages = editingUser.is_admin ? [...DEFAULT_ALLOWED_PAGES] : editingUser.allowed_pages;
+      const syncedCanSettings = editingUser.is_admin
+        ? true
+        : Boolean(editingUser.can_access_settings || effectivePages.includes("settings"));
+      const syncedPages = editingUser.is_admin
+        ? effectivePages
+        : syncedCanSettings && !effectivePages.includes("settings")
+        ? [...effectivePages, "settings"]
+        : effectivePages;
       let finalTopbarOrder = [...(editingUser.topbar_order && editingUser.topbar_order.length > 0 ? editingUser.topbar_order : DEFAULT_TOPBAR_ORDER)];
-      if (effectivePages.includes("ddt-studio")) {
+      if (syncedPages.includes("ddt-studio")) {
         finalTopbarOrder = finalTopbarOrder.filter((id) => id !== "ddt-studio");
         const dashIdx = finalTopbarOrder.indexOf("dashboard");
         finalTopbarOrder.splice(dashIdx !== -1 ? dashIdx + 1 : 1, 0, "ddt-studio");
@@ -203,11 +214,11 @@ export const UserManagementPanel: React.FC = () => {
         require_password: editRequirePassword,
         password_hash: finalHash,
         // Garanzia amministratore: tutti i permessi sono sempre forzati a true
-        can_access_settings: editingUser.is_admin ? true : editingUser.can_access_settings,
+        can_access_settings: syncedCanSettings,
         can_edit_price_lists: editingUser.is_admin ? true : editingUser.can_edit_price_lists,
         can_edit_or_numbers: editingUser.is_admin ? true : editingUser.can_edit_or_numbers,
         can_manage_backups: editingUser.is_admin ? true : Boolean(editingUser.can_manage_backups),
-        allowed_pages: effectivePages,
+        allowed_pages: syncedPages,
         topbar_order: finalTopbarOrder,
       };
 
@@ -261,27 +272,42 @@ export const UserManagementPanel: React.FC = () => {
       }
     }
 
-    setEditingUser({ ...editingUser, allowed_pages: next, topbar_order: nextOrder });
+    setEditingUser({
+      ...editingUser,
+      allowed_pages: next,
+      topbar_order: nextOrder,
+      ...(pageId === "settings" ? { can_access_settings: isEnabling } : {}),
+    });
   };
 
   const selectAllPagesEditing = () => {
     if (!editingUser || editingUser.is_admin) return;
-    setEditingUser({ ...editingUser, allowed_pages: [...DEFAULT_ALLOWED_PAGES] });
+    setEditingUser({ ...editingUser, allowed_pages: [...DEFAULT_ALLOWED_PAGES], can_access_settings: true });
   };
 
   const deselectAllPagesEditing = () => {
     if (!editingUser || editingUser.is_admin) return;
-    setEditingUser({ ...editingUser, allowed_pages: [] });
+    setEditingUser({ ...editingUser, allowed_pages: [], can_access_settings: false });
   };
 
   const togglePageInNew = (pageId: string) => {
-    setNewAllowedPages((prev) =>
-      prev.includes(pageId) ? prev.filter((p) => p !== pageId) : [...prev, pageId]
-    );
+    setNewAllowedPages((prev) => {
+      const next = prev.includes(pageId) ? prev.filter((p) => p !== pageId) : [...prev, pageId];
+      if (pageId === "settings") {
+        setNewCanSettings(next.includes("settings"));
+      }
+      return next;
+    });
   };
 
-  const selectAllPagesNew = () => setNewAllowedPages([...DEFAULT_ALLOWED_PAGES]);
-  const deselectAllPagesNew = () => setNewAllowedPages([]);
+  const selectAllPagesNew = () => {
+    setNewAllowedPages([...DEFAULT_ALLOWED_PAGES]);
+    setNewCanSettings(true);
+  };
+  const deselectAllPagesNew = () => {
+    setNewAllowedPages([]);
+    setNewCanSettings(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -499,6 +525,12 @@ export const UserManagementPanel: React.FC = () => {
                   );
                 })}
               </div>
+
+              <UserBrightnessSelector
+                preset={editingUser.theme_preset}
+                level={editingUser.theme_brightness || 4}
+                onChange={(level) => setEditingUser({ ...editingUser, theme_brightness: level })}
+              />
             </div>
 
             {/* Sezione Password di Accesso */}
@@ -672,9 +704,14 @@ export const UserManagementPanel: React.FC = () => {
                     type="checkbox"
                     checked={editingUser.is_admin ? true : editingUser.can_access_settings}
                     disabled={editingUser.is_admin}
-                    onChange={(e) =>
-                      setEditingUser({ ...editingUser, can_access_settings: e.target.checked })
-                    }
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      const currentPages = editingUser.allowed_pages || [];
+                      const nextPages = checked
+                        ? (currentPages.includes("settings") ? currentPages : [...currentPages, "settings"])
+                        : currentPages.filter((p) => p !== "settings");
+                      setEditingUser({ ...editingUser, can_access_settings: checked, allowed_pages: nextPages });
+                    }}
                     className="w-4 h-4 mt-0.5 rounded border-[var(--border)] text-[var(--primary)]"
                   />
                   <div>
@@ -893,6 +930,12 @@ export const UserManagementPanel: React.FC = () => {
                   );
                 })}
               </div>
+
+              <UserBrightnessSelector
+                preset={newTheme}
+                level={newThemeBrightness}
+                onChange={setNewThemeBrightness}
+              />
             </div>
 
             {/* Password per il nuovo utente */}
@@ -1024,7 +1067,15 @@ export const UserManagementPanel: React.FC = () => {
                   <input
                     type="checkbox"
                     checked={newCanSettings}
-                    onChange={(e) => setNewCanSettings(e.target.checked)}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setNewCanSettings(checked);
+                      setNewAllowedPages((prev) =>
+                        checked
+                          ? (prev.includes("settings") ? prev : [...prev, "settings"])
+                          : prev.filter((p) => p !== "settings")
+                      );
+                    }}
                     className="w-4 h-4 mt-0.5 rounded border-[var(--border)] text-[var(--primary)]"
                   />
                   <div>
@@ -1372,3 +1423,50 @@ export const UserManagementPanel: React.FC = () => {
     </div>
   );
 };
+
+function UserBrightnessSelector({
+  preset,
+  level,
+  onChange,
+}: {
+  preset: ThemePresetId;
+  level: number;
+  onChange: (level: number) => void;
+}) {
+  const options = getBrightnessLevelsForPreset(preset);
+  const activeOption = options.find((o) => o.level === level) || options[3];
+
+  return (
+    <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--background)]/50 space-y-2">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="font-semibold text-[var(--foreground)]">Livello Luminosità / Tonalità (L1–L10)</span>
+        <span className="text-[var(--primary)] font-semibold">{activeOption?.label}</span>
+      </div>
+      <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
+        {options.map((opt) => {
+          const isSelected = level === opt.level;
+          return (
+            <button
+              key={opt.level}
+              type="button"
+              onClick={() => onChange(opt.level)}
+              title={opt.label}
+              className={cn(
+                "py-1.5 px-1 rounded-lg border text-[11px] font-semibold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer",
+                isSelected
+                  ? "border-[var(--primary)] ring-1 ring-[var(--primary)] bg-[var(--card)] text-[var(--foreground)] shadow-sm"
+                  : "border-[var(--border)] bg-[var(--background)]/60 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              )}
+            >
+              <span
+                className="w-4 h-2.5 rounded-sm border"
+                style={{ backgroundColor: opt.bg, borderColor: opt.border }}
+              />
+              <span>L{opt.level}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

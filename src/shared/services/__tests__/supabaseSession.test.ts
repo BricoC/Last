@@ -160,4 +160,23 @@ describe("Sessione cloud Supabase", () => {
     completeRead(Response.json([{ id: "old-connection" }]));
     await expect(read).rejects.toThrow("sessione Supabase è terminata");
   });
+
+  it("ritenta il refresh su 401 prima di disconnettere la sessione", async () => {
+    await connectSupabase(email, "test-password");
+    getSession.mockResolvedValue({ data: { session: { access_token: "stale-token" } }, error: null });
+    refreshSession.mockResolvedValueOnce({
+      data: { session: { access_token: "fresh-token", refresh_token: "rt-2" }, user: { email, is_anonymous: false } },
+      error: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(Response.json([{ id: "ok" }]));
+
+    const res = await supabaseFetch(orderUrl, request);
+    expect(res.ok).toBe(true);
+    expect(getSupabaseSessionEmail()).toBe(email);
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    expect(savedSession).not.toBeNull();
+  });
 });

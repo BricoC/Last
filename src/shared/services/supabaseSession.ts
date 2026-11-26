@@ -63,7 +63,7 @@ function matches(connection: Connection | null, projectUrl: string, anonKey: str
     connection.anonKey === anonKey.trim());
 }
 
-function verifyApproval(connection: Connection, token: string): Promise<void> {
+function verifyApproval(connection: Connection, token: string, allowRefreshRetry = true): Promise<void> {
   if (connection.approval?.token === token && Date.now() < connection.approval.expiresAt) {
     return connection.approval.request;
   }
@@ -76,8 +76,16 @@ function verifyApproval(connection: Connection, token: string): Promise<void> {
       body: "{}",
       redirect: "error",
       signal: AbortSignal.timeout(8_000),
-    }).then((response) => {
+    }).then(async (response) => {
       if (!response.ok) {
+        if (response.status === 401 && allowRefreshRetry && typeof connection.client.auth.refreshSession === "function") {
+          const refreshed = await connection.client.auth.refreshSession().catch(() => null);
+          const nextToken = refreshed && !refreshed.error ? refreshed.data?.session?.access_token : null;
+          if (nextToken && connected === connection) {
+            if (connection.approval === approval) connection.approval = undefined;
+            return await verifyApproval(connection, nextToken, false);
+          }
+        }
         if (response.status === 401 || response.status === 403) {
           if (connected === connection) disconnectSupabase();
           void invoke("clear_supabase_station_session").catch((err) => {

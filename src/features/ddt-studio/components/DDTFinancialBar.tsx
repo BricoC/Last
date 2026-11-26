@@ -177,7 +177,7 @@ export const DDTFinancialBar: React.FC<DDTFinancialBarProps> = ({
         </div>
       </div>
 
-      {/* DESTRA: Cerca Articoli (F3), Visualizza Margini, Operatore & Stato */}
+      {/* DESTRA: Cerca Articoli (F4), Visualizza Margini, Operatore & Stato */}
       <div className="flex items-center space-x-3">
         {/* Cerca Articoli F4 */}
         <div className="flex flex-col items-start">

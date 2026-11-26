@@ -8,7 +8,7 @@ import { subscribeToOpenDdt } from "./services/ddtNavigation";
 import { ensureDdtBaseSnapshotFromLocal } from "./services/ddtSnapshotService";
 import { registerWindowCloseGuard, registerDirtyCheck } from "@/shared/stores/useWindowStore";
 import { UnsavedChangesModal } from "@/shared/components/ui/UnsavedChangesModal";
-import { calculateDdtTotals } from "./utils/ddtCalculations";
+import { calculateDdtTotals, isRowFilled } from "./utils/ddtCalculations";
 import { DDTStudioHeader } from "./components/DDTStudioHeader";
 import { DDTStudioSidebar } from "./components/DDTStudioSidebar";
 import { DDTClienteCard } from "./components/DDTClienteCard";
@@ -182,11 +182,6 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     lastActiveCellRef.current = { rowIndex, colId };
   }, []);
 
-  const handleReturnToTable = useCallback(() => {
-    const { rowIndex, colId } = lastActiveCellRef.current;
-    tableRef.current?.focusCell(rowIndex, colId, true);
-  }, []);
-
   const handleDescriptionEditingStopped = useCallback(() => {
     if (isSearchModalOpen) return;
     if (!isF3NavigatingRef.current) {
@@ -199,45 +194,6 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
   // Modale Alex (Ricerca Multi-Listino 4 finestre)
   const [isAlexModalOpen, setIsAlexModalOpen] = useState(false);
   const isQuantityModalOpenRef = useRef(false);
-
-  // Scorciatoie tastiera: F4 apre/chiude il pannello, F3 apre e sposta il focus direttamente sulla prima voce del listino
-  useEffect(() => {
-    const handleGlobalShortcuts = (e: KeyboardEvent) => {
-      if (isQuantityModalOpenRef.current && (e.key === "F3" || e.key === "F4")) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-
-      if (e.key === "F4") {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsSearchModalOpen((prev) => !prev);
-      } else if (e.key === "F3") {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const searchEl = document.getElementById("ddt-search-modal-container");
-        const isInsideSearch = searchEl && (searchEl === document.activeElement || searchEl.contains(document.activeElement));
-        if (isInsideSearch) {
-          handleReturnToTable();
-          return;
-        }
-
-        isF3NavigatingRef.current = true;
-        if (tableRef.current?.clearFocusedCell) {
-          tableRef.current.clearFocusedCell();
-        }
-        setIsSearchModalOpen(true);
-        setF3FocusTrigger((prev) => prev + 1);
-        setTimeout(() => {
-          isF3NavigatingRef.current = false;
-        }, 400);
-      }
-    };
-    window.addEventListener("keydown", handleGlobalShortcuts, true);
-    return () => window.removeEventListener("keydown", handleGlobalShortcuts, true);
-  }, [handleReturnToTable]);
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -464,6 +420,37 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
     showToast,
   });
 
+  const isConfirmed = ddt.status === "confermato" && ddt.doc_number !== null;
+  const hasDdtContent = Boolean(ddt.client_name?.trim() || items.some(isRowFilled));
+  const isTheOneDisabled = Boolean(isConfirmed || isSaving || isPrinting || !hasDdtContent);
+
+  // Scorciatoie tastiera: F4 apre/chiude il pannello ricerca articoli, F3 attiva "The One" (o "Aggiorna DDT" se già confermato e modificato)
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      if (e.key === "F4") {
+        if (isQuantityModalOpenRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        setIsSearchModalOpen((prev) => !prev);
+      } else if (e.key === "F3") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isQuantityModalOpenRef.current || isSaving || isPrinting) return;
+        if (!isTheOneDisabled) {
+          void handleTheOne();
+        } else if (isConfirmed && isDirty) {
+          void handleEmitDdt();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleGlobalShortcuts, true);
+    return () => window.removeEventListener("keydown", handleGlobalShortcuts, true);
+  }, [isTheOneDisabled, isConfirmed, isDirty, isSaving, isPrinting, handleTheOne, handleEmitDdt]);
+
   useEffect(() => registerWindowCloseGuard(windowId, async () => {
     return await promptUnsavedChanges();
   }), [windowId, promptUnsavedChanges]);
@@ -660,6 +647,7 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
         isExportingPdf={isExportingPdf}
         isPrinting={isPrinting}
         isDirty={isDirty}
+        hasContent={hasDdtContent}
       />
 
       {/* Corpo Principale: Sidebar Riducibile / Espandibile + Area Lavoro */}
@@ -756,7 +744,6 @@ export const DDTStudioPage: React.FC<{ windowId: string }> = ({ windowId }) => {
                         searchQuery={searchQuery}
                         onSearchQueryChange={setSearchQuery}
                         f3FocusTrigger={f3FocusTrigger}
-                        onReturnToTable={handleReturnToTable}
                         onPendingInsertChange={(isOpen) => {
                           isQuantityModalOpenRef.current = isOpen;
                         }}

@@ -72,10 +72,14 @@ export const DDT_CONFIG = {
 
   // 5. Riquadro Totali a Piè di Pagina (Footer)
   footer: {
-    altezzaTotali: "44px",
-    fontSizeLabelTotali: "8px",
-    fontSizeValoriTotali: "12px",
-    paddingTopValori: "11px",
+    altezzaTotali: "50px",
+    fontSizeLabelTotali: "11.5px",
+    fontSizeValoriTotali: "15px",
+    fontSizeValoriColliPeso: "13px",
+    paddingTopValori: "6px",
+    altezzaRigaLogistica: "38px",
+    fontSizeLabelLogistica: "11.5px",
+    fontSizeValoreLogistica: "12px",
   },
 };
 
@@ -109,9 +113,9 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
       };
     }, [companySettings]);
 
-    const footerText = useMemo(() => {
+    const footerParts = useMemo(() => {
       if (!companySettings) {
-        return "";
+        return [];
       }
       const parts: string[] = [];
       if (companySettings.business_name?.trim()) {
@@ -140,7 +144,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
       } else if (cf) {
         parts.push(`C.F: ${cf}`);
       }
-      return parts.join(" · ");
+      return parts;
     }, [companySettings]);
 
     return (
@@ -164,7 +168,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
               minHeight: "297mm",
               height: "297mm",
               maxHeight: "297mm",
-              padding: "7mm 10mm 8mm 10mm",
+              padding: "7mm 5mm 8mm 5mm",
               boxSizing: "border-box",
               pageBreakAfter: "always",
               breakAfter: "page",
@@ -875,7 +879,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           style={{
                             textAlign: "center",
                             fontStyle: "italic",
-                            fontSize: "9.5px",
+                            fontSize: DDT_CONFIG.footer.fontSizeValoriColliPeso,
                             paddingTop: DDT_CONFIG.footer.paddingTopValori,
                           }}
                         >
@@ -901,7 +905,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           style={{
                             textAlign: "center",
                             fontStyle: "italic",
-                            fontSize: "9.5px",
+                            fontSize: DDT_CONFIG.footer.fontSizeValoriColliPeso,
                             paddingTop: DDT_CONFIG.footer.paddingTopValori,
                           }}
                         >
@@ -993,7 +997,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                     </tr>
 
                     {/* Riga 2: Aspetto esteriore dei beni (colspan 2) | Porto | Firma conducente (colspan 2) */}
-                    <tr style={{ height: "30px", borderBottom: "1px solid black" }}>
+                    <tr style={{ height: DDT_CONFIG.footer.altezzaRigaLogistica, borderBottom: "1px solid black" }}>
                       <td
                         colSpan={2}
                         style={{
@@ -1004,10 +1008,10 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           boxSizing: "border-box",
                         }}
                       >
-                        <div style={{ fontSize: "8px", fontStyle: "italic", color: "#3f3f46" }}>
+                        <div style={{ fontSize: DDT_CONFIG.footer.fontSizeLabelLogistica, fontStyle: "italic", color: "#3f3f46" }}>
                           Aspetto esteriore dei beni:
                         </div>
-                        <div style={{ fontSize: "8.5px", paddingLeft: "6px", marginTop: "2px", fontStyle: "italic" }}>
+                        <div style={{ fontSize: DDT_CONFIG.footer.fontSizeValoreLogistica, paddingLeft: "6px", marginTop: "2px", fontStyle: "italic" }}>
                           {ddt.goods_appearance || ""}
                         </div>
                       </td>
@@ -1021,8 +1025,8 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           boxSizing: "border-box",
                         }}
                       >
-                        <div style={{ fontSize: "8px", fontStyle: "italic", color: "#3f3f46" }}>Porto</div>
-                        <div style={{ textAlign: "center", fontSize: "8.5px", marginTop: "2px", fontStyle: "italic" }}>
+                        <div style={{ fontSize: DDT_CONFIG.footer.fontSizeLabelLogistica, fontStyle: "italic", color: "#3f3f46" }}>Porto</div>
+                        <div style={{ textAlign: "center", fontSize: DDT_CONFIG.footer.fontSizeValoreLogistica, marginTop: "2px", fontStyle: "italic" }}>
                           {ddt.carriage_terms || "Franco stabilimento"}
                         </div>
                       </td>
@@ -1036,14 +1040,14 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           boxSizing: "border-box",
                         }}
                       >
-                        <div style={{ fontSize: "7.5px", fontStyle: "italic", color: "#3f3f46" }}>
+                        <div style={{ fontSize: DDT_CONFIG.footer.fontSizeLabelLogistica, fontStyle: "italic", color: "#3f3f46" }}>
                           Firma conducente:
                         </div>
                       </td>
                     </tr>
 
                     {/* Riga 3: VETTORE (colspan 2) | Data e ora del ritiro | Firma cessionario (colspan 2) */}
-                    <tr style={{ height: "30px" }}>
+                    <tr style={{ height: DDT_CONFIG.footer.altezzaRigaLogistica }}>
                       <td
                         colSpan={2}
                         style={{
@@ -1054,8 +1058,8 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           boxSizing: "border-box",
                         }}
                       >
-                        <div style={{ fontSize: "8px", fontStyle: "italic", color: "#3f3f46" }}>VETTORE</div>
-                        <div style={{ fontSize: "8.5px", paddingLeft: "6px", marginTop: "2px", fontStyle: "italic" }}>
+                        <div style={{ fontSize: DDT_CONFIG.footer.fontSizeLabelLogistica, fontStyle: "italic", color: "#3f3f46" }}>VETTORE</div>
+                        <div style={{ fontSize: DDT_CONFIG.footer.fontSizeValoreLogistica, paddingLeft: "6px", marginTop: "2px", fontStyle: "italic" }}>
                           {ddt.carrier || ""}
                         </div>
                       </td>
@@ -1069,21 +1073,8 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           boxSizing: "border-box",
                         }}
                       >
-                        <div style={{ fontSize: "8px", fontStyle: "italic", color: "#3f3f46" }}>
+                        <div style={{ fontSize: DDT_CONFIG.footer.fontSizeLabelLogistica, fontStyle: "italic", color: "#3f3f46" }}>
                           Data e ora del ritiro
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            padding: "2px 8px",
-                            fontSize: "7.5px",
-                            fontStyle: "italic",
-                            color: "#71717a",
-                          }}
-                        >
-                          <span>Data:</span>
-                          <span>Ora:</span>
                         </div>
                       </td>
 
@@ -1096,7 +1087,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                           boxSizing: "border-box",
                         }}
                       >
-                        <div style={{ fontSize: "7.5px", fontStyle: "italic", color: "#3f3f46" }}>
+                        <div style={{ fontSize: DDT_CONFIG.footer.fontSizeLabelLogistica, fontStyle: "italic", color: "#3f3f46" }}>
                           Firma cessionario
                         </div>
                       </td>
@@ -1104,38 +1095,11 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                   </tbody>
                 </table>
 
-                {/* Piè di pagina aziendale con P.IVA e recapiti in corsivo */}
-                <div
-                  style={{
-                    textAlign: "center",
-                    fontSize: "9.5px",
-                    fontStyle: "italic",
-                    marginTop: "6px",
-                    paddingTop: "2px",
-                    borderTop: "1px solid #e4e4e7",
-                    color: "#27272a",
-                    letterSpacing: "-0.2px",
-                  }}
-                >
-                  {footerText}
-                </div>
+                {/* Piè di pagina aziendale con P.IVA e recapiti in corsivo a tutta larghezza */}
+                <CompanyFooterLine parts={footerParts} />
               </div>
             ) : (
-              <div
-                style={{
-                  textAlign: "center",
-                  fontSize: "9.5px",
-                  fontStyle: "italic",
-                  marginTop: "6px",
-                  paddingTop: "2px",
-                  borderTop: "1px solid #e4e4e7",
-                  color: "#27272a",
-                  letterSpacing: "-0.2px",
-                  flexShrink: 0,
-                }}
-              >
-                {footerText}
-              </div>
+              <CompanyFooterLine parts={footerParts} shrinkZero />
             )}
           </div>
         ))}
@@ -1143,3 +1107,37 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
     );
   }
 );
+
+function CompanyFooterLine({ parts, shrinkZero = false }: { parts: string[]; shrinkZero?: boolean }) {
+  if (parts.length === 0) return null;
+  return (
+    <div
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: parts.length === 1 ? "center" : "space-between",
+        gap: "2px",
+        fontSize: "9.2px",
+        fontStyle: "italic",
+        letterSpacing: "-0.2px",
+        marginTop: "6px",
+        paddingTop: "2px",
+        paddingLeft: "1px",
+        paddingRight: "3px",
+        boxSizing: "border-box",
+        borderTop: "1px solid #e4e4e7",
+        color: "#27272a",
+        whiteSpace: "nowrap",
+        ...(shrinkZero ? { flexShrink: 0 } : {}),
+      }}
+    >
+      {parts.map((part, idx) => (
+        <span key={idx} style={{ display: "contents" }}>
+          {idx > 0 && <span aria-hidden="true">·</span>}
+          <span>{part}</span>
+        </span>
+      ))}
+    </div>
+  );
+}

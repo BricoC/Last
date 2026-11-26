@@ -5,7 +5,7 @@ export type ThemePresetId = "grigio" | "nero-oled" | "avorio";
 export interface ThemeTokens {
   preset: ThemePresetId;
   presetName: string;
-  brightnessLevel: number; // 1 to 5 per tutti i temi
+  brightnessLevel: number; // 1 to 10 per tutti i temi
   primaryColor: string;
   backgroundColor: string;
   cardColor: string;
@@ -16,55 +16,98 @@ export interface ThemeTokens {
   borderRadius: string;
 }
 
-// 5 Livelli di tonalità per GRIGIO
-function getGrigioTones(level: number) {
-  switch (level) {
-    case 1:
-      return { bg: "#16171a", card: "#1e2024", border: "#2e3238" };
-    case 2:
-      return { bg: "#1a1c20", card: "#23262c", border: "#333842" };
-    case 3:
-      return { bg: "#1e2025", card: "#282b32", border: "#393e49" };
-    case 4: // Default Titanio Chiaro
-    default:
-      return { bg: "#22242a", card: "#2c3038", border: "#3e4350" };
-    case 5:
-      return { bg: "#272a32", card: "#323742", border: "#464c5b" };
-  }
+export interface ThemeTonePalette {
+  bg: string;
+  card: string;
+  border: string;
 }
 
-// 5 Livelli di tonalità per BIANCO AVORIO (con testo scuro nitidissimo e contrasto perfetto)
-function getAvorioTones(level: number) {
-  switch (level) {
-    case 1: // Bianco Puro / Avorio chiarissimo
-      return { bg: "#ffffff", card: "#f8f9fa", border: "#e5e7eb" };
-    case 2: // Avorio Luminoso
-      return { bg: "#fcfbf7", card: "#ffffff", border: "#dedbd2" };
-    case 3: // Avorio Standard Caldo (Default)
-    default:
-      return { bg: "#f7f5ef", card: "#ffffff", border: "#d6d1c5" };
-    case 4: // Avorio Sabbia / Papiro
-      return { bg: "#eeebe0", card: "#faf8f2", border: "#cbc5b6" };
-    case 5: // Avorio Titanio Chiaro / Grigio Caldo
-      return { bg: "#e5e1d4", card: "#f4f1e8", border: "#bfb8a6" };
-  }
+export interface ThemeBrightnessOption {
+  level: number;
+  label: string;
+  bg: string;
+  card: string;
+  border: string;
 }
 
-// 5 Livelli di tonalità per NERO ASSOLUTO (OLED)
-function getNeroTones(level: number) {
-  switch (level) {
-    case 1: // Nero 100% puro
-    default:
-      return { bg: "#000000", card: "#0c0c0c", border: "#222222" };
-    case 2:
-      return { bg: "#070707", card: "#121212", border: "#282828" };
-    case 3:
-      return { bg: "#0e0e0e", card: "#181818", border: "#303030" };
-    case 4:
-      return { bg: "#141414", card: "#1f1f1f", border: "#383838" };
-    case 5:
-      return { bg: "#1a1a1a", card: "#252525", border: "#404040" };
-  }
+export function clampBrightnessLevel(level: number | undefined | null, fallback = 4): number {
+  const num = Number(level);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(10, Math.max(1, Math.round(num)));
+}
+
+const GRIGIO_TONES: ThemeTonePalette[] = [
+  { bg: "#131417", card: "#1b1d21", border: "#2a2e34" },
+  { bg: "#16171a", card: "#1e2024", border: "#2e3238" },
+  { bg: "#1a1c20", card: "#23262c", border: "#333842" },
+  { bg: "#1e2025", card: "#282b32", border: "#393e49" },
+  { bg: "#22242a", card: "#2c3038", border: "#3e4350" },
+  { bg: "#272a32", card: "#323742", border: "#464c5b" },
+  { bg: "#2c303a", card: "#383d4a", border: "#4e5566" },
+  { bg: "#323642", card: "#3e4452", border: "#575f72" },
+  { bg: "#383d4a", card: "#454b5b", border: "#60697d" },
+  { bg: "#3f4554", card: "#4c5364", border: "#6a7389" },
+];
+
+const AVORIO_TONES: ThemeTonePalette[] = [
+  { bg: "#ffffff", card: "#f8f9fa", border: "#e5e7eb" },
+  { bg: "#fcfbf7", card: "#ffffff", border: "#dedbd2" },
+  { bg: "#f7f5ef", card: "#ffffff", border: "#d6d1c5" },
+  { bg: "#f2efe6", card: "#fcfbf7", border: "#cfc9bb" },
+  { bg: "#eeebe0", card: "#faf8f2", border: "#cbc5b6" },
+  { bg: "#e8e4d7", card: "#f6f4ec", border: "#c3bcac" },
+  { bg: "#e2ddd0", card: "#f2efe5", border: "#bbb3a2" },
+  { bg: "#dbd5c6", card: "#ede9dd", border: "#b2aa97" },
+  { bg: "#d4cebd", card: "#e8e3d5", border: "#a9a08c" },
+  { bg: "#ccc5b3", card: "#e2dccd", border: "#9f9681" },
+];
+
+const NERO_TONES: ThemeTonePalette[] = [
+  { bg: "#000000", card: "#0a0a0a", border: "#1f1f1f" },
+  { bg: "#050505", card: "#0f0f10", border: "#242426" },
+  { bg: "#0a0a0b", card: "#141416", border: "#2a2a2d" },
+  { bg: "#0f0f11", card: "#19191c", border: "#303034" },
+  { bg: "#141417", card: "#1e1e22", border: "#36363b" },
+  { bg: "#19191d", card: "#242429", border: "#3d3d43" },
+  { bg: "#1e1e23", card: "#29292f", border: "#44444b" },
+  { bg: "#232329", card: "#2f2f36", border: "#4c4c54" },
+  { bg: "#28282f", card: "#34343c", border: "#54545d" },
+  { bg: "#2e2e36", card: "#3a3a43", border: "#5d5d67" },
+];
+
+const GRIGIO_LABELS = [
+  "L1 (Notte Fonda)", "L2 (Scuro Profondo)", "L3 (Grafite Scuro)", "L4 (Grafite Medio)",
+  "L5 (Titanio — Consigliato)", "L6 (Titanio Chiaro)", "L7 (Acciaio)", "L8 (Ardesia)",
+  "L9 (Grigio Chiaro)", "L10 (Massima Luminosità)",
+];
+
+const AVORIO_LABELS = [
+  "L1 (Bianco Puro)", "L2 (Avorio Luminoso)", "L3 (Avorio Caldo — Consigliato)", "L4 (Crema Leggero)",
+  "L5 (Avorio Sabbia)", "L6 (Papiro)", "L7 (Pietra Chiara)", "L8 (Lino)",
+  "L9 (Tortora Chiaro)", "L10 (Avorio Intenso)",
+];
+
+const NERO_LABELS = [
+  "L1 (Nero Assoluto 100%)", "L2 (Carbone Profondo)", "L3 (Carbone Scuro)", "L4 (Grafite Notte)",
+  "L5 (Ossidiana)", "L6 (Antracite Scuro)", "L7 (Ardesia Scuro)", "L8 (Ebano)",
+  "L9 (Fumo Scuro)", "L10 (Nero Morbido)",
+];
+
+export function getThemeTonePalette(preset: ThemePresetId, level: number): ThemeTonePalette {
+  const idx = clampBrightnessLevel(level) - 1;
+  if (preset === "avorio") return AVORIO_TONES[idx];
+  if (preset === "nero-oled") return NERO_TONES[idx];
+  return GRIGIO_TONES[idx];
+}
+
+export function getBrightnessLevelsForPreset(preset: ThemePresetId): ThemeBrightnessOption[] {
+  const tones = preset === "avorio" ? AVORIO_TONES : preset === "nero-oled" ? NERO_TONES : GRIGIO_TONES;
+  const labels = preset === "avorio" ? AVORIO_LABELS : preset === "nero-oled" ? NERO_LABELS : GRIGIO_LABELS;
+  return tones.map((tone, idx) => ({
+    level: idx + 1,
+    label: labels[idx],
+    ...tone,
+  }));
 }
 
 const THEME_GRIGIO_L4: ThemeTokens = {
@@ -118,15 +161,16 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   },
 
   setPreset: (preset) => {
-    const currentLevel = get().theme.brightnessLevel || 3;
+    const currentLevel = clampBrightnessLevel(get().theme.brightnessLevel, 4);
+    const tones = getThemeTonePalette(preset, currentLevel);
     let newTheme: ThemeTokens;
 
     if (preset === "grigio") {
-      const tones = getGrigioTones(get().theme.brightnessLevel || 4);
       newTheme = {
         ...get().theme,
         preset: "grigio",
         presetName: "Grigio",
+        brightnessLevel: currentLevel,
         backgroundColor: tones.bg,
         cardColor: tones.card,
         cardHoverColor: "#353a45",
@@ -136,11 +180,11 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
         primaryColor: "#3b82f6",
       };
     } else if (preset === "nero-oled") {
-      const tones = getNeroTones(currentLevel);
       newTheme = {
         ...get().theme,
         preset: "nero-oled",
         presetName: "Nero Assoluto (OLED)",
+        brightnessLevel: currentLevel,
         backgroundColor: tones.bg,
         cardColor: tones.card,
         cardHoverColor: "#1c1c1c",
@@ -151,11 +195,11 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
       };
     } else {
       // Bianco Avorio (Testo scuro carbone nitido, contrasto 100%)
-      const tones = getAvorioTones(currentLevel);
       newTheme = {
         ...get().theme,
         preset: "avorio",
         presetName: "Bianco Avorio",
+        brightnessLevel: currentLevel,
         backgroundColor: tones.bg,
         cardColor: tones.card,
         cardHoverColor: "#edeae1",
@@ -173,19 +217,12 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 
   setBrightness: (level) => {
     const { preset } = get().theme;
-    let updatedTones: { bg: string; card: string; border: string };
-
-    if (preset === "avorio") {
-      updatedTones = getAvorioTones(level);
-    } else if (preset === "nero-oled") {
-      updatedTones = getNeroTones(level);
-    } else {
-      updatedTones = getGrigioTones(level);
-    }
+    const clamped = clampBrightnessLevel(level);
+    const updatedTones = getThemeTonePalette(preset, clamped);
 
     const updatedTheme = {
       ...get().theme,
-      brightnessLevel: level,
+      brightnessLevel: clamped,
       backgroundColor: updatedTones.bg,
       cardColor: updatedTones.card,
       borderColor: updatedTones.border,
