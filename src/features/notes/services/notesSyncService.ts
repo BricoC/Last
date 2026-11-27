@@ -267,8 +267,8 @@ export class NotesSyncService {
         cursor = { updated_at: last.updated_at ?? null, id: last.id };
         const totalMatch = pullRes.headers.get("content-range")?.match(/\/(\d+)$/);
         if (totalMatch) {
-          const total = Number(totalMatch[1]);
-          if (remoteById.size >= total) break;
+          const remainingTotal = Number(totalMatch[1]);
+          if (page.length >= remainingTotal || page.length < PAGE_SIZE) break;
         } else if (page.length < PAGE_SIZE) {
           break;
         }

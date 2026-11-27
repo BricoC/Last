@@ -52,6 +52,7 @@ export interface OfflineQueueItem {
 export class OrderSupabaseService {
   public recentlyPushedRemoteIds = new Set<string>();
   private queueFlight: Promise<number> | null = null;
+  private queueRerunRequested = false;
   private processingItemId?: string;
   private mutationGeneration = 0;
   private readonly resolvedSuppliers = new Map<string, string>();
@@ -688,13 +689,26 @@ export class OrderSupabaseService {
   async processOfflineQueue(): Promise<number> {
     if (!navigator.onLine) return 0;
     await getDatabase();
-    if (this.queueFlight) return 0;
+    if (this.queueFlight) {
+      this.queueRerunRequested = true;
+      return 0;
+    }
     const initialQueue = this.getOfflineQueue();
     if (initialQueue.length === 0) {
       this.lastQueueFailure = null;
       return 0;
     }
-    this.queueFlight = this.drainOfflineQueue(initialQueue).finally(() => { this.queueFlight = null; });
+    this.queueRerunRequested = false;
+    this.queueFlight = this.drainOfflineQueue(initialQueue).finally(() => {
+      const shouldRerun = this.queueRerunRequested;
+      this.queueRerunRequested = false;
+      this.queueFlight = null;
+      if (shouldRerun && this.getOfflineQueue().length > 0 && navigator.onLine) {
+        setTimeout(() => {
+          void this.processOfflineQueue().catch(() => {});
+        }, 0);
+      }
+    });
     return this.queueFlight;
   }
 
@@ -841,7 +855,7 @@ export class OrderSupabaseService {
         window.dispatchEvent(new CustomEvent("order-legacy-offline-queue", { detail: { count: legacyHeld } }));
       }
     }
-    if (processedCount > 0) {
+    if (processedCount > 0 && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("order_offline_queue_synced", { detail: { processedCount } }));
     }
     return processedCount;
@@ -860,19 +874,19 @@ export class OrderSupabaseService {
         normalizeSupabaseProjectUrl((await this.getCredentials())?.projectUrl);
       const fetchedSupabaseIds = new Set<string>();
 
+      const writes: SqliteWrite[] = [];
       for (const item of orders) {
         if (this.mutationGeneration !== generation) return;
         const localId = "ord_" + item.id;
         fetchedSupabaseIds.add(String(item.id));
         if (this.hasQueuedOrder(String(item.id))) continue;
         // Rimuove eventuali vecchie righe draft/duplicate collegate allo stesso supabase_id
-        await db.execute(
-          `DELETE FROM orders WHERE supabase_id = $1 AND id <> $2 AND sync_status = 'synced'`,
-          [String(item.id), localId]
-        );
-        if (this.mutationGeneration !== generation) return;
-        await db.execute(
-          `INSERT INTO orders (
+        writes.push({
+          sql: `DELETE FROM orders WHERE supabase_id = $1 AND id <> $2 AND sync_status = 'synced'`,
+          params: [String(item.id), localId],
+        });
+        writes.push({
+          sql: `INSERT INTO orders (
             id, supabase_id, order_date, supplier_name, article_code, description,
             quantity, price, ordered_date, notes, user_name, is_archived, is_deleted,
             highlights, created_at, updated_at, sync_status, project_url
@@ -895,7 +909,7 @@ export class OrderSupabaseService {
             sync_status = 'synced',
             project_url = excluded.project_url
           WHERE orders.sync_status <> 'pending' AND julianday(excluded.updated_at) >= julianday(orders.updated_at)`,
-          [
+          params: [
             localId,
             item.id,
             item.order_date || "",
@@ -913,8 +927,12 @@ export class OrderSupabaseService {
             item.created_at || now,
             item.updated_at || now,
             activeProjectUrl,
-          ]
-        );
+          ],
+        });
+      }
+      if (this.mutationGeneration !== generation) return;
+      if (writes.length > 0) {
+        await applyLocalDatabaseBatch(writes);
       }
 
       // Rimuove dalla cache di questa vista eventuali ordini synced eliminati o spostati da altri PC
@@ -1014,7 +1032,7 @@ export class OrderSupabaseService {
       writes.push({ sql: "DELETE FROM orders WHERE id = $1", params: [previousLocalId] });
     }
 
-    const orderProjectUrl = getLastKnownSupabaseProjectUrl();
+    const orderProjectUrl = await resolveActiveSupabaseProjectUrl();
     writes.push({ sql: `INSERT INTO orders (
         id, supabase_id, order_date, supplier_name, article_code, description,
         quantity, price, ordered_date, notes, user_name, is_archived, is_deleted,

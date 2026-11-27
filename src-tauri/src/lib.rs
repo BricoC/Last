@@ -529,15 +529,27 @@ fn send_email_with_attachments(
     attachments: Vec<String>,
 ) -> Result<(), String> {
     let mut validated_attachments = Vec::with_capacity(attachments.len());
-    for raw in &attachments {
-        let valid = validate_allowed_file_path(
-            raw,
-            &[
-                "pdf", "xlsx", "xlsm", "xls", "csv", "png", "jpg", "jpeg", "txt", "xml", "p7m",
-            ],
-            "allegato email",
-        )?;
-        validated_attachments.push(valid.to_string_lossy().to_string());
+    if !attachments.is_empty() {
+        let allowed_temp_dir = std::env::temp_dir().join("brico_ddt_email");
+        let canonical_temp_dir = fs::canonicalize(&allowed_temp_dir).map_err(|_| {
+            "Cartella temporanea allegati email non inizializzata o non valida".to_string()
+        })?;
+        for raw in &attachments {
+            let valid = validate_allowed_file_path(
+                raw,
+                &[
+                    "pdf", "xlsx", "xlsm", "xls", "csv", "png", "jpg", "jpeg", "txt", "xml", "p7m",
+                ],
+                "allegato email",
+            )?;
+            if !valid.starts_with(&canonical_temp_dir) {
+                return Err(
+                    "Allegato email non consentito al di fuori della cartella temporanea di Last"
+                        .to_string(),
+                );
+            }
+            validated_attachments.push(valid.to_string_lossy().to_string());
+        }
     }
 
     #[cfg(target_os = "windows")]

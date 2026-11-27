@@ -199,9 +199,14 @@ export class ElectronicInvoicesService {
     const testatePageSize = 1000;
     let totalTestate = 0;
 
+    let lastTestataId: number | string | null = null;
     while (true) {
+      const cursorParam =
+        lastTestataId !== null
+          ? `&id=gt.${encodeURIComponent(String(lastTestataId))}`
+          : (testateOffset > 0 ? `&offset=${testateOffset}` : "");
       const testateRes = await supabaseFetch(
-        `${cleanUrl}/rest/v1/fatture_elettroniche_testate?select=*&order=id.asc&offset=${testateOffset}&limit=${testatePageSize}`,
+        `${cleanUrl}/rest/v1/fatture_elettroniche_testate?select=*&order=id.asc${cursorParam}&limit=${testatePageSize}`,
         { headers }
       );
       if (!testateRes.ok) {
@@ -270,7 +275,12 @@ export class ElectronicInvoicesService {
         });
       }
 
-      testateOffset += rawTestate.length;
+      const tailId = rawTestate[rawTestate.length - 1]?.id;
+      if (tailId != null && tailId !== lastTestataId) {
+        lastTestataId = tailId;
+      } else {
+        testateOffset += rawTestate.length;
+      }
     }
 
     // 3. Scarica tutte le righe a blocchi paginati da 1000
@@ -294,9 +304,14 @@ export class ElectronicInvoicesService {
         JSON.stringify([...remoteInvoices.values(), ...[...legacyInvoiceKeys.values()].filter(Boolean)])],
     });
 
+    let lastRigaId: number | string | null = null;
     while (true) {
+      const cursorParam =
+        lastRigaId !== null
+          ? `&id=gt.${encodeURIComponent(String(lastRigaId))}`
+          : (offset > 0 ? `&offset=${offset}` : "");
       const righeRes = await supabaseFetch(
-        `${cleanUrl}/rest/v1/fatture_elettroniche_righe?select=*&order=id.asc&offset=${offset}&limit=${pageSize}`,
+        `${cleanUrl}/rest/v1/fatture_elettroniche_righe?select=*&order=id.asc${cursorParam}&limit=${pageSize}`,
         { headers }
       );
       if (!righeRes.ok) {
@@ -356,7 +371,12 @@ export class ElectronicInvoicesService {
         });
       }
 
-      offset += rawRighe.length;
+      const tailRigaId = rawRighe[rawRighe.length - 1]?.id;
+      if (tailRigaId != null && tailRigaId !== lastRigaId) {
+        lastRigaId = tailRigaId;
+      } else {
+        offset += rawRighe.length;
+      }
     }
 
     onProgress?.("Aggiornamento archivio fatture locale...", 95);
@@ -621,18 +641,18 @@ export class ElectronicInvoicesService {
     );
     const totalCount = countRes[0]?.count || 0;
 
-    // Selezione con limite
-    const limit = params.limit || 300;
-    const offset = params.offset || 0;
+    // Selezione con limite parametrizzato
+    const limit = Math.max(1, Math.floor(Number(params.limit) || 300));
+    const offset = Math.max(0, Math.floor(Number(params.offset) || 0));
 
     const selectSql = `
       SELECT * FROM supplier_invoice_items
       ${whereSql}
       ORDER BY doc_date DESC, id DESC
-      LIMIT ${limit} OFFSET ${offset}
+      LIMIT ? OFFSET ?
     `;
 
-    const items = await db.select<SupplierInvoiceItem[]>(selectSql, sqlParams);
+    const items = await db.select<SupplierInvoiceItem[]>(selectSql, [...sqlParams, limit, offset]);
     return { items, totalCount };
   }
 
@@ -666,11 +686,11 @@ export class ElectronicInvoicesService {
     }
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-    const limit = params.limit || 500;
+    const limit = Math.max(1, Math.floor(Number(params.limit) || 500));
 
     return db.select<SupplierInvoice[]>(
-      `SELECT * FROM supplier_invoices ${whereSql} ORDER BY doc_date DESC LIMIT ${limit}`,
-      sqlParams
+      `SELECT * FROM supplier_invoices ${whereSql} ORDER BY doc_date DESC LIMIT ?`,
+      [...sqlParams, limit]
     );
   }
 

@@ -45,12 +45,17 @@ export function pendingCloudWrite(
 
 const running = new Map<string, Promise<number>>();
 const rerunRequested = new Set<string>();
+const pendingRunConfig = new Map<
+  string,
+  { apply: (operation: PendingCloudOperation) => Promise<void>; activeProjectUrl?: string | null }
+>();
 
 export function flushPendingCloudOperations(
   scope: string,
   apply: (operation: PendingCloudOperation) => Promise<void>,
   activeProjectUrl?: string | null,
 ): Promise<number> {
+  pendingRunConfig.set(scope, { apply, activeProjectUrl });
   const existing = running.get(scope);
   if (existing) {
     rerunRequested.add(scope);
@@ -61,8 +66,9 @@ export function flushPendingCloudOperations(
     let totalConfirmed = 0;
     do {
       rerunRequested.delete(scope);
-      const resolvedUrl = activeProjectUrl !== undefined
-        ? normalizeSupabaseProjectUrl(activeProjectUrl)
+      const currentConfig = pendingRunConfig.get(scope) ?? { apply, activeProjectUrl };
+      const resolvedUrl = currentConfig.activeProjectUrl !== undefined
+        ? normalizeSupabaseProjectUrl(currentConfig.activeProjectUrl)
         : normalizeSupabaseProjectUrl((await loadPendingOpConfig())?.projectUrl);
       const operations = await db.select<PendingCloudOperation[]>(
         "SELECT sequence, record_id, action, payload, project_url FROM pending_cloud_operations WHERE scope = $1 ORDER BY sequence",
@@ -85,7 +91,7 @@ export function flushPendingCloudOperations(
         }
         if (failed.has(operation.record_id)) continue;
         try {
-          await apply(operation);
+          await currentConfig.apply(operation);
           await db.execute("DELETE FROM pending_cloud_operations WHERE sequence = $1", [operation.sequence]);
           confirmed++;
         } catch (error) {
@@ -124,6 +130,7 @@ export function flushPendingCloudOperations(
     return totalConfirmed;
   })().finally(() => {
     rerunRequested.delete(scope);
+    pendingRunConfig.delete(scope);
     running.delete(scope);
   });
   running.set(scope, request);

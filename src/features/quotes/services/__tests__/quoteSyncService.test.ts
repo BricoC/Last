@@ -41,7 +41,11 @@ describe("Pull preventivi", () => {
       .mockResolvedValueOnce(Response.json([{ ...remote, id: "preventivo-2" }]))
       .mockResolvedValueOnce(Response.json([]));
     await expect(QuoteSyncService.pullQuotes()).resolves.toBe(2);
-    expect(fetch.mock.calls.map(([input]) => new URL(String(input)).searchParams.get("offset"))).toEqual(["0", "1", "2"]);
+    expect(fetch.mock.calls.map(([input]) => new URL(String(input)).searchParams.get("id"))).toEqual([
+      null,
+      `gt.${remote.id}`,
+      "gt.preventivo-2",
+    ]);
     expect(invoke).toHaveBeenCalledWith("apply_local_database_batch", {
       validateReferencesAfterWrite: false,
       writes: [

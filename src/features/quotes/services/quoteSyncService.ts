@@ -654,9 +654,13 @@ export class QuoteSyncService {
     url.searchParams.set("limit", "500");
     const headers = { apikey: creds.anonKey };
     let imported = 0;
-    let offset = 0;
+    let lastId: string | null = null;
     while (true) {
-      url.searchParams.set("offset", String(offset));
+      if (lastId !== null) {
+        url.searchParams.set("id", `gt.${lastId}`);
+      } else {
+        url.searchParams.delete("id");
+      }
       const response = await supabaseFetch(url.toString(), { headers });
       if (!response.ok) throw new Error(`Download preventivi: HTTP ${response.status}`);
       const rows = await response.json();
@@ -674,7 +678,11 @@ export class QuoteSyncService {
           throw err;
         }
       }
-      offset += rows.length;
+      const tailId = rows[rows.length - 1]?.id;
+      if (tailId == null || String(tailId) === lastId) {
+        return imported;
+      }
+      lastId = String(tailId);
     }
   }
 

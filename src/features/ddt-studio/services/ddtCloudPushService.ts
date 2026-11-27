@@ -146,10 +146,31 @@ class DdtCloudPushService {
     const res = await fetchWithTimeout(url.toString(), {
       headers: { apikey: creds.anonKey },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      throw new Error(`Verifica numero DDT su Supabase fallita (HTTP ${res.status})`);
+    }
     const rows = (await res.json()) as Array<{ id: string; ultima_modifica?: string | null }>;
     if (!rows?.[0]?.id) return null;
     return { id: rows[0].id, ultima_modifica: rows[0].ultima_modifica ?? null };
+  }
+
+  /**
+   * Verifica se un numero DDT è libero, occupato o non verificabile su Supabase
+   */
+  public async checkNumberAvailabilityOnCloud(
+    year: number,
+    docNumber: number,
+    excludeId?: string
+  ): Promise<"available" | "taken" | "unknown"> {
+    const creds = await this.getCredentials();
+    if (!creds) return "unknown";
+    try {
+      const owner = await this.getCloudOwnerMetaForNumber(creds, year, docNumber);
+      if (owner && owner.id !== excludeId) return "taken";
+      return "available";
+    } catch {
+      return "unknown";
+    }
   }
 
   /**
@@ -160,14 +181,7 @@ class DdtCloudPushService {
     docNumber: number,
     excludeId?: string
   ): Promise<boolean> {
-    const creds = await this.getCredentials();
-    if (!creds) return false;
-    try {
-      const owner = await this.getCloudOwnerMetaForNumber(creds, year, docNumber);
-      return Boolean(owner && owner.id !== excludeId);
-    } catch {
-      return false;
-    }
+    return (await this.checkNumberAvailabilityOnCloud(year, docNumber, excludeId)) === "taken";
   }
 
   private async fetchRemoteDdtVersion(creds: SupabaseConfig, id: string) {

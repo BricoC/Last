@@ -1,6 +1,7 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
+import { applyLocalDatabaseBatch, type SqliteWrite } from "@/shared/data-layer/localDatabaseBatch";
 import {
   matchesActiveSupabaseProject,
   normalizeSupabaseProjectUrl,
@@ -498,17 +499,18 @@ export class ClientSyncService {
     // Esecuzione batch senza transazione SQL multi-statement sul pool tauri-plugin-sql
     // (evita lock residui su connessioni diverse del pool sqlx)
     const now = new Date().toISOString();
+    const batchWrites: SqliteWrite[] = [];
     for (const w of writes) {
         if (w.isUpdate) {
-          await db.execute(
-            `UPDATE clients SET
+          batchWrites.push({
+            sql: `UPDATE clients SET
               business_name = $1, address = $2, city = $3, province = $4,
               vat_number = $5, fiscal_code = $6, sdi_code = $7, payment_method = $8,
               destinations_json = $9, phones_json = $10, price_lists_json = $11,
               is_active = 1, updated_at = $12, updated_by = 'supabase_sync',
               sync_status = 'synced', project_url = $13
             WHERE id = $14 AND deleted_at IS NULL AND COALESCE(sync_status, '') <> 'pending'`,
-            [
+            params: [
               w.businessName,
               w.address,
               w.city,
@@ -523,11 +525,11 @@ export class ClientSyncService {
               now,
               activeProjectUrl,
               w.id,
-            ]
-          );
+            ],
+          });
         } else {
-          await db.execute(
-            `INSERT INTO clients (
+          batchWrites.push({
+            sql: `INSERT INTO clients (
               id, business_name, address, city, province, vat_number,
               fiscal_code, sdi_code, payment_method, destinations_json,
               phones_json, price_lists_json, is_active, created_at,
@@ -535,7 +537,7 @@ export class ClientSyncService {
             ) VALUES (
               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $13, 'supabase_sync', 'synced', $14
             )`,
-            [
+            params: [
               w.id,
               w.businessName,
               w.address,
@@ -550,10 +552,9 @@ export class ClientSyncService {
               w.priceListsJson,
               now,
               activeProjectUrl,
-            ]
-          );
+            ],
+          });
         }
-        imported++;
       }
 
       // Allinea eventuali clienti già sincronizzati ma rimossi da Supabase da un altro PC
@@ -567,13 +568,18 @@ export class ClientSyncService {
             matchesActiveSupabaseProject(existing.project_url, activeProjectUrl) &&
             !remoteNamesLower.has(existing.business_name.trim().toLowerCase())
           ) {
-            await db.execute(
-              `DELETE FROM clients WHERE id = $1 AND deleted_at IS NULL AND sync_status = 'synced'`,
-              [existing.id]
-            );
+            batchWrites.push({
+              sql: `DELETE FROM clients WHERE id = $1 AND deleted_at IS NULL AND sync_status = 'synced'`,
+              params: [existing.id],
+            });
           }
         }
       }
+
+      if (batchWrites.length > 0) {
+        await applyLocalDatabaseBatch(batchWrites);
+      }
+      imported = writes.length;
 
     return {
       totalFetched: rows.length,

@@ -292,7 +292,7 @@ export class OffersRepository {
 
     const rawOfferProjectUrl = (offer as OfferRecord & { project_url?: string | null }).project_url ?? null;
     const offerProjectUrl =
-      rawOfferProjectUrl ?? (offer.supabase_id == null ? getLastKnownSupabaseProjectUrl() : null);
+      rawOfferProjectUrl ?? (offer.supabase_id == null ? await resolveActiveSupabaseProjectUrl() : null);
 
     // 1. Inserisci o aggiorna nel cestino
     const writes: SqliteWrite[] = [{ sql: `INSERT INTO offers_trash (
@@ -394,7 +394,7 @@ export class OffersRepository {
     const item = rows[0] as (typeof rows)[number] & { project_url?: string | null; supabase_id?: number | null };
     const nowIso = new Date().toISOString();
     const originProjectUrl =
-      item.project_url ?? (item.supabase_id == null ? getLastKnownSupabaseProjectUrl() : null);
+      item.project_url ?? (item.supabase_id == null ? await resolveActiveSupabaseProjectUrl() : null);
 
     // 1. Reinserisci nella tabella attiva con sync_status = 'pending'
     await applyLocalDatabaseBatch([{ sql: `INSERT INTO offers (

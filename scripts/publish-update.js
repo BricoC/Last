@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { spawnSync } from "child_process";
 import { syncReleaseVersions } from "./release-version-files.js";
 

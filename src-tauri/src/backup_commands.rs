@@ -69,6 +69,7 @@ fn validate_file_path_with_extensions(
     file_path: &str,
     allowed_extensions: &[&str],
     label: &str,
+    allow_unc: bool,
 ) -> Result<std::path::PathBuf, String> {
     let trimmed = file_path.trim();
     if trimmed.is_empty() {
@@ -83,10 +84,12 @@ fn validate_file_path_with_extensions(
                 ));
             }
             std::path::Component::Prefix(prefix) => {
-                if matches!(
-                    prefix.kind(),
-                    std::path::Prefix::UNC(_, _) | std::path::Prefix::VerbatimUNC(_, _)
-                ) {
+                if !allow_unc
+                    && matches!(
+                        prefix.kind(),
+                        std::path::Prefix::UNC(_, _) | std::path::Prefix::VerbatimUNC(_, _)
+                    )
+                {
                     return Err(format!("Percorso di rete UNC non consentito per {label}"));
                 }
             }
@@ -275,7 +278,8 @@ pub fn open_folder_in_explorer(folder_path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn write_backup_file(file_path: String, content: String) -> Result<u64, String> {
     use std::io::Write;
-    let path = validate_file_path_with_extensions(&file_path, &["lastbackup", "json"], "backup")?;
+    let path =
+        validate_file_path_with_extensions(&file_path, &["lastbackup", "json"], "backup", true)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Errore creazione cartella di destinazione: {}", e))?;
@@ -313,6 +317,7 @@ pub fn write_binary_file(file_path: String, bytes: Vec<u8>) -> Result<u64, Strin
         &file_path,
         &["xlsx", "xlsm", "xls", "pdf", "csv"],
         "esportazione",
+        false,
     )?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -326,7 +331,8 @@ pub fn write_binary_file(file_path: String, bytes: Vec<u8>) -> Result<u64, Strin
 /// Legge il contenuto testuale di un file di backup
 #[tauri::command]
 pub fn read_backup_file(file_path: String) -> Result<String, String> {
-    let path = validate_file_path_with_extensions(&file_path, &["lastbackup", "json"], "backup")?;
+    let path =
+        validate_file_path_with_extensions(&file_path, &["lastbackup", "json"], "backup", true)?;
     if !path.exists() || !path.is_file() {
         return Err(format!("File non trovato: {}", file_path));
     }
@@ -348,7 +354,7 @@ pub async fn copy_database_file(
     let _operation = BACKUP_FILE_OPERATION.lock().await;
     let db_path = local_database_path(&app)?;
     let target_buf =
-        validate_file_path_with_extensions(&target_file_path, &["db"], "backup database")?;
+        validate_file_path_with_extensions(&target_file_path, &["db"], "backup database", true)?;
     let target = target_buf.as_path();
     check_different_paths(&db_path, target)?;
 
@@ -371,8 +377,12 @@ pub async fn restore_database_file(
     use tauri_plugin_sql::{DbInstances, DbPool};
     let _operation = BACKUP_FILE_OPERATION.lock().await;
     let db_path = local_database_path(&app)?;
-    let source_buf =
-        validate_file_path_with_extensions(&source_file_path, &["db"], "ripristino database")?;
+    let source_buf = validate_file_path_with_extensions(
+        &source_file_path,
+        &["db"],
+        "ripristino database",
+        true,
+    )?;
     let source_path = source_buf.as_path();
     check_different_paths(source_path, &db_path)?;
 
@@ -705,6 +715,7 @@ pub fn delete_backup_file(file_path: String) -> Result<(), String> {
         &file_path,
         &["lastbackup", "json", "db"],
         "eliminazione backup",
+        true,
     )?;
     let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let ext = path
@@ -726,7 +737,8 @@ pub fn delete_backup_file(file_path: String) -> Result<(), String> {
 pub async fn inspect_sqlite_backup_file(
     file_path: String,
 ) -> Result<BackupInspectionResult, String> {
-    let path_buf = validate_file_path_with_extensions(&file_path, &["db"], "ispezione backup")?;
+    let path_buf =
+        validate_file_path_with_extensions(&file_path, &["db"], "ispezione backup", true)?;
     let path = path_buf.as_path();
     if !path.exists() {
         return Err(format!("File non trovato: {}", file_path));
@@ -775,4 +787,26 @@ pub async fn inspect_sqlite_backup_file(
         total_records,
         tables,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_file_path_with_extensions;
+
+    #[test]
+    fn backup_paths_allow_unc_while_exports_reject_unc() {
+        let unc = r"\\SERVER\Share\LastBackups\Backup 2026.11.27.db";
+        assert!(validate_file_path_with_extensions(unc, &["db"], "backup", true).is_ok());
+        assert!(
+            validate_file_path_with_extensions(unc, &["xlsx", "db"], "esportazione", false)
+                .is_err()
+        );
+        assert!(validate_file_path_with_extensions(
+            r"\\SERVER\Share\..\escape.db",
+            &["db"],
+            "backup",
+            true
+        )
+        .is_err());
+    }
 }

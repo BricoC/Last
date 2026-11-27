@@ -2,8 +2,13 @@ import { supabaseFetch } from "@/shared/services/supabaseSession";
 import { invoke } from "@tauri-apps/api/core";
 import { getEmailSettings } from "@/features/settings/emailSettingsRepository";
 import { getCompanySettings } from "@/features/settings/companySettingsRepository";
-import { createCachedSupabaseConfigLoader } from "@/shared/services/supabaseConfigCache";
+import {
+  createCachedSupabaseConfigLoader,
+  normalizeSupabaseProjectUrl,
+  resolveActiveSupabaseProjectUrl,
+} from "@/shared/services/supabaseConfigCache";
 import { getDatabase } from "@/shared/data-layer/database";
+import { flushPendingCloudOperations, pendingCloudWrite } from "@/shared/data-layer/pendingCloudOperations";
 
 export interface RibaDeadlineInfo {
   deadlineDate: Date;
@@ -279,14 +284,60 @@ export async function registerRibaPayment(
   sentAt: string,
   projectUrl?: string | null,
 ) {
+  const resolvedProjectUrl =
+    projectUrl !== undefined
+      ? normalizeSupabaseProjectUrl(projectUrl)
+      : await resolveActiveSupabaseProjectUrl().catch(() => null);
   const [sqlite, remote] = await Promise.all([
-    saveSqliteRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl),
-    saveRemoteRibaPaid(deadlineKey, sentAt ? deadlineStr : deadlineStr, sentAt),
+    saveSqliteRibaPaid(deadlineKey, deadlineStr, sentAt, resolvedProjectUrl),
+    saveRemoteRibaPaid(deadlineKey, deadlineStr, sentAt),
   ]);
   if (sqlite || remote) {
-    saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl);
+    saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt, resolvedProjectUrl);
+  }
+  if (sqlite && !remote) {
+    try {
+      const db = await getDatabase();
+      const op = pendingCloudWrite(
+        "riba",
+        deadlineKey,
+        "mark_paid",
+        { deadlineKey, deadlineStr, sentAt },
+        resolvedProjectUrl,
+      );
+      await db.execute(op.sql, op.params);
+    } catch {
+      // Tabella coda non disponibile in alcuni harness test minimali
+    }
+  } else if (remote) {
+    try {
+      const db = await getDatabase();
+      await db.execute(
+        "DELETE FROM pending_cloud_operations WHERE scope = 'riba' AND record_id = $1",
+        [deadlineKey],
+      );
+    } catch {
+      // Ignora se tabella non presente
+    }
   }
   return { confirmed: sqlite || remote, remote };
+}
+
+export async function retryPendingRibaPayments(): Promise<number> {
+  return flushPendingCloudOperations("riba", async (operation) => {
+    const payload = JSON.parse(operation.payload) as {
+      deadlineKey?: string;
+      deadlineStr?: string;
+      sentAt?: string;
+    };
+    const key = payload.deadlineKey || operation.record_id;
+    const dateStr = payload.deadlineStr || "";
+    const sentAt = payload.sentAt || new Date().toISOString();
+    const ok = await saveRemoteRibaPaid(key, dateStr, sentAt);
+    if (!ok) {
+      throw new Error(`Sincronizzazione Ri.Ba. ${key} non confermata`);
+    }
+  });
 }
 
 /**

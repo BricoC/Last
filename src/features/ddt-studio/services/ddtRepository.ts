@@ -434,10 +434,11 @@ export class DdtRepository {
       "SELECT id FROM ddt_documents WHERE year = $1 AND doc_number = $2 AND deleted_at IS NULL AND id <> $3",
       [doc.year, doc.doc_number, id]
     );
-    const cloudTaken =
+    const cloudStatus =
       conflictRows.length === 0
-        ? await ddtCloudPushService.isNumberTakenOnCloud(doc.year, doc.doc_number, id)
-        : false;
+        ? await ddtCloudPushService.checkNumberAvailabilityOnCloud(doc.year, doc.doc_number, id)
+        : "taken";
+    const cloudTaken = cloudStatus === "taken";
     if (conflictRows.length > 0 || cloudTaken) {
       return {
         success: false,

@@ -45,6 +45,8 @@ interface UserState {
   deleteUser: (userId: string) => Promise<void>;
 }
 
+const failedPasswordAttempts = new Map<string, { count: number; lockedUntil: number }>();
+
 export const useUserStore = create<UserState>((set, get) => ({
   users: [],
   currentUser: null,
@@ -156,17 +158,36 @@ export const useUserStore = create<UserState>((set, get) => ({
     const { pendingPasswordSwitch } = get();
     if (!pendingPasswordSwitch) return false;
 
+    const attemptState = failedPasswordAttempts.get(pendingPasswordSwitch.id);
+    if (attemptState && Date.now() < attemptState.lockedUntil) {
+      const waitSec = Math.ceil((attemptState.lockedUntil - Date.now()) / 1000);
+      throw new Error(`Troppi tentativi errati. Riprova tra ${waitSec} secondi.`);
+    }
+
     const ok = await verifyPassword(password, pendingPasswordSwitch.password_hash);
-    if (!ok) return false;
+    if (!ok) {
+      const nextCount = (attemptState?.count ?? 0) + 1;
+      const delayMs = nextCount >= 3 ? Math.min(30_000, 1000 * 2 ** (nextCount - 3)) : 0;
+      failedPasswordAttempts.set(pendingPasswordSwitch.id, {
+        count: nextCount,
+        lockedUntil: Date.now() + delayMs,
+      });
+      return false;
+    }
+    failedPasswordAttempts.delete(pendingPasswordSwitch.id);
 
     // Upgrade legacy SHA-256 only after it has authenticated successfully.
     // Persist before granting access so a failed DB write never silently keeps
     // the account on the weaker hash.
     if (isLegacyPasswordHash(pendingPasswordSwitch.password_hash)) {
-      await get().updateUser({
+      const upgradedUser: AppUser = {
         ...pendingPasswordSwitch,
         password_hash: await hashPassword(password),
-      });
+      };
+      await AppUserService.updateUser(upgradedUser);
+      set((state) => ({
+        users: state.users.map((u) => (u.id === upgradedUser.id ? upgradedUser : u)),
+      }));
     }
 
     const verifiedTarget = get().users.find((u) => u.id === pendingPasswordSwitch.id) ?? pendingPasswordSwitch;
@@ -258,6 +279,9 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   createUser: async (userData) => {
+    if (!get().currentUser?.is_admin) {
+      throw new Error("Solo un amministratore può creare nuovi utenti.");
+    }
     const newUser = await AppUserService.createUser(userData);
     const { users } = get();
     const updated = [...users, newUser];
@@ -266,6 +290,9 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   updateUser: async (user: AppUser) => {
+    if (!get().currentUser?.is_admin) {
+      throw new Error("Solo un amministratore può modificare i profili utente.");
+    }
     await AppUserService.updateUser(user);
     const { users, currentUser } = get();
     const updated = users.map((u) => (u.id === user.id ? user : u));
@@ -285,6 +312,10 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   deleteUser: async (userId: string) => {
+    const caller = get().currentUser;
+    if (!caller?.is_admin && caller?.id !== userId) {
+      throw new Error("Solo un amministratore può eliminare gli utenti.");
+    }
     await AppUserService.deleteUser(userId);
     const { users, currentUser, pendingPasswordSwitch } = get();
     const updated = users.filter((u) => u.id !== userId);

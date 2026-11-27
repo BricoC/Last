@@ -467,7 +467,7 @@ export class AppUserService {
     const canPrices = 1;
     const canEditPrices = isAdmin ? 1 : user.can_edit_price_lists ? 1 : 0;
     const canEditOr = isAdmin ? 1 : user.can_edit_or_numbers ? 1 : 0;
-    const canManageBackups = user.can_manage_backups !== undefined ? (user.can_manage_backups ? 1 : 0) : (isAdmin ? 1 : 0);
+    const canManageBackups = isAdmin ? 1 : user.can_manage_backups ? 1 : 0;
     const pages = isAdmin
       ? DEFAULT_ALLOWED_PAGES
       : (user.allowed_pages || DEFAULT_ALLOWED_PAGES.filter((p) => p !== "settings"));

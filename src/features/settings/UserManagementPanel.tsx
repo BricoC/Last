@@ -80,6 +80,13 @@ export const UserManagementPanel: React.FC = () => {
 
   // Gestione apertura form creazione
   const handleOpenCreate = () => {
+    if (!currentUser?.is_admin) {
+      setMessage({
+        type: "error",
+        text: "Solo un amministratore può creare nuovi utenti o postazioni.",
+      });
+      return;
+    }
     setEditingUser(null);
     setNewName("");
     setNewStation("");
@@ -98,6 +105,13 @@ export const UserManagementPanel: React.FC = () => {
   };
 
   const handleOpenEdit = (user: AppUser) => {
+    if (!currentUser?.is_admin) {
+      setMessage({
+        type: "error",
+        text: "Solo un amministratore può modificare permessi, password o profili utente.",
+      });
+      return;
+    }
     setIsCreating(false);
     setEditingUser({ ...user });
     setEditRequirePassword(Boolean(user.require_password));
@@ -108,6 +122,13 @@ export const UserManagementPanel: React.FC = () => {
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser?.is_admin) {
+      setMessage({
+        type: "error",
+        text: "Solo un amministratore può creare nuovi utenti o postazioni.",
+      });
+      return;
+    }
     if (!newName.trim()) return;
 
     if (newRequirePassword) {
@@ -233,6 +254,10 @@ export const UserManagementPanel: React.FC = () => {
   };
 
   const handleDelete = async (user: AppUser) => {
+    if (!currentUser?.is_admin) {
+      setMessage({ type: "error", text: "Solo un amministratore può eliminare gli utenti." });
+      return;
+    }
     if (user.is_admin) {
       setMessage({ type: "error", text: "Impossibile eliminare l'account Admin principale." });
       return;
@@ -795,10 +820,16 @@ export const UserManagementPanel: React.FC = () => {
                   </div>
                 </label>
 
-                <label className="flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 cursor-pointer select-none">
+                <label
+                  className={cn(
+                    "flex items-start space-x-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--background)]/60 select-none",
+                    editingUser.is_admin ? "cursor-not-allowed opacity-90" : "cursor-pointer"
+                  )}
+                >
                   <input
                     type="checkbox"
-                    checked={Boolean(editingUser.can_manage_backups)}
+                    checked={editingUser.is_admin ? true : Boolean(editingUser.can_manage_backups)}
+                    disabled={editingUser.is_admin}
                     onChange={(e) =>
                       setEditingUser({ ...editingUser, can_manage_backups: e.target.checked })
                     }
@@ -1174,7 +1205,7 @@ export const UserManagementPanel: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {!isCreating && (
+            {!isCreating && currentUser?.is_admin && (
               <button
                 type="button"
                 onClick={handleOpenCreate}
@@ -1352,7 +1383,7 @@ export const UserManagementPanel: React.FC = () => {
 
                     <td className="py-3 px-3 text-right">
                       <div className="flex items-center justify-end space-x-1.5">
-                        {(!u.is_admin || currentUser?.is_admin) && (
+                        {currentUser?.is_admin && (
                           <button
                             type="button"
                             onClick={() => handleOpenEdit(u)}
@@ -1363,7 +1394,7 @@ export const UserManagementPanel: React.FC = () => {
                           </button>
                         )}
 
-                        {!u.is_admin && u.id !== currentUser?.id && (
+                        {currentUser?.is_admin && !u.is_admin && u.id !== currentUser?.id && (
                           <button
                             type="button"
                             onClick={() => handleDelete(u)}

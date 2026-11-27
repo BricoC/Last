@@ -297,8 +297,11 @@ class CloudSyncStatusService {
         const cursor = priceState.get(table);
         if (!/^\d+$/.test(String(row.last_sync_revision))) throw new Error("Revisione listino non valida");
         if (!cursor || BigInt(row.last_sync_revision) > BigInt(cursor)) hasPendingRemoteChanges = true;
+        const rowUpdatedMs = Date.parse(row.updated_at ?? "");
+        const prevUpdatedMs = Date.parse(remoteLatestListino?.updatedAt ?? "");
         if (table !== "listini_clienti" &&
-          (!remoteLatestListino || Date.parse(row.updated_at) > Date.parse(remoteLatestListino.updatedAt ?? ""))) {
+          (!remoteLatestListino ||
+            (Number.isFinite(rowUpdatedMs) && (!Number.isFinite(prevUpdatedMs) || rowUpdatedMs > prevUpdatedMs)))) {
           remoteLatestListino = { code: row.codice_articolo || "", description: row.descrizione || "", updatedAt: row.updated_at };
         }
         registerActivity(row.updated_at, table === "listini_clienti" ? "Listini Clienti" : "Listino Generale");
@@ -356,6 +359,7 @@ class CloudSyncStatusService {
       orNumbersModule,
       companySettingsModule,
       emailSettingsModule,
+      ribaModule,
       pendingOpsModule,
     ] = await Promise.all([
       import("@/features/price-lists/services/priceListSyncService"),
@@ -369,6 +373,7 @@ class CloudSyncStatusService {
       import("@/features/or-numbers/services/orNumbersRepository"),
       import("@/features/settings/companySettingsRepository"),
       import("@/features/settings/emailSettingsRepository"),
+      import("@/features/dashboard/services/ribaService"),
       import("@/shared/data-layer/pendingCloudOperations"),
     ]);
     const { priceListSyncService } = priceListModule;
@@ -382,6 +387,7 @@ class CloudSyncStatusService {
     const { OrNumbersRepository } = orNumbersModule;
     const { retryPendingCompanySettings } = companySettingsModule;
     const { retryPendingEmailSettings } = emailSettingsModule;
+    const { retryPendingRibaPayments } = ribaModule;
     const { getPendingOperationFailure } = pendingOpsModule;
 
     const [
@@ -395,6 +401,7 @@ class CloudSyncStatusService {
       orLogWrites,
       companySettingsWrites,
       emailSettingsWrites,
+      ribaWrites,
     ] = await Promise.allSettled([
       priceListSyncService.retryPendingChanges(),
       offersSyncService.retryPendingChanges(),
@@ -406,6 +413,7 @@ class CloudSyncStatusService {
       OrNumbersRepository.retryPendingLogs(),
       retryPendingCompanySettings().then((ok) => { if (!ok) throw new Error("Invio dati aziendali non confermato"); }),
       retryPendingEmailSettings().then((ok) => { if (!ok) throw new Error("Invio impostazioni email non confermato"); }),
+      retryPendingRibaPayments(),
     ]);
     const [ddt, general, clients, quotesPull, offersPull, ordersPull, invoicesPull] = await Promise.allSettled([
       ddtIncrementalSyncService.syncNewDdtsFromSupabase({ includePreviousYear: true, checkModifiedRecent: true }),
@@ -413,7 +421,7 @@ class CloudSyncStatusService {
       priceListSyncService.syncIncrementalClientiFromSupabase(),
       QuoteSyncService.pullQuotes(),
       offerWrites.status === "fulfilled" ? offersSyncService.sync() : Promise.resolve({ success: true, pushed: 0, pulled: 0 }),
-      orderSupabaseService.fetchOrders("attivi", true),
+      orderSupabaseService.fetchOrders("attivi", true).then(() => orderSupabaseService.fetchOrders("archiviati", true)),
       electronicInvoicesService.syncFromSupabase(),
     ]);
     const ddtResult = ddt.status === "fulfilled" ? ddt.value : {
@@ -451,7 +459,14 @@ class CloudSyncStatusService {
               ? String(quotesPull.reason)
               : (QuoteSyncService.getLastRetryError() || getPendingOperationFailure("quotes") || undefined)),
       ],
-      ["Note", noteWrites.status === "rejected" ? String(noteWrites.reason) : undefined],
+      [
+        "Note",
+        noteWrites.status === "rejected"
+          ? String(noteWrites.reason)
+          : (!noteWrites.value.success
+              ? (noteWrites.value.error || "Sincronizzazione note non confermata")
+              : undefined),
+      ],
       [
         "Ordini",
         orderWrites.status === "rejected"
@@ -474,6 +489,12 @@ class CloudSyncStatusService {
       ],
       ["Dati aziendali", companySettingsWrites.status === "rejected" ? String(companySettingsWrites.reason) : undefined],
       ["Impostazioni email", emailSettingsWrites.status === "rejected" ? String(emailSettingsWrites.reason) : undefined],
+      [
+        "Ri.Ba.",
+        ribaWrites.status === "rejected"
+          ? String(ribaWrites.reason)
+          : (getPendingOperationFailure("riba") || undefined),
+      ],
       ["DDT", ddtResult.error],
       ["Listino generale", general.status === "fulfilled" ? general.value.error : String(general.reason)],
       ["Listini clienti", clients.status === "fulfilled" ? clients.value.error : String(clients.reason)],

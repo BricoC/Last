@@ -875,6 +875,37 @@ export async function restoreModularBackup(
         throw new Error("Tabella non disponibile nel database locale: " + table);
       }
 
+      if (table === "app_users") {
+        const activeUser = useUserStore.getState().currentUser;
+        if (activeUser && !activeUser.is_admin) {
+          throw new Error("Solo un amministratore può ripristinare gli account utente.");
+        }
+        if (rows.length > 0) {
+          const existingUsers = await db.select<
+            Array<{ id: string; password_hash: string | null; require_password: number | null; is_admin: number | null }>
+          >("SELECT id, password_hash, require_password, is_admin FROM \"app_users\"").catch(() => []);
+          const existingById = new Map(existingUsers.map((u) => [u.id, u]));
+          rows = rows.map((rawRow) => {
+            if (!rawRow || typeof rawRow !== "object" || Array.isArray(rawRow)) return rawRow;
+            const rowObj = rawRow as Record<string, unknown>;
+            const existing = existingById.get(String(rowObj.id ?? ""));
+            if (!existing) return rowObj;
+            const backupHash = String(rowObj.password_hash ?? "");
+            // Preserva sempre lo stato admin e le credenziali locali se il backup è stato esportato senza hash
+            return {
+              ...rowObj,
+              is_admin: existing.is_admin ?? rowObj.is_admin,
+              ...(backupHash === "" && existing.password_hash
+                ? {
+                    password_hash: existing.password_hash,
+                    require_password: existing.require_password ?? rowObj.require_password,
+                  }
+                : {}),
+            };
+          });
+        }
+      }
+
       if (mode === "replace") {
         if (table === "pending_cloud_operations") {
           const placeholders = pendingScopes.map((_, i) => `$${i + 1}`).join(", ");

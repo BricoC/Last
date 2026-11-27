@@ -99,7 +99,7 @@ export const DescriptionRichEditorCell: React.FC<DescriptionRichEditorCellProps>
     if (isInitialCharTyped) {
       editor.textContent = initialPlainValue;
     } else if (initialRichHtml) {
-      editor.innerHTML = initialRichHtml;
+      editor.innerHTML = sanitizeDescriptionRichHtml(initialRichHtml) || escapeHtmlText(initialPlainValue);
     } else {
       editor.innerHTML = escapeHtmlText(initialPlainValue);
     }

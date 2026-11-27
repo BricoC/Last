@@ -140,7 +140,7 @@ describe("ElectronicInvoicesService (Level-2 integration)", () => {
     mockInvoke.mockResolvedValue({ config: { projectUrl: projA, anonKey: "anon-a" }, isValid: true });
     mockSupabaseFetch.mockImplementation(async (url: string) => {
       if (url.includes("fatture_elettroniche_testate")) {
-        if (url.includes("offset=0")) {
+        if (!url.includes("id=gt.") && !url.includes("offset=")) {
           return new Response(JSON.stringify([{
             id: 10,
             fornitore: "Wepa Italia",
@@ -156,7 +156,7 @@ describe("ElectronicInvoicesService (Level-2 integration)", () => {
         return new Response(JSON.stringify([]), { status: 200 });
       }
       if (url.includes("fatture_elettroniche_righe")) {
-        if (url.includes("offset=0")) {
+        if (!url.includes("id=gt.") && !url.includes("offset=")) {
           return new Response(JSON.stringify([{
             invoice_id: 10,
             numero_linea: 1,
