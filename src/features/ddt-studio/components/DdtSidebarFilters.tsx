@@ -6,6 +6,7 @@ interface DdtSidebarFiltersProps {
   archiveTab: "ddt" | "drafts";
   issuedCount: number;
   draftCount: number;
+  toPriceCount?: number;
   onMarginFilterChange: (filter: MarginFilter) => void;
   onArchiveTabChange: (tab: "ddt" | "drafts") => void;
 }
@@ -15,6 +16,7 @@ export function DdtSidebarFilters({
   archiveTab,
   issuedCount,
   draftCount,
+  toPriceCount,
   onMarginFilterChange,
   onArchiveTabChange,
 }: DdtSidebarFiltersProps) {
@@ -37,7 +39,7 @@ export function DdtSidebarFilters({
               marginFilter === value && value === "without_margins" ? "bg-amber-600 text-white" :
               marginFilter === value ? "bg-[var(--primary)] text-[var(--primary-foreground)]" : "text-[var(--muted-foreground)] hover:bg-[var(--background)]"
             )}
-          >{label}</button>
+          >{label}{value === "without_margins" && typeof toPriceCount === "number" ? <> <span className="opacity-75">{toPriceCount}</span></> : null}</button>
         ))}
       </div>
       <div className="grid grid-cols-2 gap-1 border-b border-[var(--border)] p-1">

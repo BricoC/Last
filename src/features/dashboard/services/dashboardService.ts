@@ -6,6 +6,11 @@ import type { DdtListViewRow } from "@/features/ddt-studio/services/ddtReadModel
 
 export type { DdtListViewRow };
 
+export interface DayDdtListRow extends DdtListViewRow {
+  vatSubunits: number;
+  totalDocumentSubunits: number;
+}
+
 export interface MonthlyMetric {
   month: number; // 1 - 12
   turnover: number; // in euro (€)
@@ -1324,12 +1329,13 @@ export class DashboardService {
     month: number,
     day: number | null,
     year?: number | null
-  ): Promise<DdtListViewRow[]> {
+  ): Promise<DayDdtListRow[]> {
     const db = await getDatabase();
     let sql = `
       SELECT 
         d.id, d.year, d.doc_number, d.series, d.doc_date, d.client_name,
-        d.destination_name, d.destination_city, d.status, d.total_taxable_subunits,
+        d.destination_name, d.destination_city, d.status,
+        d.total_taxable_subunits, d.total_vat_subunits, d.total_document_subunits,
         d.operator, d.transport_reason, d.order_reference, d.payment_method,
         COALESCE(SUM(CASE WHEN i.deleted_at IS NULL THEN
           i.purchase_price_subunits * ${ddtQuantitySql("i.quantity")} ELSE 0 END), 0) AS purchase_subunits,
@@ -1369,6 +1375,8 @@ export class DashboardService {
       destination_city: string | null;
       status: string;
       total_taxable_subunits: number;
+      total_vat_subunits: number;
+      total_document_subunits: number;
       purchase_subunits: number | string;
       gross_subunits: number | string;
       net_rows_subunits: number | string;
@@ -1394,6 +1402,10 @@ export class DashboardService {
         destination: [row.destination_name, row.destination_city].filter(Boolean).join(" · "),
         status: row.status,
         taxableSubunits: Number(row.total_taxable_subunits ?? 0),
+        vatSubunits: Number(row.total_vat_subunits ?? 0),
+        totalDocumentSubunits:
+          Number(row.total_document_subunits ?? 0) ||
+          Number(row.total_taxable_subunits ?? 0) + Number(row.total_vat_subunits ?? 0),
         purchaseSubunits,
         revenueSubunits,
         markupPercent: purchaseSubunits > 0 ? (revenueSubunits / purchaseSubunits) * 100 : null,

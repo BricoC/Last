@@ -9,7 +9,7 @@ import {
   ArrowDown,
   ArrowUpDown,
 } from "lucide-react";
-import { dashboardService, type DdtListViewRow } from "../services/dashboardService";
+import { dashboardService, type DayDdtListRow } from "../services/dashboardService";
 import { DDTQuickViewModal } from "@/features/ddt-studio/components/DDTQuickViewModal";
 import {
   formatDdtMoney,
@@ -95,7 +95,8 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
     initialYear !== null && initialYear !== undefined ? initialYear : currentYear
   );
   const [selectedMonth, setSelectedMonth] = useState<number>(month);
-  const [rows, setRows] = useState<DdtListViewRow[]>([]);
+  const [selectedClient, setSelectedClient] = useState<string>("");
+  const [rows, setRows] = useState<DayDdtListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedDdtId, setSelectedDdtId] = useState<string | null>(null);
@@ -107,6 +108,7 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
         initialYear !== null && initialYear !== undefined ? initialYear : currentYear
       );
       setSelectedMonth(month);
+      setSelectedClient("");
     }
   }, [isOpen, initialYear, currentYear, month]);
 
@@ -168,18 +170,30 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
     }
   }, [isOpen, loadData]);
 
+  const availableClients = useMemo(() => {
+    const names = new Set<string>();
+    for (const r of rows) {
+      const c = (r.client || "").trim();
+      if (c) names.add(c);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
   // Indicizzazione e ricerca live
   const searchTokens = useMemo(() => tokenizeSearch(search), [search]);
 
   const filteredRows = useMemo(() => {
-    if (!searchTokens.length) return rows;
-    return rows.filter((r) => {
+    const base = selectedClient
+      ? rows.filter((r) => (r.client || "").trim().toUpperCase() === selectedClient.toUpperCase())
+      : rows;
+    if (!searchTokens.length) return base;
+    return base.filter((r) => {
       const targetStr = normalizeSearch(
         `${formatDdtNumber(r.docNumber, r.series)} ${r.date} ${formatDdtViewDate(r.date)} ${r.year} ${r.client} ${r.destination} ${r.orderReference} ${r.operator} ${r.reason} ${r.payment}`
       );
       return searchTokens.every((token) => matchesSearchToken(targetStr, token));
     });
-  }, [rows, searchTokens]);
+  }, [rows, selectedClient, searchTokens]);
 
   // Ordinamento effettivo delle righe
   const sortedRows = useMemo(() => {
@@ -258,14 +272,18 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
     );
   };
 
-  // Calcolo KPI del giorno
-  const { totalTaxable, totalCost, totalRevenue, avgMarkup } = useMemo(() => {
+  // Calcolo KPI del periodo filtrato
+  const { totalTaxable, totalVat, totalDocument, totalCost, totalRevenue, avgMarkup } = useMemo(() => {
     let taxable = 0;
+    let vat = 0;
+    let docTotal = 0;
     let cost = 0;
     let revenue = 0;
 
     for (const r of filteredRows) {
       taxable += r.taxableSubunits;
+      vat += r.vatSubunits;
+      docTotal += r.totalDocumentSubunits;
       cost += r.purchaseSubunits;
       revenue += r.revenueSubunits;
     }
@@ -274,6 +292,8 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
 
     return {
       totalTaxable: taxable,
+      totalVat: vat,
+      totalDocument: docTotal,
       totalCost: cost,
       totalRevenue: revenue,
       avgMarkup: markup,
@@ -335,7 +355,7 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
                   DDT Emessi — {isMonthMode ? monthName : `${day} ${monthName}`} {selectedYear ? `Anno ${selectedYear}` : "(Tutti gli anni)"}
                 </h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--primary)]/20 text-[var(--primary)] border border-[var(--primary)]/30">
-                  {filteredRows.length} {filteredRows.length === 1 ? "documento" : "documenti"}
+                  {rows.length} {rows.length === 1 ? "documento" : "documenti"}
                 </span>
               </div>
               <p className="text-[11px] text-[var(--muted-foreground)]">
@@ -346,7 +366,25 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <select
+              value={selectedClient}
+              onChange={(e) => setSelectedClient(e.target.value)}
+              className="bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)] text-xs font-bold rounded-lg px-2.5 py-1 outline-none cursor-pointer focus:border-[var(--primary)] max-w-[220px]"
+              aria-label="Filtra per cliente"
+            >
+              <option value="">Tutti i clienti</option>
+              {availableClients.map((client) => (
+                <option key={client} value={client}>
+                  {client}
+                </option>
+              ))}
+            </select>
+
+            <div className="px-2.5 py-1 rounded-lg bg-[var(--card)] border border-[var(--border)] text-xs font-mono font-bold text-[var(--primary)] whitespace-nowrap">
+              {filteredRows.length} DDT
+            </div>
+
             {isMonthMode && (
               <select
                 value={selectedMonth}
@@ -441,6 +479,14 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--card)] border border-[var(--border)]">
               <span className="text-[10px] text-[var(--muted-foreground)] font-sans uppercase font-bold">Costo:</span>
               <span className="font-semibold text-slate-300">{formatDdtMoney(totalCost)}</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--card)] border border-[var(--border)]">
+              <span className="text-[10px] text-[var(--muted-foreground)] font-sans uppercase font-bold">IVA:</span>
+              <span className="font-semibold text-amber-300">{formatDdtMoney(totalVat)}</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--card)] border border-[var(--border)]">
+              <span className="text-[10px] text-[var(--muted-foreground)] font-sans uppercase font-bold">Totale:</span>
+              <span className="font-extrabold text-white">{formatDdtMoney(totalDocument)}</span>
             </div>
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--card)] border border-[var(--border)]">
               <span className="text-[10px] text-[var(--muted-foreground)] font-sans uppercase font-bold">Ricavo:</span>

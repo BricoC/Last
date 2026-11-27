@@ -31,15 +31,15 @@ export const DDT_CONFIG = {
 
   // 2. Finestre Clienti ("Spettabile ditta" e "Luogo di destinazione merce")
   clienti: {
-    altezza: "86px",
-    spazioTraBox: "8px",
+    altezza: "74px",
+    spazioTraBox: "14px",
     margineSotto: "8px",
     paddingTop: "4px",
     paddingLeft: "10px",
     paddingRight: "10px",
     fontSizeTitolo: "10px",
-    fontSizeNome: "13.5px",
-    fontSizeIndirizzo: "11px",
+    fontSizeNome: "14px",
+    fontSizeIndirizzo: "12px",
     fontSizeDatiFiscali: "9.5px",
   },
 
@@ -315,7 +315,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
+                      gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
                       gap: DDT_CONFIG.clienti.spazioTraBox,
                       marginBottom: DDT_CONFIG.clienti.margineSotto,
                     }}
@@ -328,7 +328,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                         paddingBottom: "3px",
                         paddingLeft: DDT_CONFIG.clienti.paddingLeft,
                         paddingRight: DDT_CONFIG.clienti.paddingRight,
-                        height: DDT_CONFIG.clienti.altezza,
+                        minHeight: DDT_CONFIG.clienti.altezza,
                         display: "flex",
                         flexDirection: "column",
                         justifyContent: "space-between",
@@ -386,7 +386,7 @@ export const DDTA4Document = forwardRef<HTMLDivElement, DDTA4DocumentProps>(
                             paddingBottom: "3px",
                             paddingLeft: DDT_CONFIG.clienti.paddingLeft,
                             paddingRight: DDT_CONFIG.clienti.paddingRight,
-                            height: DDT_CONFIG.clienti.altezza,
+                            minHeight: DDT_CONFIG.clienti.altezza,
                             display: "flex",
                             flexDirection: "column",
                             justifyContent: "space-between",

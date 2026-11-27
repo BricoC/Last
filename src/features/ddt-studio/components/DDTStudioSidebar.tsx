@@ -92,6 +92,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
   const drafts = ddtList.filter((doc) => doc.status === "bozza" || doc.doc_number === null);
   const issuedDdts = ddtList.filter((doc) => doc.status !== "bozza" && doc.doc_number !== null);
   const tabDocuments = archiveTab === "drafts" ? drafts : issuedDdts;
+  const toPriceCount = tabDocuments.filter((doc) => matchesMarginFilter(doc, "without_margins")).length;
   const filteredDdtList = tabDocuments.filter((doc) => matchesMarginFilter(doc, marginFilter));
 
   // Resetta il conteggio visibile quando cambiano filtri o ricerca
@@ -189,6 +190,7 @@ export const DDTStudioSidebar: React.FC<DDTStudioSidebarProps> = React.memo(({
         archiveTab={archiveTab}
         issuedCount={issuedDdts.length}
         draftCount={drafts.length}
+        toPriceCount={toPriceCount}
         onMarginFilterChange={setMarginFilter}
         onArchiveTabChange={setArchiveTab}
       />
