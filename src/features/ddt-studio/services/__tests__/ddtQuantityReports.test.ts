@@ -12,7 +12,7 @@ it("mantiene 1,5 e 1.250,5 nei totali della dashboard e nei prezzi unitari del r
     sqlite.exec(`
       CREATE TABLE ddt_documents (
         id TEXT PRIMARY KEY, year INTEGER, doc_number INTEGER, doc_date TEXT, status TEXT, series TEXT,
-        client_name TEXT, destination_name TEXT, destination_city TEXT, operator TEXT,
+        client_name TEXT, client_address TEXT, client_city TEXT, destination_name TEXT, destination_address TEXT, destination_city TEXT, operator TEXT,
         total_taxable_subunits INTEGER, total_vat_subunits INTEGER, total_document_subunits INTEGER,
         transport_reason TEXT, payment_method TEXT, order_reference TEXT, carrier TEXT,
         internal_notes TEXT, deleted_at TEXT

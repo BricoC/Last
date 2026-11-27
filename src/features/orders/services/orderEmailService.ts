@@ -115,8 +115,9 @@ export class OrderEmailService {
         body: bodyHtml,
       });
 
-      // Se Outlook apre l'email, aggiorniamo Supabase Cloud e il database locale
-      await orderSupabaseService.markSupplierOrdersAsSent(supplierName, currentUser);
+      // Se Outlook apre l'email, aggiorniamo Supabase Cloud e il database locale solo per gli articoli inviati
+      const sentIds = items.map((item) => String(item.supabase_id ?? item.id ?? "")).filter(Boolean);
+      await orderSupabaseService.markSupplierOrdersAsSent(supplierName, currentUser, sentIds);
 
       return { success: true };
     } catch (err: any) {

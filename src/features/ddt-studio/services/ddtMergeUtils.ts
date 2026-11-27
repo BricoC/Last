@@ -93,23 +93,41 @@ const HEADER_FIELDS_TO_MERGE: Array<{
 const ITEM_FIELDS_TO_MERGE: Array<{
   key: keyof DdtItemSnapshot;
   label: string;
-  type: "str" | "num";
+  type: "str" | "num" | "discount";
 }> = [
-  { key: "code", label: "Codice", type: "str" },
   { key: "description", label: "Descrizione", type: "str" },
   { key: "row_kind", label: "Tipo riga", type: "str" },
   { key: "unit", label: "U.M.", type: "str" },
   { key: "quantity", label: "Quantità", type: "str" },
   { key: "unit_price_subunits", label: "Prezzo unitario", type: "num" },
-  { key: "discount_pct", label: "Sconto %", type: "str" },
+  { key: "discount_pct", label: "Sconto %", type: "discount" },
   { key: "vat_rate", label: "Aliquota IVA", type: "num" },
   { key: "purchase_price_subunits", label: "Prezzo acquisto", type: "num" },
 ];
 
-function normCompare(value: unknown, type: "str" | "num"): string {
+function computeEffectiveDiscountPctKey(value: unknown): string {
+  const raw = value === null || value === undefined ? "" : String(value).trim();
+  if (!raw) return "0";
+  const parts = raw
+    .split("+")
+    .map((p) => Number(p.trim().replace(",", ".")))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (parts.length === 0) return "0";
+  let factor = 1;
+  for (const pct of parts) {
+    factor *= 1 - pct / 100;
+  }
+  const effectivePct = (1 - factor) * 100;
+  return effectivePct.toFixed(4);
+}
+
+function normCompare(value: unknown, type: "str" | "num" | "discount"): string {
   if (type === "num") {
     const n = Number(value ?? 0);
     return Number.isFinite(n) ? String(Math.round(n)) : "0";
+  }
+  if (type === "discount") {
+    return computeEffectiveDiscountPctKey(value);
   }
   return value === null || value === undefined ? "" : String(value).trim();
 }

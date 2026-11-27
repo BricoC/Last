@@ -171,7 +171,7 @@ export class OffersRepository {
         updated_by = $7,
         updated_at = $8,
         sync_status = 'pending',
-        project_url = COALESCE(project_url, $10)
+        project_url = CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $10 ELSE NULL END
        WHERE id = $9`,
       [offer_date, requester, contact, items_text, status, is_urgent, updated_by, nowIso, id, activeProjectUrl]
     );
@@ -196,7 +196,7 @@ export class OffersRepository {
         updated_by = $2,
         updated_at = $3,
         sync_status = 'pending',
-        project_url = COALESCE(project_url, $5)
+        project_url = CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $5 ELSE NULL END
        WHERE id = $4`,
       [status, user, nowIso, id, activeProjectUrl]
     );
@@ -220,7 +220,7 @@ export class OffersRepository {
         updated_by = $2,
         updated_at = $3,
         sync_status = 'pending',
-        project_url = COALESCE(project_url, $5)
+        project_url = CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $5 ELSE NULL END
        WHERE id = $4`,
       [is_urgent ? 1 : 0, user, nowIso, id, activeProjectUrl]
     );
@@ -244,7 +244,7 @@ export class OffersRepository {
         updated_by = $2,
         updated_at = $3,
         sync_status = 'pending',
-        project_url = COALESCE(project_url, $5)
+        project_url = CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $5 ELSE NULL END
        WHERE id = $4`,
       [isArchived ? 1 : 0, user, nowIso, id, activeProjectUrl]
     );
@@ -268,7 +268,7 @@ export class OffersRepository {
         updated_by = $1,
         updated_at = $2,
         sync_status = 'pending',
-        project_url = COALESCE(project_url, $3)
+        project_url = CASE WHEN project_url IS NOT NULL THEN project_url WHEN supabase_id IS NULL THEN $3 ELSE NULL END
        WHERE is_archived = 0 AND status = 'Inviata'`,
       [user, nowIso, activeProjectUrl]
     );
@@ -466,7 +466,7 @@ export class OffersRepository {
       "SELECT supabase_id, project_url FROM offers WHERE id = $1 UNION ALL SELECT supabase_id, project_url FROM offers_trash WHERE id = $1 LIMIT 1", [id],
     );
     if (!existing) return;
-    const projectUrl = existing.project_url ?? getLastKnownSupabaseProjectUrl();
+    const projectUrl = existing.project_url ?? (existing.supabase_id == null ? await resolveActiveSupabaseProjectUrl() : null);
     await applyLocalDatabaseBatch([
       { sql: "DELETE FROM offers WHERE id = $1", params: [id] },
       { sql: "DELETE FROM offers_trash WHERE id = $1", params: [id] },

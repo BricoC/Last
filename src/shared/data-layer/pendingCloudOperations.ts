@@ -44,6 +44,7 @@ export function pendingCloudWrite(
 }
 
 const running = new Map<string, Promise<number>>();
+const rerunRequested = new Set<string>();
 
 export function flushPendingCloudOperations(
   scope: string,
@@ -51,69 +52,80 @@ export function flushPendingCloudOperations(
   activeProjectUrl?: string | null,
 ): Promise<number> {
   const existing = running.get(scope);
-  if (existing) return existing;
+  if (existing) {
+    rerunRequested.add(scope);
+    return existing;
+  }
   const request = (async () => {
     const db = await getDatabase();
-    const resolvedUrl = activeProjectUrl !== undefined
-      ? normalizeSupabaseProjectUrl(activeProjectUrl)
-      : normalizeSupabaseProjectUrl((await loadPendingOpConfig())?.projectUrl);
-    const operations = await db.select<PendingCloudOperation[]>(
-      "SELECT sequence, record_id, action, payload, project_url FROM pending_cloud_operations WHERE scope = $1 ORDER BY sequence",
-      [scope],
-    );
-    const failed = new Set<string>();
-    let firstFailureMessage: string | null = null;
-    let confirmed = 0;
-    let legacyHeld = 0;
-    for (const operation of operations) {
-      const opProject = normalizeSupabaseProjectUrl(operation.project_url);
-      if (!opProject) {
-        // Legacy queue item without project_url: preserve and flag instead of sending to an unverified project.
-        legacyHeld++;
-        continue;
-      }
-      if (!resolvedUrl || opProject !== resolvedUrl) {
-        // Belongs to another Supabase project: keep suspended until that project is active again.
-        continue;
-      }
-      if (failed.has(operation.record_id)) continue;
-      try {
-        await apply(operation);
-        await db.execute("DELETE FROM pending_cloud_operations WHERE sequence = $1", [operation.sequence]);
-        confirmed++;
-      } catch (error) {
-        failed.add(operation.record_id);
-        if (!firstFailureMessage) {
-          firstFailureMessage = error instanceof Error ? error.message : String(error);
+    let totalConfirmed = 0;
+    do {
+      rerunRequested.delete(scope);
+      const resolvedUrl = activeProjectUrl !== undefined
+        ? normalizeSupabaseProjectUrl(activeProjectUrl)
+        : normalizeSupabaseProjectUrl((await loadPendingOpConfig())?.projectUrl);
+      const operations = await db.select<PendingCloudOperation[]>(
+        "SELECT sequence, record_id, action, payload, project_url FROM pending_cloud_operations WHERE scope = $1 ORDER BY sequence",
+        [scope],
+      );
+      const failed = new Set<string>();
+      let firstFailureMessage: string | null = null;
+      let confirmed = 0;
+      let legacyHeld = 0;
+      for (const operation of operations) {
+        const opProject = normalizeSupabaseProjectUrl(operation.project_url);
+        if (!opProject) {
+          // Legacy queue item without project_url: preserve and flag instead of sending to an unverified project.
+          legacyHeld++;
+          continue;
         }
-        console.warn(`[${scope}] Operazione cloud ancora in sospeso:`, error);
+        if (!resolvedUrl || opProject !== resolvedUrl) {
+          // Belongs to another Supabase project: keep suspended until that project is active again.
+          continue;
+        }
+        if (failed.has(operation.record_id)) continue;
+        try {
+          await apply(operation);
+          await db.execute("DELETE FROM pending_cloud_operations WHERE sequence = $1", [operation.sequence]);
+          confirmed++;
+        } catch (error) {
+          failed.add(operation.record_id);
+          if (!firstFailureMessage) {
+            firstFailureMessage = error instanceof Error ? error.message : String(error);
+          }
+          console.warn(`[${scope}] Operazione cloud ancora in sospeso:`, error);
+        }
       }
-    }
-    if (failed.size > 0) {
-      failedOperationsByScope.set(
-        scope,
-        `${failed.size} operazioni in coda non confermate (${firstFailureMessage || "errore cloud"})`,
-      );
-    } else {
-      failedOperationsByScope.delete(scope);
-    }
-    if (legacyHeld > 0) {
-      legacyOperationsByScope.set(scope, legacyHeld);
-    } else {
-      legacyOperationsByScope.delete(scope);
-    }
-    if (legacyHeld > 0) {
-      console.warn(
-        `[${scope}] Conservate ${legacyHeld} operazioni offline legacy prive di progetto di destinazione verificabile.`,
-      );
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("pending-legacy-cloud-operations", { detail: { scope, count: legacyHeld } }),
+      totalConfirmed += confirmed;
+      if (failed.size > 0) {
+        failedOperationsByScope.set(
+          scope,
+          `${failed.size} operazioni in coda non confermate (${firstFailureMessage || "errore cloud"})`,
         );
+      } else {
+        failedOperationsByScope.delete(scope);
       }
-    }
-    return confirmed;
-  })().finally(() => running.delete(scope));
+      if (legacyHeld > 0) {
+        legacyOperationsByScope.set(scope, legacyHeld);
+      } else {
+        legacyOperationsByScope.delete(scope);
+      }
+      if (legacyHeld > 0) {
+        console.warn(
+          `[${scope}] Conservate ${legacyHeld} operazioni offline legacy prive di progetto di destinazione verificabile.`,
+        );
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("pending-legacy-cloud-operations", { detail: { scope, count: legacyHeld } }),
+          );
+        }
+      }
+    } while (rerunRequested.has(scope));
+    return totalConfirmed;
+  })().finally(() => {
+    rerunRequested.delete(scope);
+    running.delete(scope);
+  });
   running.set(scope, request);
   return request;
 }

@@ -167,7 +167,7 @@ export class OrNumbersRepository {
             await db.execute(
               `UPDATE ddt_documents 
                SET order_reference = $1 
-               WHERE (id = $2 OR (doc_number = $3 AND year = $4))
+               WHERE (id = $2 OR (doc_number = $3 AND year = $4 AND COALESCE(series, '') = ''))
                  AND (project_url = $5 OR project_url IS NULL)
                  AND deleted_at IS NULL AND COALESCE(sync_status, '') <> 'pending'
                  AND (order_reference IS NULL OR TRIM(order_reference) = '' OR TRIM(order_reference) <> $1)`,

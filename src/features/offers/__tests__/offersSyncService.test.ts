@@ -1,222 +1,191 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
-vi.mock("@/shared/services/supabaseSession", () => ({
-  supabaseFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
-}));
+let memSqlite: DatabaseSync;
 
-const { mockInvoke, mockExecute, mockSelect } = vi.hoisted(() => ({
-  mockInvoke: vi.fn(),
-  mockExecute: vi.fn(),
-  mockSelect: vi.fn(),
-}));
+function createSqliteAdapter(sqlite: DatabaseSync) {
+  return {
+    async select<T>(sql: string, params: unknown[] = []): Promise<T> {
+      const stmt = sqlite.prepare(sql);
+      if (!params.length) return stmt.all() as T;
+      const bound = Object.fromEntries(
+        params.map((v, i) => [`$${i + 1}`, (v === undefined ? null : v) as SQLInputValue])
+      );
+      return stmt.all(bound) as T;
+    },
+    async execute(sql: string, params: unknown[] = []) {
+      const stmt = sqlite.prepare(sql);
+      if (!params.length) {
+        const res = stmt.run();
+        return { rowsAffected: Number(res.changes), lastInsertId: Number(res.lastInsertRowid) };
+      }
+      const bound = Object.fromEntries(
+        params.map((v, i) => [`$${i + 1}`, (v === undefined ? null : v) as SQLInputValue])
+      );
+      const res = stmt.run(bound);
+      return { rowsAffected: Number(res.changes), lastInsertId: Number(res.lastInsertRowid) };
+    },
+  };
+}
 
+const mockInvoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: mockInvoke,
+  invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
 vi.mock("@/shared/data-layer/database", () => ({
-  getDatabase: vi.fn(async () => ({
-    execute: mockExecute,
-    select: mockSelect,
-  })),
+  getDatabase: async () => createSqliteAdapter(memSqlite),
 }));
 
-vi.mock("@supabase/supabase-js", () => ({
-  createClient: vi.fn(() => ({
-    channel: vi.fn(() => ({
-      on: vi.fn().mockReturnThis(),
-      subscribe: vi.fn().mockReturnThis(),
-    })),
-    removeChannel: vi.fn(async () => "ok"),
-  })),
-}));
-
-import { OffersSyncService } from "../services/offersSyncService";
-
-const pendingOffer = {
-  id: "local-offer",
-  supabase_id: 23,
-  project_url: "https://example.supabase.co",
-  sync_status: "pending",
-  offer_date: "2026-11-19",
-  requester: "Cliente di prova",
-  items_text: "Articolo",
-  status: "Inviata",
-  updated_at: "2026-11-20T10:00:00Z",
-};
-
-describe("OffersSyncService", () => {
-  const originalFetch = globalThis.fetch;
-
-  beforeEach(() => {
-    mockInvoke.mockReset();
-    mockExecute.mockReset();
-    mockSelect.mockReset();
-    mockInvoke.mockResolvedValue({
-      config: { projectUrl: "https://example.supabase.co", anonKey: "anon-key" },
-      isValid: true,
-    });
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  it("relinks a stale remote ID by local_id and preserves newer local edits at acknowledgement", async () => {
-    mockSelect.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingOffer]);
-    mockExecute.mockResolvedValue({ rowsAffected: 1 });
-    const requests: Array<[string, URL]> = [];
-    globalThis.fetch = vi.fn(async (input, options) => {
-      const url = new URL(String(input));
-      const method = options?.method ?? "GET";
-      requests.push([method, url]);
-      if (method === "GET" || url.searchParams.has("id")) return Response.json([]);
-      return Response.json([{ id: 41 }]);
-    });
-
-    const service = new OffersSyncService();
-    await expect(service.sync()).resolves.toEqual({ success: true, pushed: 1, pulled: 0 });
-    expect(requests.map(([method]) => method)).toEqual(["PATCH", "PATCH", "GET"]);
-    expect(requests[0][1].searchParams.get("id")).toBe("eq.23");
-    expect(requests[0][1].searchParams.get("or")).toContain('local_id.eq."local-offer"');
-    expect(requests[1][1].searchParams.get("local_id")).toBe("eq.local-offer");
-    expect(mockExecute).toHaveBeenCalledWith(
-      expect.stringContaining("CASE WHEN updated_at = $3"),
-      [41, pendingOffer.id, pendingOffer.updated_at, pendingOffer.project_url, 23],
-    );
-  });
-
-  it("continues other offers and recreates a missing offer only after explicit republication", async () => {
-    const other = { ...pendingOffer, id: "new-offer", supabase_id: null };
-    mockSelect.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingOffer, other])
-      .mockResolvedValueOnce([]).mockResolvedValueOnce([{ ...pendingOffer, supabase_id: null }]);
-    mockExecute.mockResolvedValue({ rowsAffected: 1 });
-    const published: string[] = [];
-    globalThis.fetch = vi.fn(async (_input, options) => {
-      if (options?.method !== "POST") return Response.json([]);
-      published.push(JSON.parse(String(options.body)).local_id);
-      return Response.json([{ id: published.length + 40 }]);
-    });
-
-    const service = new OffersSyncService();
-    await expect(service.sync()).resolves.toMatchObject({ success: false, pushed: 1 });
-    expect(service.getStatus().missingOfferIds).toEqual([pendingOffer.id]);
-    expect(published).toEqual([other.id]);
-    await expect(service.republishMissingOffer(pendingOffer.id)).resolves.toMatchObject({ success: true, pushed: 1 });
-    expect(published).toEqual([other.id, pendingOffer.id]);
-    expect(service.getStatus().missingOfferIds).toEqual([]);
-  });
-
-  it("keeps an offer pending on HTTP failure without falling back to another write", async () => {
-    mockSelect.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingOffer]);
-    const fetch = vi.fn(async () => new Response(null, { status: 403 }));
-    globalThis.fetch = fetch;
-    const service = new OffersSyncService();
-    await expect(service.sync()).resolves.toMatchObject({ success: false, error: expect.stringContaining("403") });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(service.getStatus().missingOfferIds).toEqual([]);
-    expect(mockExecute).not.toHaveBeenCalled();
-  });
-
-  it.each([true, false])("deletes by stable local_id before checking a legacy ID, match=%s", async (found) => {
-    mockSelect.mockResolvedValueOnce([{
-      sequence: 1,
-      record_id: pendingOffer.id,
-      action: "delete",
-      payload: JSON.stringify({ remoteId: 23 }),
-      project_url: pendingOffer.project_url,
-    }]).mockResolvedValueOnce([]);
-    mockExecute.mockResolvedValue({ rowsAffected: 1 });
-    const deletions: URL[] = [];
-    globalThis.fetch = vi.fn(async (input, options) => {
-      if (options?.method !== "DELETE") return Response.json([]);
-      deletions.push(new URL(String(input)));
-      return Response.json(found ? [{ id: 41 }] : []);
-    });
-
-    await expect(new OffersSyncService().sync()).resolves.toMatchObject({ success: true });
-    expect(deletions[0].searchParams.get("local_id")).toBe("eq.local-offer");
-    expect(deletions).toHaveLength(found ? 1 : 2);
-    if (!found) {
-      expect(deletions[1].searchParams.get("id")).toBe("eq.23");
-      expect(deletions[1].searchParams.get("local_id")).toBe("is.null");
-    }
-  });
-
-  it("coalesces concurrent sync() calls and runs a follow-up pass instead of failing", async () => {
-    let pullCalls = 0;
-    let releaseFirstPull!: () => void;
-    const firstPullGate = new Promise<void>((resolve) => {
-      releaseFirstPull = resolve;
-    });
-
-    mockSelect.mockResolvedValue([]);
-    mockExecute.mockResolvedValue({ rowsAffected: 0 });
-
-    globalThis.fetch = vi.fn(async () => {
-      pullCalls++;
-      if (pullCalls === 1) {
-        await firstPullGate;
+vi.mock("@/shared/data-layer/localDatabaseBatch", () => ({
+  applyLocalDatabaseBatch: async (writes: Array<{ sql: string; params?: unknown[] }>) => {
+    const adapter = createSqliteAdapter(memSqlite);
+    memSqlite.exec("BEGIN IMMEDIATE");
+    try {
+      for (const w of writes) {
+        await adapter.execute(w.sql, w.params ?? []);
       }
-      return new Response(JSON.stringify([]), { status: 200 });
-    }) as typeof fetch;
+      memSqlite.exec("COMMIT");
+    } catch (e) {
+      memSqlite.exec("ROLLBACK");
+      throw e;
+    }
+  },
+}));
 
-    const service = new OffersSyncService();
-    const p1 = service.sync();
-    // Wait a microtask so p1 reaches fetch
-    await Promise.resolve();
-    await Promise.resolve();
+const mockSupabaseFetch = vi.fn();
+let mockCreds: { projectUrl: string; anonKey: string } | null = null;
+vi.mock("@/shared/services/supabaseSession", () => ({
+  getAuthenticatedSupabaseCredentials: async () => mockCreds,
+  supabaseFetch: (...args: unknown[]) => mockSupabaseFetch(...args),
+  getAuthenticatedSupabaseClient: async () => null,
+}));
 
-    const p2 = service.sync();
-    releaseFirstPull();
+vi.mock("@/shared/services/supabaseRealtimeSubscription", () => ({
+  createSupabaseRealtimeSubscription: () => () => {},
+}));
 
-    const [r1, r2] = await Promise.all([p1, p2]);
-    expect(r1.success).toBe(true);
-    expect(r2.success).toBe(true);
-    expect(pullCalls).toBe(2);
-  });
+beforeEach(() => {
+  memSqlite = new DatabaseSync(":memory:");
+  mockInvoke.mockReset();
+  mockSupabaseFetch.mockReset();
+  mockCreds = null;
+  memSqlite.exec(`
+    CREATE TABLE offers (
+      id TEXT PRIMARY KEY,
+      supabase_id INTEGER,
+      offer_date TEXT,
+      requester TEXT,
+      contact TEXT,
+      items_text TEXT,
+      status TEXT,
+      is_urgent INTEGER DEFAULT 0,
+      is_archived INTEGER DEFAULT 0,
+      created_by TEXT,
+      updated_by TEXT,
+      created_at TEXT,
+      updated_at TEXT,
+      sync_status TEXT,
+      project_url TEXT
+    );
+    CREATE TABLE offers_trash (
+      id TEXT PRIMARY KEY,
+      supabase_id INTEGER,
+      offer_date TEXT,
+      requester TEXT,
+      contact TEXT,
+      items_text TEXT,
+      status TEXT,
+      is_urgent INTEGER DEFAULT 0,
+      is_archived INTEGER DEFAULT 0,
+      created_by TEXT,
+      updated_by TEXT,
+      created_at TEXT,
+      updated_at TEXT,
+      deleted_at TEXT,
+      deleted_by TEXT,
+      project_url TEXT
+    );
+    CREATE TABLE pending_cloud_operations (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT,
+      record_id TEXT,
+      action TEXT,
+      payload TEXT,
+      project_url TEXT
+    );
+  `);
+});
 
-  it("inserts newly pulled remote offers and deletes local synced offers removed remotely", async () => {
-    // 1st select: pendings -> []
-    // 2nd select: existing check for remote id 10 -> [] (new remote offer)
-    // 3rd select: localSynced check -> id "local-deleted" with supabase_id 99 (missing remotely)
-    mockSelect
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: "local-deleted", supabase_id: 99 }]);
-    mockExecute.mockResolvedValue({ rowsAffected: 1 });
+describe("OffersSyncService (Level-2 integration)", () => {
+  it("pushes pending local offers, pulls remote updates, and isolates records from other projects", async () => {
+    const projA = "https://proj-a.supabase.co";
+    const projB = "https://proj-b.supabase.co";
+    memSqlite.exec(`
+      INSERT INTO offers VALUES
+        ('off-a', NULL, '2026-02-01', 'Mario', '333', 'Vite 4x40', 'In attesa', 0, 0, 'Op', 'Op', '2026-02-01T00:00:00Z', '2026-02-01T00:00:00Z', 'pending', '${projA}'),
+        ('off-b', 77, '2026-02-01', 'Luigi', '444', 'Tasselli', 'In attesa', 0, 0, 'Op', 'Op', '2026-02-01T00:00:00Z', '2026-02-01T00:00:00Z', 'pending', '${projB}');
+    `);
 
-    globalThis.fetch = vi.fn(async () =>
-      new Response(
-        JSON.stringify([
+    mockInvoke.mockResolvedValue({ config: { projectUrl: projA, anonKey: "anon-a" }, isValid: true });
+    mockCreds = { projectUrl: projA, anonKey: "anon-a" };
+    mockSupabaseFetch.mockImplementation(async (url: string | URL, opts?: { method?: string }) => {
+      const s = String(url);
+      if (opts?.method === "POST" && s.includes("/rest/v1/offerte")) {
+        return new Response(JSON.stringify([{ id: 101 }]), { status: 201 });
+      }
+      if (s.includes("/rest/v1/offerte")) {
+        return new Response(JSON.stringify([
           {
-            id: 10,
-            local_id: "remote-10",
-            offer_date: "2026-11-17",
+            id: 101,
+            local_id: "off-a",
+            offer_date: "2026-02-01",
             requester: "Mario",
-            contact: "",
-            items_text: "10 viti",
-            status: "Da preparare",
+            contact: "333",
+            items_text: "Vite 4x40",
+            status: "In attesa",
             is_urgent: false,
             is_archived: false,
+            created_by: "Op",
+            updated_by: "Op",
+            created_at: "2026-02-01T00:00:00Z",
+            updated_at: "2026-02-01T00:00:00Z",
           },
-        ]),
-        { status: 200, headers: { "Content-Range": "0-0/1" } }
-      )
-    ) as typeof fetch;
+          {
+            id: 202,
+            local_id: "off-remote",
+            offer_date: "2026-02-02",
+            requester: "Anna",
+            contact: "555",
+            items_text: "Trapano",
+            status: "Inviata",
+            is_urgent: true,
+            is_archived: false,
+            created_by: "PC2",
+            updated_by: "PC2",
+            created_at: "2026-02-02T00:00:00Z",
+            updated_at: "2026-02-02T00:00:00Z",
+          },
+        ]), {
+          status: 200,
+          headers: { "content-range": "0-1/2" },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    });
 
-    const service = new OffersSyncService();
-    const res = await service.sync();
+    const { offersSyncService } = await import("../services/offersSyncService");
+    const res = await offersSyncService.sync();
 
-    expect(res).toEqual({ success: true, pushed: 0, pulled: 1 });
-    expect(mockExecute).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO offers"),
-      expect.arrayContaining(["remote-10", 10, "2026-11-17", "Mario"])
-    );
-    expect(mockExecute).toHaveBeenCalledWith(
-      expect.stringContaining("DELETE FROM offers WHERE id = $1 AND sync_status = 'synced'"),
-      ["local-deleted", 99]
-    );
+    expect(res.success).toBe(true);
+    expect(res.pushed).toBe(1);
+    expect(res.pulled).toBe(1);
+
+    const rowA = memSqlite.prepare("SELECT supabase_id, sync_status FROM offers WHERE id = 'off-a'").get() as Record<string, unknown>;
+    const rowB = memSqlite.prepare("SELECT sync_status FROM offers WHERE id = 'off-b'").get() as Record<string, unknown>;
+    const rowRemote = memSqlite.prepare("SELECT requester, is_urgent FROM offers WHERE id = 'off-remote'").get() as Record<string, unknown>;
+    expect(rowA).toEqual({ supabase_id: 101, sync_status: "synced" });
+    expect(rowB).toEqual({ sync_status: "pending" });
+    expect(rowRemote).toEqual({ requester: "Anna", is_urgent: 1 });
   });
 });

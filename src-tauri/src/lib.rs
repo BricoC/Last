@@ -154,6 +154,22 @@ fn list_files_in_folder(
         _ => return Err("Nessun percorso cartella specificato".to_string()),
     };
     let path = Path::new(&target_dir);
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err("Percorso cartella con '..' non consentito".to_string());
+            }
+            std::path::Component::Prefix(prefix) => {
+                if matches!(
+                    prefix.kind(),
+                    std::path::Prefix::UNC(_, _) | std::path::Prefix::VerbatimUNC(_, _)
+                ) {
+                    return Err("Percorso di rete UNC non consentito".to_string());
+                }
+            }
+            _ => {}
+        }
+    }
     if !path.exists() || !path.is_dir() {
         return Err(format!(
             "La cartella non esiste o non è valida: {}",
@@ -161,6 +177,18 @@ fn list_files_in_folder(
         ));
     }
 
+    const ALLOWED_LIST_EXTENSIONS: &[&str] = &[
+        "xls",
+        "xlsx",
+        "xlsm",
+        "csv",
+        "ods",
+        "pdf",
+        "xml",
+        "txt",
+        "json",
+        "lastbackup",
+    ];
     let exts: Vec<String> = extensions
         .unwrap_or_else(|| {
             vec![
@@ -171,7 +199,8 @@ fn list_files_in_folder(
             ]
         })
         .into_iter()
-        .map(|e| e.to_lowercase())
+        .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
+        .filter(|e| ALLOWED_LIST_EXTENSIONS.contains(&e.as_str()))
         .collect();
 
     let mut results = Vec::new();
@@ -238,8 +267,19 @@ fn validate_allowed_file_path(
     }
     let path = std::path::Path::new(trimmed);
     for component in path.components() {
-        if matches!(component, std::path::Component::ParentDir) {
-            return Err(format!("Percorso {label} con '..' non consentito"));
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(format!("Percorso {label} con '..' non consentito"));
+            }
+            std::path::Component::Prefix(prefix) => {
+                if matches!(
+                    prefix.kind(),
+                    std::path::Prefix::UNC(_, _) | std::path::Prefix::VerbatimUNC(_, _)
+                ) {
+                    return Err(format!("Percorso di rete UNC non consentito per {label}"));
+                }
+            }
+            _ => {}
         }
     }
     let ext = path
@@ -250,10 +290,30 @@ fn validate_allowed_file_path(
     if !allowed_extensions.iter().any(|allowed| *allowed == ext) {
         return Err(format!("Estensione non consentita per {label}: .{ext}"));
     }
-    if !path.exists() || !path.is_file() {
+    let meta =
+        fs::symlink_metadata(path).map_err(|_| format!("File {label} non trovato: {trimmed}"))?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("Collegamento simbolico non consentito per {label}"));
+    }
+    if !meta.is_file() {
         return Err(format!("File {label} non trovato: {trimmed}"));
     }
-    Ok(path.to_path_buf())
+    let canonical = fs::canonicalize(path)
+        .map_err(|e| format!("Impossibile risolvere percorso {label}: {e}"))?;
+    let canon_ext = canonical
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !allowed_extensions
+        .iter()
+        .any(|allowed| *allowed == canon_ext)
+    {
+        return Err(format!(
+            "Estensione non consentita per {label}: .{canon_ext}"
+        ));
+    }
+    Ok(canonical)
 }
 
 #[tauri::command]
@@ -277,6 +337,16 @@ fn save_pdf_to_desktop(filename: String, bytes: Vec<u8>) -> Result<String, Strin
     save_file_to_desktop(filename, bytes)
 }
 
+struct TempFilesGuard(Vec<std::path::PathBuf>);
+
+impl Drop for TempFilesGuard {
+    fn drop(&mut self) {
+        for p in &self.0 {
+            let _ = fs::remove_file(p);
+        }
+    }
+}
+
 #[tauri::command]
 fn print_ddt_silent(images_bytes: Vec<Vec<u8>>, copies: u32) -> Result<(), String> {
     if images_bytes.is_empty() {
@@ -284,7 +354,7 @@ fn print_ddt_silent(images_bytes: Vec<Vec<u8>>, copies: u32) -> Result<(), Strin
     }
 
     let temp_dir = std::env::temp_dir();
-    let mut file_paths = Vec::new();
+    let mut guard = TempFilesGuard(Vec::new());
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -295,15 +365,16 @@ fn print_ddt_silent(images_bytes: Vec<Vec<u8>>, copies: u32) -> Result<(), Strin
         let file_path = temp_dir.join(format!("_ddt_print_{}_{}.png", timestamp, i));
         fs::write(&file_path, img)
             .map_err(|e| format!("Errore salvataggio immagine temporanea: {}", e))?;
-        file_paths.push(file_path);
+        guard.0.push(file_path);
     }
 
-    let actual_copies = copies.max(1);
+    let actual_copies = copies.clamp(1, 50);
 
     #[cfg(target_os = "windows")]
     {
         use base64::{engine::general_purpose, Engine as _};
-        let paths_strings: Vec<String> = file_paths
+        let paths_strings: Vec<String> = guard
+            .0
             .iter()
             .map(|p| p.to_string_lossy().to_string())
             .collect();
@@ -356,10 +427,6 @@ for ($copyIdx = 1; $copyIdx -le $copies; $copyIdx++) {{
     $doc.Print()
     $doc.Dispose()
 }}
-
-foreach ($p in $imagePaths) {{
-    Remove-Item $p -Force -ErrorAction SilentlyContinue
-}}
 "#
         );
 
@@ -391,9 +458,19 @@ fn send_order_email(to: String, subject: String, body: String) -> Result<(), Str
     #[cfg(target_os = "windows")]
     {
         use base64::{engine::general_purpose, Engine as _};
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let body_path = std::env::temp_dir().join(format!("_last_email_body_{timestamp}.html"));
+        fs::write(&body_path, body.as_bytes())
+            .map_err(|e| format!("Errore scrittura corpo email temporaneo: {e}"))?;
+        let _guard = TempFilesGuard(vec![body_path.clone()]);
+
         let to_b64 = general_purpose::STANDARD.encode(&to);
         let subj_b64 = general_purpose::STANDARD.encode(&subject);
-        let body_b64 = general_purpose::STANDARD.encode(&body);
+        let body_path_b64 =
+            general_purpose::STANDARD.encode(body_path.to_string_lossy().as_bytes());
 
         let ps_script = format!(
             r#"
@@ -402,10 +479,11 @@ fn send_order_email(to: String, subject: String, body: String) -> Result<(), Str
             $mail = $outlook.CreateItem(0)
             $mail.To = _d '{}'
             $mail.Subject = _d '{}'
-            $mail.HTMLBody = _d '{}'
+            $bodyPath = _d '{}'
+            $mail.HTMLBody = [System.IO.File]::ReadAllText($bodyPath, [System.Text.Encoding]::UTF8)
             $mail.Display()
             "#,
-            to_b64, subj_b64, body_b64
+            to_b64, subj_b64, body_path_b64
         );
 
         let mut cmd = Command::new("powershell");
@@ -465,10 +543,20 @@ fn send_email_with_attachments(
     #[cfg(target_os = "windows")]
     {
         use base64::{engine::general_purpose, Engine as _};
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let body_path = std::env::temp_dir().join(format!("_last_email_att_body_{timestamp}.html"));
+        fs::write(&body_path, body.as_bytes())
+            .map_err(|e| format!("Errore scrittura corpo email temporaneo: {e}"))?;
+        let _guard = TempFilesGuard(vec![body_path.clone()]);
+
         let to_b64 = general_purpose::STANDARD.encode(&to);
         let cc_b64 = general_purpose::STANDARD.encode(cc.unwrap_or_default());
         let subj_b64 = general_purpose::STANDARD.encode(&subject);
-        let body_b64 = general_purpose::STANDARD.encode(&body);
+        let body_path_b64 =
+            general_purpose::STANDARD.encode(body_path.to_string_lossy().as_bytes());
         let att_json = serde_json::to_string(&validated_attachments).unwrap_or_default();
         let att_b64 = general_purpose::STANDARD.encode(&att_json);
 
@@ -482,7 +570,8 @@ fn send_email_with_attachments(
             $cc = _d '{}'
             if ($cc) {{ $mail.CC = $cc }}
             $mail.Subject = _d '{}'
-            $mail.HTMLBody = _d '{}'
+            $bodyPath = _d '{}'
+            $mail.HTMLBody = [System.IO.File]::ReadAllText($bodyPath, [System.Text.Encoding]::UTF8)
             $attJson = _d '{}'
             if ($attJson) {{
                 $attList = ConvertFrom-Json $attJson
@@ -494,7 +583,7 @@ fn send_email_with_attachments(
             }}
             $mail.Display()
             "#,
-            to_b64, cc_b64, subj_b64, body_b64, att_b64
+            to_b64, cc_b64, subj_b64, body_path_b64, att_b64
         );
 
         let mut cmd = Command::new("powershell");

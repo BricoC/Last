@@ -98,7 +98,7 @@ export class ElectronicInvoicesService {
     const { projectUrl, anonKey } = status.config;
     const activeProjectUrl = normalizeSupabaseProjectUrl(projectUrl);
     const matchingInvoices = invoices.filter((inv) =>
-      matchesActiveSupabaseProject(inv.project_url, activeProjectUrl)
+      inv.project_url == null || matchesActiveSupabaseProject(inv.project_url, activeProjectUrl)
     );
     if (!matchingInvoices.length) return;
     const failures: string[] = [];
@@ -526,7 +526,7 @@ export class ElectronicInvoicesService {
       const activeProjectUrl = await resolveActiveSupabaseProjectUrl();
       const pending = activeProjectUrl
         ? await db.select<Array<{ id: number }>>(
-            "SELECT id FROM supplier_invoices WHERE cloud_upload_pending = 1 AND project_url = $1 LIMIT 1",
+            "SELECT id FROM supplier_invoices WHERE cloud_upload_pending = 1 AND (project_url = $1 OR project_url IS NULL) LIMIT 1",
             [activeProjectUrl]
           )
         : await db.select<Array<{ id: number }>>(

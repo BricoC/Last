@@ -1,9 +1,52 @@
 import { parseDdtQuantity } from "../utils/ddtQuantity";
-import { normalizeDiscountString } from "../utils/ddtCalculations";
+import { getOperatorSymbol, normalizeDiscountString } from "../utils/ddtCalculations";
+import { collapseDuplicateProvinces } from "@/features/clients/utils/cityProvinceUtils";
 import { getDatabase } from "@/shared/data-layer/database";
 import { MonetaryValue } from "@/shared/domain/monetaryValue";
 import { ITALIAN_MONTH_NAMES } from "../utils/italianMonthNames";
 import type { ClientRankingEntry, DdtMonthlyReportFullData, DdtReportArticleRow, DdtReportDocumentRow, DdtReportMonthlyMetrics, MonthSummaryCount } from "./ddtReportTypes";
+export function formatMonthlyReportDestination(row: {
+  destination_name?: string | null;
+  destination_address?: string | null;
+  destination_city?: string | null;
+  client_address?: string | null;
+  client_city?: string | null;
+}): string {
+  const destParts: string[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (val?: string | null, isCity = false) => {
+    const raw = (val || "").trim();
+    const trimmed = isCity ? collapseDuplicateProvinces(raw) : raw;
+    if (!trimmed) return;
+    const key = trimmed.toUpperCase();
+    if (seen.has(key)) return;
+    if (destParts.some((existing) => {
+      const segs = existing.split(/\s+-\s+/).map((x) => x.trim().toUpperCase());
+      return segs.includes(key);
+    })) return;
+    seen.add(key);
+    destParts.push(trimmed);
+  };
+  pushUnique(row.destination_name);
+  pushUnique(row.destination_address);
+  pushUnique(row.destination_city, true);
+  if (destParts.length > 0) return destParts.join(" · ");
+
+  pushUnique(row.client_address);
+  pushUnique(row.client_city, true);
+  return destParts.join(" · ");
+}
+
+export function formatMonthlyReportCarrier(carrier?: string | null): string {
+  const trimmed = (carrier || "").trim();
+  if (!trimmed || trimmed.toLowerCase() === "nessuno") return "";
+  return trimmed;
+}
+
+export function formatMonthlyReportOperator(op?: string | null): string {
+  const sym = getOperatorSymbol(op || "").trim();
+  return sym ? sym.toLowerCase() : "";
+}
 /**
  * Recupera i conteggi dei DDT emessi per ciascun mese dell'anno specificato
  */
@@ -74,7 +117,10 @@ export async function getDdtMonthlyReportData(
     series: string | null;
     doc_date: string;
     client_name: string;
+    client_address: string | null;
+    client_city: string | null;
     destination_name: string | null;
+    destination_address: string | null;
     destination_city: string | null;
     operator: string | null;
     total_taxable_subunits: number;
@@ -87,7 +133,7 @@ export async function getDdtMonthlyReportData(
     internal_notes: string | null;
   }[]>(
     `SELECT id, year, doc_number, series, doc_date, client_name,
-            destination_name, destination_city, operator,
+            client_address, client_city, destination_name, destination_address, destination_city, operator,
             total_taxable_subunits, total_vat_subunits, total_document_subunits,
             transport_reason, payment_method, order_reference, carrier, internal_notes
      FROM ddt_documents
@@ -112,7 +158,10 @@ export async function getDdtMonthlyReportData(
     doc_number: number;
     doc_date: string;
     client_name: string;
+    client_address: string | null;
+    client_city: string | null;
     destination_name: string | null;
+    destination_address: string | null;
     destination_city: string | null;
     transport_reason: string | null;
     payment_method: string | null;
@@ -122,7 +171,7 @@ export async function getDdtMonthlyReportData(
   }[]>(
     `SELECT i.ddt_id, i.row_index, i.code, i.description, i.unit, i.quantity,
             i.unit_price_subunits, i.discount_pct, i.net_amount_subunits, i.vat_rate,
-            d.doc_number, d.doc_date, d.client_name, d.destination_name, d.destination_city,
+            d.doc_number, d.doc_date, d.client_name, d.client_address, d.client_city, d.destination_name, d.destination_address, d.destination_city,
             d.transport_reason, d.payment_method, d.order_reference, d.operator, d.internal_notes
      FROM ddt_items i
      JOIN ddt_documents d ON d.id = i.ddt_id
@@ -160,7 +209,7 @@ export async function getDdtMonthlyReportData(
     sumVat += vat;
     sumDoc += totalDoc;
 
-    const cName = (row.client_name || "SENZA CLIENTE").trim();
+    const cName = (row.client_name || "SENZA CLIENTE").trim().toUpperCase();
     const existing = clientMap.get(cName) || {
       client: cName,
       ddtNumbers: [],
@@ -174,24 +223,23 @@ export async function getDdtMonthlyReportData(
     existing.total += totalDoc;
     clientMap.set(cName, existing);
 
-    const destParts = [row.destination_name, row.destination_city].filter(Boolean);
-    const dest = destParts.join(" · ");
+    const dest = formatMonthlyReportDestination(row);
 
     return {
       year: row.year,
       monthName,
       dateStr: toDateIT(row.doc_date),
       docNumber: row.doc_number,
-      client: row.client_name,
+      client: cName,
       destination: dest,
-      operator: row.operator || "",
+      operator: formatMonthlyReportOperator(row.operator),
       taxable,
       vat,
       totalDocument: totalDoc,
       reason: row.transport_reason || "Vendita",
       payment: row.payment_method || "",
       orderReference: row.order_reference || "",
-      carrier: row.carrier || "",
+      carrier: formatMonthlyReportCarrier(row.carrier),
       notes: row.internal_notes || "",
     };
   });
@@ -219,20 +267,19 @@ export async function getDdtMonthlyReportData(
     const qNum = parseDdtQuantity(row.quantity) ?? 0;
     const netPrice = qNum > 0 ? netAmount / qNum : unitPrice;
 
-    const destParts = [row.destination_name, row.destination_city].filter(Boolean);
-    const dest = destParts.join(" · ");
+    const dest = formatMonthlyReportDestination(row);
 
     return {
       year,
       monthName,
       dateStr: toDateIT(row.doc_date),
       docNumber: row.doc_number,
-      client: row.client_name,
+      client: (row.client_name || "SENZA CLIENTE").trim().toUpperCase(),
       destination: dest,
       reason: row.transport_reason || "Vendita",
       payment: row.payment_method || "",
       orderReference: row.order_reference || "",
-      operator: row.operator || "",
+      operator: formatMonthlyReportOperator(row.operator),
       rowIndex: row.row_index,
       description: row.description,
       unit: row.unit || "NR.",

@@ -9,7 +9,13 @@ import { calculateDdtTotals, calculateRowAmounts, normalizeDiscountString } from
 import { tokenizeSearch } from "@/shared/hooks/useFragmentSearch";
 import { ddtCloudPushService } from "./ddtCloudPushService";
 import { buildDdtSavePayloadFromImported } from "./ddtImportNormalization";
+import { normalizeClientCanonicalKey } from "@/features/clients/utils/clientSearchUtils";
 
+function sanitizeCarrier(value?: string | null): string | null {
+  const trimmed = (value || "").trim();
+  if (!trimmed || trimmed.toLowerCase() === "nessuno") return null;
+  return trimmed;
+}
 function notifyDdtUpdated(): void {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("ddt-data-updated"));
@@ -57,7 +63,7 @@ export class DdtRepository {
     let summaryQuery = `
       SELECT ddt_id,
              COUNT(CASE WHEN unit_price_subunits > 0 THEN 1 END) AS billed_rows,
-             MIN(CASE WHEN unit_price_subunits > 0 THEN (purchase_price_subunits > 0) ELSE 1 END) AS all_have_cost
+             MIN(CASE WHEN unit_price_subunits > 0 THEN (purchase_price_subunits > 0 AND vat_rate > 0) ELSE 1 END) AS all_have_cost
       FROM ddt_items
       WHERE deleted_at IS NULL
     `;
@@ -132,10 +138,18 @@ export class DdtRepository {
     const row = docRows[0];
     if ((!row.client_address || !row.client_city) && row.client_name) {
       try {
-        const clientRows = await db.select<any[]>(
+        let clientRows = await db.select<any[]>(
           "SELECT * FROM clients WHERE LOWER(TRIM(business_name)) = LOWER(TRIM($1)) AND deleted_at IS NULL LIMIT 1",
           [row.client_name]
         );
+        if (clientRows.length === 0) {
+          const targetKey = normalizeClientCanonicalKey(row.client_name);
+          if (targetKey) {
+            const allClients = await db.select<any[]>("SELECT * FROM clients WHERE deleted_at IS NULL");
+            const canonicalMatch = allClients.find((c) => normalizeClientCanonicalKey(c.business_name || "") === targetKey);
+            if (canonicalMatch) clientRows = [canonicalMatch];
+          }
+        }
         if (clientRows.length > 0) {
           const c = clientRows[0];
           row.client_id = row.client_id || c.id;
@@ -664,7 +678,7 @@ export class DdtRepository {
       updated_at: now,
       updated_by: "system",
       client_id: ddt.client_id || null,
-      client_name: (ddt.client_name || "").trim() || "Cliente",
+      client_name: (ddt.client_name || "").trim().toUpperCase() || "CLIENTE",
       client_address: ddt.client_address || null,
       client_city: ddt.client_city || null,
       client_vat: ddt.client_vat || null,
@@ -683,7 +697,7 @@ export class DdtRepository {
       carriage_terms: ddt.carriage_terms || "Franco stabilimento",
       packages_count: ddt.packages_count || null,
       weight_kg: ddt.weight_kg || null,
-      carrier: ddt.carrier || null,
+      carrier: sanitizeCarrier(ddt.carrier),
       pickup_date_time: ddt.pickup_date_time || null,
       internal_notes: ddt.internal_notes || null,
       total_taxable_subunits: totals.totale_imponibile.toSubunits(),
@@ -757,7 +771,7 @@ export class DdtRepository {
       carriage_terms: row.carriage_terms || "Franco stabilimento",
       packages_count: row.packages_count || undefined,
       weight_kg: row.weight_kg || undefined,
-      carrier: row.carrier || undefined,
+      carrier: sanitizeCarrier(row.carrier) ?? undefined,
       pickup_date_time: row.pickup_date_time || undefined,
       internal_notes: row.internal_notes || undefined,
       total_taxable: MonetaryValue.fromSubunits(row.total_taxable_subunits || 0),

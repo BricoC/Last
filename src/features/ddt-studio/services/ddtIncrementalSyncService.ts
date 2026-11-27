@@ -136,7 +136,7 @@ class DdtIncrementalSyncService {
         const db = await getDatabase();
         for (const y of [year, year - 1]) {
           const rows = await db.select<{ doc_number: number }[]>(
-            "SELECT DISTINCT doc_number FROM ddt_documents WHERE year=$1 AND doc_number>0 AND (status<>'bozza' OR deleted_at IS NOT NULL) ORDER BY doc_number",
+            "SELECT DISTINCT doc_number FROM ddt_documents WHERE year=$1 AND doc_number>0 AND deleted_at IS NULL AND status<>'bozza' ORDER BY doc_number",
             [y],
           );
           const missingNumbers: number[] = [];

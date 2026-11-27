@@ -95,7 +95,7 @@ export class SupplierPriceListService {
   public static async scanAndSync(
     onProgress?: SyncProgressCallback,
     force: boolean = false
-  ): Promise<{ updatedFiles: number; totalItems: number; skippedFiles: number; deletedFiles: number }> {
+  ): Promise<{ updatedFiles: number; totalItems: number; skippedFiles: number; deletedFiles: number; failedFiles: string[] }> {
     const db = await getDatabase();
     const folderPath = this.getFolderPath();
 
@@ -153,6 +153,7 @@ export class SupplierPriceListService {
 
     let updatedFiles = 0;
     let skippedFiles = 0;
+    const failedFiles: string[] = [];
 
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i];
@@ -183,6 +184,7 @@ export class SupplierPriceListService {
         await this.parseAndSaveExcelFile(file);
         updatedFiles++;
       } catch (err) {
+        failedFiles.push(file.filename);
         console.error(`[SupplierPriceListService] Errore su file ${file.filename}:`, err);
       }
     }
@@ -193,7 +195,7 @@ export class SupplierPriceListService {
     );
     const totalItems = countRes[0]?.cnt || 0;
 
-    return { updatedFiles, totalItems, skippedFiles, deletedFiles };
+    return { updatedFiles, totalItems, skippedFiles, deletedFiles, failedFiles };
   }
 
   /**

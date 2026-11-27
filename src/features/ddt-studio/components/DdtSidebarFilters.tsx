@@ -20,13 +20,12 @@ export function DdtSidebarFilters({
 }: DdtSidebarFiltersProps) {
   const filters: [MarginFilter, string][] = [
     ["all", "Tutti"],
-    ["with_margins", "Con margini"],
-    ["without_margins", "Senza margini"],
+    ["without_margins", "Da prezzare"],
   ];
 
   return (
     <>
-      <div className="grid grid-cols-3 gap-0.5 border-b border-[var(--border)] bg-[var(--card)] p-1">
+      <div className="grid grid-cols-2 gap-0.5 border-b border-[var(--border)] bg-[var(--card)] p-1">
         {filters.map(([value, label]) => (
           <button
             key={value}

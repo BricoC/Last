@@ -237,7 +237,7 @@ export class OffersSyncService {
       );
 
       for (const item of pendings) {
-        const itemProjectUrl = item.project_url || activeProjectUrl;
+        const itemProjectUrl = item.project_url ?? (item.supabase_id == null ? activeProjectUrl : null);
         if (!itemProjectUrl || !matchesActiveSupabaseProject(itemProjectUrl, activeProjectUrl)) continue;
         const remoteId = await writeRemoteOffer(creds, item);
         if (remoteId === null && item.supabase_id) {

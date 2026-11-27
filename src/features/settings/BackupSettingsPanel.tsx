@@ -83,6 +83,7 @@ export const BackupSettingsPanel: React.FC = () => {
   const [detailedReport, setDetailedReport] = useState<FullBackupReport | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [showRawTables, setShowRawTables] = useState(false);
+  const [clearOfflineQueuesOnDbRestore, setClearOfflineQueuesOnDbRestore] = useState(false);
 
   // Caricamento conteggi record
   const refreshCounts = useCallback(async () => {
@@ -357,6 +358,7 @@ export const BackupSettingsPanel: React.FC = () => {
     }
 
     setIsDatabaseRestore(insp.isDatabaseFile);
+    setClearOfflineQueuesOnDbRestore(false);
     if (insp.isDatabaseFile) {
       setInspectedPkg(null);
       setCategoriesToRestore([]);
@@ -381,7 +383,7 @@ export const BackupSettingsPanel: React.FC = () => {
 
     try {
       if (isDatabaseRestore) {
-        const res = await restoreDatabaseFile(selectedBackupPath);
+        const res = await restoreDatabaseFile(selectedBackupPath, clearOfflineQueuesOnDbRestore);
         if (res.success) {
           setFeedback({
             type: "success",
@@ -412,6 +414,11 @@ export const BackupSettingsPanel: React.FC = () => {
             message: `Ripristino completato con successo! Importati ${totalRows} record nelle tabelle selezionate.`,
           });
           setInspectModalOpen(false);
+          const { clearCompanySettingsCache } = await import("./companySettingsRepository");
+          clearCompanySettingsCache();
+          window.dispatchEvent(new CustomEvent("ddt-data-updated"));
+          window.dispatchEvent(new CustomEvent("clients-data-updated"));
+          window.dispatchEvent(new CustomEvent("cloud-sync-status-updated"));
           void refreshCounts();
         } else {
           setFeedback({ type: "error", message: res.error || "Errore durante il ripristino dei dati." });
@@ -922,6 +929,17 @@ export const BackupSettingsPanel: React.FC = () => {
                     Stai per ripristinare l'intero database. Verrà automaticamente creata una copia di sicurezza
                     dello stato attuale prima della sostituzione.
                   </p>
+                  <label className="flex items-start gap-2 pt-1 text-[11px] text-purple-100 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={clearOfflineQueuesOnDbRestore}
+                      onChange={(e) => setClearOfflineQueuesOnDbRestore(e.target.checked)}
+                      className="mt-0.5 accent-[var(--primary)]"
+                    />
+                    <span>
+                      Ignora vecchie code di sincronizzazione offline presenti nel backup (consigliato per backup di giorni precedenti)
+                    </span>
+                  </label>
                 </div>
               ) : (
                 /* Caso 2: Backup Modulare .lastbackup */

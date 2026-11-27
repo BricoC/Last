@@ -977,7 +977,7 @@ export class PriceListSyncService {
         countParams,
       );
       const localCloudPrefixedCount = Number(localCountRow?.cnt ?? 0);
-      if (localCloudPrefixedCount <= remoteTotal) return 0;
+      if (localCloudPrefixedCount === 0) return 0;
 
       const remoteIds = new Set<string>();
       const PAGE_SIZE = 1000;

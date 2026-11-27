@@ -617,7 +617,8 @@ export class ClientSyncService {
 
       for (const nameToSearch of searchNames) {
         const checkUrl = new URL("/rest/v1/clienti", creds.projectUrl);
-        checkUrl.searchParams.set("cliente", `eq.${nameToSearch}`);
+        const escapedLike = nameToSearch.replace(/[%_\\]/g, (m) => `\\${m}`);
+        checkUrl.searchParams.set("cliente", `ilike.${escapedLike}`);
         const checkRes = await supabaseFetch(checkUrl.toString(), {
           headers: {
             apikey: creds.anonKey,
@@ -660,9 +661,16 @@ export class ClientSyncService {
           headers: {
             apikey: creds.anonKey,
             "Content-Type": "application/json",
+            Prefer: "return=representation",
           },
           body: JSON.stringify(payload),
         });
+        if (res.ok) {
+          const updatedRows = await res.json().catch(() => null);
+          if (Array.isArray(updatedRows) && updatedRows.length === 0) {
+            throw new Error(`Cliente #${supId} non trovato o eliminato su Supabase durante l'aggiornamento`);
+          }
+        }
       } else {
         const insertUrl = new URL("/rest/v1/clienti", creds.projectUrl);
         res = await supabaseFetch(insertUrl.toString(), {

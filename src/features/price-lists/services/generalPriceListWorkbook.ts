@@ -178,7 +178,7 @@ export function buildGeneralPriceListWorkbook(rows: ListinoGeneraleRow[]): Excel
     excelRow.getCell(18).value = ivaFrac;
     excelRow.getCell(18).numFmt = "0.0%";
 
-    excelRow.getCell(19).value = item.note || null;
+    excelRow.getCell(19).value = safeText(item.note) || null;
   });
 
   return wb;

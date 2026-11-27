@@ -1,5 +1,5 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
-import { normalizeSupabaseProjectUrl } from "./supabaseConfigCache";
+import { getLastKnownSupabaseProjectUrl, normalizeSupabaseProjectUrl } from "./supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import type { IncrementalSyncResult } from "@/features/ddt-studio/services/ddtIncrementalSyncService";
@@ -98,7 +98,7 @@ class CloudSyncStatusService {
     if (!forceRefresh && this.lastStatus && now - this.lastCheckTime < 15000) {
       return this.lastStatus;
     }
-    if (this.isChecking && this.lastStatus) {
+    if (this.isChecking && !forceRefresh && this.lastStatus) {
       return this.lastStatus;
     }
 
@@ -478,6 +478,17 @@ class CloudSyncStatusService {
       ["Listino generale", general.status === "fulfilled" ? general.value.error : String(general.reason)],
       ["Listini clienti", clients.status === "fulfilled" ? clients.value.error : String(clients.reason)],
     ].filter(([, error]) => Boolean(error)).map(([label, error]) => `${label}: ${error}`);
+
+    const activeProjectForStorage = normalizeSupabaseProjectUrl(getLastKnownSupabaseProjectUrl());
+    if (activeProjectForStorage) {
+      const prevStorageProject = localStorage.getItem("last_supabase_sync_project_url");
+      if (prevStorageProject && prevStorageProject !== activeProjectForStorage) {
+        localStorage.removeItem("last_supabase_sync_timestamp");
+        localStorage.removeItem("last_supabase_sync_summary");
+        localStorage.removeItem("last_supabase_sync_failure");
+      }
+      localStorage.setItem("last_supabase_sync_project_url", activeProjectForStorage);
+    }
 
     let summary: string;
     if (failures.length) {

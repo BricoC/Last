@@ -233,9 +233,15 @@ export async function restoreSupabaseSession(): Promise<boolean> {
         if (refreshed && !refreshed.error && refreshed.data?.session && !refreshed.data.user?.is_anonymous) {
           session = refreshed.data.session;
           resolvedEmail = refreshed.data.user?.email ?? saved.email;
-          shouldPersistRefresh = shouldPersistRefresh || Boolean(
-            session.refresh_token && session.refresh_token !== saved.refreshToken,
-          );
+          const rotated = Boolean(session.refresh_token && session.refresh_token !== saved.refreshToken);
+          shouldPersistRefresh = shouldPersistRefresh || rotated;
+          if (rotated && session.refresh_token) {
+            await persistStationSession(
+              connection.projectUrl,
+              resolvedEmail,
+              session.refresh_token,
+            ).catch(() => {});
+          }
         }
       }
 

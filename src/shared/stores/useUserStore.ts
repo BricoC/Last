@@ -187,7 +187,7 @@ export const useUserStore = create<UserState>((set, get) => ({
     const target = users.find((u) => u.id === userId);
     if (!target) return;
     // Non consentire mai switch diretto su un utente protetto da password senza verifica
-    if (target.require_password && currentUser?.id !== target.id) {
+    if (target.require_password && target.password_hash && currentUser?.id !== target.id) {
       set({ pendingPasswordSwitch: target });
       return;
     }

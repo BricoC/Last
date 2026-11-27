@@ -48,16 +48,21 @@ export class OrderExcelService {
       headerRow.alignment = { vertical: "middle", horizontal: "center" };
       headerRow.height = 24;
 
+      const safeText = (val?: string | null): string => {
+        const s = val ?? "";
+        return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+      };
+
       for (const item of items) {
         const row = worksheet.addRow({
-          order_date: item.order_date,
-          supplier_name: item.supplier_name,
-          article_code: item.article_code,
-          description: item.description,
+          order_date: safeText(item.order_date),
+          supplier_name: safeText(item.supplier_name),
+          article_code: safeText(item.article_code),
+          description: safeText(item.description),
           quantity: item.quantity,
           price: item.price,
-          ordered_date: item.ordered_date || '',
-          notes: item.notes || '',
+          ordered_date: safeText(item.ordered_date || ''),
+          notes: safeText(item.notes || ''),
         });
         row.height = 20;
         row.alignment = { vertical: "middle" };

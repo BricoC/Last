@@ -11,6 +11,7 @@ import { DDTClientArticleHistoryModal } from "@/features/ddt-studio/components/D
 import { DDTQuickViewModal } from "@/features/ddt-studio/components/DDTQuickViewModal";
 import { MonthlyPerformanceModal } from "./components/MonthlyPerformanceModal";
 import { MonthDailyModal } from "./components/MonthDailyModal";
+import { DayDdtListModal } from "./components/DayDdtListModal";
 import { RibaModal } from "./components/RibaModal";
 import { DashboardFirstSetupWidget } from "./components/DashboardFirstSetupWidget";
 import { DashboardKpiBar } from "./components/DashboardKpiBar";
@@ -101,6 +102,7 @@ export const DashboardPage: React.FC = () => {
     };
   });
   const [isRibaModalOpen, setIsRibaModalOpen] = useState(false);
+  const [isMonthDdtListModalOpen, setIsMonthDdtListModalOpen] = useState(false);
 
   // Easter Egg Box & Dennis Nedry Pop-up
   const { playIllidanCinematic, triggerStreetFighter } = useEasterEggStore();
@@ -590,6 +592,7 @@ export const DashboardPage: React.FC = () => {
           onCopyFilteredPdfs={() => void handleCopyFilteredPdfs()}
           selectedQuickDdtId={selectedQuickDdtId}
           onSelectQuickDdtId={setSelectedQuickDdtId}
+          onOpenMonthListModal={() => setIsMonthDdtListModalOpen(true)}
         />
       </main>
 
@@ -628,6 +631,17 @@ export const DashboardPage: React.FC = () => {
           isOpen={selectedMonthForDailyDirect !== null}
           onClose={() => setSelectedMonthForDailyDirect(null)}
           initialMonth={selectedMonthForDailyDirect}
+        />
+      )}
+
+      {isMonthDdtListModalOpen && (
+        <DayDdtListModal
+          isOpen={isMonthDdtListModalOpen}
+          onClose={() => setIsMonthDdtListModalOpen(false)}
+          day={null}
+          month={selectedMonthForDdts}
+          initialYear={currentYearNum}
+          availableYears={data?.availableYears}
         />
       )}
 

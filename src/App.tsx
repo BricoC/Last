@@ -105,6 +105,7 @@ export function App() {
   }, [applyToDom]);
 
   useEffect(() => {
+    if (!currentUser?.id) return;
     // Sincronizzazione bidirezionale DDT all'avvio, Realtime Supabase (<1s), polling leggero di sicurezza (2 min) e sync su online/focus con throttle
     let lastQuickSyncMs = 0;
     let disposed = false;
@@ -227,7 +228,7 @@ export function App() {
       window.removeEventListener("focus", runQuickSync);
       unsubscribeRealtime?.();
     };
-  }, []);
+  }, [currentUser?.id]);
 
   // Controllo ed esecuzione silenziosa del backup giornaliero automatico quando l'utente è autenticato
   useEffect(() => {
@@ -274,13 +275,19 @@ export function App() {
   useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
+    let closeInProgress = false;
     let unlisten: (() => void) | undefined;
     import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
         return getCurrentWindow().onCloseRequested(async (event) => {
+          if (closeInProgress) {
+            event.preventDefault();
+            return;
+          }
           if (!hasAnyUnsavedChanges()) {
             return;
           }
+          closeInProgress = true;
           try {
             const allowed = await runAllWindowCloseGuards();
             if (!allowed) {
@@ -289,6 +296,8 @@ export function App() {
           } catch (e) {
             event.preventDefault();
             console.warn("[App] Errore verifica modifiche non salvate in chiusura:", e);
+          } finally {
+            closeInProgress = false;
           }
         });
       })

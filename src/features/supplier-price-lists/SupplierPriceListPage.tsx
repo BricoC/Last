@@ -23,6 +23,7 @@ import "ag-grid-community/styles/ag-theme-alpine.css";
 
 export const SupplierPriceListPage: React.FC = () => {
   const [items, setItems] = useState<SupplierPriceListItem[]>([]);
+  const [searchTotalCount, setSearchTotalCount] = useState(0);
   const [totalDbCount, setTotalDbCount] = useState(0);
   const [suppliers, setSuppliers] = useState<SupplierDistinctInfo[]>([]);
   const [selectedSupplier, setSelectedSupplier] = useState<string>("ALL");
@@ -85,6 +86,7 @@ export const SupplierPriceListPage: React.FC = () => {
           offset: 0,
         });
         setItems(res.items);
+        setSearchTotalCount(res.total);
       } catch (err) {
         console.error("[SupplierPriceListPage] Errore ricerca articoli:", err);
       } finally {
@@ -138,13 +140,24 @@ export const SupplierPriceListPage: React.FC = () => {
       await loadSuppliers();
       await performSearch(searchQuery, selectedSupplier);
 
-      alert(
-        `Scansione completata con successo!\n\n` +
-          `- File caricati/aggiornati: ${result.updatedFiles}\n` +
-          `- File rimossi cancellati dall'archivio: ${result.deletedFiles}\n` +
-          `- File già sincronizzati: ${result.skippedFiles}\n` +
-          `- Totale articoli in archivio: ${result.totalItems.toLocaleString()}`
-      );
+      if (result.failedFiles.length > 0) {
+        alert(
+          `Scansione completata con ${result.failedFiles.length} file non elaborati:\n` +
+            `- File non validi/errore: ${result.failedFiles.join(", ")}\n\n` +
+            `- File caricati/aggiornati: ${result.updatedFiles}\n` +
+            `- File rimossi cancellati dall'archivio: ${result.deletedFiles}\n` +
+            `- File già sincronizzati: ${result.skippedFiles}\n` +
+            `- Totale articoli in archivio: ${result.totalItems.toLocaleString()}`
+        );
+      } else {
+        alert(
+          `Scansione completata con successo!\n\n` +
+            `- File caricati/aggiornati: ${result.updatedFiles}\n` +
+            `- File rimossi cancellati dall'archivio: ${result.deletedFiles}\n` +
+            `- File già sincronizzati: ${result.skippedFiles}\n` +
+            `- Totale articoli in archivio: ${result.totalItems.toLocaleString()}`
+        );
+      }
     } catch (err) {
       alert(`Errore scansione cartella listini: ${err}`);
     } finally {
@@ -569,6 +582,16 @@ export const SupplierPriceListPage: React.FC = () => {
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* AVVISO TRONCAMENTO OLTRE 10.000 RISULTATI */}
+      {searchTotalCount > items.length && (
+        <div className="px-4 py-1.5 bg-amber-950/60 border-b border-amber-700/40 text-xs text-amber-200 flex items-center justify-between">
+          <span>
+            Visualizzati i primi {items.length.toLocaleString()} articoli su{" "}
+            {searchTotalCount.toLocaleString()} corrispondenti — affina la ricerca per filtrare gli altri.
+          </span>
         </div>
       )}
 

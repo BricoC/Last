@@ -432,7 +432,7 @@ export class QuoteSyncService {
         ) ORDER BY updated_at`
       );
       for (const { id, project_url } of pending) {
-        if (!matchesActiveSupabaseProject(project_url, initialCreds?.projectUrl)) continue;
+        if (project_url != null && !matchesActiveSupabaseProject(project_url, initialCreds?.projectUrl)) continue;
         const quote = await quoteRepository.getQuoteById(id, false);
         if (quote && !(await this.pushQuote(quote))) {
           failedCount++;
@@ -857,12 +857,14 @@ export class QuoteSyncService {
       if (trashProjectUrl) {
         await db.execute(
           `DELETE FROM quotes_trash
-           WHERE project_url = $1 AND id NOT IN (
-             SELECT id FROM quotes_trash
-             WHERE project_url = $1
-             ORDER BY deleted_at DESC
-             LIMIT 5
-           )`,
+           WHERE project_url = $1
+             AND NOT EXISTS (SELECT 1 FROM pending_cloud_operations WHERE scope = 'quotes' AND record_id = quotes_trash.id)
+             AND id NOT IN (
+               SELECT id FROM quotes_trash
+               WHERE project_url = $1
+               ORDER BY deleted_at DESC, id DESC
+               LIMIT 5
+             )`,
           [trashProjectUrl]
         );
       }

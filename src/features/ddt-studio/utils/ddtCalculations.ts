@@ -8,7 +8,8 @@ export const OPERATORI = ["Alessandro", "Nicola", "Samu"] as const;
 export function normalizeOperator(op?: string): string {
   if (!op) return "";
   const lower = op.trim().toLowerCase();
-  if (lower === "a" || lower === "ale" || lower === "alessandro") return "Alessandro";
+  if (!lower || lower === "0") return "";
+  if (lower === "a" || lower === "ale" || lower === "alex" || lower === "alessandro") return "Alessandro";
   if (lower === "b" || lower === "nico" || lower === "nicola") return "Nicola";
   if (lower === "c" || lower === "sam" || lower === "samu" || lower === "samuele") return "Samu";
   return op;
@@ -17,7 +18,8 @@ export function normalizeOperator(op?: string): string {
 export function getOperatorSymbol(op?: string): string {
   if (!op) return "";
   const lower = op.trim().toLowerCase();
-  if (lower === "a" || lower === "ale" || lower === "alessandro") return "A";
+  if (!lower || lower === "0") return "";
+  if (lower === "a" || lower === "ale" || lower === "alex" || lower === "alessandro") return "A";
   if (lower === "b" || lower === "nico" || lower === "nicola") return "b";
   if (lower === "c" || lower === "sam" || lower === "samu" || lower === "samuele") return "c";
   return op;
@@ -126,7 +128,7 @@ export function parseCascadeDiscounts(raw?: string | number | null): number[] {
   return clean
     .split("+")
     .map((part) => parseFloat(part.trim().replace(",", ".")))
-    .filter((n) => !isNaN(n) && n > 0);
+    .filter((n) => !isNaN(n) && n > 0 && n <= 100);
 }
 
 /**

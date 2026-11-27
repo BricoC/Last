@@ -557,7 +557,8 @@ function getBackupFileTimestamp(): string {
   const dd = pad(now.getDate());
   const hh = pad(now.getHours());
   const min = pad(now.getMinutes());
-  return `${yyyy}.${mm}.${dd} ore ${hh}.${min}`;
+  const sec = pad(now.getSeconds());
+  return `${yyyy}.${mm}.${dd} ore ${hh}.${min}.${sec}`;
 }
 
 /**
@@ -684,6 +685,14 @@ export async function executeModularBackup(
       }
     }
 
+    if (Array.isArray(exportedData.app_users)) {
+      exportedData.app_users = exportedData.app_users.map((row: Record<string, unknown>) => ({
+        ...row,
+        password_hash: "",
+        require_password: 0,
+      }));
+    }
+
     const isTotal = selectedCategoryIds.length === BACKUP_CATEGORIES.length;
     const pkg: BackupPackage = {
       app: "Last",
@@ -776,12 +785,18 @@ export async function inspectBackupFile(filePath: string): Promise<{
 /**
  * Ripristina un file di database SQLite fisico (.db)
  */
-export async function restoreDatabaseFile(filePath: string): Promise<{
+export async function restoreDatabaseFile(
+  filePath: string,
+  clearOfflineQueues: boolean = false
+): Promise<{
   success: boolean;
   error?: string;
 }> {
   try {
-    await invoke("restore_database_file", { sourceFilePath: filePath });
+    await invoke("restore_database_file", {
+      sourceFilePath: filePath,
+      clearOfflineQueues,
+    });
     return { success: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -810,13 +825,14 @@ export async function restoreModularBackup(
         .flatMap((category) => category.tables)
     );
     const pendingScopes = getPendingScopesForCategories(categoriesToRestore);
-    if (pendingScopes.length > 0 && Object.prototype.hasOwnProperty.call(pkg.tables, "pending_cloud_operations")) {
+    if (pendingScopes.length > 0 && (mode === "replace" || Object.prototype.hasOwnProperty.call(pkg.tables, "pending_cloud_operations"))) {
       selectedTables.add("pending_cloud_operations");
     }
     const writes: SqliteWrite[] = [];
     for (const table of selectedTables) {
-      if (!Object.prototype.hasOwnProperty.call(pkg.tables, table)) continue;
-      const rawRows = pkg.tables[table];
+      const hasTableInPkg = Object.prototype.hasOwnProperty.call(pkg.tables, table);
+      if (!hasTableInPkg && !(table === "pending_cloud_operations" && mode === "replace")) continue;
+      const rawRows = hasTableInPkg ? pkg.tables[table] : [];
       if (!Array.isArray(rawRows)) throw new Error("Tabella backup non valida: " + table);
       let rows =
         table === "pending_cloud_operations"
@@ -942,7 +958,9 @@ export async function restoreModularBackup(
           params: [],
         });
       }
-      restoredCounts[table] = rows.length;
+      if (hasTableInPkg) {
+        restoredCounts[table] = rows.length;
+      }
     }
 
     const referenceTables = Object.keys(restoredCounts).filter((table) =>

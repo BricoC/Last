@@ -197,7 +197,19 @@ export async function importAllReadableSupabaseDdts(projectUrl: string, anonKey:
     });
     mappedLines.push(...lines.map((line, index) => mapLineForLocal(line, header.id, index + 1)));
   }
-  return invoke<DdtImportResult>("import_supabase_ddt_into_local", { payload: { headers: importedHeaders, lines: mappedLines } });
+  const result = await invoke<DdtImportResult>("import_supabase_ddt_into_local", {
+    payload: { headers: importedHeaders, lines: mappedLines },
+  });
+  if (projectUrlForImport && cursor !== "0") {
+    const db = await (await import("@/shared/data-layer/database")).getDatabase();
+    await db.execute(
+      `INSERT INTO ddt_pull_state (project_url, revision, initialized, updated_at)
+       VALUES ($1, $2, 1, $3)
+       ON CONFLICT(project_url) DO UPDATE SET revision = excluded.revision, initialized = 1, updated_at = excluded.updated_at`,
+      [projectUrlForImport, cursor, new Date().toISOString()]
+    );
+  }
+  return result;
 }
 
 export async function createDdtReadOnlyPreview(projectUrl: string, anonKey: string): Promise<DdtPreview> {

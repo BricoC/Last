@@ -44,6 +44,10 @@ function serializeCleanNode(node: Node): { html: string; hasFormatting: boolean 
   const el = node as HTMLElement;
   const tag = el.tagName.toLowerCase();
 
+  if (tag === "script" || tag === "style" || tag === "noscript" || tag === "template") {
+    return { html: "", hasFormatting: false };
+  }
+
   let innerHtml = "";
   let innerHasFormatting = false;
   el.childNodes.forEach((child) => {
@@ -92,6 +96,30 @@ function serializeCleanNode(node: Node): { html: string; hasFormatting: boolean 
   return { html: innerHtml, hasFormatting: innerHasFormatting };
 }
 
+function parseRichHtmlBody(rawHtml: string): HTMLElement | null {
+  if (typeof DOMParser === "undefined") return null;
+  const doc = new DOMParser().parseFromString(rawHtml, "text/html");
+  return doc?.body ?? null;
+}
+
+function extractSafeNodeText(node: Node): string {
+  if (node.nodeType === 3) {
+    return node.textContent || "";
+  }
+  if (node.nodeType !== 1) {
+    return "";
+  }
+  const tag = (node as HTMLElement).tagName.toLowerCase();
+  if (tag === "script" || tag === "style" || tag === "noscript" || tag === "template") {
+    return "";
+  }
+  let text = "";
+  node.childNodes.forEach((child) => {
+    text += extractSafeNodeText(child);
+  });
+  return text;
+}
+
 /**
  * Sanitizza l'HTML dell'editor descrizione, consentendo solo <b>, <i>,
  * <span data-pl-color="..."> e <mark data-pl-hl="...">.
@@ -99,20 +127,19 @@ function serializeCleanNode(node: Node): { html: string; hasFormatting: boolean 
  */
 export function sanitizeDescriptionRichHtml(rawHtml: string | null | undefined): string | null {
   if (!rawHtml || !rawHtml.trim()) return null;
-  if (typeof document === "undefined") return null;
 
-  const container = document.createElement("div");
-  container.innerHTML = rawHtml;
+  const body = parseRichHtmlBody(rawHtml);
+  if (!body) return null;
 
   let html = "";
   let hasFormatting = false;
-  container.childNodes.forEach((child) => {
+  body.childNodes.forEach((child) => {
     const res = serializeCleanNode(child);
     html += res.html;
     if (res.hasFormatting) hasFormatting = true;
   });
 
-  const plain = normalizeInlineText(container.textContent || "").trim();
+  const plain = normalizeInlineText(extractSafeNodeText(body)).trim();
   if (!plain || !hasFormatting) return null;
   return html.trim();
 }
@@ -122,12 +149,11 @@ export function sanitizeDescriptionRichHtml(rawHtml: string | null | undefined):
  */
 export function extractPlainTextFromRichHtml(rawHtml: string | null | undefined): string {
   if (!rawHtml) return "";
-  if (typeof document === "undefined") {
+  const body = parseRichHtmlBody(rawHtml);
+  if (!body) {
     return rawHtml.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
   }
-  const container = document.createElement("div");
-  container.innerHTML = rawHtml;
-  return normalizeInlineText(container.textContent || "").trim();
+  return normalizeInlineText(extractSafeNodeText(body)).trim();
 }
 
 /**

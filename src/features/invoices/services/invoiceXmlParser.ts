@@ -219,6 +219,8 @@ function parseBodyElement(
   let vatTotal = 0;
 
   if (bodyEl) {
+    const docType = getTagText(bodyEl, "TipoDocumento").trim().toUpperCase();
+    const isCreditNote = docType === "TD04" || docType === "TD08";
     const num = getTagText(bodyEl, "Numero");
     if (num) docNumber = num;
     const date = getTagText(bodyEl, "Data");
@@ -253,6 +255,12 @@ function parseBodyElement(
         taxableTotal += parseNum(getTagText(el, "ImponibileImporto"));
         vatTotal += parseNum(getTagText(el, "Imposta"));
       }
+    }
+
+    if (isCreditNote) {
+      if (totalDocAmount > 0) totalDocAmount = -totalDocAmount;
+      if (taxableTotal > 0) taxableTotal = -taxableTotal;
+      if (vatTotal > 0) vatTotal = -vatTotal;
     }
   }
 
@@ -335,7 +343,9 @@ function parseBodyElement(
           const imp = parseNum(impStr, 0);
           discountedPrice = isSurcharge
             ? discountedPrice + imp
-            : Math.max(0, discountedPrice - imp);
+            : discountedPrice >= 0
+              ? Math.max(0, discountedPrice - imp)
+              : discountedPrice - imp;
           if (discIdx < 3 && unitPrice > 0) {
             discounts[discIdx] = Math.round(((sign * imp) / unitPrice) * 10000) / 100;
             discIdx++;
@@ -429,7 +439,7 @@ export function parseInvoiceXmlAll(
   }
 
   if (bodyEls.length === 0) {
-    return [parseBodyElement(null, supplierName, vatNumber, fiscalCode, fileName)];
+    throw new Error(`Il file "${fileName}" non è una Fattura Elettronica valida (manca FatturaElettronicaBody).`);
   }
 
   return bodyEls.map((bodyEl) =>

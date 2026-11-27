@@ -53,11 +53,15 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettingsInput = {
   logo_data_url: null,
 };
 
-export async function pushCompanySettingsToSupabase(input: CompanySettingsInput): Promise<boolean> {
+export async function pushCompanySettingsToSupabase(
+  input: CompanySettingsInput,
+  expectedUpdatedAt?: string
+): Promise<boolean> {
   try {
     const creds = await getSupabaseCredentials();
     if (!creds) return false;
 
+    const updatedAt = expectedUpdatedAt || new Date().toISOString();
     const row = {
       id: SETTINGS_ID,
       business_name: (input.business_name ?? "").trim(),
@@ -71,7 +75,7 @@ export async function pushCompanySettingsToSupabase(input: CompanySettingsInput)
       phone: (input.phone ?? "").trim(),
       email: (input.email ?? "").trim(),
       logo_data_url: input.logo_data_url ?? null,
-      updated_at: new Date().toISOString(),
+      updated_at: updatedAt,
       updated_by: "system",
     };
 
@@ -88,8 +92,13 @@ export async function pushCompanySettingsToSupabase(input: CompanySettingsInput)
 
     if (res.ok) {
       const db = await getDatabase();
-      await db.execute("UPDATE company_settings SET sync_status = 'synced' WHERE id = $1", [SETTINGS_ID]);
-      if (cachedCompanySettings) {
+      const upd = expectedUpdatedAt
+        ? await db.execute(
+            "UPDATE company_settings SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2",
+            [SETTINGS_ID, expectedUpdatedAt]
+          )
+        : await db.execute("UPDATE company_settings SET sync_status = 'synced' WHERE id = $1", [SETTINGS_ID]);
+      if (cachedCompanySettings && (!expectedUpdatedAt || (upd.rowsAffected ?? 0) > 0)) {
         cachedCompanySettings = { ...cachedCompanySettings, sync_status: "synced" };
       }
       return true;
@@ -272,7 +281,7 @@ export async function saveCompanySettings(input: CompanySettingsInput): Promise<
     sync_status: "pending",
   };
 
-  const syncedCloud = await pushCompanySettingsToSupabase(input);
+  const syncedCloud = await pushCompanySettingsToSupabase(input, now);
   return { savedLocal: true, syncedCloud };
 }
 
@@ -296,5 +305,5 @@ export async function retryPendingCompanySettings(): Promise<boolean> {
     phone: r.phone ?? "",
     email: r.email ?? "",
     logo_data_url: r.logo_data_url ?? null,
-  });
+  }, r.updated_at);
 }

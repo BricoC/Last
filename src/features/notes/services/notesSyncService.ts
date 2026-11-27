@@ -127,6 +127,7 @@ export class NotesSyncService {
         `SELECT * FROM notes WHERE sync_status = 'pending'
            AND NOT EXISTS (SELECT 1 FROM note_deletions WHERE note_deletions.id = notes.id)`
       );
+      let pushError: string | null = null;
 
       for (const item of pendings) {
         if (!matchesActiveSupabaseProject(item.project_url, activeProjectUrl)) continue;
@@ -160,8 +161,11 @@ export class NotesSyncService {
           if (res.ok) {
             const updatedRows = await res.json().catch(() => null);
             if (Array.isArray(updatedRows) && updatedRows.length === 0) {
-              // La nota è stata eliminata su Cloud da un'altra postazione: non resuscitarla silenziosamente
-              throw new Error(`Nota #${item.supabase_id} eliminata da un'altra postazione sul Cloud`);
+              // La nota è stata eliminata su Cloud da un'altra postazione: segnala ma non bloccare le altre note né il PULL
+              if (!pushError) {
+                pushError = `Nota #${item.supabase_id} eliminata da un'altra postazione sul Cloud`;
+              }
+              continue;
             } else {
               await db.execute(
                 `UPDATE notes SET sync_status = 'synced', project_url = $3 WHERE id = $1 AND updated_at = $2`,
@@ -370,6 +374,7 @@ export class NotesSyncService {
       if (pullErrorStatus !== null) throw new Error(`Download note: HTTP ${pullErrorStatus}`);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("notes-data-updated"));
       if (deletionError) throw new Error(deletionError);
+      if (pushError) throw new Error(pushError);
       this.lastSyncTime = new Date();
       return { success: true, pushed, pulled };
     } catch (err: unknown) {

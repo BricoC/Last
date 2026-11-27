@@ -37,11 +37,15 @@ export const getSupabaseCredentials = createCachedSupabaseConfigLoader("emailSet
 /**
  * Invia le impostazioni email al Cloud Supabase (UPSERT)
  */
-export async function pushEmailSettingsToSupabase(input: EmailSettingsInput): Promise<boolean> {
+export async function pushEmailSettingsToSupabase(
+  input: EmailSettingsInput,
+  expectedUpdatedAt?: string
+): Promise<boolean> {
   try {
     const creds = await getSupabaseCredentials();
     if (!creds) return false;
 
+    const updatedAt = expectedUpdatedAt || new Date().toISOString();
     const row = {
       id: SETTINGS_ID,
       carrara_to: input.carrara_to.trim(),
@@ -54,7 +58,7 @@ export async function pushEmailSettingsToSupabase(input: EmailSettingsInput): Pr
       bank_cc: input.bank_cc.trim(),
       accountant_to: input.accountant_to.trim(),
       accountant_cc: input.accountant_cc.trim(),
-      updated_at: new Date().toISOString(),
+      updated_at: updatedAt,
       updated_by: "system",
     };
 
@@ -71,7 +75,14 @@ export async function pushEmailSettingsToSupabase(input: EmailSettingsInput): Pr
 
     if (res.ok) {
       const db = await getDatabase();
-      await db.execute("UPDATE email_settings SET sync_status = 'synced' WHERE id = $1", [SETTINGS_ID]);
+      if (expectedUpdatedAt) {
+        await db.execute(
+          "UPDATE email_settings SET sync_status = 'synced' WHERE id = $1 AND updated_at = $2",
+          [SETTINGS_ID, expectedUpdatedAt]
+        );
+      } else {
+        await db.execute("UPDATE email_settings SET sync_status = 'synced' WHERE id = $1", [SETTINGS_ID]);
+      }
       return true;
     } else {
       const txt = await res.text();
@@ -190,7 +201,7 @@ export async function pullEmailSettingsFromSupabase(requireCloud = false): Promi
 export async function getEmailSettings(): Promise<EmailSettings> {
   try {
     const db = await getDatabase();
-    const rows = await db.select<EmailSettings[]>(
+    const rows = await db.select<Array<EmailSettings & { updated_at?: string }>>(
       "SELECT * FROM email_settings WHERE id = $1 AND deleted_at IS NULL",
       [SETTINGS_ID]
     );
@@ -266,14 +277,14 @@ export async function saveEmailSettings(input: EmailSettingsInput): Promise<Save
   );
 
   // 2. Sincronizzazione immediata con Supabase Cloud
-  const syncedCloud = await pushEmailSettingsToSupabase(input);
+  const syncedCloud = await pushEmailSettingsToSupabase(input, now);
 
   return { savedLocal: true, syncedCloud };
 }
 
 export async function retryPendingEmailSettings(): Promise<boolean> {
   const db = await getDatabase();
-  const rows = await db.select<EmailSettings[]>(
+  const rows = await db.select<Array<EmailSettings & { updated_at?: string }>>(
     "SELECT * FROM email_settings WHERE id = $1 AND deleted_at IS NULL AND sync_status = 'pending' LIMIT 1",
     [SETTINGS_ID]
   );
@@ -290,5 +301,5 @@ export async function retryPendingEmailSettings(): Promise<boolean> {
     bank_cc: r.bank_cc ?? "",
     accountant_to: r.accountant_to ?? "",
     accountant_cc: r.accountant_cc ?? "",
-  });
+  }, r.updated_at);
 }

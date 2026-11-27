@@ -30,7 +30,7 @@ import { useEscClose } from "@/shared/hooks/useEscClose";
 export interface DayDdtListModalProps {
   isOpen: boolean;
   onClose: () => void;
-  day: number;
+  day?: number | null;
   month: number;
   initialYear?: number | null;
   availableYears?: number[];
@@ -94,19 +94,21 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
   const [selectedYear, setSelectedYear] = useState<number | null>(
     initialYear !== null && initialYear !== undefined ? initialYear : currentYear
   );
+  const [selectedMonth, setSelectedMonth] = useState<number>(month);
   const [rows, setRows] = useState<DdtListViewRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedDdtId, setSelectedDdtId] = useState<string | null>(null);
 
-  // Aggiorna l'anno selezionato se cambiano le props
+  // Aggiorna l'anno e il mese selezionati se cambiano le props
   useEffect(() => {
     if (isOpen) {
       setSelectedYear(
         initialYear !== null && initialYear !== undefined ? initialYear : currentYear
       );
+      setSelectedMonth(month);
     }
-  }, [isOpen, initialYear, currentYear]);
+  }, [isOpen, initialYear, currentYear, month]);
 
   // Configurazione ordinamento colonne
   const [sortConfig, setSortConfig] = useState<{
@@ -150,15 +152,15 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await dashboardService.getDdtsForDay(month, day, selectedYear);
+      const data = await dashboardService.getDdtsForDay(selectedMonth, day ?? null, selectedYear);
       setRows(data);
     } catch (err) {
-      console.error("Errore caricamento DDT del giorno:", err);
+      console.error("Errore caricamento DDT:", err);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [month, day, selectedYear]);
+  }, [selectedMonth, day, selectedYear]);
 
   useEffect(() => {
     if (isOpen) {
@@ -311,7 +313,8 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
 
   if (!isOpen) return null;
 
-  const monthName = MONTH_NAMES[month - 1] || `Mese ${month}`;
+  const isMonthMode = day === null || day === undefined;
+  const monthName = MONTH_NAMES[selectedMonth - 1] || `Mese ${selectedMonth}`;
 
   return (
     <div
@@ -329,19 +332,35 @@ export const DayDdtListModal: React.FC<DayDdtListModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-extrabold tracking-tight text-white uppercase">
-                  DDT Emessi — {day} {monthName} {selectedYear ? `Anno ${selectedYear}` : "(Tutti gli anni)"}
+                  DDT Emessi — {isMonthMode ? monthName : `${day} ${monthName}`} {selectedYear ? `Anno ${selectedYear}` : "(Tutti gli anni)"}
                 </h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--primary)]/20 text-[var(--primary)] border border-[var(--primary)]/30">
                   {filteredRows.length} {filteredRows.length === 1 ? "documento" : "documenti"}
                 </span>
               </div>
               <p className="text-[11px] text-[var(--muted-foreground)]">
-                Elenco documenti emessi nel giorno selezionato. Clicca sul numero DDT per visualizzare il riepilogo rapido.
+                {isMonthMode
+                  ? "Elenco documenti emessi nel mese selezionato. Clicca sul numero DDT per visualizzare il riepilogo rapido."
+                  : "Elenco documenti emessi nel giorno selezionato. Clicca sul numero DDT per visualizzare il riepilogo rapido."}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {isMonthMode && (
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                className="bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)] text-xs font-bold rounded-lg px-2.5 py-1 outline-none cursor-pointer focus:border-[var(--primary)]"
+                aria-label="Seleziona mese"
+              >
+                {MONTH_NAMES.map((name, idx) => (
+                  <option key={name} value={idx + 1}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
             {/* Selettore Anno con Pills */}
             <div className="flex items-center gap-1 bg-[var(--card)] p-0.5 rounded-lg border border-[var(--border)]">
               <button

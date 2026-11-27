@@ -497,18 +497,23 @@ export class OrderSupabaseService {
   /**
    * Imposta data ordine su Supabase e SQLite per tutti gli articoli di un fornitore (invio email)
    */
-  async markSupplierOrdersAsSent(supplierName: string, currentUser = "Operatore"): Promise<boolean> {
-    const db = await getDatabase();
-    const orders = await db.select<Array<{ id: string; supabase_id: string | null }>>(
-      `SELECT id, supabase_id FROM orders
-       WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_archived = 0 AND is_deleted = 0`,
-      [supplierName],
-    );
+  async markSupplierOrdersAsSent(supplierName: string, currentUser = "Operatore", orderIds?: string[]): Promise<boolean> {
+    const targetIds = Array.isArray(orderIds) && orderIds.length > 0 ? orderIds : null;
+    let resolvedIds = targetIds;
+    if (!resolvedIds) {
+      const db = await getDatabase();
+      const orders = await db.select<Array<{ id: string; supabase_id: string | null }>>(
+        `SELECT id, supabase_id FROM orders
+         WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM($1)) AND is_archived = 0 AND is_deleted = 0`,
+        [supplierName],
+      );
+      resolvedIds = orders.map((order) => order.supabase_id || order.id);
+    }
     const date = TODAY();
-    await this.changeOrders(orders.map((order) => order.supabase_id || order.id), "mark_sent", date);
+    await this.changeOrders(resolvedIds, "mark_sent", date);
     await orderRepository.recordAuditLog("orders", "UPDATE", currentUser, null,
-      { supplier: supplierName, ordered_date: date, count: orders.length },
-      `Inviato ordine email a ${supplierName} (${orders.length} articoli)`);
+      { supplier: supplierName, ordered_date: date, count: resolvedIds.length },
+      `Inviato ordine email a ${supplierName} (${resolvedIds.length} articoli)`);
     return true;
   }
 

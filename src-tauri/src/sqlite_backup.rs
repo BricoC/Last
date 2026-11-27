@@ -157,6 +157,44 @@ impl StagedSnapshot {
             .map_err(|error| format!("Impossibile consolidare la coda ordini nel backup: {error}"))
     }
 
+    pub(crate) async fn clear_offline_queues(&self) -> Result<(), String> {
+        let mut connection = open_database(&self.path, false).await?;
+        for table in [
+            "pending_cloud_operations",
+            "note_deletions",
+            "order_queue_restore",
+        ] {
+            let exists: Option<i64> = sqlx::query_scalar(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $1 LIMIT 1",
+            )
+            .bind(table)
+            .fetch_optional(&mut connection)
+            .await
+            .map_err(|error| format!("Verifica tabella {table}: {error}"))?;
+            if exists.is_some() {
+                let delete_sql = match table {
+                    "pending_cloud_operations" => "DELETE FROM pending_cloud_operations",
+                    "note_deletions" => "DELETE FROM note_deletions",
+                    "order_queue_restore" => "DELETE FROM order_queue_restore",
+                    _ => continue,
+                };
+                sqlx::query(delete_sql)
+                    .execute(&mut connection)
+                    .await
+                    .map_err(|error| format!("Pulizia coda {table}: {error}"))?;
+            }
+        }
+        connection
+            .close()
+            .await
+            .map_err(|error| error.to_string())?;
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&self.path)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| format!("Impossibile consolidare il backup ripulito: {error}"))
+    }
+
     pub(crate) async fn validate(&self, require_last_schema: bool) -> Result<(), String> {
         let mut connection = open_database(&self.path, true).await?;
         let result: String = sqlx::query_scalar("PRAGMA quick_check(1)")

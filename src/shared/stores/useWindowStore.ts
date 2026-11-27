@@ -51,7 +51,19 @@ export function registerDirtyCheck(id: string, check: () => boolean): () => void
 }
 
 export function hasAnyUnsavedChanges(): boolean {
-  for (const check of dirtyChecks.values()) {
+  for (const [id] of windowCloseGuards.entries()) {
+    const check = dirtyChecks.get(id);
+    if (!check) {
+      return true;
+    }
+    try {
+      if (check()) return true;
+    } catch {
+      // ignore
+    }
+  }
+  for (const [id, check] of dirtyChecks.entries()) {
+    if (windowCloseGuards.has(id)) continue;
     try {
       if (check()) return true;
     } catch {

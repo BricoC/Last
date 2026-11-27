@@ -76,11 +76,38 @@ fn validate_file_path_with_extensions(
     }
     let path = Path::new(trimmed);
     for component in path.components() {
-        if matches!(component, std::path::Component::ParentDir) {
-            return Err(format!(
-                "Percorso {label} con traversal '..' non consentito"
-            ));
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(format!(
+                    "Percorso {label} con traversal '..' non consentito"
+                ));
+            }
+            std::path::Component::Prefix(prefix) => {
+                if matches!(
+                    prefix.kind(),
+                    std::path::Prefix::UNC(_, _) | std::path::Prefix::VerbatimUNC(_, _)
+                ) {
+                    return Err(format!("Percorso di rete UNC non consentito per {label}"));
+                }
+            }
+            _ => {}
         }
+    }
+    let file_name_lower = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(
+        file_name_lower.as_str(),
+        "supabase.local.json"
+            | "supabase.management.local.json"
+            | "supabase.session.local.bin"
+            | "supabase.session.dev.local.bin"
+    ) {
+        return Err(format!(
+            "Accesso a file di configurazione interno non consentito per {label}"
+        ));
     }
     let ext = path
         .extension()
@@ -91,6 +118,26 @@ fn validate_file_path_with_extensions(
         return Err(format!(
             "Estensione file non consentita per {label}: .{ext}"
         ));
+    }
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return Err(format!("Collegamento simbolico non consentito per {label}"));
+        }
+        let canonical = fs::canonicalize(path)
+            .map_err(|e| format!("Impossibile risolvere percorso {label}: {e}"))?;
+        let canon_ext = canonical
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .unwrap_or_default();
+        if !allowed_extensions
+            .iter()
+            .any(|allowed| *allowed == canon_ext)
+        {
+            return Err(format!(
+                "Estensione file risolto non consentita per {label}: .{canon_ext}"
+            ));
+        }
     }
     Ok(path.to_path_buf())
 }
@@ -319,6 +366,7 @@ pub async fn copy_database_file(
 pub async fn restore_database_file(
     app: AppHandle,
     source_file_path: String,
+    clear_offline_queues: Option<bool>,
 ) -> Result<u64, String> {
     use tauri_plugin_sql::{DbInstances, DbPool};
     let _operation = BACKUP_FILE_OPERATION.lock().await;
@@ -333,6 +381,9 @@ pub async fn restore_database_file(
     stage.capture(&mut source).await?;
     source.close().await.map_err(|error| error.to_string())?;
     stage.validate(true).await?;
+    if clear_offline_queues.unwrap_or(false) {
+        stage.clear_offline_queues().await?;
+    }
 
     // Stop local writers until the old database is consolidated and the swap completes.
     let state = app.state::<DbInstances>();

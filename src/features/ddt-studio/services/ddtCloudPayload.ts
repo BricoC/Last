@@ -1,5 +1,32 @@
 import { parseDdtQuantity } from "../utils/ddtQuantity";
 import { parseCascadeDiscounts } from "../utils/ddtCalculations";
+export function formatCloudDestination(
+  destinationName?: string | null,
+  destinationAddress?: string | null,
+  clientName?: string | null,
+): string {
+  const rawDestName = (destinationName || "").trim();
+  const rawDestAddr = (destinationAddress || "").trim();
+  const normalizedClient = (clientName || "").trim().toUpperCase();
+  if (!rawDestAddr) return rawDestName;
+
+  const upperName = rawDestName.toUpperCase();
+  const upperAddr = rawDestAddr.toUpperCase();
+  const isDestNameMissingOrClient = !rawDestName || upperName === normalizedClient;
+  if (isDestNameMissingOrClient || upperName === upperAddr) {
+    return rawDestAddr;
+  }
+
+  const existingSegments = rawDestName
+    .split(/\s+-\s+/)
+    .map((segment) => segment.trim().toUpperCase())
+    .filter(Boolean);
+  if (existingSegments.includes(upperAddr)) {
+    return rawDestName;
+  }
+
+  return `${rawDestName} - ${rawDestAddr}`;
+}
 export interface LocalDdtRow {
   id: string;
   doc_number: number | null;
@@ -135,19 +162,12 @@ export function buildSupabaseDdtPayloads(doc: LocalDdtRow, items: LocalDdtItemRo
   const profit = round5(taxable - roundedCost);
   const markup = roundedCost > 0 ? round5(profit / roundedCost) : 0;
 
-  const rawDestName = (doc.destination_name || "").trim();
-  const rawDestAddr = (doc.destination_address || "").trim();
   const rawDestCity = (doc.destination_city || "").trim();
-  const clientName = (doc.client_name || "").trim();
-  const isDestNameMissingOrClient = !rawDestName || rawDestName.toUpperCase() === clientName.toUpperCase();
-  const isDestNameSameAsAddr = Boolean(rawDestAddr && rawDestName.toUpperCase() === rawDestAddr.toUpperCase());
-  const cloudDestinazione = rawDestAddr
-    ? isDestNameMissingOrClient || isDestNameSameAsAddr
-      ? rawDestAddr
-      : rawDestCity
-      ? rawDestName
-      : `${rawDestName} - ${rawDestAddr}`
-    : rawDestName;
+  const cloudDestinazione = formatCloudDestination(
+    doc.destination_name,
+    doc.destination_address,
+    doc.client_name,
+  );
   const cloudCittaDest = rawDestCity;
 
   const headerPayload = {

@@ -22,6 +22,7 @@ export interface DashboardMonthDdtsCardProps {
   onCopyFilteredPdfs: () => void;
   selectedQuickDdtId: string | null;
   onSelectQuickDdtId: (id: string) => void;
+  onOpenMonthListModal?: () => void;
 }
 
 export const DashboardMonthDdtsCard: React.FC<DashboardMonthDdtsCardProps> = ({
@@ -38,6 +39,7 @@ export const DashboardMonthDdtsCard: React.FC<DashboardMonthDdtsCardProps> = ({
   onCopyFilteredPdfs,
   selectedQuickDdtId,
   onSelectQuickDdtId,
+  onOpenMonthListModal,
 }) => {
   return (
     <div className="col-span-5 flex flex-col rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 overflow-hidden shadow-xs">
@@ -45,9 +47,14 @@ export const DashboardMonthDdtsCard: React.FC<DashboardMonthDdtsCardProps> = ({
       <div className="flex items-center justify-between shrink-0 mb-2 gap-2">
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <Clock className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-          <span className="text-xs font-bold text-[var(--foreground)] uppercase tracking-wider shrink-0">
+          <button
+            type="button"
+            onClick={onOpenMonthListModal}
+            className="text-xs font-bold text-[var(--foreground)] hover:text-[var(--primary)] uppercase tracking-wider shrink-0 transition-colors cursor-pointer"
+            title="Apri elenco completo DDT del mese"
+          >
             DDT del Mese
-          </span>
+          </button>
           <select
             value={selectedMonthForDdts}
             onChange={(e) => onSelectMonthForDdts(Number(e.target.value))}
@@ -180,9 +187,9 @@ export const DashboardMonthDdtsCard: React.FC<DashboardMonthDdtsCardProps> = ({
                     )}
                     title={
                       doc.pricingStatus === "complete_with_margins"
-                        ? "Prezzato interamente con tutti i margini"
+                        ? "Prezzato interamente con margini e IVA"
                         : doc.pricingStatus === "priced_no_margins"
-                        ? "Prezzato interamente senza margini"
+                        ? "Da completare (mancano margini o IVA)"
                         : "Né prezzi né margini (non prezzato interamente)"
                     }
                   />

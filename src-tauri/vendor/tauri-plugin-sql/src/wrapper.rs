@@ -96,7 +96,7 @@ impl DbPool {
                     create_dir_all(&app_path).expect("Couldn't create app config dir");
                 }
 
-                let db_url = &path_mapper(app_path, conn_url);
+                let db_url = &checked_path_mapper(app_path, conn_url)?;
 
                 ensure_database::<Sqlite>(db_url, conn_url, _auto_create).await?;
                 Ok(Self::Sqlite(Pool::connect(db_url).await?))
@@ -361,21 +361,35 @@ fn redact_password(conn_url: &str) -> String {
 
 #[cfg(feature = "sqlite")]
 /// Maps the user supplied DB connection string to a connection string
-/// with a fully qualified file path to the App's designed "app_path"
-fn path_mapper(mut app_path: std::path::PathBuf, connection_string: &str) -> String {
-    app_path.push(
-        connection_string
-            .split_once(':')
-            .expect("Couldn't parse the connection string for DB!")
-            .1,
-    );
+/// with a fully qualified file path to the App's designed "app_path",
+/// rejecting absolute paths, UNC prefixes, directory separators, and traversal.
+fn checked_path_mapper(
+    mut app_path: std::path::PathBuf,
+    connection_string: &str,
+) -> Result<String, crate::Error> {
+    let raw_rel = connection_string
+        .split_once(':')
+        .map(|(_, rest)| rest.trim())
+        .filter(|rest| !rest.is_empty())
+        .ok_or_else(|| crate::Error::InvalidDbUrl(connection_string.to_string()))?;
 
-    format!(
-        "sqlite:{}",
-        app_path
-            .to_str()
-            .expect("Problem creating fully qualified path to Database file!")
-    )
+    let rel_path = std::path::Path::new(raw_rel);
+    let mut components = rel_path.components();
+    let is_single_normal = matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
+        && !rel_path.is_absolute();
+    if !is_single_normal {
+        return Err(crate::Error::InvalidDbUrl(format!(
+            "Unsafe SQLite database path rejected: {connection_string}"
+        )));
+    }
+
+    app_path.push(rel_path);
+
+    let full_str = app_path
+        .to_str()
+        .ok_or_else(|| crate::Error::InvalidDbUrl(connection_string.to_string()))?;
+    Ok(format!("sqlite:{full_str}"))
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 import { supabaseFetch } from "@/shared/services/supabaseSession";
+import { normalizeSupabaseProjectUrl } from "@/shared/services/supabaseConfigCache";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "@/shared/data-layer/database";
 import { computeTableComparison, type TableComparisonRow } from "./cloudMonitorUtils";
@@ -54,7 +55,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     localCountSql:
       "SELECT COUNT(*) as c FROM ddt_documents WHERE deleted_at IS NULL AND doc_number IS NOT NULL AND status <> 'bozza'",
     localPendingSql:
-      "SELECT COUNT(*) as c FROM ddt_documents WHERE sync_status = 'pending' AND doc_number IS NOT NULL AND status <> 'bozza'",
+      "SELECT COUNT(*) as c FROM ddt_documents WHERE sync_status = 'pending' AND doc_number IS NOT NULL AND status <> 'bozza' AND ($1 = '' OR project_url = $1)",
   },
   {
     key: "ddt_righe",
@@ -64,7 +65,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     localCountSql:
       "SELECT COUNT(*) as c FROM ddt_items i JOIN ddt_documents d ON i.ddt_id = d.id WHERE i.deleted_at IS NULL AND d.deleted_at IS NULL AND d.doc_number IS NOT NULL AND d.status <> 'bozza'",
     localPendingSql:
-      "SELECT COUNT(*) as c FROM ddt_items i JOIN ddt_documents d ON i.ddt_id = d.id WHERE i.sync_status = 'pending' AND d.doc_number IS NOT NULL AND d.status <> 'bozza'",
+      "SELECT COUNT(*) as c FROM ddt_items i JOIN ddt_documents d ON i.ddt_id = d.id WHERE i.sync_status = 'pending' AND d.doc_number IS NOT NULL AND d.status <> 'bozza' AND ($1 = '' OR d.project_url = $1)",
   },
   {
     key: "clienti",
@@ -72,7 +73,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudTable: "clienti",
     localTable: "clients",
     localCountSql: "SELECT COUNT(*) as c FROM clients WHERE deleted_at IS NULL",
-    localPendingSql: "SELECT COUNT(*) as c FROM clients WHERE deleted_at IS NULL AND sync_status = 'pending'",
+    localPendingSql: "SELECT COUNT(*) as c FROM clients WHERE deleted_at IS NULL AND sync_status = 'pending' AND ($1 = '' OR project_url = $1)",
   },
   {
     key: "fornitori",
@@ -87,6 +88,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudTable: "ordini",
     localTable: "orders",
     localCountSql: "SELECT COUNT(*) as c FROM orders",
+    localPendingSql: "SELECT COUNT(*) as c FROM orders WHERE sync_status = 'pending' AND ($1 = '' OR project_url = $1)",
   },
   {
     key: "listino_generale",
@@ -94,6 +96,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudTable: "listino_generale",
     localTable: "listino_generale",
     localCountSql: "SELECT COUNT(*) as c FROM listino_generale WHERE source_table = 'listino_generale'",
+    localPendingSql: "SELECT COUNT(*) as c FROM listino_generale WHERE source_table = 'listino_generale' AND sync_revision IS NOT NULL",
   },
   {
     key: "listini_vari",
@@ -101,6 +104,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudTable: "listini_vari",
     localTable: "listino_generale (listini_vari)",
     localCountSql: "SELECT COUNT(*) as c FROM listino_generale WHERE source_table = 'listini_vari'",
+    localPendingSql: "SELECT COUNT(*) as c FROM listino_generale WHERE source_table = 'listini_vari' AND sync_revision IS NOT NULL",
   },
   {
     key: "listini_clienti",
@@ -108,6 +112,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudTable: "listini_clienti",
     localTable: "listini_clienti",
     localCountSql: "SELECT COUNT(*) as c FROM listini_clienti",
+    localPendingSql: "SELECT COUNT(*) as c FROM listini_clienti WHERE sync_revision IS NOT NULL",
   },
   {
     key: "offerte",
@@ -115,7 +120,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudTable: "offerte",
     localTable: "offers",
     localCountSql: "SELECT COUNT(*) as c FROM offers",
-    localPendingSql: "SELECT COUNT(*) as c FROM offers WHERE sync_status = 'pending'",
+    localPendingSql: "SELECT COUNT(*) as c FROM offers WHERE sync_status = 'pending' AND ($1 = '' OR project_url = $1)",
   },
   {
     key: "note",
@@ -123,7 +128,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudTable: "note",
     localTable: "notes",
     localCountSql: "SELECT COUNT(*) as c FROM notes",
-    localPendingSql: "SELECT COUNT(*) as c FROM notes WHERE sync_status = 'pending'",
+    localPendingSql: "SELECT COUNT(*) as c FROM notes WHERE sync_status = 'pending' AND ($1 = '' OR project_url = $1)",
   },
   {
     key: "preventivi",
@@ -132,7 +137,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudFilterQuery: "deleted_at=is.null",
     localTable: "quotes",
     localCountSql: "SELECT COUNT(*) as c FROM quotes WHERE deleted_at IS NULL",
-    localPendingSql: "SELECT COUNT(*) as c FROM quotes WHERE deleted_at IS NULL AND sync_status = 'pending'",
+    localPendingSql: "SELECT COUNT(*) as c FROM quotes WHERE deleted_at IS NULL AND sync_status = 'pending' AND ($1 = '' OR project_url = $1)",
   },
   {
     key: "fatture",
@@ -140,6 +145,7 @@ const MONITORED_TABLES: TableMonitorSpec[] = [
     cloudTable: "fatture_elettroniche_testate",
     localTable: "supplier_invoices",
     localCountSql: "SELECT COUNT(*) as c FROM supplier_invoices",
+    localPendingSql: "SELECT COUNT(*) as c FROM supplier_invoices WHERE cloud_upload_pending = 1 AND ($1 = '' OR project_url = $1)",
   },
 ];
 
@@ -195,6 +201,8 @@ export async function fetchCloudMonitorSnapshot(hasManagementToken: boolean): Pr
 
   const db = await getDatabase();
 
+  const normalizedProject = normalizeSupabaseProjectUrl(projectUrl) ?? "";
+
   // 1. Query conteggi locali in SQLite
   const localStatsPromise = Promise.all(
     MONITORED_TABLES.map(async (spec) => {
@@ -204,7 +212,9 @@ export async function fetchCloudMonitorSnapshot(hasManagementToken: boolean): Pr
         let pendingCount = 0;
         if (spec.localPendingSql) {
           try {
-            const pendRows = await db.select<{ c: number }[]>(spec.localPendingSql);
+            const pendRows = spec.localPendingSql.includes("$1")
+              ? await db.select<{ c: number }[]>(spec.localPendingSql, [normalizedProject])
+              : await db.select<{ c: number }[]>(spec.localPendingSql);
             pendingCount = Number(pendRows?.[0]?.c ?? 0);
           } catch {
             pendingCount = 0;

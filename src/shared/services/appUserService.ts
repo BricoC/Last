@@ -393,8 +393,10 @@ export class AppUserService {
         } catch {
           allowedPages = [];
         }
-        if (isAdmin || !hasExplicitAllowedPages) {
+        if (isAdmin) {
           allowedPages = DEFAULT_ALLOWED_PAGES;
+        } else if (!hasExplicitAllowedPages) {
+          allowedPages = ["dashboard"];
         }
 
         let topbarOrder: string[] = [];
@@ -419,7 +421,7 @@ export class AppUserService {
           can_access_price_lists: true,
           can_edit_price_lists: isAdmin ? true : Boolean(r.can_edit_price_lists),
           can_edit_or_numbers: isAdmin ? true : Boolean(r.can_edit_or_numbers),
-          can_manage_backups: Boolean(r.can_manage_backups),
+          can_manage_backups: isAdmin ? true : Boolean(r.can_manage_backups),
           is_admin: isAdmin,
           allowed_pages: isAdmin ? DEFAULT_ALLOWED_PAGES : allowedPages,
           theme_preset: (r.theme_preset || "grigio") as "grigio" | "nero-oled" | "avorio",
@@ -473,6 +475,9 @@ export class AppUserService {
     const themeBrightness = user.theme_brightness || 4;
     const passwordHash = user.password_hash || "";
     const requirePassword = user.require_password ? 1 : 0;
+    if (requirePassword && !passwordHash.trim()) {
+      throw new Error("Impossibile attivare la richiesta password senza impostare una password valida.");
+    }
     const topbarOrder = user.topbar_order && user.topbar_order.length > 0 ? user.topbar_order : DEFAULT_TOPBAR_ORDER;
     const createdAt = new Date().toISOString();
 
@@ -534,9 +539,13 @@ export class AppUserService {
     const canSettings = isAdmin ? 1 : user.can_access_settings ? 1 : 0;
     const canEditPrices = isAdmin ? 1 : user.can_edit_price_lists ? 1 : 0;
     const canEditOr = isAdmin ? 1 : user.can_edit_or_numbers ? 1 : 0;
-    const canManageBackups = user.can_manage_backups ? 1 : 0;
+    const canManageBackups = isAdmin ? 1 : user.can_manage_backups ? 1 : 0;
     const pages = isAdmin ? DEFAULT_ALLOWED_PAGES : (user.allowed_pages || []);
     const requirePassword = user.require_password ? 1 : 0;
+    const passwordHash = user.password_hash || "";
+    if (requirePassword && !passwordHash.trim()) {
+      throw new Error("Impossibile attivare la richiesta password senza impostare una password valida.");
+    }
     const topbarOrder = user.topbar_order && user.topbar_order.length > 0 ? user.topbar_order : DEFAULT_TOPBAR_ORDER;
 
     await db.execute(
@@ -557,7 +566,7 @@ export class AppUserService {
         JSON.stringify(pages),
         user.theme_preset || "grigio",
         user.theme_brightness || 4,
-        user.password_hash || "",
+        passwordHash,
         requirePassword,
         JSON.stringify(topbarOrder),
         user.id,

@@ -145,6 +145,11 @@ export const useAppUpdaterStore = create<AppUpdaterState>((set, get) => ({
   restartApp: async () => {
     if (!isTauri()) return;
     try {
+      const { hasAnyUnsavedChanges, runAllWindowCloseGuards } = await import("@/shared/stores/useWindowStore");
+      if (hasAnyUnsavedChanges()) {
+        const allowed = await runAllWindowCloseGuards();
+        if (!allowed) return;
+      }
       const { pendingUpdate } = get();
       if (pendingUpdate) {
         // Applica l'aggiornamento scaricato e riavvia l'app

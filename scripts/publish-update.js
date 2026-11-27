@@ -65,6 +65,45 @@ if (dirtyStatus) {
   process.exit(1);
 }
 
+const tag = `v${version}`;
+const pkgJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
+const currentVersion = String(pkgJson.version || "0.0.0").trim();
+const compareSemver = (a, b) => {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  }
+  return 0;
+};
+if (compareSemver(version, currentVersion) <= 0) {
+  console.error(`\x1b[31m[ERRORE] La nuova versione v${version} deve essere strettamente maggiore della versione attuale v${currentVersion}.\x1b[0m`);
+  process.exit(1);
+}
+
+runGit(["fetch", "origin", "main", "--tags"]);
+const behindCount = Number(readGit(["rev-list", "--count", "HEAD..origin/main"]) || "0");
+if (behindCount > 0) {
+  console.error(`\x1b[31m[ERRORE] Il branch locale 'main' è indietro di ${behindCount} commit rispetto a 'origin/main'. Esegui git pull prima del rilascio.\x1b[0m`);
+  process.exit(1);
+}
+
+try {
+  const existingLocalTag = readGit(["tag", "-l", tag]);
+  if (existingLocalTag === tag) {
+    console.error(`\x1b[31m[ERRORE] Il tag locale ${tag} esiste già.\x1b[0m`);
+    process.exit(1);
+  }
+  const existingRemoteTag = readGit(["ls-remote", "--tags", "origin", `refs/tags/${tag}`]);
+  if (existingRemoteTag) {
+    console.error(`\x1b[31m[ERRORE] Il tag remoto ${tag} esiste già su origin.\x1b[0m`);
+    process.exit(1);
+  }
+} catch (err) {
+  console.error("\x1b[31m[ERRORE] Impossibile verificare i tag remoti su origin:\x1b[0m", err.message);
+  process.exit(1);
+}
+
 if (!skipChecks) {
   console.log("\x1b[36m[PREFLIGHT] Esecuzione test, build e controlli Rust prima del tag...\x1b[0m");
   runNpm(["test"]);
@@ -86,7 +125,6 @@ for (const [file, oldVersion] of Object.entries(previousVersions)) {
 }
 
 // 3. Commit e Tag Git
-const tag = `v${version}`;
 try {
   runGit([
     "add",
@@ -100,10 +138,9 @@ try {
   runGit(["tag", "-a", tag, "-m", notes]);
   console.log(`\x1b[32m[OK] Creato tag Git: ${tag}\x1b[0m`);
 
-  // 4. Push su GitHub
-  console.log("\x1b[36m[PUSH] Invio commit e tag su GitHub...\x1b[0m");
-  runGit(["push", "origin", "main"]);
-  runGit(["push", "origin", tag]);
+  // 4. Push atomico su GitHub
+  console.log("\x1b[36m[PUSH] Invio atomico di commit e tag su GitHub...\x1b[0m");
+  runGit(["push", "--atomic", "origin", "main", tag]);
 
   console.log("\n\x1b[32m==========================================================\x1b[0m");
   console.log("\x1b[32m  Rilascio avviato con successo su GitHub!\x1b[0m");

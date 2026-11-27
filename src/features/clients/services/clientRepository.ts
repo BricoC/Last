@@ -60,7 +60,7 @@ export class ClientRepository {
         [
           id,
           normalizedInput.code || null,
-          normalizedInput.business_name.trim(),
+          normalizedInput.business_name.trim().toUpperCase(),
           normalizedInput.address || null,
           normalizedInput.city || null,
           normalizedInput.postal_code || null,
@@ -127,7 +127,7 @@ export class ClientRepository {
         WHERE id = $23 AND deleted_at IS NULL`,
       params: [
           input.code || null,
-          input.business_name.trim(),
+          input.business_name.trim().toUpperCase(),
           input.address || null,
           input.city || null,
           input.postal_code || null,
@@ -159,7 +159,7 @@ export class ClientRepository {
    */
   public async upsertClientFromDocument(input: CreateClientInput & { id?: string }): Promise<Client> {
     const db = await getDatabase();
-    const trimmedName = input.business_name.trim();
+    const trimmedName = input.business_name.trim().toUpperCase();
     const hasExplicitProjectScope = input.project_url !== undefined;
     const targetProjectUrl = input.project_url ?? null;
     const matchesProjectScope = (rowProjectUrl: string | null | undefined): boolean => {

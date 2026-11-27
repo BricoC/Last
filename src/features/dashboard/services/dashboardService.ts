@@ -257,7 +257,7 @@ export class DashboardService {
       `SELECT 
          d.year,
          CAST(strftime('%m', d.doc_date) AS INTEGER) AS month,
-         SUM(i.net_amount_subunits) AS net_subunits,
+         SUM(CASE WHEN COALESCE(i.purchase_price_subunits, 0) > 0 THEN i.net_amount_subunits ELSE 0 END) AS net_subunits,
          SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
@@ -387,7 +387,7 @@ export class DashboardService {
            i.ddt_id,
            COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' THEN 1 END) AS item_count,
            COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 THEN 1 END) AS priced_count,
-           COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 AND i.purchase_price_subunits > 0 THEN 1 END) AS margined_count
+           COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 AND i.purchase_price_subunits > 0 AND i.vat_rate > 0 THEN 1 END) AS margined_count
          FROM ddt_items i
          JOIN (
            SELECT id FROM ddt_documents
@@ -526,7 +526,7 @@ export class DashboardService {
     }[]>(
       `SELECT 
          d.year,
-         SUM(i.net_amount_subunits) AS net_subunits,
+         SUM(CASE WHEN COALESCE(i.purchase_price_subunits, 0) > 0 THEN i.net_amount_subunits ELSE 0 END) AS net_subunits,
          SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
@@ -577,7 +577,7 @@ export class DashboardService {
     }[]>(
       `SELECT 
          d.year,
-         SUM(i.net_amount_subunits) AS net_subunits,
+         SUM(CASE WHEN COALESCE(i.purchase_price_subunits, 0) > 0 THEN i.net_amount_subunits ELSE 0 END) AS net_subunits,
          SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
@@ -921,7 +921,7 @@ export class DashboardService {
          i.ddt_id,
          COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' THEN 1 END) AS item_count,
          COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 THEN 1 END) AS priced_count,
-         COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 AND i.purchase_price_subunits > 0 THEN 1 END) AS margined_count
+         COUNT(CASE WHEN COALESCE(i.row_kind, 'item') <> 'note' AND i.unit_price_subunits > 0 AND i.purchase_price_subunits > 0 AND i.vat_rate > 0 THEN 1 END) AS margined_count
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
        WHERE i.deleted_at IS NULL
@@ -1036,7 +1036,7 @@ export class DashboardService {
     const costRows = await db.select<{ month: number; cost_subunits: number; net_subunits: number }[]>(
       `SELECT 
          CAST(strftime('%m', d.doc_date) AS INTEGER) AS month,
-         SUM(i.net_amount_subunits) AS net_subunits,
+         SUM(CASE WHEN COALESCE(i.purchase_price_subunits, 0) > 0 THEN i.net_amount_subunits ELSE 0 END) AS net_subunits,
          SUM(CAST(i.purchase_price_subunits AS REAL) * ${ddtQuantitySql("i.quantity")}) AS cost_subunits
        FROM ddt_items i
        JOIN ddt_documents d ON d.id = i.ddt_id
@@ -1093,7 +1093,7 @@ export class DashboardService {
           const turnoverAtCutoff = compData.cutoffTurnover;
           const fullMonthTurnover = compData.fullTurnover;
           const deltaPercent =
-            turnoverAtCutoff > 0 ? ((turnover - turnoverAtCutoff) / turnoverAtCutoff) * 100 : null;
+            turnoverAtCutoff > 0 ? ((cur.cutoffTurnover - turnoverAtCutoff) / turnoverAtCutoff) * 100 : null;
 
           comparisonsByYear[compYear] = {
             year: compYear,
@@ -1322,7 +1322,7 @@ export class DashboardService {
    */
   public async getDdtsForDay(
     month: number,
-    day: number,
+    day: number | null,
     year?: number | null
   ): Promise<DdtListViewRow[]> {
     const db = await getDatabase();
@@ -1342,9 +1342,12 @@ export class DashboardService {
         AND d.status <> 'bozza' 
         AND d.doc_number IS NOT NULL
         AND CAST(strftime('%m', d.doc_date) AS INTEGER) = $1
-        AND CAST(strftime('%d', d.doc_date) AS INTEGER) = $2
     `;
-    const params: (number | string)[] = [month, day];
+    const params: (number | string)[] = [month];
+    if (day !== null && day !== undefined && day > 0) {
+      params.push(day);
+      sql += ` AND CAST(strftime('%d', d.doc_date) AS INTEGER) = $${params.length}`;
+    }
     if (year !== null && year !== undefined && year > 0) {
       params.push(year);
       sql += ` AND d.year = $${params.length}`;

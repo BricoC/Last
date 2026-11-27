@@ -279,11 +279,13 @@ export async function registerRibaPayment(
   sentAt: string,
   projectUrl?: string | null,
 ) {
-  saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl);
   const [sqlite, remote] = await Promise.all([
     saveSqliteRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl),
-    saveRemoteRibaPaid(deadlineKey, deadlineStr, sentAt),
+    saveRemoteRibaPaid(deadlineKey, sentAt ? deadlineStr : deadlineStr, sentAt),
   ]);
+  if (sqlite || remote) {
+    saveLocalRibaPaid(deadlineKey, deadlineStr, sentAt, projectUrl);
+  }
   return { confirmed: sqlite || remote, remote };
 }
 
